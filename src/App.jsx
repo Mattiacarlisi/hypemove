@@ -645,7 +645,7 @@ export default function HypemoveLanding() {
     {/* Brand */}
     <div>
       <div className="flex items-center gap-3 mb-3">
-        <img src="/images/1.1.png" alt="Hypemove logo" className="h-8 w-8 rounded-xl" />
+        <img src="/images/logo1.png" alt="Hypemove logo" className="h-8 w-8 rounded-xl" />
         <span className="font-semibold text-white">Hypemove</span>
       </div>
       <p className="text-gray-400 leading-relaxed">
