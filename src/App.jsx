@@ -470,9 +470,9 @@ export default function HypemoveLanding() {
     {/* Griglia benefici */}
     <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
       {[
-        { icon: Zap, color: "#335DFF", title: "Più energia in pochi minuti", desc: "Una spinta immediata quando serve. In pochi minuti ricarichi corpo e mente, e torni a fare quello che ami.", img: "/images/1.1.png" },
-        { icon: Sparkles, color: "#FFFF33", title: "Focus e produttività", desc: "Niente più testa annebbiata: riaccendi la concentrazione e concludi la giornata con soddisfazione.", img: "/images/1.1.png" },
-        { icon: Trophy, color: "#335DFF", title: "Costanza senza stress", desc: "Piccole azioni quotidiane per risultati concreti, senza sentirti sotto pressione.", img: "/images/1.1.png" },
+        { icon: Zap, color: "#335DFF", title: "Più energia in pochi minuti", desc: "Una spinta immediata quando serve. In pochi minuti ricarichi corpo e mente, e torni a fare quello che ami.", img: "/images/1.4.png" },
+        { icon: Sparkles, color: "#FFFF33", title: "Focus e produttività", desc: "Niente più testa annebbiata: riaccendi la concentrazione e concludi la giornata con soddisfazione.", img: "/images/1.5.png" },
+        { icon: Trophy, color: "#335DFF", title: "Costanza senza stress", desc: "Piccole azioni quotidiane per risultati concreti, senza sentirti sotto pressione.", img: "/images/1.6.png" },
       ].map(({ icon: Icon, color, title, desc, img }) => (
         <article
           key={title}
