@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 font-semibold shadow-lg text-white bg-primary;
+}
+.btn-outline {
+  @apply inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 font-semibold border border-primary;
+}
