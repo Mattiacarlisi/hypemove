@@ -15,7 +15,7 @@ export default function HypemoveLanding() {
     {/* Logo */}
     <a href="#top" className="flex items-center gap-3">
       <img 
-        src="/images/1.1.png" 
+        src="/images/logo1.png" 
         alt="Hypemove logo" 
         className="h-12 w-12 rounded-xl" 
       />
