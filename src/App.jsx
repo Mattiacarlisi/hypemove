@@ -663,12 +663,12 @@ export default function HypemoveLanding() {
         {
           q: "Come funziona Hypemove?",
           a:
-            "Scegli un micro‑workout da 30 secondi a 10 minuti: ti guida passo passo e ti aiuta a ricaricare energia e focus. Con sfide e piccole ricompense per mantenere la costanza, senza stress."
+            "Hypemove è un’app che ti aiuta a muoverti ogni giorno con allenamenti brevi, da 30 secondi a 10 minuti. Segui una roadmap guidata, pensata per aiutarti a creare l’abitudine passo dopo passo — senza stress e senza perdere tempo a scegliere. Ogni giorno sblocchi sfide, guadagni punti e porti a termine piccole missioni… dove vuoi, quando vuoi."
         },
         {
           q: "Serve attrezzatura?",
           a:
-            "No. Tutto è pensato a corpo libero. Se vuoi, puoi aggiungere elastici o manubri: li abiliti nelle impostazioni e l’app adatta gli esercizi."
+            "No. Tutto è pensato a corpo libero. "
         },
         {
           q: "È adatta ai principianti?",
@@ -678,12 +678,12 @@ export default function HypemoveLanding() {
         {
           q: "Quanto tempo mi serve al giorno?",
           a:
-            "Anche 1–3 minuti sono utili. L’obiettivo è eliminare la frizione iniziale: piccoli step quotidiani che sommano grandi risultati."
+            "Bastano pochi minuti: gli allenamenti durano da 30 secondi a 10 minuti e si inseriscono facilmente nella tua giornata, anche quando sei pieno di impegni. Muoversi ogni giorno, anche solo per poco, migliora l’energia, l’umore, la forza e fa bene alla salute — con costanza, i benefici si sentono davvero."
         },
         {
           q: "Devo fare un abbonamento?",
           a:
-            "Stiamo lanciando l’MVP: l’accesso è gratuito in questa fase. In futuro potremmo introdurre opzioni premium, ma la versione base resterà accessibile."
+           "No: puoi iniziare a usare Hypemove gratis, senza abbonamento. I contenuti base sono subito accessibili, senza impegno. Se vorrai, più avanti potrai attivare un piano premium per sbloccare servizi aggiuntivi e funzioni extra."
         },
         {
           q: "Quando sarà disponibile l’app su iOS e Android?",
@@ -719,7 +719,7 @@ export default function HypemoveLanding() {
         className="inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-base font-semibold shadow-lg transition-transform hover:scale-105"
         style={{ backgroundColor: "#335DFF", color: "white" }}
       >
-        Ho ancora un dubbio? Fammi provare gratis
+        Prova hypemove gratis
         <ArrowRight className="h-5 w-5" />
       </a>
     </div>
