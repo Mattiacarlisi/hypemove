@@ -837,7 +837,7 @@ export default function HypemoveLanding() {
     <div>
       <h4 className="font-semibold text-white mb-3">Supporto</h4>
       <ul className="space-y-2">
-        <li><a href="#" className="hover:text-white transition">Contattaci</a></li>
+        <li><a href="mailto:hypemoveapp@gmail.com" className="hover:text-white transition">Contattaci</a></li>
         <li><a href="#faq" className="hover:text-white transition">FAQ</a></li>
         <li><a href="#" className="hover:text-white transition">Privacy Policy</a></li>
         <li><a href="#" className="hover:text-white transition">Termini di servizio</a></li>
