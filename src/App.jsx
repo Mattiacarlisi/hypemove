@@ -637,6 +637,175 @@ export default function HypemoveLanding() {
   </div>
 </section>
 
+
+{/* FAQ */}
+<section
+  id="faq"
+  className="py-20 bg-gradient-to-b from-white via-[#FFFF33]/10 to-white"
+>
+  <div className="mx-auto max-w-5xl px-4">
+    {/* Header */}
+    <div className="text-center mb-10">
+      <span className="inline-block px-4 py-1 rounded-full text-xs font-semibold bg-[#335DFF]/10 text-[#335DFF]">
+        Domande frequenti
+      </span>
+      <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold text-gray-900">
+        Tutto quello che ti chiedi su <span className="text-[#335DFF]">Hypemove</span>
+      </h2>
+      <p className="mt-3 text-gray-600 max-w-2xl mx-auto">
+        Se non trovi una risposta, scrivici: aggiorniamo le FAQ in base ai feedback della community.
+      </p>
+    </div>
+
+    {/* Lista FAQ */}
+    <div className="space-y-3">
+      {[
+        {
+          q: "Come funziona Hypemove?",
+          a:
+            "Scegli un micro‑workout da 30 secondi a 10 minuti: ti guida passo passo e ti aiuta a ricaricare energia e focus. Con sfide e piccole ricompense per mantenere la costanza, senza stress."
+        },
+        {
+          q: "Serve attrezzatura?",
+          a:
+            "No. Tutto è pensato a corpo libero. Se vuoi, puoi aggiungere elastici o manubri: li abiliti nelle impostazioni e l’app adatta gli esercizi."
+        },
+        {
+          q: "È adatta ai principianti?",
+          a:
+            "Sì. Intensità e durata partono in modo graduale. Puoi aumentare passo dopo passo, secondo il tuo ritmo."
+        },
+        {
+          q: "Quanto tempo mi serve al giorno?",
+          a:
+            "Anche 1–3 minuti sono utili. L’obiettivo è eliminare la frizione iniziale: piccoli step quotidiani che sommano grandi risultati."
+        },
+        {
+          q: "Devo fare un abbonamento?",
+          a:
+            "Stiamo lanciando l’MVP: l’accesso è gratuito in questa fase. In futuro potremmo introdurre opzioni premium, ma la versione base resterà accessibile."
+        },
+        {
+          q: "Quando sarà disponibile l’app su iOS e Android?",
+          a:
+            "Presto. Intanto puoi entrare nella lista per ricevere l’accesso appena pronto. Trovi il link nei pulsanti “Scarica gratis / Inizia gratis”."
+        }
+      ].map(({ q, a }, idx) => (
+        <details
+          key={idx}
+          className="group border border-gray-100 rounded-2xl bg-white shadow-sm hover:shadow-md transition-all p-5"
+        >
+          <summary className="cursor-pointer list-none flex items-start justify-between gap-4">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900">{q}</h3>
+            <span
+              aria-hidden="true"
+              className="select-none text-xl leading-none transition-transform group-open:rotate-45"
+              style={{ color: "#335DFF" }}
+            >
+              +
+            </span>
+          </summary>
+          <div className="mt-3 text-gray-700 leading-relaxed">
+            {a}
+          </div>
+        </details>
+      ))}
+    </div>
+
+    {/* CTA sotto FAQ */}
+    <div className="mt-10 flex justify-center">
+      <a
+        href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+        className="inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-base font-semibold shadow-lg transition-transform hover:scale-105"
+        style={{ backgroundColor: "#335DFF", color: "white" }}
+      >
+        Ho ancora un dubbio? Fammi provare gratis
+        <ArrowRight className="h-5 w-5" />
+      </a>
+    </div>
+  </div>
+
+  {/* Micro-styles inline per accessibilità */}
+  <style jsx>{`
+    details[open] {
+      border-color: #335DFF;
+      box-shadow: 0 8px 28px rgba(51, 93, 255, 0.12);
+    }
+    details:focus-within {
+      outline: 2px solid #FFFF33;
+      outline-offset: 2px;
+      border-radius: 1rem;
+    }
+  `}</style>
+
+  {/* JSON-LD SEO markup */}
+  <script
+    type="application/ld+json"
+    dangerouslySetInnerHTML={{
+      __html: JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Come funziona Hypemove?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Scegli un micro‑workout da 30 secondi a 10 minuti per ricaricare energia e focus. Sfide e ricompense ti aiutano a restare costante senza stress."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Serve attrezzatura?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No, gli esercizi sono a corpo libero. Se vuoi, puoi abilitare elastici o manubri e l’app adatta i contenuti."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "È adatta ai principianti?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Sì. Durata e intensità sono graduali e personalizzabili, ideali per chi ricomincia."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Quanto tempo mi serve al giorno?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Bastano anche 1–3 minuti. L’obiettivo è ridurre la frizione e creare una routine sostenibile."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Devo fare un abbonamento?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Durante l’MVP l’accesso è gratuito. In futuro potrebbero esserci opzioni premium; la base resterà accessibile."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Quando sarà disponibile su iOS e Android?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "A breve. Entra nella lista: riceverai l’accesso appena disponibile."
+            }
+          }
+        ]
+      })
+    }}
+  />
+</section>
+
+
+
+
+
+
+
     
 
 <footer id="footer" className="border-t bg-gray-900 text-gray-300">
