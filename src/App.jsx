@@ -141,7 +141,7 @@ export default function HypemoveLanding() {
 >
   <img 
     src="/images/1.2.png" 
-    alt="Anteprima app Hypemove" 
+    alt="Schermata iniziale dell’app Hypemove con la mascotte che guida l’utente nel percorso di mini allenamenti personalizzati" 
     className="w-full max-w-[160px] sm:max-w-[200px] md:max-w-[240px] rounded-xl shadow-lg border border-gray-100 object-contain"
     loading="lazy"
   />
@@ -337,7 +337,7 @@ export default function HypemoveLanding() {
       >
         <img
           src="/images/1.1.png"
-          alt="Hypemove in azione: micro-allenamenti e progressi"
+          alt="Mascotte di Hypemove in azione pronta a supportarti durante il tuo percorso: micro-allenamenti, snack workout e progressi"
           className="w-full h-full object-contain"
           loading="lazy"
           sizes="(max-width:1024px) 100vw, 48vw"
