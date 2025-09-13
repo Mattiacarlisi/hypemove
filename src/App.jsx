@@ -688,7 +688,7 @@ export default function HypemoveLanding() {
         {
           q: "Quando sarà disponibile l’app su iOS e Android?",
           a:
-            "Presto. Intanto puoi entrare nella lista per ricevere l’accesso appena pronto. Trovi il link nei pulsanti “Scarica gratis / Inizia gratis”."
+            "Stiamo lavorando a pieno ritmo per lanciare l’app il prima possibile! 🚀 Nel frattempo, puoi iscriverti alla lista d’attesa per ricevere l’accesso appena sarà pronta. Ti basta cliccare su uno dei pulsanti “Scarica gratis” o “Inizia gratis” che trovi nella pagina."
         }
       ].map(({ q, a }, idx) => (
         <details
