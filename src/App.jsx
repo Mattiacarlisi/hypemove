@@ -791,7 +791,7 @@ export default function HypemoveLanding() {
             "name": "Quando sarà disponibile su iOS e Android?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "A breve. Entra nella lista: riceverai l’accesso appena disponibile."
+              "text": "Stiamo lavorando a pieno ritmo per lanciare l’app il prima possibile! 🚀 Nel frattempo, puoi iscriverti alla lista d’attesa per ricevere l’accesso appena sarà pronta. Ti basta cliccare su uno dei pulsanti “Scarica gratis” o “Inizia gratis” che trovi nella pagina."
             }
           }
         ]
