@@ -786,7 +786,7 @@ export default function HypemoveLanding() {
               "text": "Durante l’MVP l’accesso è gratuito. In futuro potrebbero esserci opzioni premium; la base resterà accessibile."
             }
           },
-            {
+          {
             "@type": "Question",
             "name": "Quando sarà disponibile su iOS e Android?",
             "acceptedAnswer": {
