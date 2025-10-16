@@ -840,7 +840,7 @@ export default function HypemoveLanding() {
       <ul className="space-y-2">
         <li><a href="#" className="hover:text-white transition">Contattaci</a></li>
         <li><a href="#faq" className="hover:text-white transition">FAQ</a></li>
-        <li><a href="#" className="hover:text-white transition">Privacy Policy</a></li>
+        <li><a href="/legal/privacy.html" className="hover:text-white transition">Privacy Policy</a></li>
         <li><a href="#" className="hover:text-white transition">Termini di servizio</a></li>
       </ul>
     </div>
