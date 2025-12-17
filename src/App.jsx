@@ -34,7 +34,7 @@ export default function HypemoveLanding() {
 
     {/* CTA Desktop */}
     <a 
-      href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header" 
+      href="https://play.google.com/store/apps/details?id=pt.app&hl=it" 
       className="hidden lg:inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-base font-semibold shadow-sm" 
       style={{ backgroundColor: PRIMARY, color: "white" }}
     >
@@ -70,7 +70,7 @@ export default function HypemoveLanding() {
 
   <div className="pt-4 border-t border-gray-200">
     <a
-      href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+      href="https://play.google.com/store/apps/details?id=pt.app&hl=it"
       className="inline-flex w-full items-center justify-center gap-2 rounded-2xl px-6 py-3 text-lg font-semibold shadow-md transition-transform hover:scale-105 active:scale-95"
       style={{ backgroundColor: "#335DFF", color: "white" }}
     >
@@ -115,7 +115,7 @@ export default function HypemoveLanding() {
       {/* CTA */}
       <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
         <a 
-          href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header" 
+          href="https://play.google.com/store/apps/details?id=pt.app&hl=it" 
           className="inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-base font-semibold shadow-lg transition-transform hover:scale-105"
           style={{ backgroundColor: PRIMARY, color: "white" }}
         >
@@ -237,7 +237,7 @@ export default function HypemoveLanding() {
     {/* CTA */}
     <div className="mt-16 flex justify-center">
       <a
-        href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+        href="https://play.google.com/store/apps/details?id=pt.app&hl=it"
         className="inline-flex items-center justify-center gap-2 rounded-2xl px-8 py-4 text-lg font-semibold shadow-lg transition-transform hover:scale-105"
         style={{ backgroundColor: "#335DFF", color: "white" }}
       >
@@ -318,7 +318,7 @@ export default function HypemoveLanding() {
         {/* CTA */}
         <div className="mt-6">
           <a
-            href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+            href="https://play.google.com/store/apps/details?id=pt.app&hl=it"
             className="inline-flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-white shadow-md hover:scale-105 transition-transform"
             style={{ backgroundColor: "#335DFF" }}
           >
@@ -616,7 +616,7 @@ export default function HypemoveLanding() {
     {/* Bottone */}
     <div className="mt-8 flex justify-center">
       <a
-        href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+        href="https://play.google.com/store/apps/details?id=pt.app&hl=it"
         className="group relative inline-flex items-center gap-3 px-8 py-4 rounded-full font-semibold text-lg shadow-xl transition-all duration-300 ease-out 
         bg-[#FFFF33] text-[#1E3ACC] hover:bg-[#FFEB3B] hover:scale-105"
       >
@@ -715,7 +715,7 @@ export default function HypemoveLanding() {
     {/* CTA sotto FAQ */}
     <div className="mt-10 flex justify-center">
       <a
-        href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+        href="https://play.google.com/store/apps/details?id=pt.app&hl=it"
         className="inline-flex items-center gap-2 rounded-2xl px-6 py-3 text-base font-semibold shadow-lg transition-transform hover:scale-105"
         style={{ backgroundColor: "#335DFF", color: "white" }}
       >
@@ -849,7 +849,7 @@ export default function HypemoveLanding() {
     <div>
       <h4 className="font-semibold text-white mb-3">Scarica l’app</h4>
       <a
-        href="https://docs.google.com/forms/d/e/1FAIpQLSceGX0_9MxRmdTlHDSCUKNHt8zcOoT2ro91_rRjmu6eaXxYOQ/viewform?usp=header"
+        href="https://play.google.com/store/apps/details?id=pt.app&hl=it"
         className="inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 font-medium shadow-md hover:shadow-lg transition bg-white text-gray-900"
       >
         <Download className="h-5 w-5" /> Inizia gratis
