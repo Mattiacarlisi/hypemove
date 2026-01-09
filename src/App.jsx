@@ -17,9 +17,9 @@ export default function HypemoveLanding() {
       <img 
         src="/images/logo1.png" 
         alt="Hypemove logo con mascotte" 
-        className="h-12 w-12 rounded-xl" 
+        className="h-[100px] w-[100px] rounded-xl object-contain"
       />
-      <span className="font-bold text-xl tracking-tight">Hypemove</span>
+      
     </a>
 
     {/* Menu Desktop */}
