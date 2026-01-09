@@ -95,21 +95,16 @@ export default function HypemoveLanding() {
       className="space-y-6 text-center lg:text-left"
     >
       <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight">
-        Ti senti spesso{" "}
-        <span 
-          className="underline decoration-wavy" 
-          style={{ textDecorationColor: ACCENT }}
-        >
-          stanco
-        </span>{" "}
-        e poco energico?
+        L’allenamento progettato per diventare un’abitudine.{" "}
+
       </h1>
       <p className="text-lg sm:text-xl text-gray-700 max-w-2xl mx-auto lg:mx-0">
-        La giornata vola e ti ritrovi la sera senza aver fatto davvero qualcosa per te?
+        Se hai iniziato mille volte e hai sempre mollato, il problema non sei tu, è il <strong>metodo.</strong>
       </p>
       <p className="text-base sm:text-lg">
-        <strong>Ora che sei qui,</strong>{" "}
-        <span className="font-medium">Prova Hypemove</span> e regala al tuo corpo e alla tua mente la ricarica che merita.
+        Hypemove è l'app {" "}
+        <strong>gratuita</strong>{" "}
+        che usa la scienza delle abitudini per rendere il movimento <strong>semplice, veloce e gratificante.</strong>
       </p>
 
       {/* CTA */}
@@ -122,13 +117,7 @@ export default function HypemoveLanding() {
           Scarica gratis!
           <ArrowRight className="h-5 w-5" />
         </a>
-        <a 
-          href="#benefici" 
-          className="inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-base font-semibold border transition-colors hover:bg-gray-100"
-          style={{ borderColor: PRIMARY }}
-        >
-          Vedi i benefici
-        </a>
+
       </div>
     </motion.div>
 
