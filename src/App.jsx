@@ -22,15 +22,16 @@ export default function HypemoveLanding() {
       
     </a>
 
-    {/* Menu Desktop */}
-    <nav className="hidden lg:flex items-center gap-8 text-base font-medium">
-  <a href="#target" className="hover:text-gray-800">Per chi è</a>
-  <a href="#soluzione" className="hover:text-gray-800">Soluzione</a>
-  <a href="#effetto-immediato" className="hover:text-gray-800">Effetto immediato</a>
+{/* Menu Desktop (AGGIORNATO) */}
+<nav className="hidden lg:flex items-center gap-8 text-base font-medium">
+  <a href="#hypemover" className="hover:text-gray-800">Per chi è</a>
+  <a href="#metodo" className="hover:text-gray-800">Metodo</a>
   <a href="#benefici" className="hover:text-gray-800">Benefici</a>
   <a href="#social" className="hover:text-gray-800">Testimonianze</a>
+  <a href="#faq" className="hover:text-gray-800">FAQ</a>
   <a href="#cta-finale" className="hover:text-gray-800">Diventa Hypemover</a>
-    </nav>
+</nav>
+
 
     {/* CTA Desktop */}
     <a 
@@ -59,14 +60,15 @@ export default function HypemoveLanding() {
   id="mobile-menu" 
   className="lg:hidden hidden border-t border-gray-100 bg-white px-5 py-5 space-y-5"
 >
-  <nav className="space-y-4">
-    <a href="#target" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Per chi è</a>
-    <a href="#soluzione" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Soluzione</a>
-    <a href="#effetto-immediato" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Effetto immediato</a>
-    <a href="#benefici" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Benefici</a>
-    <a href="#social" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Testimonianze</a>
-    <a href="#cta-finale" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Diventa Hypemover</a>
-  </nav>
+  {/* Mobile Menu (AGGIORNATO) */}
+<nav className="space-y-4">
+  <a href="#hypemover" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Per chi è</a>
+  <a href="#metodo" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Metodo</a>
+  <a href="#benefici" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Benefici</a>
+  <a href="#social" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Testimonianze</a>
+  <a href="#faq" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">FAQ</a>
+  <a href="#cta-finale" className="block text-lg font-medium text-gray-800 hover:text-[#335DFF] transition-colors">Diventa Hypemover</a>
+</nav>
 
   <div className="pt-4 border-t border-gray-200">
     <a
