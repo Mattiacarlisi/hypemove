@@ -296,7 +296,7 @@ function DynamicHero() {
               className="overflow-hidden"
             >
               <div className="max-w-[820px] text-[2.35rem] font-black leading-[0.9] tracking-[-0.07em] text-black sm:text-6xl lg:text-[2.75rem] xl:text-[3.15rem]">
-                Allenarti non deve più
+                Raggiungi il tuo obiettivo
               </div>
             </motion.div>
             <motion.div
@@ -306,7 +306,7 @@ function DynamicHero() {
               className="overflow-hidden"
             >
               <div className="max-w-[820px] text-[2.35rem] font-black leading-[0.9] tracking-[-0.07em] text-black sm:text-6xl lg:text-[2.75rem] xl:text-[3.15rem]">
-                sembrare una cosa troppo grande
+                con allenamenti
               </div>
             </motion.div>
             <motion.div
@@ -316,7 +316,7 @@ function DynamicHero() {
               className="overflow-hidden"
             >
               <div className="max-w-[760px] text-[2.35rem] font-black leading-[0.92] tracking-[-0.07em] text-[#FB8B04] sm:text-6xl lg:text-[3.2rem] xl:text-[3.55rem]">
-                per la tua vita.
+                semplici ed efficaci
               </div>
             </motion.div>
           </div>
@@ -327,7 +327,7 @@ function DynamicHero() {
             transition={{ duration: 0.55, delay: 0.18 }}
             className="mt-2 max-w-[620px] text-base leading-7 text-black/65 sm:mt-3 sm:text-lg sm:leading-8 xl:text-[1rem]"
           >
-            Hypemove ti aiuta a trovare un percorso più adatto al tuo obiettivo e trasforma il movimento in qualcosa che riesci davvero a iniziare, ripetere e mantenere senza sentirti ogni volta in ritardo.
+            Hypemove ti dà il percorso più adatto al tuo obiettivo e, workout dopo workout, trasforma il movimento in un'abitudine quotidiana.
           </motion.p>
 
           <motion.div
@@ -405,8 +405,8 @@ function HorizontalGoals() {
       <div className="mx-auto max-w-7xl">
         <SectionTitle
           eyebrow="Obiettivi"
-          title="Trova il percorso più adatto a quello che vuoi davvero ottenere"
-          subtitle="Scorri tra gli obiettivi e guarda quale senti più vicino a te. Hypemove parte da qui: da un piano che abbia più senso per la tua vita reale."
+          title="Scegli il tuo obiettivo. Pensiamo noi al resto."
+          subtitle="Ogni persona ha un obiettivo diverso. Hypemove parte dal tuo."
         />
 
         <div className="mt-8 flex flex-col gap-4 sm:mt-10 sm:flex-row sm:items-center sm:justify-between">
@@ -835,7 +835,7 @@ export default function HypemoveLandingPage() {
             <LogoMark className="h-12 w-12 shrink-0" />
             <div>
               <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">Il fitness che riesci davvero a continuare</div>
+              <div className="text-xs text-black/45">Muoverti ogni giorno. Senza che sembri una fatica.</div>
             </div>
           </a>
 
