@@ -3,20 +3,16 @@ import { motion, useAnimationControls, useScroll, useSpring, useTransform } from
 import {
   Apple,
   ArrowRight,
-  ChevronRight,
   Download,
   Flame,
   Menu,
   PlayCircle,
-  ShieldCheck,
   Sparkles,
   Star,
   Timer,
   Trophy,
-  Users,
   Waves,
   X,
-  Zap,
 } from "lucide-react";
 
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
