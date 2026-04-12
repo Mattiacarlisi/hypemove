@@ -33,18 +33,40 @@ const navLinks = [
 const goals = [
   {
     title: "Dimagrimento",
-    desc: "Per chi vuole rimettersi in moto con qualcosa di sostenibile, concreto e più facile da mantenere nel tempo.",
+    desc: "Per chi vuole perdere peso e sentirsi più leggero, con un metodo che riesci davvero a portare avanti.",
     icon: Flame,
+    eyebrow: "Perdere peso",
+    shell:
+      "border-[#F6C27A]/50 bg-[linear-gradient(180deg,#fff8ef_0%,#fff4e3_100%)] shadow-[0_28px_80px_rgba(251,139,4,0.16)]",
+    accent: "from-[#FB8B04]/28 via-[#FFD29A]/16 to-transparent",
+    badge: "bg-white/78 text-[#A85A00] border-[#F1B86A]/60",
+    iconWrap: "bg-[#111111] text-white shadow-[0_16px_34px_rgba(17,17,17,0.2)]",
+    titleClass: "text-black",
   },
   {
     title: "Tonificazione",
-    desc: "Per chi vuole sentirsi più tonico, vedere un cambiamento sul corpo e non perdere settimane a ricominciare da zero.",
+    desc: "Per chi vuole sentirsi più tonico e vedersi cambiare senza ricominciare da zero ogni volta.",
     icon: Trophy,
+    eyebrow: "Definire il corpo",
+    shell:
+      "border-[#E7D7B6]/70 bg-[linear-gradient(145deg,#FFFDF8_0%,#F6EEDB_52%,#F0E2BF_100%)] shadow-[0_30px_90px_rgba(185,148,79,0.18)]",
+    accent: "from-[#E9C46A]/24 via-[#FFF6DA]/16 to-transparent",
+    badge: "bg-white/78 text-[#8A6424] border-[#E7D7B6]/80",
+    iconWrap: "bg-[#1C1C1C] text-[#F6D77A] shadow-[0_16px_34px_rgba(28,28,28,0.16)]",
+    titleClass: "text-[#1F1405]",
+    bodyClass: "text-[#3C3020]/80",
   },
   {
     title: "Mobility & Stretching",
-    desc: "Per chi vuole sentirsi meno rigido, muoversi meglio e stare meglio anche dopo giornate sedentarie.",
+    desc: "Per chi vuole sentirsi meno rigido e muoversi meglio dopo lunghe giornate passate alla scrivania.",
     icon: Waves,
+    eyebrow: "Muoversi meglio",
+    shell:
+      "border-[#C7E6DD]/70 bg-[linear-gradient(180deg,#F1FBF8_0%,#E4F5F0_100%)] shadow-[0_28px_80px_rgba(61,144,119,0.14)]",
+    accent: "from-[#79C7AF]/24 via-[#D8F3EA]/16 to-transparent",
+    badge: "bg-white/82 text-[#216A58] border-[#9FD6C7]/70",
+    iconWrap: "bg-[#0F3D34] text-white shadow-[0_16px_34px_rgba(15,61,52,0.18)]",
+    titleClass: "text-[#0C1F1A]",
   },
 ];
 
@@ -228,7 +250,7 @@ function HeroPreview() {
 
       setRotationBase((current) => current + 360);
       setIsFlipping(false);
-    }, 4000);
+    }, 3000);
 
     return () => {
       window.clearTimeout(timer);
@@ -401,25 +423,30 @@ function HorizontalGoals() {
   };
 
   return (
-    <section id="goals" ref={ref} className="overflow-hidden px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
-      <div className="mx-auto max-w-7xl">
+    <section id="goals" ref={ref} className="relative overflow-hidden bg-[radial-gradient(circle_at_top,#fff7eb_0%,#fdfdfd_42%,#f8f6f1_100%)] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[linear-gradient(180deg,rgba(251,139,4,0.10),rgba(251,139,4,0))]" />
+      <div className="pointer-events-none absolute left-[-10%] top-32 h-64 w-64 rounded-full bg-[#FB8B04]/10 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-0 right-[-8%] h-72 w-72 rounded-full bg-black/[0.04] blur-3xl" />
+
+      <div className="relative mx-auto max-w-7xl">
         <SectionTitle
           eyebrow="Obiettivi"
           title="Scegli il tuo obiettivo. Pensiamo noi al resto."
           subtitle="Ogni persona ha un obiettivo diverso. Hypemove parte dal tuo."
         />
 
-        <div className="mt-8 flex flex-col gap-4 sm:mt-10 sm:flex-row sm:items-center sm:justify-between">
-          <div className="max-w-2xl text-sm leading-6 text-black/55 sm:text-base sm:leading-7">
-            Dimagrimento, tonificazione o mobility: qui non parti da qualcosa di generico. Parti da una direzione che senti più tua.
+        <div className="mt-10 flex flex-col gap-5 sm:mt-12 lg:flex-row lg:items-end lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="text-sm leading-7 text-black/60 sm:text-base sm:leading-8">
+              Dimagrisci, tonificati o sciogliti: non un programma generico, ma un percorso costruito sulle tue esigenze e sul tuo obiettivo.
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 self-start sm:self-auto">
-            <div className="text-xs font-semibold uppercase tracking-[0.22em] text-black/35">Scorri</div>
+          <div className="hidden items-center gap-3 self-start lg:flex lg:self-auto">
             <button
               type="button"
               onClick={() => scrollByAmount("left")}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-black/10 bg-white text-black transition hover:-translate-y-0.5 hover:border-black/20"
+              className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-black/10 bg-white/90 text-black shadow-[0_10px_30px_rgba(15,23,42,0.08)] backdrop-blur transition hover:-translate-y-0.5 hover:border-black/20 hover:bg-black hover:text-white"
               aria-label="Scorri obiettivi a sinistra"
             >
               <ArrowRight className="h-4 w-4 rotate-180" />
@@ -427,7 +454,7 @@ function HorizontalGoals() {
             <button
               type="button"
               onClick={() => scrollByAmount("right")}
-              className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-black/10 bg-white text-black transition hover:-translate-y-0.5 hover:border-black/20"
+              className="inline-flex h-12 w-12 items-center justify-center rounded-full border border-black/10 bg-white/90 text-black shadow-[0_10px_30px_rgba(15,23,42,0.08)] backdrop-blur transition hover:-translate-y-0.5 hover:border-black/20 hover:bg-black hover:text-white"
               aria-label="Scorri obiettivi a destra"
             >
               <ArrowRight className="h-4 w-4" />
@@ -437,22 +464,13 @@ function HorizontalGoals() {
       </div>
 
       <div className="relative mt-10 sm:mt-12">
-        <motion.div
-          style={{ x: smoothX }}
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 hidden w-24 bg-gradient-to-r from-[#FDFDFD] to-transparent lg:block"
-        />
-        <motion.div
-          style={{ x: smoothX }}
-          className="pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-24 bg-gradient-to-l from-[#FDFDFD] to-transparent lg:block"
-        />
-
         <div
           ref={carouselRef}
-          className="no-scrollbar overflow-x-auto scroll-smooth pb-4 [scrollbar-width:none] [-ms-overflow-style:none]"
+          className="no-scrollbar overflow-x-auto bg-transparent scroll-smooth pb-4 [scrollbar-width:none] [-ms-overflow-style:none]"
         >
           <motion.div
             style={{ x: smoothX }}
-            className="flex w-max gap-4 pr-4 sm:gap-5 lg:pr-8 lg:pl-[max(2rem,calc((100vw-80rem)/2))]"
+            className="flex w-max gap-4 bg-transparent pr-4 sm:gap-5 lg:pr-8 lg:pl-[max(2rem,calc((100vw-80rem)/2))]"
           >
             {goals.map((item, index) => {
               const Icon = item.icon;
@@ -464,15 +482,21 @@ function HorizontalGoals() {
                   viewport={{ once: true, amount: 0.15 }}
                   transition={{ duration: 0.45, delay: index * 0.06 }}
                   whileHover={{ y: -8, rotate: index % 2 === 0 ? -1 : 1 }}
-                  className="group relative w-[260px] shrink-0 snap-start overflow-hidden rounded-[28px] border border-black/10 bg-white p-5 shadow-[0_24px_60px_rgba(0,0,0,0.06)] sm:w-[300px] sm:rounded-[32px] sm:p-6 lg:w-[320px] lg:rounded-[34px]"
+                  className={`group relative w-[260px] shrink-0 snap-start overflow-hidden rounded-[30px] border p-5 sm:w-[300px] sm:rounded-[34px] sm:p-6 lg:w-[320px] lg:rounded-[36px] ${item.shell}`}
                 >
-                  <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-[#FB8B04]/10 blur-2xl transition group-hover:bg-[#FB8B04]/18" />
+                  <div className={`absolute inset-0 bg-gradient-to-br ${item.accent} opacity-90 transition duration-300 group-hover:opacity-100`} />
+                  <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
+                  <div className="absolute right-5 top-5 h-20 w-20 rounded-full bg-white/20 blur-3xl" />
+                  <div className="absolute bottom-[-32px] right-[-12px] h-24 w-24 rounded-full border border-white/20 bg-white/10" />
                   <div className="relative">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white sm:h-14 sm:w-14">
+                    <div className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.26em] ${item.badge}`}>
+                      {item.eyebrow}
+                    </div>
+                    <div className={`mt-5 flex h-12 w-12 items-center justify-center rounded-[18px] sm:h-14 sm:w-14 ${item.iconWrap}`}>
                       <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
                     </div>
-                    <h3 className="mt-4 text-xl font-black tracking-[-0.03em] text-black sm:mt-5 sm:text-2xl">{item.title}</h3>
-                    <p className="mt-3 text-sm leading-6 text-black/65 sm:text-base sm:leading-7">{item.desc}</p>
+                    <h3 className={`mt-5 max-w-[10ch] text-xl font-black tracking-[-0.05em] sm:text-[2rem] sm:leading-[0.98] ${item.titleClass}`}>{item.title}</h3>
+                    <p className={`mt-4 max-w-[24ch] text-sm leading-7 sm:text-base sm:leading-8 ${item.bodyClass ?? "text-black/68"}`}>{item.desc}</p>
                   </div>
                 </motion.div>
               );
