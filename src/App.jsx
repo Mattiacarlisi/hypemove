@@ -248,7 +248,7 @@ function HeroPreview() {
 
       {/* La preview ruota come una card: dietro c'e il logo Hypemove, poi torna sul fronte con una nuova schermata */}
       <motion.div
-        initial={{ opacity: 0, y: 22, scale: 0.94, rotateY: -65, rotateZ: -5 }}
+        initial={false}
         animate={controls}
         transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1] }}
         className="hero-flip relative z-10 aspect-[9/19]"
