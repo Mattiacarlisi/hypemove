@@ -477,10 +477,6 @@ function HorizontalGoals() {
                     </div>
                     <h3 className="mt-4 text-xl font-black tracking-[-0.03em] text-black sm:mt-5 sm:text-2xl">{item.title}</h3>
                     <p className="mt-3 text-sm leading-6 text-black/65 sm:text-base sm:leading-7">{item.desc}</p>
-                    <div className="mt-5 inline-flex items-center text-sm font-bold text-[#FB8B04]">
-                      Guarda questo percorso
-                      <ChevronRight className="ml-1 h-4 w-4" />
-                    </div>
                   </div>
                 </motion.div>
               );
