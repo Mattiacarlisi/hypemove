@@ -304,7 +304,7 @@ function DynamicHero() {
   const smoothTitleY = useSpring(titleY, { stiffness: 90, damping: 20 });
 
   return (
-    <section ref={heroRef} className="relative overflow-hidden px-4 pb-8 pt-5 sm:px-6 sm:pb-10 sm:pt-7 lg:px-8 lg:pb-6 lg:pt-4">
+    <section ref={heroRef} className="relative overflow-hidden px-4 pb-8 pt-5 sm:px-6 sm:pb-10 sm:pt-7 md:px-8 lg:px-8 lg:pb-6 lg:pt-4">
       <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:42px_42px] sm:[background-size:56px_56px]" />
       <div className="pointer-events-none absolute right-[-14%] top-[4%] h-[220px] w-[220px] rounded-full bg-[#FB8B04]/10 blur-3xl sm:right-[-8%] sm:h-[300px] sm:w-[300px] lg:h-[360px] lg:w-[360px]" />
 
@@ -317,7 +317,7 @@ function DynamicHero() {
               transition={{ duration: 0.5 }}
               className="overflow-hidden"
             >
-              <div className="max-w-[820px] text-[2.35rem] font-black leading-[0.9] tracking-[-0.07em] text-black sm:text-6xl lg:text-[2.75rem] xl:text-[3.15rem]">
+              <div className="max-w-[820px] text-[2.35rem] font-black leading-[0.9] tracking-[-0.07em] text-black sm:text-[3.35rem] md:text-[4rem] lg:text-[2.75rem] xl:text-[3.15rem]">
                 Raggiungi il tuo obiettivo
               </div>
             </motion.div>
@@ -327,7 +327,7 @@ function DynamicHero() {
               transition={{ duration: 0.55, delay: 0.05 }}
               className="overflow-hidden"
             >
-              <div className="max-w-[820px] text-[2.35rem] font-black leading-[0.9] tracking-[-0.07em] text-black sm:text-6xl lg:text-[2.75rem] xl:text-[3.15rem]">
+              <div className="max-w-[820px] text-[2.35rem] font-black leading-[0.9] tracking-[-0.07em] text-black sm:text-[3.35rem] md:text-[4rem] lg:text-[2.75rem] xl:text-[3.15rem]">
                 con allenamenti
               </div>
             </motion.div>
@@ -337,7 +337,7 @@ function DynamicHero() {
               transition={{ duration: 0.6, delay: 0.1 }}
               className="overflow-hidden"
             >
-              <div className="max-w-[760px] text-[2.35rem] font-black leading-[0.92] tracking-[-0.07em] text-[#FB8B04] sm:text-6xl lg:text-[3.2rem] xl:text-[3.55rem]">
+              <div className="max-w-[760px] text-[2.35rem] font-black leading-[0.92] tracking-[-0.07em] text-[#FB8B04] sm:text-[3.35rem] md:text-[4rem] lg:text-[3.2rem] xl:text-[3.55rem]">
                 semplici ed efficaci
               </div>
             </motion.div>
@@ -435,14 +435,12 @@ function HorizontalGoals() {
           subtitle="Ogni persona ha un obiettivo diverso. Hypemove parte dal tuo."
         />
 
-        <div className="mt-10 flex flex-col gap-5 sm:mt-12 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-2xl">
-            <div className="text-sm leading-7 text-black/60 sm:text-base sm:leading-8">
-              Dimagrisci, tonificati o sciogliti: non un programma generico, ma un percorso costruito sulle tue esigenze e sul tuo obiettivo.
-            </div>
+        <div className="mt-8 sm:mt-10">
+          <div className="mx-auto max-w-3xl text-center text-sm leading-7 text-black/60 sm:text-base sm:leading-8">
+            Dimagrisci, tonificati o sciogliti: non un programma generico, ma un percorso costruito sulle tue esigenze e sul tuo obiettivo.
           </div>
 
-          <div className="hidden items-center gap-3 self-start lg:flex lg:self-auto">
+          <div className="mt-6 flex items-center justify-center gap-3 md:hidden">
             <button
               type="button"
               onClick={() => scrollByAmount("left")}
@@ -463,14 +461,14 @@ function HorizontalGoals() {
         </div>
       </div>
 
-      <div className="relative mt-10 sm:mt-12">
+      <div className="relative mt-10 md:hidden">
         <div
           ref={carouselRef}
-          className="no-scrollbar overflow-x-auto bg-transparent scroll-smooth pb-4 [scrollbar-width:none] [-ms-overflow-style:none]"
+          className="no-scrollbar overflow-x-auto overflow-y-hidden bg-transparent scroll-smooth pb-4 touch-pan-x [scrollbar-width:none] [-ms-overflow-style:none]"
         >
           <motion.div
             style={{ x: smoothX }}
-            className="flex w-max gap-4 bg-transparent pr-4 sm:gap-5 lg:pr-8 lg:pl-[max(2rem,calc((100vw-80rem)/2))]"
+            className="flex w-max items-stretch gap-4 bg-transparent px-4 sm:gap-5 sm:px-6"
           >
             {goals.map((item, index) => {
               const Icon = item.icon;
@@ -481,8 +479,7 @@ function HorizontalGoals() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true, amount: 0.15 }}
                   transition={{ duration: 0.45, delay: index * 0.06 }}
-                  whileHover={{ y: -8, rotate: index % 2 === 0 ? -1 : 1 }}
-                  className={`group relative w-[260px] shrink-0 snap-start overflow-hidden rounded-[30px] border p-5 sm:w-[300px] sm:rounded-[34px] sm:p-6 lg:w-[320px] lg:rounded-[36px] ${item.shell}`}
+                  className={`group relative min-h-[348px] w-[260px] shrink-0 snap-start overflow-hidden rounded-[30px] border p-5 sm:w-[300px] sm:rounded-[34px] sm:p-6 ${item.shell}`}
                 >
                   <div className={`absolute inset-0 bg-gradient-to-br ${item.accent} opacity-90 transition duration-300 group-hover:opacity-100`} />
                   <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
@@ -503,8 +500,42 @@ function HorizontalGoals() {
             })}
           </motion.div>
         </div>
+      </div>
 
-        
+      <div className="relative mx-auto mt-12 hidden max-w-7xl md:block">
+        <div className="grid gap-5 md:grid-cols-3 lg:gap-6">
+          {goals.map((item, index) => {
+            const Icon = item.icon;
+            return (
+              <motion.div
+                key={item.title}
+                initial={{ opacity: 0, y: 28 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.15 }}
+                transition={{ duration: 0.45, delay: index * 0.06 }}
+                whileHover={{ y: -8, rotate: index % 2 === 0 ? -1 : 1 }}
+                className={`group relative min-h-[420px] overflow-hidden rounded-[30px] border p-6 lg:rounded-[36px] ${item.shell}`}
+              >
+                <div className={`absolute inset-0 bg-gradient-to-br ${item.accent} opacity-90 transition duration-300 group-hover:opacity-100`} />
+                <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
+                <div className="absolute right-5 top-5 h-20 w-20 rounded-full bg-white/20 blur-3xl" />
+                <div className="absolute bottom-[-32px] right-[-12px] h-24 w-24 rounded-full border border-white/20 bg-white/10" />
+                <div className="relative">
+                  <div className={`inline-flex rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.26em] ${item.badge}`}>
+                    {item.eyebrow}
+                  </div>
+                  <div className={`mt-5 flex h-14 w-14 items-center justify-center rounded-[18px] ${item.iconWrap}`}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className={`mt-6 max-w-[10ch] text-[2rem] font-black leading-[0.98] tracking-[-0.05em] ${item.titleClass}`}>
+                    {item.title}
+                  </h3>
+                  <p className={`mt-5 max-w-[24ch] text-base leading-8 ${item.bodyClass ?? "text-black/68"}`}>{item.desc}</p>
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -566,7 +597,26 @@ function StickyStory() {
           </div>
 
           <div className="space-y-5 sm:space-y-8">
-            {storySteps.map((step, index) => (
+            {[
+              {
+                number: "01",
+                title: "Personalizzazione",
+                text: "Un percorso costruito su di te. Scegli il tuo obiettivo e Hypemove crea un programma su misura. Niente di generico, niente di inutile. Solo quello che ti serve davvero per arrivare dove vuoi.",
+                icon: Sparkles,
+              },
+              {
+                number: "02",
+                title: "Snack workout",
+                text: "Allenamenti semplici e brevi, pensati apposta per essere sostenibili nel tempo.",
+                icon: Timer,
+              },
+              {
+                number: "03",
+                title: "Gamification",
+                text: "Ogni workout ti porta qualcosa in più. Punti, streak e reward ad ogni allenamento completato. Più vai avanti, più senti il progresso e quella sensazione ti fa venire voglia di non fermarti.",
+                icon: PlayCircle,
+              },
+            ].map((step, index) => (
               <StoryCard key={step.title} step={step} index={index} />
             ))}
           </div>
@@ -699,6 +749,33 @@ function FinalCta() {
 
 // Domande frequenti.
 function Faq() {
+  const faqs = [
+    {
+      q: "Hypemove è gratis?",
+      a: "Sì. Puoi scaricarla e iniziare subito senza pagare nulla. Gratuitamente hai accesso ai workout e ai percorsi base. Se vuoi qualcosa di ancora più personalizzato e su misura per il tuo obiettivo, puoi passare al piano Premium — ma il primo passo è sempre gratis e senza pressione.",
+    },
+    {
+      q: "Posso trovare un piano adatto al mio obiettivo?",
+      a: "Sì. Hypemove non ti dà un programma generico uguale per tutti. Scegli il tuo obiettivo — dimagrimento, tonificazione o mobility — e costruisce un percorso pensato per te. Così sai sempre cosa fare e perché.",
+    },
+    {
+      q: "Serve essere già allenati?",
+      a: "No, anzi. Hypemove è pensata proprio per chi parte da zero, ha smesso da tempo o non riesce mai a restare costante. Non devi avere esperienza, non devi essere in forma. Devi solo aprire l'app e seguire.",
+    },
+    {
+      q: "Serve attrezzatura?",
+      a: "No. Puoi fare tutto a casa, in camera, in salotto. Niente pesi. L'unica cosa che ti serve è lo smartphone che hai già in mano.",
+    },
+    {
+      q: "Quanto tempo serve?",
+      a: "Bastano 5 minuti al giorno per iniziare. I workout sono brevi, guidati e pensati per entrare in qualsiasi giornata — anche in quella in cui pensavi di non avere tempo. Perché la costanza vera non viene da sessioni lunghissime, viene dalla regolarità.",
+    },
+    {
+      q: "Funziona anche se ho pochissimo tempo?",
+      a: "Sì. Gli allenamenti durano solo 5–15 minuti. Sono già pronti, così inizi subito e riesci ad allenarti anche nelle giornate più piene.",
+    },
+  ];
+
   return (
     <section id="faq" className="px-4 pb-24 pt-6 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-4xl">
@@ -709,28 +786,7 @@ function Faq() {
         />
 
         <div className="mt-10 space-y-4 sm:mt-12">
-          {[
-            {
-              q: "Hypemove è gratis?",
-              a: "Sì. Puoi iniziare gratis, così il primo passo è molto più facile e senza pressione.",
-            },
-            {
-              q: "Posso trovare un piano adatto al mio obiettivo?",
-              a: "Sì. Hypemove nasce per offrire percorsi più adatti a obiettivi diversi, come dimagrimento, tonificazione e mobility.",
-            },
-            {
-              q: "Serve essere già allenati?",
-              a: "No. È pensata soprattutto per chi parte da zero, ricomincia o non riesce a essere costante con il fitness tradizionale.",
-            },
-            {
-              q: "Serve attrezzatura?",
-              a: "L'idea base è rendere il movimento semplice e facilmente accessibile anche da casa, senza complicazioni inutili.",
-            },
-            {
-              q: "Quanto tempo serve?",
-              a: "L'obiettivo è aiutarti con workout più brevi e più facili da iniziare, così il movimento entra meglio nella tua vita reale.",
-            },
-          ].map((faq, index) => (
+          {faqs.map((faq, index) => (
             <motion.details
               key={faq.q}
               initial={{ opacity: 0, y: 20 }}
@@ -752,26 +808,16 @@ function Faq() {
           type="application/ld+json"
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
-              '@context': 'https://schema.org',
-              '@type': 'FAQPage',
-              mainEntity: [
-                {
-                  '@type': 'Question',
-                  name: 'Hypemove è gratis?',
-                  acceptedAnswer: {
-                    '@type': 'Answer',
-                    text: 'Sì. Puoi iniziare gratis.',
-                  },
+              "@context": "https://schema.org",
+              "@type": "FAQPage",
+              mainEntity: faqs.map((faq) => ({
+                "@type": "Question",
+                name: faq.q,
+                acceptedAnswer: {
+                  "@type": "Answer",
+                  text: faq.a.replaceAll(" — ", ", "),
                 },
-                {
-                  '@type': 'Question',
-                  name: 'Posso trovare un piano adatto al mio obiettivo?',
-                  acceptedAnswer: {
-                    '@type': 'Answer',
-                    text: 'Sì. Hypemove nasce per offrire percorsi più adatti a obiettivi diversi.',
-                  },
-                },
-              ],
+              })),
             }),
           }}
         />
@@ -827,9 +873,7 @@ function Footer() {
               <Download className="h-4 w-4" />
               Scarica gratis
             </a>
-            <p className="leading-6 text-black/50">
-              Android disponibile ora. iPhone in arrivo: sostituisci il link placeholder quando avrai la pagina App Store.
-            </p>
+            <p className="leading-6 text-black/50">Android disponibile ora. iPhone in arrivo.</p>
           </div>
         </div>
       </div>
@@ -854,7 +898,7 @@ export default function HypemoveLandingPage() {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
       <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/85 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 md:px-8 lg:px-8">
           <a href="#top" className="flex items-center gap-3">
             <LogoMark className="h-12 w-12 shrink-0" />
             <div>
