@@ -122,7 +122,7 @@ const testimonials = [
   },
   {
     quote:
-      "Apro l'app e non devo pensare. Questo da solo cambia tantissimo. È molto più facile restare costante quando non devi ogni volta convincerti da capo.",
+      "Apro l'app e non devo pensare. Questo da solo cambia tantissimo. Ãˆ molto più facile restare costante quando non devi ogni volta convincerti da capo.",
     name: "Marco, 29",
     role: "Ha già mollato tante volte",
   },
@@ -551,21 +551,24 @@ function StoryCard({ step, index }) {
       viewport={{ once: true, amount: 0.2 }}
       transition={{ duration: 0.45, delay: index * 0.08 }}
       whileHover={{ y: -6 }}
-      className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl sm:rounded-[36px] sm:p-7"
+      className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl sm:rounded-[36px] sm:p-7"
     >
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+      <div className="pointer-events-none absolute right-4 top-3 text-[4.5rem] font-black leading-none tracking-[-0.08em] text-white/[0.06] transition duration-300 group-hover:text-white/[0.1] sm:right-6 sm:top-4 sm:text-[6rem]">
+        {step.number}
+      </div>
+      <div className="flex flex-col gap-6">
         <div className="flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-black sm:h-14 sm:w-14">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-black shadow-[0_14px_34px_rgba(255,255,255,0.12)] sm:h-14 sm:w-14">
             <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
           </div>
           <div>
-            <div className="text-xs font-bold tracking-[0.24em] text-[#FB8B04] sm:text-sm">{step.number}</div>
-            <h4 className="mt-2 text-xl font-black tracking-[-0.03em] text-white sm:text-2xl">{step.title}</h4>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-white/65 sm:text-base sm:leading-7">{step.text}</p>
+            <h4 className="text-2xl font-black tracking-[-0.04em] text-white sm:text-[2rem]">{step.title}</h4>
           </div>
         </div>
-        <div className="w-fit rounded-full border border-white/10 px-4 py-2 text-xs font-semibold text-white/45 sm:text-sm">
-          Hypemove system
+        <p className="relative max-w-[42ch] text-sm leading-7 text-white/68 sm:text-base sm:leading-8">{step.text}</p>
+        <div className="relative flex items-center justify-between border-t border-white/10 pt-4">
+          <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-white/38">Hypemove system</div>
+          <div className="h-2 w-2 rounded-full bg-[#FB8B04]" />
         </div>
       </div>
     </motion.div>
@@ -580,20 +583,31 @@ function StickyStory() {
         <SectionTitle
           dark
           eyebrow="Metodo"
-          title="Un modo più semplice per iniziare. Un motivo in più per continuare."
-          subtitle="Hypemove ti accompagna con un percorso chiaro, più leggero da seguire e più facile da portare avanti nella vita reale."
+          title="Meno attrito. Piu voglia di continuare."
+          subtitle="Tre leve semplici che rendono il percorso piu chiaro, piu leggero e piu facile da seguire."
         />
 
         <div className="mt-14 grid gap-8 lg:mt-16 lg:grid-cols-[0.78fr_1.22fr]">
           <div className="lg:sticky lg:top-24 lg:h-fit">
             <Kicker dark>Hypemove system</Kicker>
             <h3 className="mt-5 text-3xl font-black tracking-[-0.05em] text-white sm:text-4xl lg:text-5xl">
-              Il problema non sei tu.
-              <span className="block text-[#FB8B04]">È il metodo sbagliato.</span>
+              Un sistema pensato
+              <span className="block text-[#FB8B04]">per farti restare costante.</span>
             </h3>
             <p className="mt-5 max-w-md text-base leading-7 text-white/65 sm:text-lg sm:leading-8">
-              Hypemove non si appoggia alla tua forza di volontà. Costruisce un'esperienza che abbassa la frizione, aumenta il desiderio e rende il movimento più ripetibile nella tua vita vera.
+              Niente programma pesante da interpretare. Hai un percorso piu guidato, piu breve e piu coinvolgente.
             </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
+                Percorso su misura
+              </div>
+              <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
+                Workout brevi
+              </div>
+              <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
+                Reward e streak
+              </div>
+            </div>
           </div>
 
           <div className="space-y-5 sm:space-y-8">
@@ -601,7 +615,7 @@ function StickyStory() {
               {
                 number: "01",
                 title: "Personalizzazione",
-                text: "Un percorso costruito su di te. Scegli il tuo obiettivo e Hypemove crea un programma su misura. Niente di generico, niente di inutile. Solo quello che ti serve davvero per arrivare dove vuoi.",
+                text: "Un percorso costruito su di te. Scegli il tuo obiettivo e Hypemove crea un programma su misura.",
                 icon: Sparkles,
               },
               {
@@ -613,7 +627,7 @@ function StickyStory() {
               {
                 number: "03",
                 title: "Gamification",
-                text: "Ogni workout ti porta qualcosa in più. Punti, streak e reward ad ogni allenamento completato. Più vai avanti, più senti il progresso e quella sensazione ti fa venire voglia di non fermarti.",
+                text: "Punti, streak e reward ad ogni allenamento completato. Piu vai avanti, piu senti il progresso.",
                 icon: PlayCircle,
               },
             ].map((step, index) => (
@@ -625,7 +639,6 @@ function StickyStory() {
     </section>
   );
 }
-
 // Sezione con i benefici principali.
 function BenefitsPanels() {
   return (
@@ -634,7 +647,7 @@ function BenefitsPanels() {
         <SectionTitle
           eyebrow="Benefici"
           title="Piccole azioni. Effetti reali nella tua giornata."
-          subtitle="Il vero obiettivo non è impressionarti con promesse assurde. È farti percepire un beneficio credibile e desiderabile già da subito."
+          subtitle="Il vero obiettivo non è impressionarti con promesse assurde. Ãˆ farti percepire un beneficio credibile e desiderabile già da subito."
         />
 
         <div className="mt-14 grid gap-5 sm:mt-16 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
