@@ -95,20 +95,24 @@ const storySteps = [
 // Card della sezione benefici.
 const benefits = [
   {
-    title: "Più facile iniziare",
-    desc: "Anche nelle giornate storte la soglia mentale è più bassa. E quando partire è più facile, rimandare diventa meno automatico.",
+    title: "Raggiungi il tuo obiettivo",
+    desc: "Dimagrire, tonificarti o sentirti meno rigido diventa più semplice da portare avanti.",
+    icon: Trophy,
   },
   {
-    title: "Più costanza reale",
-    desc: "Non punta sulla perfezione. Punta a farti restare in movimento più spesso, con qualcosa che riesci davvero a ripetere.",
+    title: "Ottieni più energia",
+    desc: "Muoversi con più continuità ti aiuta a sentirti meno spento durante la giornata.",
+    icon: Sparkles,
   },
   {
-    title: "Meno sensi di colpa",
-    desc: "Ti fa sentire capace e in controllo, invece di ricordarti tutto quello che non hai fatto nelle settimane passate.",
+    title: "Ti senti meglio nel tuo corpo",
+    desc: "Non si tratta solo di allenarti, ma di iniziare a percepire un cambiamento reale.",
+    icon: Waves,
   },
   {
-    title: "Più compatibile con la vita vera",
-    desc: "Da casa, senza caos e senza organizzazioni infinite. Così il movimento entra meglio nella tua giornata reale.",
+    title: "Diventa più costante",
+    desc: "Workout brevi e già pronti ti aiutano a continuare senza mollare dopo pochi giorni.",
+    icon: Timer,
   },
 ];
 
@@ -122,7 +126,7 @@ const testimonials = [
   },
   {
     quote:
-      "Apro l'app e non devo pensare. Questo da solo cambia tantissimo. Ãˆ molto più facile restare costante quando non devi ogni volta convincerti da capo.",
+      "Apro l'app e non devo pensare. Questo da solo cambia tantissimo. È molto più facile restare costante quando non devi ogni volta convincerti da capo.",
     name: "Marco, 29",
     role: "Ha già mollato tante volte",
   },
@@ -134,7 +138,7 @@ const testimonials = [
   },
 ];
 
-// Pulsanti CTA riutilizzati in piu punti della pagina.
+// Pulsanti CTA riutilizzati in più punti della pagina.
 function CTAButtons({ center = false }) {
   return (
     <div className={`flex flex-col gap-3 sm:flex-row ${center ? "justify-center" : ""}`}>
@@ -553,9 +557,6 @@ function StoryCard({ step, index }) {
       whileHover={{ y: -6 }}
       className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl sm:rounded-[36px] sm:p-7"
     >
-      <div className="pointer-events-none absolute right-4 top-3 text-[4.5rem] font-black leading-none tracking-[-0.08em] text-white/[0.06] transition duration-300 group-hover:text-white/[0.1] sm:right-6 sm:top-4 sm:text-[6rem]">
-        {step.number}
-      </div>
       <div className="flex flex-col gap-6">
         <div className="flex items-start gap-4">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-black shadow-[0_14px_34px_rgba(255,255,255,0.12)] sm:h-14 sm:w-14">
@@ -583,57 +584,38 @@ function StickyStory() {
         <SectionTitle
           dark
           eyebrow="Metodo"
-          title="Meno attrito. Piu voglia di continuare."
-          subtitle="Tre leve semplici che rendono il percorso piu chiaro, piu leggero e piu facile da seguire."
+          title={
+            <>
+              Un sistema pensato per
+              <span className="block text-[#FB8B04]">NON farti mollare</span>
+            </>
+          }
+          subtitle="Niente programma pesante da interpretare. Hai un percorso più guidato, più breve e più coinvolgente."
         />
 
-        <div className="mt-14 grid gap-8 lg:mt-16 lg:grid-cols-[0.78fr_1.22fr]">
-          <div className="lg:sticky lg:top-24 lg:h-fit">
-            <Kicker dark>Hypemove system</Kicker>
-            <h3 className="mt-5 text-3xl font-black tracking-[-0.05em] text-white sm:text-4xl lg:text-5xl">
-              Un sistema pensato
-              <span className="block text-[#FB8B04]">per farti restare costante.</span>
-            </h3>
-            <p className="mt-5 max-w-md text-base leading-7 text-white/65 sm:text-lg sm:leading-8">
-              Niente programma pesante da interpretare. Hai un percorso piu guidato, piu breve e piu coinvolgente.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
-                Percorso su misura
-              </div>
-              <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
-                Workout brevi
-              </div>
-              <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm font-semibold text-white/70">
-                Reward e streak
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-5 sm:space-y-8">
-            {[
-              {
-                number: "01",
-                title: "Personalizzazione",
-                text: "Un percorso costruito su di te. Scegli il tuo obiettivo e Hypemove crea un programma su misura.",
-                icon: Sparkles,
-              },
-              {
-                number: "02",
-                title: "Snack workout",
-                text: "Allenamenti semplici e brevi, pensati apposta per essere sostenibili nel tempo.",
-                icon: Timer,
-              },
-              {
-                number: "03",
-                title: "Gamification",
-                text: "Punti, streak e reward ad ogni allenamento completato. Piu vai avanti, piu senti il progresso.",
-                icon: PlayCircle,
-              },
-            ].map((step, index) => (
-              <StoryCard key={step.title} step={step} index={index} />
-            ))}
-          </div>
+        <div className="mt-14 grid gap-5 sm:mt-16 lg:grid-cols-3 lg:gap-6">
+          {[
+            {
+              number: "01",
+              title: "Personalizzazione",
+              text: "Scegli il tuo obiettivo e Hypemove ti propone un percorso più adatto a te.",
+              icon: Sparkles,
+            },
+            {
+              number: "02",
+              title: "Snack workout",
+              text: "Allenamenti brevi e semplici, pensati per aiutarti a iniziare senza rimandare.",
+              icon: Timer,
+            },
+            {
+              number: "03",
+              title: "Gamification",
+              text: "Punti, streak e reward ti danno un motivo in più per tornare anche domani.",
+              icon: PlayCircle,
+            },
+          ].map((step, index) => (
+            <StoryCard key={step.title} step={step} index={index} />
+          ))}
         </div>
       </div>
     </section>
@@ -646,11 +628,10 @@ function BenefitsPanels() {
       <div className="mx-auto max-w-7xl">
         <SectionTitle
           eyebrow="Benefici"
-          title="Piccole azioni. Effetti reali nella tua giornata."
-          subtitle="Il vero obiettivo non è impressionarti con promesse assurde. Ãˆ farti percepire un beneficio credibile e desiderabile già da subito."
+          title="Come Hypemove ti aiuta davvero"
         />
 
-        <div className="mt-14 grid gap-5 sm:mt-16 sm:grid-cols-2 sm:gap-6 xl:grid-cols-4">
+        <div className="mt-12 divide-y divide-black/10 border-y border-black/10 sm:mt-14">
           {benefits.map((item, index) => (
             <motion.div
               key={item.title}
@@ -658,12 +639,29 @@ function BenefitsPanels() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.15 }}
               transition={{ duration: 0.55, delay: index * 0.06 }}
-              whileHover={{ y: -6 }}
-              className="flex min-h-[300px] flex-col rounded-[28px] border border-black/10 bg-white p-7 shadow-[0_20px_50px_rgba(0,0,0,0.04)] sm:min-h-[320px] sm:rounded-[34px]"
+              className={`grid items-center gap-5 py-6 sm:gap-8 sm:py-8 lg:grid-cols-[88px_minmax(0,1fr)] ${
+                index % 2 === 1 ? "lg:grid-cols-[minmax(0,1fr)_88px]" : ""
+              }`}
             >
-              <div className="text-[11px] font-bold uppercase tracking-[0.24em] text-[#FB8B04]">Benefit</div>
-              <h3 className="mt-6 text-xl font-black tracking-[-0.04em] text-black sm:text-[2rem] sm:leading-[1.05]">{item.title}</h3>
-              <p className="mt-5 text-base leading-8 text-black/60">{item.desc}</p>
+              <div
+                className={`flex ${
+                  index % 2 === 1 ? "lg:order-2 lg:justify-end" : "lg:order-1"
+                }`}
+              >
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-black text-white shadow-[0_14px_34px_rgba(17,17,17,0.14)] sm:h-16 sm:w-16">
+                  <item.icon className="h-6 w-6" />
+                </div>
+              </div>
+              <div className={index % 2 === 1 ? "lg:order-1 lg:text-right" : "lg:order-2"}>
+                <h3 className="text-xl font-black tracking-[-0.04em] text-black sm:text-[2rem] sm:leading-[1.05]">
+                  {item.title}
+                </h3>
+                <p className={`mt-3 text-sm leading-7 text-black/60 sm:text-base sm:leading-8 ${
+                  index % 2 === 1 ? "lg:ml-auto lg:max-w-[40ch]" : "max-w-[40ch]"
+                }`}>
+                  {item.desc}
+                </p>
+              </div>
             </motion.div>
           ))}
         </div>
@@ -685,7 +683,12 @@ function SocialProof() {
         <SectionTitle
           dark
           eyebrow="Recensioni"
-          title="Persone normali. Storie vere. Un punto in comune: volevano finalmente riuscirci davvero."
+          title={
+            <>
+              Persone normali. Storie vere. Un punto in comune:
+              <span className="text-[#FB8B04]"> volevano finalmente riuscirci davvero.</span>
+            </>
+          }
           subtitle="Chi usa Hypemove non cerca il workout perfetto. Cerca un modo più realistico per restare costante."
         />
 
