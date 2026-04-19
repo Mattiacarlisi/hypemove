@@ -24,6 +24,14 @@ const routes = [
     canonical: "https://www.hypemove.app/app-fitness-principianti",
   },
   {
+    path: "/guide",
+    outputPath: path.join(projectRoot, "dist", "guide", "index.html"),
+    title: "Guide utili per allenarti a casa | Hypemove",
+    description:
+      "Guide semplici e realistiche per iniziare ad allenarti a casa, creare costanza e scegliere workout brevi adatti al tuo obiettivo.",
+    canonical: "https://www.hypemove.app/guide",
+  },
+  {
     path: "/workout-10-minuti-casa",
     outputPath: path.join(projectRoot, "dist", "workout-10-minuti-casa", "index.html"),
     title: "Workout 10 minuti a casa | Allenamento semplice per chi ha poco tempo | Hypemove",

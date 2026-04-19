@@ -3,6 +3,7 @@ import { createRoot, hydrateRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.jsx";
 import AppFitnessPrincipianti from "./pages/AppFitnessPrincipianti.jsx";
+import Guide from "./pages/Guide.jsx";
 import MiniWorkoutEfficaci from "./pages/MiniWorkoutEfficaci.jsx";
 import Workout10MinutiCasa from "./pages/Workout10MinutiCasa.jsx";
 import "./index.css";
@@ -21,6 +22,7 @@ const app = (
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/app-fitness-principianti" element={<AppFitnessPrincipianti />} />
+          <Route path="/guide" element={<Guide />} />
           <Route path="/mini-workout-efficaci" element={<MiniWorkoutEfficaci />} />
           <Route path="/workout-10-minuti-casa" element={<Workout10MinutiCasa />} />
           <Route path="/allenamento-a-casa" element={<App />} />

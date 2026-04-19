@@ -1,5 +1,6 @@
 import React from "react";
 import { ArrowRight, CheckCircle2, Download, XCircle } from "lucide-react";
+import GuideFooter from "../components/GuideFooter.jsx";
 
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
 
@@ -270,6 +271,7 @@ export default function AppFitnessPrincipianti() {
           </div>
         </section>
       </main>
+      <GuideFooter />
     </div>
   );
 }

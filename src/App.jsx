@@ -27,6 +27,7 @@ const navLinks = [
   { label: "Benefici", href: "#benefits" },
   { label: "Recensioni", href: "#proof" },
   { label: "FAQ", href: "#faq" },
+  { label: "Guide", href: "/guide" },
 ];
 
 // Card della sezione obiettivi.
@@ -135,6 +136,24 @@ const testimonials = [
       "Non mi serve il workout perfetto. Mi serve un sistema che entri davvero nella mia vita. Hypemove mi dà questa sensazione in modo molto più naturale.",
     name: "Elena, 41",
     role: "Vuole stare meglio senza rigidità",
+  },
+];
+
+const guideCards = [
+  {
+    title: "I workout brevi funzionano davvero?",
+    desc: "Quando 5 o 10 minuti possono aiutarti a muoverti con più costanza.",
+    href: "/mini-workout-efficaci",
+  },
+  {
+    title: "Come allenarti a casa se hai poco tempo",
+    desc: "Un approccio semplice per iniziare anche nelle giornate piene.",
+    href: "/workout-10-minuti-casa",
+  },
+  {
+    title: "App fitness per chi parte da zero",
+    desc: "Una guida per principianti che vogliono partire senza sentirsi già indietro.",
+    href: "/app-fitness-principianti",
   },
 ];
 
@@ -842,11 +861,57 @@ function Faq() {
   );
 }
 
+// Sezione home con link interni verso le guide SEO principali.
+function GuidePreview() {
+  return (
+    <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <SectionTitle
+            eyebrow="Guide"
+            title="Guide utili per iniziare"
+            subtitle="Contenuti semplici e realistici per allenarti a casa con più costanza."
+          />
+          <a
+            href="/guide"
+            className="mx-auto inline-flex min-h-[52px] items-center justify-center rounded-full border border-black/10 bg-white px-6 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:border-black/20 lg:mx-0"
+          >
+            Tutte le guide
+            <ArrowRight className="ml-2 h-4 w-4" />
+          </a>
+        </div>
+
+        <div className="mt-10 grid gap-5 md:grid-cols-3">
+          {guideCards.map((item) => (
+            <a
+              key={item.href}
+              href={item.href}
+              className="group flex min-h-[230px] flex-col justify-between rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_60px_rgba(0,0,0,0.05)] transition hover:-translate-y-1 hover:border-black/20"
+            >
+              <span>
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <h3 className="mt-5 text-2xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
+                <p className="mt-4 text-base leading-7 text-black/62">{item.desc}</p>
+              </span>
+              <span className="mt-6 inline-flex items-center text-sm font-bold text-black">
+                Leggi la guida
+                <ArrowRight className="ml-2 h-4 w-4 transition group-hover:translate-x-1" />
+              </span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 // Footer con link utili, legali e download.
 function Footer() {
   return (
     <footer className="border-t border-black/10 bg-[#F7F7F7]">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-4 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-5 lg:px-8">
         <div>
           <div className="flex items-center gap-3">
             <LogoMark className="h-8 w-8 shrink-0" />
@@ -868,6 +933,18 @@ function Footer() {
             <a href="#story" className="block transition hover:text-black">Metodo</a>
             <a href="#proof" className="block transition hover:text-black">Recensioni</a>
             <a href="#faq" className="block transition hover:text-black">FAQ</a>
+            <a href="/guide" className="block transition hover:text-black">Guide</a>
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-black uppercase tracking-[0.22em] text-black">Guide utili</h3>
+          <div className="mt-4 space-y-3 text-sm text-black/55">
+            <a href="/app-fitness-principianti" className="block transition hover:text-black">App fitness per principianti</a>
+            <a href="/mini-workout-efficaci" className="block transition hover:text-black">Workout brevi efficaci</a>
+            <a href="/allenamento-a-casa" className="block transition hover:text-black">Allenamento a casa</a>
+            <a href="/allenamento-a-casa" className="block transition hover:text-black">Dimagrire a casa</a>
+            <a href="/allenamento-a-casa" className="block transition hover:text-black">Tonificazione a casa</a>
           </div>
         </div>
 
@@ -988,6 +1065,8 @@ export default function HypemoveLandingPage() {
         <FinalCta />
         {/* FAQ */}
         <Faq />
+        {/* Guide SEO e contenuti consigliati */}
+        <GuidePreview />
       </main>
 
       {/* Footer finale */}
