@@ -2,6 +2,7 @@ import React, { Suspense, lazy } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.jsx";
+import AppFitnessPrincipianti from "./pages/AppFitnessPrincipianti.jsx";
 import "./index.css";
 
 const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
@@ -17,6 +18,7 @@ const app = (
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<App />} />
+          <Route path="/app-fitness-principianti" element={<AppFitnessPrincipianti />} />
           <Route path="/reset-password" element={<ResetPassword />} />
         </Routes>
       </Suspense>
@@ -25,8 +27,7 @@ const app = (
 );
 
 const shouldHydrate =
-  rootElement.hasChildNodes() &&
-  (window.location.pathname === "/" || window.location.pathname === "/index.html");
+  rootElement.hasChildNodes();
 
 if (shouldHydrate) {
   hydrateRoot(rootElement, app);
