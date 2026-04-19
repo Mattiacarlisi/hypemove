@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App.jsx";
 import AllenamentoACasa from "./pages/AllenamentoACasa.jsx";
 import AppFitnessPrincipianti from "./pages/AppFitnessPrincipianti.jsx";
+import BeneficiCamminataTempo from "./pages/BeneficiCamminataTempo.jsx";
 import CostanzaAllenamento from "./pages/CostanzaAllenamento.jsx";
 import Guide from "./pages/Guide.jsx";
 import MiniWorkoutEfficaci from "./pages/MiniWorkoutEfficaci.jsx";
@@ -24,6 +25,7 @@ const app = (
         <Routes>
           <Route path="/" element={<App />} />
           <Route path="/app-fitness-principianti" element={<AppFitnessPrincipianti />} />
+          <Route path="/benefici-camminata-tempo" element={<BeneficiCamminataTempo />} />
           <Route path="/come-essere-costanti-nell-allenamento" element={<CostanzaAllenamento />} />
           <Route path="/guide" element={<Guide />} />
           <Route path="/mini-workout-efficaci" element={<MiniWorkoutEfficaci />} />

@@ -32,6 +32,14 @@ const routes = [
     canonical: "https://www.hypemove.app/allenamento-a-casa",
   },
   {
+    path: "/benefici-camminata-tempo",
+    outputPath: path.join(projectRoot, "dist", "benefici-camminata-tempo", "index.html"),
+    title: "Benefici della camminata: cosa cambia dopo 10, 20, 30 e 60 minuti | Hypemove",
+    description:
+      "Camminare serve davvero? Scopri quali benefici ha una camminata di 10, 20, 30 o 60 minuti e cosa ha più senso aspettarsi nella vita reale.",
+    canonical: "https://www.hypemove.app/benefici-camminata-tempo",
+  },
+  {
     path: "/come-essere-costanti-nell-allenamento",
     outputPath: path.join(projectRoot, "dist", "come-essere-costanti-nell-allenamento", "index.html"),
     title: "Come essere costanti nell’allenamento (senza vivere di motivazione) | Hypemove",

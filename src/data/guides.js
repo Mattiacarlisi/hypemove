@@ -36,6 +36,15 @@ export const guides = [
     featuredHome: false,
   },
   {
+    title: "Benefici della camminata",
+    href: "/benefici-camminata-tempo",
+    category: "Benessere",
+    readTime: "6 min",
+    description: "Cosa aspettarti da 10, 20, 30 o 60 minuti di camminata.",
+    tags: ["camminata", "walking", "benessere", "attività fisica"],
+    featuredHome: false,
+  },
+  {
     title: "Come essere costanti nell'allenamento",
     href: "/come-essere-costanti-nell-allenamento",
     category: "Costanza",

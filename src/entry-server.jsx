@@ -3,6 +3,7 @@ import { renderToString } from "react-dom/server";
 import App from "./App.jsx";
 import AllenamentoACasa from "./pages/AllenamentoACasa.jsx";
 import AppFitnessPrincipianti from "./pages/AppFitnessPrincipianti.jsx";
+import BeneficiCamminataTempo from "./pages/BeneficiCamminataTempo.jsx";
 import CostanzaAllenamento from "./pages/CostanzaAllenamento.jsx";
 import Guide from "./pages/Guide.jsx";
 import MiniWorkoutEfficaci from "./pages/MiniWorkoutEfficaci.jsx";
@@ -12,6 +13,7 @@ export function render(pathname = "/") {
   const pages = {
     "/allenamento-a-casa": AllenamentoACasa,
     "/app-fitness-principianti": AppFitnessPrincipianti,
+    "/benefici-camminata-tempo": BeneficiCamminataTempo,
     "/come-essere-costanti-nell-allenamento": CostanzaAllenamento,
     "/guide": Guide,
     "/mini-workout-efficaci": MiniWorkoutEfficaci,
