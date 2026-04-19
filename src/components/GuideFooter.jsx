@@ -47,6 +47,7 @@ export default function GuideFooter() {
             <a href="/mini-workout-efficaci" className="block transition hover:text-black">Workout brevi efficaci</a>
             <a href="/workout-10-minuti-casa" className="block transition hover:text-black">Workout 10 minuti a casa</a>
             <a href="/allenamento-a-casa" className="block transition hover:text-black">Allenamento a casa</a>
+            <a href="/come-essere-costanti-nell-allenamento" className="block transition hover:text-black">Costanza nell'allenamento</a>
             <a href="/allenamento-a-casa" className="block transition hover:text-black">Dimagrire a casa</a>
             <a href="/allenamento-a-casa" className="block transition hover:text-black">Tonificazione a casa</a>
           </div>

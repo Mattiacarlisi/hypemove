@@ -24,6 +24,22 @@ const routes = [
     canonical: "https://www.hypemove.app/app-fitness-principianti",
   },
   {
+    path: "/allenamento-a-casa",
+    outputPath: path.join(projectRoot, "dist", "allenamento-a-casa", "index.html"),
+    title: "Allenamento a casa: guida semplice per iniziare davvero | Hypemove",
+    description:
+      "Vuoi iniziare ad allenarti a casa? Scopri come farlo in modo semplice, realistico e sostenibile, anche se hai poco tempo o parti da zero.",
+    canonical: "https://www.hypemove.app/allenamento-a-casa",
+  },
+  {
+    path: "/come-essere-costanti-nell-allenamento",
+    outputPath: path.join(projectRoot, "dist", "come-essere-costanti-nell-allenamento", "index.html"),
+    title: "Come essere costanti nell’allenamento (senza vivere di motivazione) | Hypemove",
+    description:
+      "Fai fatica a essere costante con l’allenamento? Scopri strategie realistiche per smettere di iniziare e mollare dopo pochi giorni.",
+    canonical: "https://www.hypemove.app/come-essere-costanti-nell-allenamento",
+  },
+  {
     path: "/guide",
     outputPath: path.join(projectRoot, "dist", "guide", "index.html"),
     title: "Guide utili per allenarti a casa | Hypemove",

@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowRight, BookOpen, Clock, Home, Sparkles, Target } from "lucide-react";
+import { ArrowRight, BookOpen, Clock, Home, Repeat2, Sparkles, Target } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
 
 const guideClusters = [
@@ -43,6 +43,28 @@ const guideClusters = [
       {
         title: "Allenamento casa poco tempo",
         desc: "Strategie pratiche per allenarti senza palestra.",
+        href: "/workout-10-minuti-casa",
+      },
+    ],
+  },
+  {
+    title: "Costanza",
+    icon: Repeat2,
+    description: "Per chi parte bene ma poi molla: sistemi semplici per continuare anche quando la motivazione cala.",
+    links: [
+      {
+        title: "Come essere costanti nell'allenamento",
+        desc: "Strategie realistiche per allenarti senza dipendere dalla motivazione.",
+        href: "/come-essere-costanti-nell-allenamento",
+      },
+      {
+        title: "Mini workout efficaci",
+        desc: "Quando poco, fatto spesso, diventa una scelta concreta.",
+        href: "/mini-workout-efficaci",
+      },
+      {
+        title: "Workout 10 minuti a casa",
+        desc: "Una base semplice da ripetere nelle giornate piene.",
         href: "/workout-10-minuti-casa",
       },
     ],
