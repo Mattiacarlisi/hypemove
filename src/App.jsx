@@ -919,7 +919,9 @@ export default function HypemoveLandingPage() {
             <LogoMark className="h-12 w-12 shrink-0" />
             <div>
               <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">Muoverti ogni giorno. Senza che sembri una fatica.</div>
+              <h1 className="text-xs font-normal leading-4 text-black/45">
+                App fitness per allenarti a casa, dimagrire, tonificare e stare meglio
+              </h1>
             </div>
           </a>
 
