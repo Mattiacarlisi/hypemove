@@ -17,6 +17,29 @@ function LogoMark() {
 export default function GuideFooter() {
   return (
     <footer className="border-t border-black/10 bg-[#F7F7F7]">
+      <div className="mx-auto flex max-w-7xl flex-col gap-4 border-b border-black/10 px-4 py-8 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
+        <div>
+          <div className="text-lg font-black tracking-[-0.04em] text-black">Vuoi continuare a orientarti?</div>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-black/55">
+            Torna alla raccolta delle guide oppure alla home per scoprire Hypemove.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          <a
+            href="/guide"
+            className="inline-flex min-h-[46px] items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+          >
+            Tutte le guide
+          </a>
+          <a
+            href="/"
+            className="inline-flex min-h-[46px] items-center justify-center rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:border-black/20"
+          >
+            Home
+          </a>
+        </div>
+      </div>
+
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-5 lg:px-8">
         <div>
           <div className="flex items-center gap-3">
