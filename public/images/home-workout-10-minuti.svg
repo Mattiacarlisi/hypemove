@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">Allenamento di 10 minuti a casa senza attrezzi</title>
+  <desc id="desc">Illustrazione di una persona che si allena a casa su un tappetino.</desc>
+  <rect width="1200" height="800" rx="48" fill="#f7fbfd"/>
+  <rect x="0" y="616" width="1200" height="184" fill="#f7efe3"/>
+  <rect x="112" y="548" width="738" height="62" rx="31" fill="#111"/>
+  <rect x="139" y="567" width="681" height="24" rx="12" fill="#2a2a2a"/>
+  <rect x="870" y="190" width="120" height="360" rx="6" fill="#d8e8ee"/>
+  <rect x="890" y="210" width="80" height="320" rx="8" fill="#fff"/>
+  <path d="M935 210v320" stroke="#d8e8ee" stroke-width="8"/>
+  <path d="M890 360h80" stroke="#d8e8ee" stroke-width="8"/>
+  <circle cx="980" cy="610" r="58" fill="#fb8b04" opacity=".16"/>
+  <circle cx="996" cy="582" r="32" fill="#fb8b04"/>
+  <path d="M1016 616c44 12 75 48 84 98H892c10-50 41-86 84-98 11 10 28 18 40 0Z" fill="#111"/>
+  <path d="M972 594c18 28 46 28 64 0" fill="none" stroke="#111" stroke-width="18" stroke-linecap="round"/>
+  <path d="M996 625v100" stroke="#111" stroke-width="24" stroke-linecap="round"/>
+  <path d="M996 710l-78 34" stroke="#111" stroke-width="24" stroke-linecap="round"/>
+  <path d="M996 710l78 34" stroke="#111" stroke-width="24" stroke-linecap="round"/>
+  <path d="M940 642l-96-70" stroke="#111" stroke-width="24" stroke-linecap="round"/>
+  <path d="M1052 642l96-70" stroke="#111" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="840" cy="570" r="24" fill="#111"/>
+  <circle cx="1152" cy="570" r="24" fill="#111"/>
+  <rect x="222" y="182" width="380" height="250" rx="34" fill="#fff" stroke="#d8e8ee" stroke-width="10"/>
+  <path d="M266 362c70-76 120-82 176-34 57 49 95 40 120-20" fill="none" stroke="#fb8b04" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="316" cy="280" r="32" fill="#111"/>
+  <path d="M292 330l36-54 70 78 58-46" fill="none" stroke="#111" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M98 126h88" stroke="#111" stroke-width="18" stroke-linecap="round"/>
+  <path d="M98 166h164" stroke="#fb8b04" stroke-width="18" stroke-linecap="round"/>
+  <path d="M98 206h128" stroke="#111" stroke-width="18" stroke-linecap="round" opacity=".25"/>
+</svg>

@@ -23,6 +23,22 @@ const routes = [
       "Cerchi un'app fitness per principianti? Hypemove ti aiuta a iniziare con workout semplici, guidati e sostenibili, pensati per chi parte da zero.",
     canonical: "https://www.hypemove.app/app-fitness-principianti",
   },
+  {
+    path: "/workout-10-minuti-casa",
+    outputPath: path.join(projectRoot, "dist", "workout-10-minuti-casa", "index.html"),
+    title: "Workout 10 minuti a casa | Allenamento semplice per chi ha poco tempo | Hypemove",
+    description:
+      "Cerchi un workout di 10 minuti a casa? Scopri un allenamento semplice, guidato e realistico per chi ha poco tempo e vuole rimettersi in moto.",
+    canonical: "https://www.hypemove.app/workout-10-minuti-casa",
+  },
+  {
+    path: "/mini-workout-efficaci",
+    outputPath: path.join(projectRoot, "dist", "mini-workout-efficaci", "index.html"),
+    title: "I mini workout sono efficaci? Cosa dice davvero la realtà | Hypemove",
+    description:
+      "I mini workout da 5 o 10 minuti funzionano davvero? Scopri quando sono efficaci, per chi lo sono e perché spesso battono i programmi perfetti mai iniziati.",
+    canonical: "https://www.hypemove.app/mini-workout-efficaci",
+  },
 ];
 
 const { render } = await import(pathToFileURL(distServerEntryPath).href);
