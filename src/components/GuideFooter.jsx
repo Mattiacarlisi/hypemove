@@ -1,5 +1,6 @@
 import React from "react";
 import { Download } from "lucide-react";
+import { guideFooterLinks } from "../data/guides.js";
 
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
 const PRIVACY_URL = "/legal/privacy.html";
@@ -43,13 +44,11 @@ export default function GuideFooter() {
         <div>
           <h3 className="text-sm font-black uppercase tracking-[0.22em] text-black">Guide utili</h3>
           <div className="mt-4 space-y-3 text-sm text-black/55">
-            <a href="/app-fitness-principianti" className="block transition hover:text-black">App fitness per principianti</a>
-            <a href="/mini-workout-efficaci" className="block transition hover:text-black">Workout brevi efficaci</a>
-            <a href="/workout-10-minuti-casa" className="block transition hover:text-black">Workout 10 minuti a casa</a>
-            <a href="/allenamento-a-casa" className="block transition hover:text-black">Allenamento a casa</a>
-            <a href="/come-essere-costanti-nell-allenamento" className="block transition hover:text-black">Costanza nell'allenamento</a>
-            <a href="/allenamento-a-casa" className="block transition hover:text-black">Dimagrire a casa</a>
-            <a href="/allenamento-a-casa" className="block transition hover:text-black">Tonificazione a casa</a>
+            {guideFooterLinks.map((guide) => (
+              <a key={guide.href} href={guide.href} className="block transition hover:text-black">
+                {guide.title}
+              </a>
+            ))}
           </div>
         </div>
 

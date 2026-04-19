@@ -14,6 +14,7 @@ import {
   Waves,
   X,
 } from "lucide-react";
+import { guideFooterLinks, homeGuideCards } from "./data/guides.js";
 
 const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
 const PRIVACY_URL = "/legal/privacy.html";
@@ -136,24 +137,6 @@ const testimonials = [
       "Non mi serve il workout perfetto. Mi serve un sistema che entri davvero nella mia vita. Hypemove mi dà questa sensazione in modo molto più naturale.",
     name: "Elena, 41",
     role: "Vuole stare meglio senza rigidità",
-  },
-];
-
-const guideCards = [
-  {
-    title: "I workout brevi funzionano davvero?",
-    desc: "Quando 5 o 10 minuti possono aiutarti a muoverti con più costanza.",
-    href: "/mini-workout-efficaci",
-  },
-  {
-    title: "Come allenarti a casa se hai poco tempo",
-    desc: "Un approccio semplice per iniziare anche nelle giornate piene.",
-    href: "/workout-10-minuti-casa",
-  },
-  {
-    title: "App fitness per chi parte da zero",
-    desc: "Una guida per principianti che vogliono partire senza sentirsi già indietro.",
-    href: "/app-fitness-principianti",
   },
 ];
 
@@ -882,20 +865,20 @@ function GuidePreview() {
         </div>
 
         <div className="mt-10 grid gap-5 md:grid-cols-3">
-          {guideCards.map((item) => (
+          {homeGuideCards.map((item) => (
             <a
               key={item.href}
               href={item.href}
-              className="group flex min-h-[230px] flex-col justify-between rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_60px_rgba(0,0,0,0.05)] transition hover:-translate-y-1 hover:border-black/20"
+              className="group flex min-h-[190px] flex-col justify-between rounded-[22px] border border-black/10 bg-white p-5 shadow-[0_18px_52px_rgba(0,0,0,0.045)] transition hover:-translate-y-1 hover:border-black/20"
             >
               <span>
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white">
-                  <Sparkles className="h-5 w-5" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-black text-white">
+                  <Sparkles className="h-4 w-4" />
                 </div>
-                <h3 className="mt-5 text-2xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
-                <p className="mt-4 text-base leading-7 text-black/62">{item.desc}</p>
+                <h3 className="mt-4 text-xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-black/60">{item.description}</p>
               </span>
-              <span className="mt-6 inline-flex items-center text-sm font-bold text-black">
+              <span className="mt-5 inline-flex items-center text-sm font-bold text-black">
                 Leggi la guida
                 <ArrowRight className="ml-2 h-4 w-4 transition group-hover:translate-x-1" />
               </span>
@@ -940,11 +923,11 @@ function Footer() {
         <div>
           <h3 className="text-sm font-black uppercase tracking-[0.22em] text-black">Guide utili</h3>
           <div className="mt-4 space-y-3 text-sm text-black/55">
-            <a href="/app-fitness-principianti" className="block transition hover:text-black">App fitness per principianti</a>
-            <a href="/mini-workout-efficaci" className="block transition hover:text-black">Workout brevi efficaci</a>
-            <a href="/allenamento-a-casa" className="block transition hover:text-black">Allenamento a casa</a>
-            <a href="/allenamento-a-casa" className="block transition hover:text-black">Dimagrire a casa</a>
-            <a href="/allenamento-a-casa" className="block transition hover:text-black">Tonificazione a casa</a>
+            {guideFooterLinks.map((guide) => (
+              <a key={guide.href} href={guide.href} className="block transition hover:text-black">
+                {guide.title}
+              </a>
+            ))}
           </div>
         </div>
 
