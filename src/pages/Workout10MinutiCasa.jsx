@@ -1,8 +1,7 @@
 import React from "react";
 import { ArrowRight, CheckCircle2, Download, Home, Timer, XCircle } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
-
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
+import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const idealFor = [
   "Hai poco tempo durante la giornata",
@@ -58,10 +57,14 @@ function LogoMark() {
   );
 }
 
-function CtaButton({ children = "Prova Hypemove gratis" }) {
+function CtaButton({ children = "Prova Hypemove gratis", location }) {
   return (
     <a
       href={PLAY_STORE_URL}
+      onClick={(event) => handleAndroidDownloadClick(event, {
+        buttonText: children,
+        location,
+      })}
       className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
     >
       <Download className="mr-2 h-4 w-4" />
@@ -129,6 +132,10 @@ export default function Workout10MinutiCasa() {
           </a>
           <a
             href={PLAY_STORE_URL}
+            onClick={(event) => handleAndroidDownloadClick(event, {
+              buttonText: "Prova gratis",
+              location: "guide_workout_10_minuti_navbar",
+            })}
             className="hidden rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex"
           >
             Prova gratis
@@ -152,7 +159,7 @@ export default function Workout10MinutiCasa() {
                 Non servono sessioni infinite per iniziare a stare meglio.
               </p>
               <div className="mt-8">
-                <CtaButton />
+                <CtaButton location="guide_workout_10_minuti_hero" />
               </div>
               <InternalLinks />
             </div>
@@ -310,7 +317,7 @@ export default function Workout10MinutiCasa() {
               Dieci minuti possono essere abbastanza per rimetterti in moto oggi.
             </p>
             <div className="mt-8">
-              <CtaButton>Scarica Hypemove gratis</CtaButton>
+              <CtaButton location="guide_workout_10_minuti_final">Scarica Hypemove gratis</CtaButton>
             </div>
           </div>
         </section>

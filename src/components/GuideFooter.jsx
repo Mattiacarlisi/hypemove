@@ -1,8 +1,8 @@
 import React from "react";
 import { Download } from "lucide-react";
 import { guideFooterLinks } from "../data/guides.js";
+import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
 const PRIVACY_URL = "/legal/privacy.html";
 const MARKETING_URL = "/legal/marketing.html";
 
@@ -88,6 +88,10 @@ export default function GuideFooter() {
           <div className="mt-4 space-y-4 text-sm text-black/55">
             <a
               href={PLAY_STORE_URL}
+              onClick={(event) => handleAndroidDownloadClick(event, {
+                buttonText: "Scarica gratis",
+                location: "guide_footer",
+              })}
               className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 font-semibold text-white transition hover:-translate-y-0.5"
             >
               <Download className="h-4 w-4" />

@@ -1,8 +1,7 @@
 import React from "react";
 import { ArrowRight, CheckCircle2, Download, MinusCircle, Timer } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
-
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
+import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const effectiveWhen = [
   "Quando parti da zero",
@@ -48,10 +47,14 @@ function LogoMark() {
   );
 }
 
-function CtaButton({ children = "Prova Hypemove gratis" }) {
+function CtaButton({ children = "Prova Hypemove gratis", location }) {
   return (
     <a
       href={PLAY_STORE_URL}
+      onClick={(event) => handleAndroidDownloadClick(event, {
+        buttonText: children,
+        location,
+      })}
       className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
     >
       <Download className="mr-2 h-4 w-4" />
@@ -123,6 +126,10 @@ export default function MiniWorkoutEfficaci() {
           </a>
           <a
             href={PLAY_STORE_URL}
+            onClick={(event) => handleAndroidDownloadClick(event, {
+              buttonText: "Prova gratis",
+              location: "guide_mini_workout_navbar",
+            })}
             className="hidden rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex"
           >
             Prova gratis
@@ -155,7 +162,7 @@ export default function MiniWorkoutEfficaci() {
                 Brevi abbastanza da iniziare. Concreti abbastanza da farti muovere. Utili se diventano ripetibili.
               </p>
               <div className="mt-6">
-                <CtaButton />
+                <CtaButton location="guide_mini_workout_hero_card" />
               </div>
             </div>
           </div>
@@ -291,7 +298,7 @@ export default function MiniWorkoutEfficaci() {
               Chiediti anche se è qualcosa che riuscirai davvero a rifare settimana prossima.
             </p>
             <div className="mt-8">
-              <CtaButton />
+              <CtaButton location="guide_mini_workout_final" />
             </div>
           </div>
         </section>

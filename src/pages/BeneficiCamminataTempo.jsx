@@ -1,8 +1,7 @@
 import React from "react";
 import { Activity, ArrowRight, CheckCircle2, Clock3, Download, Footprints, ListChecks, ShieldCheck } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
-
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
+import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const timeline = [
   {
@@ -106,10 +105,17 @@ function LogoMark() {
   );
 }
 
-function CtaButton({ children = "Scopri Hypemove", href = PLAY_STORE_URL }) {
+function CtaButton({ children = "Scopri Hypemove", href = PLAY_STORE_URL, location }) {
+  const isAndroidDownload = href === PLAY_STORE_URL;
+
   return (
     <a
       href={href}
+      onClick={isAndroidDownload ? (event) => handleAndroidDownloadClick(event, {
+        buttonText: children,
+        href,
+        location,
+      }) : undefined}
       className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
     >
       <Download className="mr-2 h-4 w-4" />
@@ -316,7 +322,7 @@ export default function BeneficiCamminataTempo() {
                   Hypemove ti aiuta a partire con workout brevi e guidati, pensati per entrare davvero nella tua giornata.
                 </p>
                 <div className="mt-8">
-                  <CtaButton>Prova Hypemove gratis</CtaButton>
+                  <CtaButton location="guide_benefici_camminata_section">Prova Hypemove gratis</CtaButton>
                 </div>
               </div>
 

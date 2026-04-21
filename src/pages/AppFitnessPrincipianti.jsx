@@ -1,8 +1,7 @@
 import React from "react";
 import { ArrowRight, CheckCircle2, Download, XCircle } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
-
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
+import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const beginnerBenefits = [
   {
@@ -62,10 +61,14 @@ function LogoMark() {
   );
 }
 
-function CtaButton({ children = "Provala gratis" }) {
+function CtaButton({ children = "Provala gratis", location }) {
   return (
     <a
       href={PLAY_STORE_URL}
+      onClick={(event) => handleAndroidDownloadClick(event, {
+        buttonText: children,
+        location,
+      })}
       className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
     >
       <Download className="mr-2 h-4 w-4" />
@@ -105,6 +108,10 @@ export default function AppFitnessPrincipianti() {
           </a>
           <a
             href={PLAY_STORE_URL}
+            onClick={(event) => handleAndroidDownloadClick(event, {
+              buttonText: "Provala gratis",
+              location: "guide_app_fitness_principianti_navbar",
+            })}
             className="hidden rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex"
           >
             Provala gratis
@@ -130,7 +137,7 @@ export default function AppFitnessPrincipianti() {
                 Hypemove nasce per l'opposto: chi vuole stare meglio, ma fa fatica a iniziare e continuare.
               </p>
               <div className="mt-8">
-                <CtaButton />
+                <CtaButton location="guide_app_fitness_principianti_hero" />
               </div>
             </div>
 
@@ -266,7 +273,7 @@ export default function AppFitnessPrincipianti() {
               Forse non ti serviva più motivazione. Ti serviva un sistema più adatto a come vivi davvero.
             </p>
             <div className="mt-8">
-              <CtaButton>Scarica gratis</CtaButton>
+              <CtaButton location="guide_app_fitness_principianti_final">Scarica gratis</CtaButton>
             </div>
           </div>
         </section>

@@ -15,8 +15,8 @@ import {
   X,
 } from "lucide-react";
 import { guideFooterLinks, homeGuideCards } from "./data/guides.js";
+import { DEFAULT_ANDROID_BUTTON_TEXT, PLAY_STORE_URL, handleAndroidDownloadClick } from "./lib/analytics.js";
 
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
 const PRIVACY_URL = "/legal/privacy.html";
 const MARKETING_URL = "/legal/marketing.html";
 const IOS_WAITLIST_URL = "#download";
@@ -141,11 +141,15 @@ const testimonials = [
 ];
 
 // Pulsanti CTA riutilizzati in più punti della pagina.
-function CTAButtons({ center = false }) {
+function CTAButtons({ center = false, location }) {
   return (
     <div className={`flex flex-col gap-3 sm:flex-row ${center ? "justify-center" : ""}`}>
       <a
         href={PLAY_STORE_URL}
+        onClick={(event) => handleAndroidDownloadClick(event, {
+          buttonText: DEFAULT_ANDROID_BUTTON_TEXT,
+          location,
+        })}
         className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
       >
         <Download className="mr-2 h-4 w-4" />
@@ -364,7 +368,7 @@ function DynamicHero() {
             transition={{ duration: 0.55, delay: 0.24 }}
             className="mt-4"
           >
-            <CTAButtons />
+            <CTAButtons location="hero" />
           </motion.div>
         </motion.div>
 
@@ -741,7 +745,7 @@ function FinalCta() {
               Che tu voglia dimagrire, tonificare o sentirti meno rigido, Hypemove ti aiuta a partire da una direzione più giusta per te. Senza pressione. Senza caos. Gratis.
             </p>
             <div className="mt-6">
-              <CTAButtons />
+              <CTAButtons location="final_cta" />
             </div>
           </div>
 
@@ -944,6 +948,10 @@ function Footer() {
           <div className="mt-4 space-y-4 text-sm text-black/55">
             <a
               href={PLAY_STORE_URL}
+              onClick={(event) => handleAndroidDownloadClick(event, {
+                buttonText: "Scarica gratis",
+                location: "footer",
+              })}
               className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 font-semibold text-white transition hover:-translate-y-0.5"
             >
               <Download className="h-4 w-4" />
@@ -994,7 +1002,14 @@ export default function HypemoveLandingPage() {
           </nav>
 
           <div className="hidden lg:flex">
-            <a href={PLAY_STORE_URL} className="inline-flex items-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5">
+            <a
+              href={PLAY_STORE_URL}
+              onClick={(event) => handleAndroidDownloadClick(event, {
+                buttonText: "Scarica gratis",
+                location: "navbar",
+              })}
+              className="inline-flex items-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+            >
               Scarica gratis
             </a>
           </div>
@@ -1024,7 +1039,14 @@ export default function HypemoveLandingPage() {
                 </a>
               ))}
             </nav>
-            <a href={PLAY_STORE_URL} className="mt-5 inline-flex w-full items-center justify-center rounded-full bg-black px-5 py-3 text-base font-semibold text-white">
+            <a
+              href={PLAY_STORE_URL}
+              onClick={(event) => handleAndroidDownloadClick(event, {
+                buttonText: DEFAULT_ANDROID_BUTTON_TEXT,
+                location: "mobile_menu",
+              })}
+              className="mt-5 inline-flex w-full items-center justify-center rounded-full bg-black px-5 py-3 text-base font-semibold text-white"
+            >
               Scarica gratis per Android
             </a>
           </div>

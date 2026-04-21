@@ -1,8 +1,7 @@
 import React from "react";
 import { ArrowRight, CheckCircle2, Download, Home, ListChecks } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
-
-const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
+import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const homeReasons = [
   "Zero spostamenti",
@@ -55,10 +54,17 @@ function LogoMark() {
   );
 }
 
-function CtaButton({ children = "Scopri Hypemove", href = PLAY_STORE_URL }) {
+function CtaButton({ children = "Scopri Hypemove", href = PLAY_STORE_URL, location }) {
+  const isAndroidDownload = href === PLAY_STORE_URL;
+
   return (
     <a
       href={href}
+      onClick={isAndroidDownload ? (event) => handleAndroidDownloadClick(event, {
+        buttonText: children,
+        href,
+        location,
+      }) : undefined}
       className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
     >
       <Download className="mr-2 h-4 w-4" />
@@ -154,7 +160,7 @@ export default function AllenamentoACasa() {
                 Non serve trasformare il salotto in una palestra. Serve un sistema che riesci davvero a seguire.
               </p>
               <div className="mt-8">
-                <CtaButton />
+                <CtaButton location="guide_allenamento_a_casa_hero" />
               </div>
               <InternalLinks />
             </div>
