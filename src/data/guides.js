@@ -36,12 +36,12 @@ export const guides = [
     featuredHome: false,
   },
   {
-    title: "Benefici della camminata",
+    title: "Benefici della camminata dopo 10, 20, 30 e 60 minuti",
     href: "/benefici-camminata-tempo",
     category: "Benessere",
-    readTime: "6 min",
-    description: "Cosa aspettarti da 10, 20, 30 o 60 minuti di camminata.",
-    tags: ["camminata", "walking", "benessere", "attività fisica"],
+    readTime: "7 min",
+    description: "Cosa succede al corpo mentre cammini e come rendere la passeggiata più completa con mini workout guidati.",
+    tags: ["benefici camminata", "camminare 30 minuti", "camminata veloce", "mini workout"],
     featuredHome: false,
   },
   {

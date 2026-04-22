@@ -744,33 +744,39 @@ function SocialProof() {
 function FinalCta() {
   return (
     <section id="download" className="px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
-      <div className="mx-auto max-w-7xl overflow-hidden rounded-[32px] border border-black/10 bg-white p-6 shadow-[0_35px_100px_rgba(0,0,0,0.08)] sm:rounded-[42px] sm:p-10 lg:p-14">
-        <div className="grid items-center gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10">
+      <div className="mx-auto max-w-7xl overflow-hidden rounded-[32px] border border-black/10 bg-[#FCFBF8] p-6 shadow-[0_35px_100px_rgba(0,0,0,0.08)] sm:rounded-[42px] sm:p-10 lg:p-14">
+        <div className="grid items-center gap-8 lg:grid-cols-[1.02fr_0.98fr] lg:gap-12">
           <div>
             <Kicker>Scarica gratis</Kicker>
             <h2 className="mt-6 text-3xl font-black leading-[0.95] tracking-[-0.05em] text-black sm:text-5xl xl:text-6xl">
-              Inizia con un piano più adatto a te.
-              <span className="mt-2 block text-[#FB8B04]">E vedi se questa volta cambia davvero qualcosa.</span>
+              Smetti di ricominciare da capo.
+              <span className="mt-2 block text-[#FB8B04]">Inizia con un percorso che ti aiuta a continuare.</span>
             </h2>
             <p className="mt-6 max-w-2xl text-base leading-7 text-black/65 sm:text-lg sm:leading-8">
-              Che tu voglia dimagrire, tonificare o sentirti meno rigido, Hypemove ti aiuta a partire da una direzione più giusta per te. Senza pressione. Senza caos. Gratis.
+              Workout brevi, guidati e già pronti per aiutarti a rimetterti in forma con più costanza, anche nelle settimane più piene.
             </p>
             <div className="mt-6">
               <CTAButtons location="final_cta" />
             </div>
           </div>
 
-          <div className="grid gap-4">
-            <motion.div whileHover={{ y: -6 }} className="rounded-[24px] bg-black p-5 text-white sm:rounded-[30px] sm:p-6">
-              <div className="text-xs font-bold uppercase tracking-[0.24em] text-white/45 sm:text-sm">Per chi vuole iniziare davvero</div>
-              <div className="mt-4 text-2xl font-black leading-tight tracking-[-0.04em] sm:text-3xl">
-                Un'app pensata per chi ha poco tempo, poca voglia e non vuole mollare dopo due giorni.
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+            <motion.div whileHover={{ y: -6 }} className="relative overflow-hidden rounded-[24px] bg-black p-5 text-white sm:rounded-[30px] sm:p-6">
+              <div className="absolute right-[-44px] top-[-44px] h-32 w-32 rounded-full bg-[#FB8B04]/25 blur-2xl" />
+              <div className="relative">
+                <div className="text-xs font-bold uppercase tracking-[0.24em] text-white/45 sm:text-sm">Per chi è fatta</div>
+                <div className="mt-4 text-2xl font-black leading-tight tracking-[-0.04em] sm:text-3xl">
+                  Per chi vuole un modo più semplice e realistico per allenarsi davvero.
+                </div>
               </div>
             </motion.div>
-            <motion.div whileHover={{ y: -6 }} className="rounded-[24px] border border-black/10 bg-[#FB8B04] p-5 text-black sm:rounded-[30px] sm:p-6">
-              <div className="text-xs font-bold uppercase tracking-[0.24em] text-black/45 sm:text-sm">Perché piace</div>
-              <div className="mt-4 text-xl font-black leading-tight tracking-[-0.03em] sm:text-2xl">
-                Perché ti aiuta a muoverti davvero, senza complicarti la vita.
+            <motion.div whileHover={{ y: -6 }} className="relative overflow-hidden rounded-[24px] border border-black/10 bg-[#FB8B04] p-5 text-black shadow-[0_24px_70px_rgba(251,139,4,0.22)] sm:rounded-[30px] sm:p-6">
+              <div className="absolute bottom-[-52px] right-[-36px] h-36 w-36 rounded-full bg-white/25 blur-2xl" />
+              <div className="relative">
+                <div className="text-xs font-bold uppercase tracking-[0.24em] text-black/45 sm:text-sm">Perché funziona meglio</div>
+                <div className="mt-4 text-2xl font-black leading-tight tracking-[-0.04em] sm:text-3xl">
+                  Meno decisioni, meno attrito, più continuità.
+                </div>
               </div>
             </motion.div>
           </div>
@@ -782,6 +788,7 @@ function FinalCta() {
 
 // Domande frequenti.
 function Faq() {
+  const [showAll, setShowAll] = useState(false);
   const faqs = [
     {
       q: "Hypemove è gratis?",
@@ -804,10 +811,23 @@ function Faq() {
       a: "Bastano 5 minuti al giorno per iniziare. I workout sono brevi, guidati e pensati per entrare in qualsiasi giornata — anche in quella in cui pensavi di non avere tempo. Perché la costanza vera non viene da sessioni lunghissime, viene dalla regolarità.",
     },
     {
-      q: "Funziona anche se ho pochissimo tempo?",
-      a: "Sì. Gli allenamenti durano solo 5–15 minuti. Sono già pronti, così inizi subito e riesci ad allenarti anche nelle giornate più piene.",
+      q: "I workout brevi servono davvero?",
+      a: "Sì, se riesci a farli con costanza. Hypemove non ti promette risultati assurdi in pochi giorni, ma un modo più realistico per muoverti con regolarità e avvicinarti davvero al tuo obiettivo. Per molte persone, un workout breve che riesci a seguire vale molto di più di un programma perfetto che molli dopo tre giorni.",
+    },
+    {
+      q: "E se ho già mollato tante volte?",
+      a: "È proprio da lì che nasce Hypemove. Non per chi è già super disciplinato, ma per chi ogni volta riparte e poi si blocca. Per questo trovi workout brevi, un percorso guidato e meno decisioni da prendere: così iniziare è più semplice e continuare diventa molto più naturale.",
+    },
+    {
+      q: "Posso allenarmi davvero a casa senza organizzarmi troppo?",
+      a: "Sì. Hypemove è pensata per aiutarti a partire senza trasformare l'allenamento in un'altra cosa da organizzare. Ti basta aprire l'app, seguire il workout e iniziare: niente palestra, niente attrezzatura obbligatoria, niente preparazioni infinite.",
+    },
+    {
+      q: "È troppo intenso per chi parte da zero o ha poca energia?",
+      a: "No. Hypemove parte dal tuo livello e dal tuo obiettivo, così il percorso risulta più adatto a te fin dall'inizio. Non ogni giornata richiede un allenamento pesante: ci sono anche sessioni più leggere, pensate per aiutarti a muoverti un po' senza sentirti distrutto.",
     },
   ];
+  const visibleFaqs = showAll ? faqs : faqs.slice(0, 5);
 
   return (
     <section id="faq" className="px-4 pb-24 pt-6 sm:px-6 lg:px-8">
@@ -819,7 +839,7 @@ function Faq() {
         />
 
         <div className="mt-10 space-y-4 sm:mt-12">
-          {faqs.map((faq, index) => (
+          {visibleFaqs.map((faq, index) => (
             <motion.details
               key={faq.q}
               initial={{ opacity: 0, y: 20 }}
@@ -836,6 +856,20 @@ function Faq() {
             </motion.details>
           ))}
         </div>
+
+        {faqs.length > 5 ? (
+          <div className="mt-8 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setShowAll((current) => !current)}
+              className="inline-flex min-h-[52px] items-center justify-center rounded-full border border-black/10 bg-white px-6 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:border-black/20 hover:bg-black hover:text-white"
+              aria-expanded={showAll}
+            >
+              {showAll ? "Mostra meno FAQ" : `Mostra tutte le FAQ (${faqs.length})`}
+              <ArrowRight className={`ml-2 h-4 w-4 transition ${showAll ? "-rotate-90" : "rotate-90"}`} />
+            </button>
+          </div>
+        ) : null}
 
         <script
           type="application/ld+json"

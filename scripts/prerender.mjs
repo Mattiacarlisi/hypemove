@@ -34,9 +34,9 @@ const routes = [
   {
     path: "/benefici-camminata-tempo",
     outputPath: path.join(projectRoot, "dist", "benefici-camminata-tempo", "index.html"),
-    title: "Benefici della camminata: cosa cambia dopo 10, 20, 30 e 60 minuti | Hypemove",
+    title: "Benefici della camminata dopo 10, 20, 30 e 60 minuti | Hypemove",
     description:
-      "Camminare serve davvero? Scopri quali benefici ha una camminata di 10, 20, 30 o 60 minuti e cosa ha più senso aspettarsi nella vita reale.",
+      "Scopri cosa succede al corpo dopo 10, 20, 30 e 60 minuti di camminata e come rendere la passeggiata più completa con mini workout guidati.",
     canonical: "https://www.hypemove.app/benefici-camminata-tempo",
   },
   {
