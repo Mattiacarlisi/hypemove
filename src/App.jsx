@@ -15,7 +15,13 @@ import {
   X,
 } from "lucide-react";
 import { guideFooterLinks, homeGuideCards } from "./data/guides.js";
-import { DEFAULT_ANDROID_BUTTON_TEXT, PLAY_STORE_URL, handleAndroidDownloadClick } from "./lib/analytics.js";
+import {
+  DEFAULT_ANDROID_BUTTON_TEXT,
+  DEFAULT_IPHONE_BUTTON_TEXT,
+  PLAY_STORE_URL,
+  handleAndroidDownloadClick,
+  handleIphoneDownloadClick,
+} from "./lib/analytics.js";
 
 const PRIVACY_URL = "/legal/privacy.html";
 const MARKETING_URL = "/legal/marketing.html";
@@ -158,10 +164,15 @@ function CTAButtons({ center = false, location }) {
       </a>
       <a
         href={IOS_WAITLIST_URL}
+        onClick={(event) => handleIphoneDownloadClick(event, {
+          buttonText: DEFAULT_IPHONE_BUTTON_TEXT,
+          href: IOS_WAITLIST_URL,
+          location,
+        })}
         className="group inline-flex min-h-[56px] items-center justify-center rounded-full border border-black/10 bg-white px-6 py-4 text-base font-semibold text-black transition hover:-translate-y-0.5 hover:border-black/20 sm:px-7"
       >
         <Apple className="mr-2 h-4 w-4" />
-        iPhone in arrivo
+        {DEFAULT_IPHONE_BUTTON_TEXT}
       </a>
     </div>
   );
