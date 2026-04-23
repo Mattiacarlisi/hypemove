@@ -37,7 +37,7 @@ const beginnerCards = [
 
 const appFeatures = [
   {
-    title: "Onboarding rapido",
+    title: "Parti dal tuo livello",
     text: "Quando entri nell’app, Hypemove raccoglie le informazioni essenziali per costruire il tuo punto di partenza, come livello fitness e obiettivo.",
     icon: Sparkles,
   },
@@ -363,7 +363,7 @@ export default function AppFitnessPrincipianti() {
             <div className="grid gap-8 lg:grid-cols-[minmax(0,0.95fr)_minmax(280px,0.58fr)] lg:items-center">
               <TextBlock eyebrow="Scarica gratis" title="Inizia con un percorso più semplice da seguire">
                 <p>
-                  Se stai cercando un’app fitness pensata davvero per chi parte da zero, Hypemove nasce proprio per aiutarti a iniziare con più chiarezza, meno attrito e più continuità.
+                  Se stai cercando un’app fitness pensata davvero per chi parte da zero, Hypemove ti aiuta a iniziare con più chiarezza e a essere più costante nel tempo.
                 </p>
               </TextBlock>
 
