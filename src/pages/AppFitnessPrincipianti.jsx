@@ -256,7 +256,7 @@ export default function AppFitnessPrincipianti() {
                     Spesso è difficile soprattutto nella vita reale: poco tempo, poca energia mentale, troppe decisioni, poca costanza.
                   </p>
                   <p>
-                    Hypemove nasce proprio per questo: aiutarti a iniziare in modo più semplice e continuare con più continuità.
+                    Hypemove nasce proprio per questo: aiutarti a iniziare in modo più semplice e a essere più costante nel tempo.
                   </p>
                 </div>
               </div>
