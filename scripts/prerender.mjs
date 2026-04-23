@@ -21,9 +21,9 @@ const routes = [
   {
     path: "/app-fitness-principianti",
     outputPath: path.join(projectRoot, "dist", "app-fitness-principianti", "index.html"),
-    title: "App fitness per principianti | Hypemove",
+    title: "App fitness per principianti: una guida semplice per chi parte da zero | Hypemove",
     description:
-      "Cerchi un'app fitness per principianti? Hypemove ti aiuta a iniziare con workout semplici, guidati e sostenibili, pensati per chi parte da zero.",
+      "Scopri perché Hypemove è un’app fitness adatta ai principianti: percorso guidato, workout brevi, progressione graduale e meno attrito per iniziare davvero.",
     canonical: "https://www.hypemove.app/app-fitness-principianti",
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/logo1.png",

@@ -1,55 +1,60 @@
 import React from "react";
-import { ArrowRight, CheckCircle2, Download, XCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, Compass, Download, Map, Sparkles, TimerReset } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
-const beginnerBenefits = [
+const ARTICLE_URL = "https://www.hypemove.app/app-fitness-principianti";
+const ARTICLE_SEO_TITLE = "App fitness per principianti: una guida semplice per chi parte da zero | Hypemove";
+const ARTICLE_DESCRIPTION = "Scopri perché Hypemove è un’app fitness adatta ai principianti: percorso guidato, workout brevi, progressione graduale e meno attrito per iniziare davvero.";
+const ARTICLE_IMAGE_PATH = "/images/homeworkout.png";
+const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/homeworkout.png";
+const ARTICLE_IMAGE_ALT = "Donna che si allena a casa con workout per principianti";
+const ARTICLE_PUBLISHED_DATE = "2026-04-19";
+const ARTICLE_MODIFIED_DATE = "2026-04-23";
+
+const beginnerCards = [
   {
-    title: "Workout semplici da iniziare",
-    text: "Sessioni brevi e guidate, così non perdi energie a capire cosa fare. Apri l'app e inizi.",
+    title: "Sai cosa fare",
+    text: "Non ti lascia davanti a una libreria dispersiva di workout. Hypemove ti dà una direzione chiara attraverso un percorso guidato, così inizi più facilmente e perdi meno energie a decidere.",
+    icon: Compass,
   },
   {
-    title: "Percorso più adatto al tuo obiettivo",
-    text: "Vuoi dimagrire, tonificarti o muoverti meglio? Parti da una direzione chiara invece di fare esercizi a caso.",
+    title: "Workout brevi, ma strutturati",
+    text: "Hypemove lavora soprattutto con workout da 5, 7 e 10 minuti. Sono più facili da iniziare, ma non casuali: fanno parte di una logica di percorso pensata per aiutarti a costruire continuità.",
+    icon: TimerReset,
   },
   {
-    title: "Un sistema che ti aiuta a continuare",
-    text: "Progressi visibili, coinvolgimento e piccoli reward rendono più facile tornare anche domani.",
+    title: "Progressione graduale",
+    text: "Partire da zero non significa restare fermo sempre allo stesso punto. Il percorso è progressivo: ti accompagna nel tempo senza farti sentire travolto troppo presto.",
+    icon: Map,
+  },
+  {
+    title: "Ti aiuta a essere costante",
+    text: "Hypemove non punta sulla perfezione. Punta ad aiutarti a tornare, allenarti con più regolarità e costruire una routine che abbia senso nella vita reale.",
+    icon: CheckCircle2,
   },
 ];
 
-const idealFor = [
-  "Non ti alleni da mesi o anni",
-  "Ti senti fuori forma e vuoi ripartire senza stress",
-  "Hai poco tempo durante la giornata",
-  "Hai già mollato tante volte",
-  "Vuoi allenarti a casa senza palestra",
-  "Cerchi qualcosa di semplice e sostenibile",
-];
-
-const notIdealFor = [
-  "Vuoi programmi da bodybuilder",
-  "Cerchi allenamenti estremi ogni giorno",
-  "Sei già molto avanzato e super costante",
-  "Vuoi risultati magici in una settimana",
-];
-
-const faqs = [
+const appFeatures = [
   {
-    q: "Serve essere già in forma?",
-    a: "No. Hypemove nasce proprio per chi parte da zero.",
+    title: "Onboarding rapido",
+    text: "Quando entri nell’app, Hypemove raccoglie le informazioni essenziali per costruire il tuo punto di partenza, come livello fitness e obiettivo.",
+    icon: Sparkles,
   },
   {
-    q: "Serve attrezzatura?",
-    a: "No, puoi allenarti a casa senza palestra.",
+    title: "Roadmap guidata",
+    text: "Dopo l’onboarding ricevi un percorso lineare, guidato e progressivo. Non devi saltare tra contenuti casuali: hai una direzione chiara da seguire.",
+    icon: Map,
   },
   {
-    q: "Quanto durano gli allenamenti?",
-    a: "Da 5, 10, 15 minuti o più, in base al percorso.",
+    title: "Workout facili da avviare",
+    text: "La logica del prodotto è aiutarti a partire in fretta, senza troppe decisioni inutili. Il workout deve restare semplice da iniziare anche nelle giornate storte.",
+    icon: TimerReset,
   },
   {
-    q: "È gratis?",
-    a: "Sì, puoi iniziare gratis.",
+    title: "Progressi visibili",
+    text: "Dopo il workout non finisce tutto lì. Hypemove rende più visibile il tuo avanzamento con reward, progressione e sistemi che supportano il ritorno nel tempo.",
+    icon: CheckCircle2,
   },
 ];
 
@@ -61,7 +66,33 @@ function LogoMark() {
   );
 }
 
-function CtaButton({ children = "Provala gratis", location }) {
+function Kicker({ children, dark = false }) {
+  return (
+    <div
+      className={`inline-flex rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${
+        dark ? "border-white/10 bg-white/10 text-white/65" : "border-black/10 bg-white text-black/60"
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
+function TextBlock({ eyebrow, title, children, dark = false }) {
+  return (
+    <div className="max-w-3xl">
+      {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
+      <h2 className={`mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+        {title}
+      </h2>
+      <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/72" : "text-black/65"}`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CtaButton({ children = "Scarica Hypemove", location }) {
   return (
     <a
       href={PLAY_STORE_URL}
@@ -78,19 +109,111 @@ function CtaButton({ children = "Provala gratis", location }) {
   );
 }
 
-function SectionHeader({ eyebrow, title, children }) {
+function SeoJsonLd() {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebPage",
+        "@id": `${ARTICLE_URL}#webpage`,
+        url: ARTICLE_URL,
+        name: ARTICLE_SEO_TITLE,
+        description: ARTICLE_DESCRIPTION,
+        inLanguage: "it-IT",
+        isPartOf: {
+          "@id": "https://www.hypemove.app/#website",
+        },
+        about: {
+          "@id": `${ARTICLE_URL}#article`,
+        },
+        primaryImageOfPage: {
+          "@type": "ImageObject",
+          url: ARTICLE_IMAGE_URL,
+        },
+        breadcrumb: {
+          "@id": `${ARTICLE_URL}#breadcrumb`,
+        },
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": `${ARTICLE_URL}#breadcrumb`,
+        itemListElement: [
+          {
+            "@type": "ListItem",
+            position: 1,
+            name: "Home",
+            item: "https://www.hypemove.app/",
+          },
+          {
+            "@type": "ListItem",
+            position: 2,
+            name: "Guide",
+            item: "https://www.hypemove.app/guide",
+          },
+          {
+            "@type": "ListItem",
+            position: 3,
+            name: "App fitness per principianti",
+            item: ARTICLE_URL,
+          },
+        ],
+      },
+      {
+        "@type": "Article",
+        "@id": `${ARTICLE_URL}#article`,
+        headline: ARTICLE_SEO_TITLE,
+        name: ARTICLE_SEO_TITLE,
+        description: ARTICLE_DESCRIPTION,
+        image: [
+          {
+            "@type": "ImageObject",
+            url: ARTICLE_IMAGE_URL,
+            width: 750,
+            height: 1334,
+          },
+        ],
+        datePublished: ARTICLE_PUBLISHED_DATE,
+        dateModified: ARTICLE_MODIFIED_DATE,
+        author: {
+          "@type": "Organization",
+          "@id": "https://www.hypemove.app/#organization",
+          name: "Hypemove",
+          url: "https://www.hypemove.app/",
+        },
+        publisher: {
+          "@type": "Organization",
+          "@id": "https://www.hypemove.app/#organization",
+          name: "Hypemove",
+          logo: {
+            "@type": "ImageObject",
+            url: "https://www.hypemove.app/images/logo1.png",
+          },
+        },
+        mainEntityOfPage: {
+          "@type": "WebPage",
+          "@id": `${ARTICLE_URL}#webpage`,
+        },
+        articleSection: "Fitness e benessere",
+        keywords: [
+          "app fitness per principianti",
+          "app allenamento principianti",
+          "allenamento a casa per principianti",
+          "workout per principianti",
+          "app fitness per iniziare",
+          "hypemove",
+        ],
+        inLanguage: "it-IT",
+      },
+    ],
+  };
+
   return (
-    <div className="max-w-3xl">
-      {eyebrow ? (
-        <div className="inline-flex rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black/60">
-          {eyebrow}
-        </div>
-      ) : null}
-      <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
-        {title}
-      </h2>
-      {children ? <div className="mt-5 space-y-5 text-base leading-8 text-black/65 sm:text-lg">{children}</div> : null}
-    </div>
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(structuredData),
+      }}
+    />
   );
 }
 
@@ -107,177 +230,153 @@ export default function AppFitnessPrincipianti() {
             </div>
           </a>
           <a
-            href={PLAY_STORE_URL}
-            onClick={(event) => handleAndroidDownloadClick(event, {
-              buttonText: "Provala gratis",
-              location: "guide_app_fitness_principianti_navbar",
-            })}
-            className="hidden rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex"
+            href="/guide"
+            className="hidden rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black/70 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black sm:inline-flex"
           >
-            Provala gratis
+            Guide
           </a>
         </div>
       </header>
 
       <main>
-        <section className="relative overflow-hidden px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+        <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
           <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:48px_48px]" />
-          <div className="pointer-events-none absolute right-[-12%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
+          <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
 
-          <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)]">
-            <div>
-              <div className="inline-flex rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black/60">
-                Per chi parte da zero
+          <div className="relative mx-auto max-w-7xl">
+            <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
+              <div className="max-w-[42rem]">
+                <Kicker>Per chi parte da zero</Kicker>
+                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] tracking-[-0.06em] text-black sm:text-5xl lg:text-[4rem]">
+                  Un’app fitness pensata davvero per chi parte da zero
+                </h1>
+                <div className="mt-6 hidden max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:block lg:text-[1.12rem] lg:leading-9">
+                  <p>Iniziare ad allenarsi non è difficile solo a livello fisico.</p>
+                  <p>
+                    Spesso è difficile soprattutto nella vita reale: poco tempo, poca energia mentale, troppe decisioni, poca costanza.
+                  </p>
+                  <p>
+                    Hypemove nasce proprio per questo: aiutarti a iniziare in modo più semplice e continuare con più continuità.
+                  </p>
+                </div>
               </div>
-              <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] tracking-[-0.06em] text-black sm:text-6xl lg:text-7xl">
-                Un'app fitness pensata davvero per chi parte da zero
-              </h1>
-              <p className="mt-6 max-w-2xl text-base leading-8 text-black/65 sm:text-xl sm:leading-9">
-                Molte app sembrano fatte per persone già motivate, già allenate o già costanti.
-                Hypemove nasce per l'opposto: chi vuole stare meglio, ma fa fatica a iniziare e continuare.
-              </p>
-              <div className="mt-8">
-                <CtaButton location="guide_app_fitness_principianti_hero" />
-              </div>
+
+              <figure className="relative mx-auto w-full max-w-[40rem] self-center overflow-hidden rounded-[28px] border border-black/10 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.08)] lg:justify-self-end">
+                <img
+                  src={ARTICLE_IMAGE_PATH}
+                  alt={ARTICLE_IMAGE_ALT}
+                  width="1024"
+                  height="1536"
+                  loading="eager"
+                  fetchpriority="high"
+                  className="aspect-[4/3] h-full w-full object-cover object-top"
+                />
+              </figure>
             </div>
 
-            <div className="rounded-[30px] border border-black/10 bg-white p-6 shadow-[0_30px_90px_rgba(0,0,0,0.08)]">
-              <div className="text-sm font-bold uppercase tracking-[0.22em] text-[#FB8B04]">
-                Hypemove beginner system
-              </div>
-              <div className="mt-5 space-y-4">
-                {["Parti piano", "Segui un percorso", "Torna domani"].map((item, index) => (
-                  <div key={item} className="flex items-center gap-4 border-t border-black/10 pt-4 first:border-t-0 first:pt-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-black text-sm font-black text-white">
-                      {index + 1}
-                    </div>
-                    <div className="text-xl font-black tracking-[-0.04em]">{item}</div>
-                  </div>
-                ))}
-              </div>
+            <div className="mt-6 max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:hidden">
+              <p>Iniziare ad allenarsi non è difficile solo a livello fisico.</p>
+              <p>
+                Spesso è difficile soprattutto nella vita reale: poco tempo, poca energia mentale, troppe decisioni, poca costanza.
+              </p>
+              <p>
+                Hypemove nasce proprio per questo: aiutarti a iniziare in modo più semplice e continuare con più continuità.
+              </p>
             </div>
-          </div>
-        </section>
-
-        <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
-          <div className="mx-auto max-w-7xl">
-            <SectionHeader eyebrow="Il problema vero dei principianti" title="Il problema non è la volontà. È il punto di partenza.">
-              <p>
-                Quando inizi da zero spesso succede sempre la stessa cosa: scarichi un'app, parti motivato,
-                dopo pochi giorni salti una volta, poi due, poi smetti. Non perché sei pigro.
-                Perché il sistema non era adatto a te.
-              </p>
-              <p>
-                Routine troppo lunghe, livelli troppo avanzati, troppe decisioni da prendere,
-                pressione inutile. Tutte cose che fanno mollare chi sta iniziando.
-              </p>
-            </SectionHeader>
           </div>
         </section>
 
         <section className="px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
           <div className="mx-auto max-w-7xl">
-            <SectionHeader eyebrow="Come Hypemove aiuta" title="Come funziona Hypemove" />
-            <div className="mt-10 grid gap-5 md:grid-cols-3">
-              {beginnerBenefits.map((item) => (
-                <article key={item.title} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_60px_rgba(0,0,0,0.05)]">
-                  <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white">
-                    <CheckCircle2 className="h-5 w-5" />
-                  </div>
-                  <h3 className="text-2xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
-                  <p className="mt-4 text-base leading-8 text-black/65">{item.text}</p>
-                </article>
-              ))}
+            <TextBlock title="Perché Hypemove è adatta ai principianti" />
+
+            <div className="mt-10 grid gap-5 lg:grid-cols-2">
+              {beginnerCards.map((item) => {
+                const Icon = item.icon;
+
+                return (
+                  <article key={item.title} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="text-2xl font-black tracking-[-0.04em] text-black sm:text-3xl">
+                        {item.title}
+                      </div>
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-black text-white">
+                        <Icon className="h-5 w-5" />
+                      </div>
+                    </div>
+                    <p className="mt-5 text-base leading-8 text-black/65">{item.text}</p>
+                  </article>
+                );
+              })}
             </div>
           </div>
         </section>
 
         <section className="bg-black px-4 py-20 text-white sm:px-6 sm:py-24 lg:px-8">
-          <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-2">
-            <div>
-              <div className="inline-flex rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
-                Per chi è perfetta
-              </div>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl">Hypemove è ideale se...</h2>
-              <ul className="mt-8 grid gap-4">
-                {idealFor.map((item) => (
-                  <li key={item} className="flex gap-3 text-base leading-7 text-white/75">
-                    <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-[30px] border border-white/10 bg-white/[0.04] p-6 backdrop-blur-xl sm:p-8">
-              <div className="inline-flex rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/65">
-                Onestà prima di tutto
-              </div>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl">Forse non fa per te se...</h2>
-              <ul className="mt-8 grid gap-4">
-                {notIdealFor.map((item) => (
-                  <li key={item} className="flex gap-3 text-base leading-7 text-white/72">
-                    <XCircle className="mt-1 h-5 w-5 shrink-0 text-white/38" />
-                    <span>{item}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          <div className="mx-auto max-w-7xl">
+            <TextBlock eyebrow="Il punto importante" title="Breve non vuol dire casuale" dark>
+              <p>
+                Essere adatta a chi parte da zero non significa essere fatta “a caso”.
+              </p>
+              <p>
+                Hypemove non ti propone semplicemente workout brevi perché così sembrano più facili.
+              </p>
+              <p>
+                Li inserisce dentro una struttura guidata, con una roadmap lineare, una progressione chiara e un’esperienza costruita per ridurre l’attrito mentale.
+              </p>
+              <p>
+                In altre parole: non semplifica togliendo valore.
+                <br />
+                Semplifica per aiutarti a partire davvero.
+              </p>
+              <p>
+                È una differenza enorme, soprattutto per chi tende a mollare dopo pochi giorni o si sente subito perso quando deve costruirsi tutto da solo.
+              </p>
+            </TextBlock>
           </div>
         </section>
 
         <section className="px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
-          <div className="mx-auto max-w-4xl">
-            <div className="text-center">
-              <div className="inline-flex rounded-full border border-black/10 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-black/60">
-                FAQ
-              </div>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">Domande frequenti</h2>
-            </div>
+          <div className="mx-auto max-w-7xl">
+            <TextBlock title="Cosa trovi dentro Hypemove" />
 
-            <div className="mt-10 space-y-4">
-              {faqs.map((faq) => (
-                <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                  <h3 className="text-xl font-black tracking-[-0.03em] text-black">{faq.q}</h3>
-                  <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
-                </article>
-              ))}
-            </div>
+            <div className="mt-10 grid gap-5 md:grid-cols-2">
+              {appFeatures.map((item) => {
+                const Icon = item.icon;
 
-            <script
-              type="application/ld+json"
-              dangerouslySetInnerHTML={{
-                __html: JSON.stringify({
-                  "@context": "https://schema.org",
-                  "@type": "FAQPage",
-                  mainEntity: faqs.map((faq) => ({
-                    "@type": "Question",
-                    name: faq.q,
-                    acceptedAnswer: {
-                      "@type": "Answer",
-                      text: faq.a,
-                    },
-                  })),
-                }),
-              }}
-            />
+                return (
+                  <article key={item.title} className="rounded-[26px] border border-black/10 bg-[#FCFBF8] p-6">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <h3 className="mt-5 text-2xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
+                    <p className="mt-4 text-base leading-8 text-black/62">{item.text}</p>
+                  </article>
+                );
+              })}
+            </div>
           </div>
         </section>
 
         <section className="px-4 pb-24 sm:px-6 lg:px-8">
-          <div className="mx-auto max-w-7xl rounded-[32px] bg-[#FB8B04] p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
-            <h2 className="max-w-4xl text-3xl font-black leading-[0.98] tracking-[-0.05em] sm:text-5xl">
-              Se hai sempre pensato “non riesco a essere costante”, parti da qui.
-            </h2>
-            <p className="mt-5 max-w-2xl text-base leading-8 text-black/70 sm:text-lg">
-              Forse non ti serviva più motivazione. Ti serviva un sistema più adatto a come vivi davvero.
-            </p>
-            <div className="mt-8">
-              <CtaButton location="guide_app_fitness_principianti_final">Scarica gratis</CtaButton>
+          <div className="mx-auto max-w-7xl overflow-hidden rounded-[32px] border border-black/10 bg-white p-6 shadow-[0_30px_90px_rgba(0,0,0,0.07)] sm:p-10 lg:p-12">
+            <div className="grid gap-8 lg:grid-cols-[minmax(0,0.95fr)_minmax(280px,0.58fr)] lg:items-center">
+              <TextBlock eyebrow="Scarica gratis" title="Inizia con un percorso più semplice da seguire">
+                <p>
+                  Se stai cercando un’app fitness pensata davvero per chi parte da zero, Hypemove nasce proprio per aiutarti a iniziare con più chiarezza, meno attrito e più continuità.
+                </p>
+              </TextBlock>
+
+              <div className="flex lg:justify-end">
+                <CtaButton location="guide_app_fitness_principianti_final" />
+              </div>
             </div>
           </div>
         </section>
+
+        <SeoJsonLd />
       </main>
+
       <GuideFooter currentHref="/app-fitness-principianti" />
     </div>
   );
