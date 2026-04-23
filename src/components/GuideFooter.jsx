@@ -1,6 +1,6 @@
 import React from "react";
-import { Download } from "lucide-react";
-import { guideFooterLinks } from "../data/guides.js";
+import { ArrowRight, Download } from "lucide-react";
+import { guideFooterLinks, guides } from "../data/guides.js";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const PRIVACY_URL = "/legal/privacy.html";
@@ -14,30 +14,61 @@ function LogoMark() {
   );
 }
 
-export default function GuideFooter() {
+export default function GuideFooter({ currentHref }) {
+  const relatedGuides = guides
+    .filter((guide) => guide.href !== currentHref)
+    .slice(0, 3);
+
   return (
     <footer className="border-t border-black/10 bg-[#F7F7F7]">
-      <div className="mx-auto flex max-w-7xl flex-col gap-4 border-b border-black/10 px-4 py-8 sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
-        <div>
-          <div className="text-lg font-black tracking-[-0.04em] text-black">Vuoi continuare a orientarti?</div>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-black/55">
-            Torna alla raccolta delle guide oppure alla home per scoprire Hypemove.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-3">
+      <div className="mx-auto max-w-7xl border-b border-black/10 px-4 py-10 sm:px-6 lg:px-8">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div>
+            <div className="text-2xl font-black tracking-[-0.05em] text-black sm:text-3xl">
+              Forse potrebbe interessarti anche:
+            </div>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-black/55">
+              Tre articoli utili per continuare a muoverti in modo semplice e realistico.
+            </p>
+          </div>
           <a
             href="/guide"
-            className="inline-flex min-h-[46px] items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+            className="inline-flex min-h-[44px] w-fit items-center justify-center rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:border-black/20"
           >
             Tutte le guide
-          </a>
-          <a
-            href="/"
-            className="inline-flex min-h-[46px] items-center justify-center rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black transition hover:-translate-y-0.5 hover:border-black/20"
-          >
-            Home
+            <ArrowRight className="ml-2 h-4 w-4" />
           </a>
         </div>
+
+        <div className="mt-7 grid gap-4 md:grid-cols-3">
+          {relatedGuides.map((guide) => (
+            <a
+              key={guide.href}
+              href={guide.href}
+              className="group flex min-h-[178px] flex-col justify-between rounded-[20px] border border-black/10 bg-white p-5 shadow-[0_14px_42px_rgba(0,0,0,0.04)] transition hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_22px_58px_rgba(0,0,0,0.07)]"
+            >
+              <span>
+                <span className="flex items-center justify-between gap-4">
+                  <span className="rounded-full bg-[#FCFBF8] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-black/52">
+                    {guide.category}
+                  </span>
+                  <span className="text-xs font-bold uppercase tracking-[0.16em] text-black/42">
+                    {guide.readTime}
+                  </span>
+                </span>
+                <span className="mt-4 block text-xl font-black leading-[1.08] tracking-[-0.04em] text-black">
+                  {guide.title}
+                </span>
+                <span className="mt-3 block text-sm leading-6 text-black/58">{guide.description}</span>
+              </span>
+              <span className="mt-5 inline-flex items-center text-sm font-bold text-black">
+                Leggi l'articolo
+                <ArrowRight className="ml-2 h-4 w-4 transition group-hover:translate-x-1" />
+              </span>
+            </a>
+          ))}
+        </div>
+
       </div>
 
       <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-5 lg:px-8">

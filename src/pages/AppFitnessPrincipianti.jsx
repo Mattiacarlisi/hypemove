@@ -278,7 +278,7 @@ export default function AppFitnessPrincipianti() {
           </div>
         </section>
       </main>
-      <GuideFooter />
+      <GuideFooter currentHref="/app-fitness-principianti" />
     </div>
   );
 }

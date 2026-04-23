@@ -90,28 +90,6 @@ function TextSection({ eyebrow, title, children, dark = false }) {
   );
 }
 
-function InternalLinks() {
-  const links = [
-    { href: "/workout-10-minuti-casa", label: "Workout 10 minuti a casa" },
-    { href: "/app-fitness-principianti", label: "App fitness per principianti" },
-    { href: "/", label: "Homepage Hypemove" },
-  ];
-
-  return (
-    <nav aria-label="Link utili" className="mt-8 flex flex-wrap gap-3">
-      {links.map((link) => (
-        <a
-          key={link.href}
-          href={link.href}
-          className="inline-flex items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/65 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black"
-        >
-          {link.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 export default function MiniWorkoutEfficaci() {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
@@ -152,7 +130,6 @@ export default function MiniWorkoutEfficaci() {
                 Dipende da cosa intendi per efficaci. Se cerchi il piano perfetto in teoria, la risposta è una.
                 Se cerchi qualcosa che una persona reale riesce davvero a fare con continuità, la risposta cambia molto.
               </p>
-              <InternalLinks />
             </div>
 
             <div className="rounded-[32px] border border-black/10 bg-white p-6 shadow-[0_30px_90px_rgba(0,0,0,0.08)]">
@@ -303,7 +280,7 @@ export default function MiniWorkoutEfficaci() {
           </div>
         </section>
       </main>
-      <GuideFooter />
+      <GuideFooter currentHref="/mini-workout-efficaci" />
     </div>
   );
 }

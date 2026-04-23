@@ -97,30 +97,6 @@ function TextSection({ eyebrow, title, children, dark = false }) {
   );
 }
 
-function InternalLinks() {
-  const links = [
-    { href: "/app-fitness-principianti", label: "App fitness per principianti" },
-    { href: "/mini-workout-efficaci", label: "Mini workout efficaci" },
-    { href: "/workout-10-minuti-casa", label: "Workout 10 minuti a casa" },
-    { href: "/allenamento-a-casa", label: "Allenamento a casa" },
-    { href: "/guide", label: "Tutte le guide" },
-  ];
-
-  return (
-    <nav aria-label="Link utili" className="mt-8 flex flex-wrap gap-3">
-      {links.map((link) => (
-        <a
-          key={link.href}
-          href={link.href}
-          className="inline-flex items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/65 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black"
-        >
-          {link.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 export default function CostanzaAllenamento() {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
@@ -159,7 +135,6 @@ export default function CostanzaAllenamento() {
               <div className="mt-8">
                 <CtaButton location="guide_costanza_allenamento_hero" />
               </div>
-              <InternalLinks />
             </div>
 
             <div className="rounded-[32px] border border-black/10 bg-white p-6 shadow-[0_30px_90px_rgba(0,0,0,0.08)]">
@@ -248,7 +223,6 @@ export default function CostanzaAllenamento() {
               <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
                 Perché Hypemove è pensata per la costanza
               </h2>
-              <InternalLinks />
             </div>
             <ul className="grid gap-3">
               {hypemoveHelps.map((item) => (
@@ -311,7 +285,7 @@ export default function CostanzaAllenamento() {
         </section>
       </main>
 
-      <GuideFooter />
+      <GuideFooter currentHref="/come-essere-costanti-nell-allenamento" />
     </div>
   );
 }

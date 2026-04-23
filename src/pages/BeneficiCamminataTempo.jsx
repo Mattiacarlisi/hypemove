@@ -1,5 +1,5 @@
 import React from "react";
-import { Apple, ArrowRight, CheckCircle2, Clock3, Download, Footprints, ListChecks } from "lucide-react";
+import { Apple, ArrowRight, CheckCircle2, Clock3, Download, ListChecks } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
 import {
   PLAY_STORE_URL,
@@ -9,44 +9,41 @@ import {
 
 const IPHONE_DOWNLOAD_URL = "#download";
 const ARTICLE_URL = "https://www.hypemove.app/benefici-camminata-tempo";
-const ARTICLE_TITLE = "Benefici della camminata: cosa succede al corpo dopo 10, 20, 30 e 60 minuti";
+const ARTICLE_TITLE = "I benefici della camminata";
+const ARTICLE_SUBTITLE = "Cosa succede al corpo dopo 10, 20, 30 e 60 minuti";
+const ARTICLE_SEO_TITLE = "Benefici della camminata: cosa succede al corpo dopo 10, 20, 30 e 60 minuti";
 const ARTICLE_DESCRIPTION = "Scopri cosa succede al corpo dopo 10, 20, 30 e 60 minuti di camminata e come rendere la passeggiata più completa con mini workout guidati.";
+const ARTICLE_IMAGE_PATH = "/images/immagine donna che cammina ne bosco.png";
+const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/immagine%20donna%20che%20cammina%20ne%20bosco.png";
+const ARTICLE_IMAGE_ALT = "Donna che cammina su un sentiero nel bosco durante una passeggiata all'aperto";
 
 const walkingStages = [
   {
     time: "10 minuti",
-    title: "Il corpo inizia ad attivarsi",
+    title: "Dopo 10 minuti",
     text: [
-      "Nei primi minuti il corpo inizia ad attivarsi. Il respiro aumenta leggermente, la circolazione si adatta al movimento e smetti di essere fermo.",
-      "Per molte persone è anche il momento in cui la testa si alleggerisce un po'. Non perché la camminata risolva tutto, ma perché interrompe l'immobilità, rimette in moto il corpo e spesso abbassa quella sensazione di pesantezza mentale accumulata durante la giornata.",
-      "I primi 10 minuti, in pratica, sono il momento in cui inizi davvero a entrare nella camminata.",
+      "Nei primi minuti il corpo esce dalla staticità: il respiro accelera un po’, il corpo si scalda e inizi davvero a entrare nel movimento. Per molte persone è anche il momento in cui la testa si alleggerisce leggermente, perché interrompi la sedentarietà e cambi ritmo.",
     ],
   },
   {
     time: "20 minuti",
-    title: "Il movimento diventa più naturale",
+    title: "Dopo 20 minuti",
     text: [
-      "Dopo circa 20 minuti, la camminata inizia spesso a essere percepita come più naturale. Il corpo è più caldo, il passo tende a stabilizzarsi e il movimento diventa più fluido.",
-      "Molte persone in questa fase si sentono anche più calme, più presenti e meno tese. È il momento in cui la camminata smette di essere solo fare due passi e inizia a diventare qualcosa che ti fa stare meglio davvero.",
-      "Spesso qui arrivano anche più chiarezza mentale, più concentrazione e una sensazione generale di maggiore equilibrio.",
+      "Dopo circa 20 minuti la camminata tende a diventare più naturale. Il passo si stabilizza, il corpo è più sciolto e il movimento risulta meno “meccanico”. È spesso il momento in cui camminare smette di essere solo un modo per muoversi e inizia a farti stare meglio davvero.",
     ],
   },
   {
     time: "30 minuti",
-    title: "Diventa un blocco di movimento vero",
+    title: "Dopo 30 minuti",
     text: [
-      "Quando arrivi intorno ai 30 minuti, la camminata inizia a diventare un blocco di movimento vero e proprio, non più solo una parentesi.",
-      "Molte persone qui percepiscono una sensazione maggiore di soddisfazione, un umore più stabile e meno stanchezza mentale. È il punto in cui il corpo e la testa sembrano aver trovato davvero il loro ritmo.",
-      "Per tanti, questa è una durata molto interessante: abbastanza lunga da farti sentire di aver fatto qualcosa di concreto, ma ancora facile da inserire nella vita reale.",
+      "Intorno ai 30 minuti la camminata diventa un blocco di movimento vero e proprio. A quel punto molte persone sentono di aver fatto qualcosa di concreto: il corpo è attivo, la mente è spesso più lucida e la sensazione di aver spezzato la giornata sedentaria è più netta. Per tanti, è una durata molto efficace perché resta sostenibile ma ha già un peso reale.",
     ],
   },
   {
     time: "60 minuti",
-    title: "Il volume di movimento diventa importante",
+    title: "Dopo 60 minuti",
     text: [
-      "Dopo un'ora, il volume totale di movimento aumenta in modo importante. A quel punto non stai più semplicemente facendo una passeggiata: stai dedicando al corpo un tempo significativo.",
-      "Una camminata così lunga può avere benefici interessanti sul piano del benessere generale, della salute cardiovascolare, del dispendio energetico e della riduzione degli effetti di una giornata troppo sedentaria.",
-      "In pratica, più il tempo di camminata si allunga, più stai dando al corpo uno stimolo consistente.",
+      "Dopo un’ora il volume totale di movimento diventa importante. Non stai più facendo solo due passi: stai dedicando al corpo un tempo significativo. Una camminata così lunga può incidere in modo interessante sul benessere generale, sul dispendio energetico e su quanto riesci a compensare una giornata troppo sedentaria.",
     ],
   },
 ];
@@ -68,25 +65,6 @@ const comboBenefits = [
   "inserire un piccolo blocco di mobilità",
   "spezzare la monotonia del gesto sempre uguale",
   "trasformare una semplice passeggiata in un momento di movimento più ricco",
-];
-
-const relatedLinks = [
-  {
-    href: "/mini-workout-efficaci",
-    label: "mini workout efficaci",
-  },
-  {
-    href: "/workout-10-minuti-casa",
-    label: "workout da 10 minuti a casa",
-  },
-  {
-    href: "/come-essere-costanti-nell-allenamento",
-    label: "come essere costanti nell'allenamento",
-  },
-  {
-    href: "/allenamento-a-casa",
-    label: "allenamento a casa",
-  },
 ];
 
 const faqs = [
@@ -200,22 +178,6 @@ function TextBlock({ eyebrow, title, children, dark = false }) {
   );
 }
 
-function RelatedLinks() {
-  return (
-    <nav aria-label="Guide correlate" className="mt-8 flex flex-wrap gap-3">
-      {relatedLinks.map((link) => (
-        <a
-          key={link.href}
-          href={link.href}
-          className="inline-flex items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/65 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black"
-        >
-          {link.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 function SeoJsonLd() {
   const structuredData = {
     "@context": "https://schema.org",
@@ -247,11 +209,11 @@ function SeoJsonLd() {
       {
         "@type": "Article",
         "@id": `${ARTICLE_URL}#article`,
-        headline: ARTICLE_TITLE,
+        headline: ARTICLE_SEO_TITLE,
         description: ARTICLE_DESCRIPTION,
-        image: "https://www.hypemove.app/images/logo1.png",
+        image: ARTICLE_IMAGE_URL,
         datePublished: "2026-04-19",
-        dateModified: "2026-04-22",
+        dateModified: "2026-04-23",
         author: {
           "@type": "Organization",
           name: "Hypemove",
@@ -327,39 +289,50 @@ export default function BeneficiCamminataTempo() {
       </header>
 
       <main>
-        <section className="relative overflow-hidden px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+        <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
           <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:48px_48px]" />
           <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
 
-          <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[minmax(0,0.96fr)_minmax(320px,0.58fr)]">
-            <div>
-              <Kicker>Guida pratica</Kicker>
-              <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] tracking-[-0.06em] text-black sm:text-6xl lg:text-7xl">
-                {ARTICLE_TITLE}
-              </h1>
-              <div className="mt-6 max-w-2xl space-y-4 text-base leading-8 text-black/65 sm:text-xl sm:leading-9">
-                <p>
-                  Camminare è una delle forme di movimento più semplici da inserire nella vita reale. Non richiede attrezzatura, non ti obbliga a organizzare tutta la giornata e, per molte persone, è uno dei modi più accessibili per muoversi di più.
+          <div className="relative mx-auto max-w-7xl">
+            <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
+              <div className="max-w-[42rem]">
+                <Kicker>Guida pratica</Kicker>
+                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] tracking-[-0.06em] text-black sm:text-5xl lg:text-[4rem]">
+                  {ARTICLE_TITLE}
+                </h1>
+                <p className="mt-4 max-w-[34rem] text-lg font-semibold leading-8 text-black/72 sm:text-[1.75rem] sm:leading-8">
+                  {ARTICLE_SUBTITLE}
                 </p>
-                <p>
-                  Ma una domanda è normalissima: cosa succede davvero al corpo mentre cammini?
-                </p>
-                <p>
-                  Capirlo può aiutarti a dare più valore a una cosa semplice come una camminata e, se vuoi, anche a renderla più efficace senza complicarti la vita.
-                </p>
+                <div className="mt-6 hidden max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:block lg:text-[1.12rem] lg:leading-9">
+                  <p>
+                    Camminare è una delle forme di movimento più semplici da inserire nella vita reale. Non richiede attrezzatura, non ti obbliga a organizzare tutta la giornata e, per molte persone, è uno dei modi più accessibili per muoversi di più.
+                  </p>
+                  <p>
+                    Ma una domanda è normalissima: cosa succede davvero al corpo mentre cammini?
+                  </p>
+                </div>
               </div>
-              <RelatedLinks />
+
+              <figure className="relative mx-auto w-full max-w-[40rem] self-center overflow-hidden rounded-[28px] border border-black/10 bg-white shadow-[0_24px_70px_rgba(0,0,0,0.08)] lg:justify-self-end">
+                <img
+                  src={ARTICLE_IMAGE_PATH}
+                  alt={ARTICLE_IMAGE_ALT}
+                  width="1536"
+                  height="1024"
+                  loading="eager"
+                  fetchpriority="high"
+                  className="aspect-[4/3] h-full w-full object-cover object-center"
+                />
+              </figure>
             </div>
 
-            <div className="relative overflow-hidden rounded-[32px] border border-black/10 bg-white p-6 shadow-[0_30px_90px_rgba(0,0,0,0.08)]">
-              <div className="absolute right-[-48px] top-[-48px] h-36 w-36 rounded-full bg-[#FB8B04]/18 blur-2xl" />
-              <div className="relative">
-                <Footprints className="h-10 w-10 text-[#FB8B04]" />
-                <div className="mt-5 text-4xl font-black tracking-[-0.06em]">Una cosa semplice può diventare più utile.</div>
-                <p className="mt-4 text-base leading-8 text-black/62">
-                  La camminata resta la base. Un mini workout guidato può essere il modo più semplice per aggiungere qualcosa in più quando il corpo è già in movimento.
-                </p>
-              </div>
+            <div className="mt-6 max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:hidden">
+              <p>
+                Camminare è una delle forme di movimento più semplici da inserire nella vita reale. Non richiede attrezzatura, non ti obbliga a organizzare tutta la giornata e, per molte persone, è uno dei modi più accessibili per muoversi di più.
+              </p>
+              <p>
+                Ma una domanda è normalissima: cosa succede davvero al corpo mentre cammini?
+              </p>
             </div>
           </div>
         </section>
@@ -379,14 +352,15 @@ export default function BeneficiCamminataTempo() {
             <div className="mt-10 grid gap-5 lg:grid-cols-2">
               {walkingStages.map((item) => (
                 <article key={item.time} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="text-2xl font-black tracking-[-0.04em] text-black sm:text-3xl">
+                      {item.title}
+                    </div>
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-black text-white">
                       <Clock3 className="h-5 w-5" />
                     </div>
-                    <div className="text-sm font-black uppercase tracking-[0.22em] text-[#FB8B04]">{item.time}</div>
                   </div>
-                  <h3 className="mt-5 text-2xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
-                  <div className="mt-4 space-y-4 text-base leading-8 text-black/65">
+                  <div className="mt-5 space-y-4 text-base leading-8 text-black/65">
                     {item.text.map((paragraph) => (
                       <p key={paragraph}>{paragraph}</p>
                     ))}
@@ -401,10 +375,11 @@ export default function BeneficiCamminataTempo() {
           <div className="mx-auto max-w-7xl">
             <div className="max-w-4xl">
               <Kicker dark>Amplificare i benefici</Kicker>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-white sm:text-5xl">
-                E se volessi rendere la <span className="text-[#FB8B04]">camminata più efficace?</span>
-              </h2>
-            </div>
+                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-white sm:text-5xl">
+                  <span className="block">E se volessi rendere la</span>
+                  <span className="block text-[#FB8B04]">{"camminata più efficace?"}</span>
+                </h2>
+              </div>
 
             <div className="mt-8 max-w-3xl space-y-5 text-base leading-8 text-white/70 sm:text-lg">
               <p>
@@ -456,7 +431,6 @@ export default function BeneficiCamminataTempo() {
               <p>
                 Ed è proprio qui che questa strategia diventa intelligente: fai di più, ma senza dover costruire un'altra sessione separata da zero.
               </p>
-              <RelatedLinks />
             </TextBlock>
 
             <ul className="grid gap-3">
@@ -529,7 +503,7 @@ export default function BeneficiCamminataTempo() {
         </section>
       </main>
 
-      <GuideFooter />
+      <GuideFooter currentHref="/benefici-camminata-tempo" />
     </div>
   );
 }

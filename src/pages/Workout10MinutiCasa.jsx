@@ -96,28 +96,6 @@ function TextSection({ eyebrow, title, children }) {
   );
 }
 
-function InternalLinks() {
-  const links = [
-    { href: "/app-fitness-principianti", label: "App fitness per principianti" },
-    { href: "/allenamento-a-casa", label: "Allenamento a casa" },
-    { href: "/", label: "Homepage Hypemove" },
-  ];
-
-  return (
-    <nav aria-label="Link utili" className="mt-8 flex flex-wrap gap-3">
-      {links.map((link) => (
-        <a
-          key={link.href}
-          href={link.href}
-          className="inline-flex items-center rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-semibold text-black/65 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black"
-        >
-          {link.label}
-        </a>
-      ))}
-    </nav>
-  );
-}
-
 export default function Workout10MinutiCasa() {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
@@ -161,7 +139,6 @@ export default function Workout10MinutiCasa() {
               <div className="mt-8">
                 <CtaButton location="guide_workout_10_minuti_hero" />
               </div>
-              <InternalLinks />
             </div>
 
             <div className="grid gap-5">
@@ -259,7 +236,6 @@ export default function Workout10MinutiCasa() {
               <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
                 Come Hypemove ti aiuta con workout da 10 minuti
               </h2>
-              <InternalLinks />
             </div>
             <ul className="grid gap-3">
               {hypemoveHelps.map((item) => (
@@ -322,7 +298,7 @@ export default function Workout10MinutiCasa() {
           </div>
         </section>
       </main>
-      <GuideFooter />
+      <GuideFooter currentHref="/workout-10-minuti-casa" />
     </div>
   );
 }
