@@ -7,8 +7,8 @@ const ARTICLE_URL = "https://www.hypemove.app/mini-workout-efficaci";
 const ARTICLE_SEO_TITLE = "Mini workout efficaci: 5 o 10 minuti servono davvero? | Hypemove";
 const ARTICLE_DESCRIPTION =
   "I mini workout sono davvero efficaci? Scopri quando funzionano, quando potrebbero non bastare e perché possono aiutarti a iniziare, muoverti di più e creare continuità.";
-const ARTICLE_IMAGE_PATH = "/images/WOD1.png";
-const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/WOD1.png";
+const ARTICLE_IMAGE_PATH = "/images/WOD3.png";
+const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/WOD3.png";
 const ARTICLE_IMAGE_ALT = "Persona che si allena a casa con un mini workout breve e guidato";
 const ARTICLE_PUBLISHED_DATE = "2026-04-24";
 const ARTICLE_MODIFIED_DATE = "2026-04-24";

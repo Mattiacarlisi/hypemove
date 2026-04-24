@@ -1,7 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Clock3, Home, Repeat2, Search, Sparkles } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
 import { guideCategories, guides } from "../data/guides.js";
+
+const PAGE_URL = "https://www.hypemove.app/guide";
+const PAGE_SEO_TITLE = "Guide fitness per principianti, workout a casa e costanza | Hypemove";
+const PAGE_DESCRIPTION =
+  "Scopri le guide Hypemove per iniziare ad allenarti, essere più costante, fare workout brevi a casa e rimetterti in forma con un approccio semplice e sostenibile.";
 
 const filters = ["Tutte", ...guideCategories];
 
@@ -11,6 +16,147 @@ const categoryIcons = {
   Costanza: Repeat2,
   "Allenamento a casa": Home,
 };
+
+const guideImagesByHref = {
+  "/app-fitness-principianti": {
+    src: "/images/homeworkout.png",
+    alt: "Donna che si allena a casa con workout per principianti",
+  },
+  "/mini-workout-efficaci": {
+    src: "/images/WOD3.png",
+    alt: "Persona che si allena a casa con un mini workout breve e guidato",
+  },
+  "/workout-10-minuti-casa": {
+    src: "/images/WOD2.png",
+    alt: "Workout di 10 minuti a casa nell'app Hypemove",
+  },
+  "/benefici-camminata-tempo": {
+    src: "/images/immagine donna che cammina ne bosco.png",
+    alt: "Donna che cammina su un sentiero nel bosco durante una passeggiata all'aperto",
+  },
+  "/allenamento-a-casa": {
+    src: "/images/WOD1.png",
+    alt: "Persona che si allena a casa",
+  },
+  "/come-essere-costanti-nell-allenamento": {
+    src: "/images/workout.png",
+    alt: "Persona che si allena a casa con costanza",
+  },
+};
+
+function useSeoMeta() {
+  useEffect(() => {
+    document.title = PAGE_SEO_TITLE;
+    document.documentElement.setAttribute("lang", "it-IT");
+
+    const upsertMeta = (selector, attrs, content) => {
+      let tag = document.head.querySelector(selector);
+
+      if (!tag) {
+        tag = document.createElement("meta");
+        Object.entries(attrs).forEach(([key, value]) => {
+          tag.setAttribute(key, value);
+        });
+        document.head.appendChild(tag);
+      }
+
+      tag.setAttribute("content", content);
+    };
+
+    const upsertLink = (selector, attrs) => {
+      let tag = document.head.querySelector(selector);
+
+      if (!tag) {
+        tag = document.createElement("link");
+        document.head.appendChild(tag);
+      }
+
+      Object.entries(attrs).forEach(([key, value]) => {
+        tag.setAttribute(key, value);
+      });
+    };
+
+    upsertMeta("meta[name='description']", { name: "description" }, PAGE_DESCRIPTION);
+
+    upsertMeta(
+      "meta[name='robots']",
+      { name: "robots" },
+      "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    );
+
+    upsertMeta("meta[property='og:type']", { property: "og:type" }, "website");
+    upsertMeta("meta[property='og:site_name']", { property: "og:site_name" }, "Hypemove");
+    upsertMeta("meta[property='og:locale']", { property: "og:locale" }, "it_IT");
+    upsertMeta("meta[property='og:title']", { property: "og:title" }, PAGE_SEO_TITLE);
+    upsertMeta("meta[property='og:description']", { property: "og:description" }, PAGE_DESCRIPTION);
+    upsertMeta("meta[property='og:url']", { property: "og:url" }, PAGE_URL);
+
+    upsertMeta("meta[name='twitter:card']", { name: "twitter:card" }, "summary_large_image");
+    upsertMeta("meta[name='twitter:title']", { name: "twitter:title" }, PAGE_SEO_TITLE);
+    upsertMeta("meta[name='twitter:description']", { name: "twitter:description" }, PAGE_DESCRIPTION);
+
+    upsertLink("link[rel='canonical']", {
+      rel: "canonical",
+      href: PAGE_URL,
+    });
+  }, []);
+}
+
+function SeoJsonLd() {
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "CollectionPage",
+        "@id": `${PAGE_URL}#webpage`,
+        url: PAGE_URL,
+        name: PAGE_SEO_TITLE,
+        description: PAGE_DESCRIPTION,
+        inLanguage: "it-IT",
+        isPartOf: {
+          "@id": "https://www.hypemove.app/#website",
+        },
+        mainEntity: {
+          "@type": "ItemList",
+          itemListElement: guides.map((guide, index) => ({
+            "@type": "ListItem",
+            position: index + 1,
+            name: guide.title,
+            description: guide.description,
+            url: `https://www.hypemove.app${guide.href}`,
+          })),
+        },
+      },
+      {
+        "@type": "BreadcrumbList",
+        "@id": `${PAGE_URL}#breadcrumb`,
+        itemListElement: [
+          {
+            "@type": "ListItem",
+            position: 1,
+            name: "Home",
+            item: "https://www.hypemove.app/",
+          },
+          {
+            "@type": "ListItem",
+            position: 2,
+            name: "Guide",
+            item: PAGE_URL,
+          },
+        ],
+      },
+    ],
+  };
+
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(structuredData),
+      }}
+    />
+  );
+}
 
 function LogoMark() {
   return (
@@ -22,42 +168,72 @@ function LogoMark() {
 
 function GuideCard({ guide }) {
   const Icon = categoryIcons[guide.category] ?? Sparkles;
+  const image = guide.image
+    ? {
+        src: guide.image,
+        alt: guide.imageAlt ?? guide.title,
+      }
+    : guideImagesByHref[guide.href];
 
   return (
     <a
       href={guide.href}
-      className="group flex min-h-[188px] flex-col justify-between rounded-[20px] border border-black/10 bg-white p-5 shadow-[0_14px_42px_rgba(0,0,0,0.04)] transition hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_22px_58px_rgba(0,0,0,0.07)]"
+      className="group flex h-full flex-col overflow-hidden rounded-[28px] border border-black/10 bg-white shadow-[0_18px_54px_rgba(0,0,0,0.045)] transition hover:-translate-y-1 hover:border-black/20 hover:shadow-[0_28px_80px_rgba(0,0,0,0.08)]"
+      aria-label={`Leggi la guida: ${guide.title}`}
     >
-      <span>
-        <span className="flex items-center justify-between gap-4">
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-black text-white">
-            <Icon className="h-4 w-4" />
+      <span className="relative block overflow-hidden bg-[#FCFBF8]">
+        {image?.src ? (
+          <img
+            src={image.src}
+            alt={image.alt}
+            loading="lazy"
+            decoding="async"
+            className="aspect-[4/3] w-full object-cover transition duration-500 group-hover:scale-[1.03]"
+          />
+        ) : (
+          <span className="flex aspect-[4/3] w-full items-center justify-center bg-[#FCFBF8]">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white">
+              <Icon className="h-5 w-5" />
+            </span>
           </span>
-          <span className="text-xs font-bold uppercase tracking-[0.16em] text-black/42">
-            {guide.readTime}
-          </span>
-        </span>
+        )}
 
-        <span className="mt-4 inline-flex rounded-full bg-[#FCFBF8] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-black/52">
+        <span className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/92 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-black shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-md">
+          <Icon className="h-3.5 w-3.5 text-[#FB8B04]" />
           {guide.category}
         </span>
 
-        <h2 className="mt-3 text-xl font-black leading-[1.08] tracking-[-0.04em] text-black">
+        <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
+          <Clock3 className="h-3.5 w-3.5" />
+          {guide.readTime}
+        </span>
+      </span>
+
+      <span className="flex flex-1 flex-col p-5 sm:p-6">
+        <span className="inline-flex w-fit rounded-full bg-[#FCFBF8] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-black/52">
+          {guide.tags?.[0] ?? guide.category}
+        </span>
+
+        <h2 className="mt-4 text-2xl font-black leading-[1.02] tracking-[-0.05em] text-black">
           {guide.title}
         </h2>
 
-        <p className="mt-3 text-sm leading-6 text-black/58">{guide.description}</p>
-      </span>
+        <p className="mt-4 line-clamp-3 text-sm leading-7 text-black/60">
+          {guide.description}
+        </p>
 
-      <span className="mt-5 inline-flex items-center text-sm font-bold text-black">
-        Leggi
-        <ArrowRight className="ml-2 h-4 w-4 transition group-hover:translate-x-1" />
+        <span className="mt-6 inline-flex items-center text-sm font-black text-black">
+          Leggi
+          <ArrowRight className="ml-2 h-4 w-4 transition group-hover:translate-x-1" />
+        </span>
       </span>
     </a>
   );
 }
 
 export default function Guide() {
+  useSeoMeta();
+
   const [activeFilter, setActiveFilter] = useState("Tutte");
   const [query, setQuery] = useState("");
 
@@ -66,7 +242,7 @@ export default function Guide() {
 
     return guides.filter((guide) => {
       const matchesFilter = activeFilter === "Tutte" || guide.category === activeFilter;
-      const searchableText = [guide.title, guide.description, guide.category, ...guide.tags]
+      const searchableText = [guide.title, guide.description, guide.category, ...(guide.tags ?? [])]
         .join(" ")
         .toLowerCase();
       const matchesQuery = !normalizedQuery || searchableText.includes(normalizedQuery);
@@ -79,7 +255,7 @@ export default function Guide() {
     <div className="min-h-screen bg-[#FDFDFD] text-black">
       <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3">
+          <a href="/" className="flex items-center gap-3" aria-label="Vai alla home di Hypemove">
             <LogoMark />
             <div>
               <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
@@ -174,7 +350,7 @@ export default function Guide() {
               </div>
 
               {filteredGuides.length > 0 ? (
-                <div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="mt-7 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                   {filteredGuides.map((guide) => (
                     <GuideCard key={guide.href} guide={guide} />
                   ))}
@@ -192,6 +368,8 @@ export default function Guide() {
             </div>
           </div>
         </section>
+
+        <SeoJsonLd />
       </main>
 
       <GuideFooter />
