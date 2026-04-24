@@ -1,16 +1,19 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { ArrowRight, CheckCircle2, Compass, Download, Map, Sparkles, TimerReset } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
 const ARTICLE_URL = "https://www.hypemove.app/app-fitness-principianti";
-const ARTICLE_SEO_TITLE = "App fitness per principianti: una guida semplice per chi parte da zero | Hypemove";
-const ARTICLE_DESCRIPTION = "Scopri perché Hypemove è un’app fitness adatta ai principianti: percorso guidato, workout brevi, progressione graduale e meno attrito per iniziare davvero.";
+const ARTICLE_SEO_TITLE = "App fitness per principianti: percorso guidato per chi parte da zero | Hypemove";
+const ARTICLE_DESCRIPTION =
+  "Cerchi un'app fitness per principianti? Scopri Hypemove: percorso guidato, workout brevi da 5, 7 e 10 minuti, progressione graduale e allenamento a casa più semplice da seguire.";
 const ARTICLE_IMAGE_PATH = "/images/homeworkout.png";
 const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/homeworkout.png";
 const ARTICLE_IMAGE_ALT = "Donna che si allena a casa con workout per principianti";
 const ARTICLE_PUBLISHED_DATE = "2026-04-19";
 const ARTICLE_MODIFIED_DATE = "2026-04-23";
+const ORGANIZATION_URL = "https://www.hypemove.app/";
+const ORGANIZATION_LOGO_URL = "https://www.hypemove.app/images/logo1.png";
 
 const beginnerCards = [
   {
@@ -58,6 +61,70 @@ const appFeatures = [
   },
 ];
 
+function useSeoMeta() {
+  useEffect(() => {
+    document.title = ARTICLE_SEO_TITLE;
+    document.documentElement.setAttribute("lang", "it-IT");
+
+    const upsertMeta = (selector, attrs, content) => {
+      let tag = document.head.querySelector(selector);
+      if (!tag) {
+        tag = document.createElement("meta");
+        Object.entries(attrs).forEach(([key, value]) => tag.setAttribute(key, value));
+        document.head.appendChild(tag);
+      }
+      tag.setAttribute("content", content);
+    };
+
+    const upsertLink = (selector, attrs) => {
+      let tag = document.head.querySelector(selector);
+      if (!tag) {
+        tag = document.createElement("link");
+        document.head.appendChild(tag);
+      }
+      Object.entries(attrs).forEach(([key, value]) => tag.setAttribute(key, value));
+    };
+
+    upsertMeta('meta[name="description"]', { name: "description" }, ARTICLE_DESCRIPTION);
+    upsertMeta(
+      'meta[name="robots"]',
+      { name: "robots" },
+      "index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    );
+    upsertMeta('meta[name="googlebot"]', { name: "googlebot" }, "index, follow, max-image-preview:large");
+    upsertMeta('meta[name="author"]', { name: "author" }, "Hypemove");
+
+    upsertMeta('meta[property="og:type"]', { property: "og:type" }, "article");
+    upsertMeta('meta[property="og:site_name"]', { property: "og:site_name" }, "Hypemove");
+    upsertMeta('meta[property="og:locale"]', { property: "og:locale" }, "it_IT");
+    upsertMeta('meta[property="og:title"]', { property: "og:title" }, ARTICLE_SEO_TITLE);
+    upsertMeta('meta[property="og:description"]', { property: "og:description" }, ARTICLE_DESCRIPTION);
+    upsertMeta('meta[property="og:url"]', { property: "og:url" }, ARTICLE_URL);
+    upsertMeta('meta[property="og:image"]', { property: "og:image" }, ARTICLE_IMAGE_URL);
+    upsertMeta('meta[property="og:image:alt"]', { property: "og:image:alt" }, ARTICLE_IMAGE_ALT);
+    upsertMeta('meta[property="og:image:width"]', { property: "og:image:width" }, "1024");
+    upsertMeta('meta[property="og:image:height"]', { property: "og:image:height" }, "1536");
+    upsertMeta(
+      'meta[property="article:published_time"]',
+      { property: "article:published_time" },
+      ARTICLE_PUBLISHED_DATE
+    );
+    upsertMeta(
+      'meta[property="article:modified_time"]',
+      { property: "article:modified_time" },
+      ARTICLE_MODIFIED_DATE
+    );
+
+    upsertMeta('meta[name="twitter:card"]', { name: "twitter:card" }, "summary_large_image");
+    upsertMeta('meta[name="twitter:title"]', { name: "twitter:title" }, ARTICLE_SEO_TITLE);
+    upsertMeta('meta[name="twitter:description"]', { name: "twitter:description" }, ARTICLE_DESCRIPTION);
+    upsertMeta('meta[name="twitter:image"]', { name: "twitter:image" }, ARTICLE_IMAGE_URL);
+    upsertMeta('meta[name="twitter:image:alt"]', { name: "twitter:image:alt" }, ARTICLE_IMAGE_ALT);
+
+    upsertLink('link[rel="canonical"]', { rel: "canonical", href: ARTICLE_URL });
+  }, []);
+}
+
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
@@ -101,6 +168,7 @@ function CtaButton({ children = "Scarica Hypemove", location }) {
         location,
       })}
       className="group inline-flex min-h-[56px] items-center justify-center rounded-full bg-black px-6 py-4 text-base font-semibold text-white transition hover:-translate-y-0.5 sm:px-7"
+      aria-label="Scarica Hypemove dal Google Play Store"
     >
       <Download className="mr-2 h-4 w-4" />
       {children}
@@ -114,6 +182,26 @@ function SeoJsonLd() {
     "@context": "https://schema.org",
     "@graph": [
       {
+        "@type": "Organization",
+        "@id": `${ORGANIZATION_URL}#organization`,
+        name: "Hypemove",
+        url: ORGANIZATION_URL,
+        logo: {
+          "@type": "ImageObject",
+          url: ORGANIZATION_LOGO_URL,
+        },
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${ORGANIZATION_URL}#website`,
+        url: ORGANIZATION_URL,
+        name: "Hypemove",
+        inLanguage: "it-IT",
+        publisher: {
+          "@id": `${ORGANIZATION_URL}#organization`,
+        },
+      },
+      {
         "@type": "WebPage",
         "@id": `${ARTICLE_URL}#webpage`,
         url: ARTICLE_URL,
@@ -121,7 +209,7 @@ function SeoJsonLd() {
         description: ARTICLE_DESCRIPTION,
         inLanguage: "it-IT",
         isPartOf: {
-          "@id": "https://www.hypemove.app/#website",
+          "@id": `${ORGANIZATION_URL}#website`,
         },
         about: {
           "@id": `${ARTICLE_URL}#article`,
@@ -142,7 +230,7 @@ function SeoJsonLd() {
             "@type": "ListItem",
             position: 1,
             name: "Home",
-            item: "https://www.hypemove.app/",
+            item: ORGANIZATION_URL,
           },
           {
             "@type": "ListItem",
@@ -168,26 +256,17 @@ function SeoJsonLd() {
           {
             "@type": "ImageObject",
             url: ARTICLE_IMAGE_URL,
-            width: 750,
-            height: 1334,
+            width: 1024,
+            height: 1536,
           },
         ],
         datePublished: ARTICLE_PUBLISHED_DATE,
         dateModified: ARTICLE_MODIFIED_DATE,
         author: {
-          "@type": "Organization",
-          "@id": "https://www.hypemove.app/#organization",
-          name: "Hypemove",
-          url: "https://www.hypemove.app/",
+          "@id": `${ORGANIZATION_URL}#organization`,
         },
         publisher: {
-          "@type": "Organization",
-          "@id": "https://www.hypemove.app/#organization",
-          name: "Hypemove",
-          logo: {
-            "@type": "ImageObject",
-            url: "https://www.hypemove.app/images/logo1.png",
-          },
+          "@id": `${ORGANIZATION_URL}#organization`,
         },
         mainEntityOfPage: {
           "@type": "WebPage",
@@ -218,6 +297,8 @@ function SeoJsonLd() {
 }
 
 export default function AppFitnessPrincipianti() {
+  useSeoMeta();
+
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
       <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
@@ -269,6 +350,7 @@ export default function AppFitnessPrincipianti() {
                   height="1536"
                   loading="eager"
                   fetchpriority="high"
+                  decoding="async"
                   className="aspect-[4/3] h-full w-full object-cover object-top"
                 />
               </figure>
@@ -314,7 +396,11 @@ export default function AppFitnessPrincipianti() {
 
         <section className="bg-black px-4 py-20 text-white sm:px-6 sm:py-24 lg:px-8">
           <div className="mx-auto max-w-7xl">
-            <TextBlock eyebrow="Il punto importante" title="Breve non vuol dire casuale" dark>
+            <TextBlock 
+  eyebrow="Il punto importante" 
+  title={<span className="text-[#FB8B04]">Breve non vuol dire casuale</span>} 
+  dark
+>
               <p>
                 Essere adatta a chi parte da zero non significa essere fatta “a caso”.
               </p>
