@@ -198,13 +198,13 @@ function GuideCard({ guide }) {
           </span>
         )}
 
-        <span className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/92 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-black shadow-[0_10px_30px_rgba(0,0,0,0.08)] backdrop-blur-md">
+        <span className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/78 px-3.5 py-2 text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-md">
           <Icon className="h-3.5 w-3.5 text-[#FB8B04]" />
           {guide.category}
         </span>
 
-        <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full bg-black px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
-          <Clock3 className="h-3.5 w-3.5" />
+        <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-white shadow-[0_10px_30px_rgba(0,0,0,0.18)]">
+          <Clock3 className="h-3.5 w-3.5 text-white" />
           {guide.readTime}
         </span>
       </span>
