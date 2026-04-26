@@ -12,6 +12,7 @@ import Workout10MinutiCasa from "./pages/Workout10MinutiCasa.jsx";
 import "./index.css";
 
 const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
+const Unsubscribe = lazy(() => import("./pages/Unsubscribe.jsx"));
 
 function RouteFallback() {
   return <div className="min-h-screen bg-white" aria-hidden="true" />;
@@ -32,6 +33,7 @@ const app = (
           <Route path="/workout-10-minuti-casa" element={<Workout10MinutiCasa />} />
           <Route path="/allenamento-a-casa" element={<AllenamentoACasa />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/unsubscribe" element={<Unsubscribe />} />
         </Routes>
       </Suspense>
     </BrowserRouter>

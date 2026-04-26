@@ -95,6 +95,17 @@ const routes = [
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - mini workout efficaci",
   },
+  {
+    path: "/unsubscribe",
+    outputPath: path.join(projectRoot, "dist", "unsubscribe", "index.html"),
+    title: "Disiscrizione email | Hypemove",
+    description:
+      "Gestisci la disiscrizione dalle email automatiche di promemoria e recupero abitudine di Hypemove.",
+    canonical: "https://www.hypemove.app/unsubscribe",
+    ogType: "website",
+    ogImage: "https://www.hypemove.app/images/logo1.png",
+    ogImageAlt: "Hypemove - disiscrizione email",
+  },
 ];
 
 const { render } = await import(pathToFileURL(distServerEntryPath).href);
