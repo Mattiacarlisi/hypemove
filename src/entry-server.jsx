@@ -7,6 +7,7 @@ import BeneficiCamminataTempo from "./pages/BeneficiCamminataTempo.jsx";
 import CostanzaAllenamento from "./pages/CostanzaAllenamento.jsx";
 import Guide from "./pages/Guide.jsx";
 import MiniWorkoutEfficaci from "./pages/MiniWorkoutEfficaci.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
 import Unsubscribe from "./pages/Unsubscribe.jsx";
 import Workout10MinutiCasa from "./pages/Workout10MinutiCasa.jsx";
 
@@ -18,6 +19,7 @@ export function render(pathname = "/") {
     "/come-essere-costanti-nell-allenamento": CostanzaAllenamento,
     "/guide": Guide,
     "/mini-workout-efficaci": MiniWorkoutEfficaci,
+    "/reset-password": ResetPassword,
     "/unsubscribe": Unsubscribe,
     "/workout-10-minuti-casa": Workout10MinutiCasa,
   };

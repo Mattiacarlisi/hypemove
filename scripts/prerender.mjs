@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 const projectRoot = process.cwd();
 const distIndexPath = path.join(projectRoot, "dist", "index.html");
 const distServerEntryPath = path.join(projectRoot, "dist-server", "entry-server.js");
+const INDEXABLE_ROBOTS = "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
+const PRIVATE_ROBOTS = "noindex, nofollow";
 
 const routes = [
   {
@@ -14,6 +16,7 @@ const routes = [
     description:
       "Hypemove ? l'app fitness per allenarti a casa con workout guidati da 5, 10 e 15 minuti. Ideale per dimagrire, tonificare e restare costante.",
     canonical: "https://www.hypemove.app/",
+    robots: INDEXABLE_ROBOTS,
     ogType: "website",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - app per allenamento a casa guidato",
@@ -25,6 +28,7 @@ const routes = [
     description:
       "Scopri perché Hypemove è un’app fitness adatta ai principianti: percorso guidato, workout brevi, progressione graduale e meno attrito per iniziare davvero.",
     canonical: "https://www.hypemove.app/app-fitness-principianti",
+    robots: INDEXABLE_ROBOTS,
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - app fitness per principianti",
@@ -36,6 +40,7 @@ const routes = [
     description:
       "Vuoi iniziare ad allenarti a casa? Scopri come farlo in modo semplice, realistico e sostenibile, anche se hai poco tempo o parti da zero.",
     canonical: "https://www.hypemove.app/allenamento-a-casa",
+    robots: INDEXABLE_ROBOTS,
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - guida allenamento a casa",
@@ -47,6 +52,7 @@ const routes = [
     description:
       "Scopri i benefici della camminata e cosa succede al corpo dopo 10, 20, 30 e 60 minuti. Una guida pratica per capire come camminare meglio e rendere la passeggiata più efficace.",
     canonical: "https://www.hypemove.app/benefici-camminata-tempo",
+    robots: INDEXABLE_ROBOTS,
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/benefici-camminata-bosco.png",
     ogImageAlt: "Donna che cammina nel bosco durante una passeggiata",
@@ -58,6 +64,7 @@ const routes = [
     description:
       "Fai fatica a essere costante con l?allenamento? Scopri strategie realistiche per smettere di iniziare e mollare dopo pochi giorni.",
     canonical: "https://www.hypemove.app/come-essere-costanti-nell-allenamento",
+    robots: INDEXABLE_ROBOTS,
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - costanza nell'allenamento",
@@ -69,6 +76,7 @@ const routes = [
     description:
       "Guide semplici e realistiche per iniziare ad allenarti a casa, creare costanza e scegliere workout brevi adatti al tuo obiettivo.",
     canonical: "https://www.hypemove.app/guide",
+    robots: INDEXABLE_ROBOTS,
     ogType: "website",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - guide utili per allenarti a casa",
@@ -80,6 +88,7 @@ const routes = [
     description:
       "Cerchi un workout di 10 minuti a casa? Scopri un allenamento semplice, guidato e realistico per chi ha poco tempo e vuole rimettersi in moto.",
     canonical: "https://www.hypemove.app/workout-10-minuti-casa",
+    robots: INDEXABLE_ROBOTS,
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - workout 10 minuti a casa",
@@ -91,6 +100,7 @@ const routes = [
     description:
       "I mini workout da 5 o 10 minuti funzionano davvero? Scopri quando sono efficaci, per chi lo sono e perch? spesso battono i programmi perfetti mai iniziati.",
     canonical: "https://www.hypemove.app/mini-workout-efficaci",
+    robots: INDEXABLE_ROBOTS,
     ogType: "article",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - mini workout efficaci",
@@ -102,9 +112,21 @@ const routes = [
     description:
       "Gestisci la disiscrizione dalle email automatiche di promemoria e recupero abitudine di Hypemove.",
     canonical: "https://www.hypemove.app/unsubscribe",
+    robots: PRIVATE_ROBOTS,
     ogType: "website",
     ogImage: "https://www.hypemove.app/images/logo1.png",
     ogImageAlt: "Hypemove - disiscrizione email",
+  },
+  {
+    path: "/reset-password",
+    outputPath: path.join(projectRoot, "dist", "reset-password", "index.html"),
+    title: "Reimposta password | Hypemove",
+    description: "Reimposta la password del tuo account Hypemove.",
+    canonical: "https://www.hypemove.app/reset-password",
+    robots: PRIVATE_ROBOTS,
+    ogType: "website",
+    ogImage: "https://www.hypemove.app/images/logo1.png",
+    ogImageAlt: "Hypemove - reimposta password",
   },
 ];
 
@@ -123,6 +145,10 @@ function applySeo(html, route) {
     .replace(
       /<meta\s+name="description"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
       `<meta\n      name="description"\n      content="${route.description}"\n    />`
+    )
+    .replace(
+      /<meta\s+name="robots"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
+      `<meta\n      name="robots"\n      content="${route.robots ?? INDEXABLE_ROBOTS}"\n    />`
     )
     .replace(
       /<meta\s+property="og:type"\s+content="[^"]*"\s*\/>/,

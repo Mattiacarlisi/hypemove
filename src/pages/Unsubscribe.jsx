@@ -4,6 +4,21 @@ const HOME_URL = "https://hypemove.app";
 const FUNCTION_URL =
   "https://fiwskdxntgcredypplub.supabase.co/functions/v1/unsubscribe-lifecycle-emails";
 
+function usePrivateSeo() {
+  useEffect(() => {
+    document.title = "Disiscrizione email | Hypemove";
+
+    let robots = document.head.querySelector('meta[name="robots"]');
+    if (!robots) {
+      robots = document.createElement("meta");
+      robots.setAttribute("name", "robots");
+      document.head.appendChild(robots);
+    }
+
+    robots.setAttribute("content", "noindex, nofollow");
+  }, []);
+}
+
 function LogoMark() {
   return (
     <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
@@ -51,6 +66,8 @@ function HomeButton({ children = "Torna su Hypemove", variant = "primary" }) {
 }
 
 export default function Unsubscribe() {
+  usePrivateSeo();
+
   const [token, setToken] = useState("");
   const [status, setStatus] = useState("invalid");
 

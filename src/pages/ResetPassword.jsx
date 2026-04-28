@@ -4,7 +4,24 @@ import { Lock, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 
 const PRIMARY = "#335DFF";
 
+function usePrivateSeo() {
+  useEffect(() => {
+    document.title = "Reimposta password | Hypemove";
+
+    let robots = document.head.querySelector('meta[name="robots"]');
+    if (!robots) {
+      robots = document.createElement("meta");
+      robots.setAttribute("name", "robots");
+      document.head.appendChild(robots);
+    }
+
+    robots.setAttribute("content", "noindex, nofollow");
+  }, []);
+}
+
 export default function ResetPassword() {
+  usePrivateSeo();
+
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
