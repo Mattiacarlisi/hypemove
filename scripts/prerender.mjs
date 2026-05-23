@@ -213,6 +213,31 @@ function applySeo(html, route) {
   );
 }
 
+async function removeWithRetry(targetPath, attempts = 5) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === attempts || !["ENOTEMPTY", "EPERM", "EBUSY"].includes(error.code)) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, attempt * 200));
+    }
+  }
+}
+
+async function cleanupBuildServer() {
+  const targetPath = path.join(projectRoot, "dist-server");
+
+  try {
+    await removeWithRetry(targetPath);
+  } catch (error) {
+    console.warn(`Cleanup saltato per ${targetPath}: ${error.code ?? error.message}`);
+  }
+}
+
 for (const route of routes) {
   const appHtml = render(route.path);
   const rootMarkup = `<div id="root">${appHtml}</div>`;
@@ -222,4 +247,4 @@ for (const route of routes) {
   await fs.writeFile(route.outputPath, prerenderedHtml, "utf8");
   console.log(`Prerender completato per ${route.path}`);
 }
-await fs.rm(path.join(projectRoot, "dist-server"), { recursive: true, force: true });
+await cleanupBuildServer();

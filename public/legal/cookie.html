@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cookie Policy – Hypemove</title>
+
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #0d0d0d; --dark: #1a1a1a; --mid: #444; --muted: #777;
+    --light: #f2f1ef; --white: #fafaf8; --border: #e0deda; --warn-bg: #fff8f0; --warn-border: #c0580a; --warn-text: #5a3010;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--white); color: var(--dark); font-family: 'DM Sans', sans-serif; font-size: 16px; line-height: 1.75; font-weight: 300; }
+  .topbar { position: sticky; top: 0; z-index: 100; background: var(--white); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .topbar-logo { font-family: 'DM Serif Display', serif; font-size: 1.15rem; letter-spacing: -0.02em; color: var(--black); text-decoration: none; }
+  .topbar-nav { display: flex; gap: 1.5rem; }
+  .topbar-nav a { font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; letter-spacing: 0.04em; text-transform: uppercase; transition: color 0.2s; }
+  .topbar-nav a:hover { color: var(--black); }
+  .hero { background: var(--black); color: var(--white); padding: 5rem 2rem 4rem; text-align: center; }
+  .hero-label { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-bottom: 1.2rem; }
+  .hero h1 { font-family: 'DM Serif Display', serif; font-size: clamp(2.2rem, 5vw, 3.5rem); font-weight: 400; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 1.2rem; }
+  .hero-meta { font-size: 0.85rem; color: rgba(255,255,255,0.45); display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap; margin-top: 1.5rem; }
+  .layout { max-width: 860px; margin: 0 auto; padding: 4rem 2rem 6rem; }
+  .toc { background: var(--light); border: 1px solid var(--border); border-radius: 2px; padding: 2rem 2.5rem; margin-bottom: 3.5rem; }
+  .toc-title { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 1rem; }
+  .toc ol { list-style: none; counter-reset: toc; columns: 2; column-gap: 2rem; }
+  @media (max-width: 600px) { .toc ol { columns: 1; } .contacts-box, .rights-grid { grid-template-columns: 1fr !important; } }
+  .toc li { counter-increment: toc; padding: 0.3rem 0; font-size: 0.88rem; display: flex; gap: 0.6rem; align-items: baseline; }
+  .toc li::before { content: counter(toc, decimal-leading-zero); font-size: 0.7rem; font-weight: 600; color: var(--muted); flex-shrink: 0; }
+  .toc a { color: var(--dark); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .section { margin-bottom: 3.5rem; }
+  .section-header { display: flex; align-items: baseline; gap: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.8rem; margin-bottom: 1.5rem; }
+  .section-num { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; flex-shrink: 0; }
+  .section-title { font-family: 'DM Serif Display', serif; font-size: 1.35rem; font-weight: 400; letter-spacing: -0.02em; color: var(--black); }
+  p { margin-bottom: 1rem; color: var(--mid); font-size: 0.95rem; }
+  strong { color: var(--dark); font-weight: 600; }
+  a { color: var(--dark); }
+  .subsection { margin-bottom: 1.4rem; }
+  .subsection-title { font-weight: 600; font-size: 0.92rem; color: var(--black); margin-bottom: 0.5rem; }
+  ul.doc-list { list-style: none; margin: 0.5rem 0 1rem 0; padding: 0; }
+  ul.doc-list li { padding: 0.35rem 0 0.35rem 1.2rem; position: relative; font-size: 0.92rem; color: var(--mid); border-bottom: 1px solid var(--border); }
+  ul.doc-list li:last-child { border-bottom: none; }
+  ul.doc-list li::before { content: '—'; position: absolute; left: 0; color: var(--muted); font-size: 0.8rem; }
+  .callout { background: var(--light); border-left: 3px solid var(--black); padding: 1rem 1.4rem; margin: 1.2rem 0; font-size: 0.9rem; color: var(--dark); }
+  .callout strong { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--black); }
+  .warning-callout { background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: 1rem 1.4rem; margin: 1.2rem 0; font-size: 0.9rem; color: var(--warn-text); }
+  .warning-callout strong { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  thead tr { background: var(--black); color: white; }
+  thead th { padding: 0.75rem 1rem; text-align: left; font-weight: 600; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  tbody tr:nth-child(even) { background: var(--light); }
+  tbody td { padding: 0.7rem 1rem; color: var(--mid); border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+  tbody td:first-child { font-weight: 500; color: var(--dark); }
+  .contacts-box { border: 1px solid var(--border); padding: 1.5rem 2rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+  .contact-item label { display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
+  .contact-item a, .contact-item span { font-size: 0.9rem; color: var(--dark); text-decoration: none; }
+  .contact-item a:hover { text-decoration: underline; }
+  .rights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+  .right-item { border: 1px solid var(--border); padding: 1rem 1.2rem; }
+  .right-item .right-name { font-weight: 600; font-size: 0.85rem; color: var(--black); margin-bottom: 0.3rem; }
+  .right-item p { font-size: 0.85rem; margin: 0; }
+  footer { background: var(--black); color: rgba(255,255,255,0.35); text-align: center; padding: 2rem; font-size: 0.78rem; line-height: 1.8; }
+  footer a { color: rgba(255,255,255,0.5); text-decoration: none; }
+  footer a:hover { color: white; }
+  hr.section-divider { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+</style>
+
+</head>
+<body>
+
+<div class="topbar">
+  <a class="topbar-logo" href="#">Hypemove</a>
+  <nav class="topbar-nav">
+    <a href="termini.html">Termini</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="cookie.html">Cookie</a>
+  </nav>
+</div>
+
+
+<div class="hero">
+  <span class="hero-label">Documento legale</span>
+  <h1>Cookie Policy</h1>
+  <div class="hero-meta">
+    <span>Direttiva ePrivacy + GDPR</span>
+    <span>Versione 1.0</span>
+    <span>In vigore dal 23 maggio 2025</span>
+  </div>
+</div>
+
+<div class="layout">
+
+  <div class="callout">
+    <strong>Ambito di applicazione</strong>
+    La presente Cookie Policy si applica al sito web di Hypemove. L'app mobile non utilizza cookie tradizionali: utilizza SDK e identificativi tecnici del dispositivo descritti nell'Informativa Privacy, sezioni 02 e 04.
+  </div>
+
+  <!-- 1 -->
+  <div class="section" id="c1">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2 class="section-title">Cosa sono i cookie</h2>
+    </div>
+    <p>I cookie sono piccoli file di testo salvati sul tuo dispositivo quando visiti un sito web. Permettono al sito di riconoscere il tuo browser, ricordare le tue preferenze e raccogliere informazioni sul comportamento di navigazione.</p>
+    <p>Oltre ai cookie veri e propri, questa policy copre anche tecnologie analoghe come pixel, web beacon, localStorage e identificativi di sessione.</p>
+  </div>
+
+  <!-- 2 -->
+  <div class="section" id="c2">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2 class="section-title">Cookie utilizzati su questo sito</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Tipologia</th><th>Finalità</th><th>Fornitore</th><th>Durata</th><th>Consenso</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Cookie tecnici di sessione</td><td>Funzionamento base del sito, navigazione</td><td>Hypemove</td><td>Sessione</td><td>Non richiesto</td></tr>
+          <tr><td>Cookie di preferenza</td><td>Memorizzare impostazioni (lingua, consensi)</td><td>Hypemove</td><td>12 mesi</td><td>Non richiesto</td></tr>
+          <tr><td>Google Analytics (anonimizzato)</td><td>Statistiche aggregate di traffico sul sito</td><td>Google LLC</td><td>24 mesi</td><td>Non richiesto</td></tr>
+          <tr><td>Google Analytics (identificativo)</td><td>Analisi comportamento dei singoli utenti</td><td>Google LLC</td><td>24 mesi</td><td><strong>Richiesto</strong></td></tr>
+          <tr><td>Cookie di marketing / remarketing</td><td>Pubblicità personalizzata</td><td>Terzi</td><td>Variabile</td><td><strong>Richiesto</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">
+      <strong>Stato attuale</strong>
+      Al momento Hypemove utilizza sul sito solo cookie tecnici e Google Analytics in modalità anonimizzata (IP anonimizzato, senza cross-site tracking). I cookie identificativi e di marketing non sono attivi. Se venissero attivati, il banner di consenso verrà aggiornato di conseguenza e il consenso sarà richiesto prima dell'attivazione.
+    </div>
+  </div>
+
+  <!-- 3 -->
+  <div class="section" id="c3">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2 class="section-title">Google Analytics e trasferimento dati</h2>
+    </div>
+    <p>Il sito utilizza <strong>Google Analytics</strong>, un servizio di analisi web fornito da <strong>Google LLC</strong>, con sede negli USA. Google Analytics raccoglie informazioni sull'utilizzo del sito (pagine visitate, durata, provenienza, dispositivo) tramite cookie e le trasmette a server Google negli Stati Uniti.</p>
+    <p>Il trasferimento avviene in conformità alle Clausole Contrattuali Standard EU e al Data Processing Agreement stipulato con Google. L'indirizzo IP degli utenti è anonimizzato prima della trasmissione (funzione IP anonymization attiva).</p>
+    <p>Per maggiori informazioni sulla privacy policy di Google: <a href="https://policies.google.com/privacy" target="_blank">policies.google.com/privacy</a>. Per disattivare il tracciamento di Google Analytics: <a href="https://tools.google.com/dlpage/gaoptout" target="_blank">tools.google.com/dlpage/gaoptout</a></p>
+  </div>
+
+  <!-- 4 -->
+  <div class="section" id="c4">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2 class="section-title">Come gestire e disabilitare i cookie</h2>
+    </div>
+    <p>Puoi gestire, disabilitare o eliminare i cookie in qualsiasi momento tramite le impostazioni del tuo browser. Tieni presente che la disabilitazione dei cookie tecnici potrebbe compromettere il funzionamento del sito.</p>
+    <ul class="doc-list">
+      <li><strong>Chrome:</strong> Impostazioni → Privacy e sicurezza → Cookie e altri dati dei siti</li>
+      <li><strong>Safari:</strong> Preferenze → Privacy → Gestisci dati siti web</li>
+      <li><strong>Firefox:</strong> Impostazioni → Privacy e sicurezza → Cookie e dati del sito</li>
+      <li><strong>Edge:</strong> Impostazioni → Cookie e autorizzazioni sito</li>
+      <li><strong>Opera:</strong> Impostazioni → Avanzate → Privacy e sicurezza → Cookie</li>
+    </ul>
+    <p>Per la gestione dei cookie di profilazione di terzi puoi consultare anche: <a href="https://www.youronlinechoices.com" target="_blank">youronlinechoices.com</a></p>
+  </div>
+
+  <!-- 5 -->
+  <div class="section" id="c5">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2 class="section-title">Contatti e modifiche</h2>
+    </div>
+    <p>Per qualsiasi domanda relativa alla presente Cookie Policy: <strong><a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a></strong></p>
+    <p>Co-Titolari del Trattamento: <strong>Mattia Carlisi</strong> (P.IVA 13008420013) e <strong>Danilo Napolitano</strong>.</p>
+    <p>La presente Policy verrà aggiornata in caso di introduzione di nuovi cookie o modifica delle finalità di quelli esistenti. La data dell'ultima revisione è sempre indicata nell'intestazione del documento.</p>
+  </div>
+
+</div>
+
+<footer>
+  <p>© 2025 Hypemove — Co-fondatori: Mattia Carlisi (P.IVA 13008420013) &amp; Danilo Napolitano</p>
+  <p style="margin-top:0.5rem;">
+    <a href="termini.html">Termini e Condizioni</a> &nbsp;·&nbsp;
+    <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="cookie.html">Cookie Policy</a>
+  </p>
+</footer>
+
+</body>
+</html>

@@ -1,113 +1,343 @@
 ﻿<!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Informativa e Termini d'Uso - Hypemove</title>
-  <meta name="robots" content="noindex,follow" />
-  <style>
-    :root { --brand:#335DFF; --accent:#FFFF33; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin:0; color:#0f172a; background:#fff; line-height:1.6; }
-    header { background: var(--brand); color:#fff; padding:32px 16px; }
-    header .wrap, main, footer { max-width:860px; margin:0 auto; }
-    h1 { margin:0 0 8px 0; font-size:28px; }
-    header p { margin:0; opacity:.9 }
-    main { padding:24px 16px 48px; }
-    h2 { margin-top:28px; color:#111827; font-size:20px; }
-    ul { padding-left:18px; }
-    a { color: var(--brand); }
-    footer { padding:24px 16px; border-top:1px solid #e5e7eb; font-size:14px; color:#475569; text-align:center; }
-    .sign { margin-top:40px; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Informativa Privacy – Hypemove</title>
+
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #0d0d0d; --dark: #1a1a1a; --mid: #444; --muted: #777;
+    --light: #f2f1ef; --white: #fafaf8; --border: #e0deda; --warn-bg: #fff8f0; --warn-border: #c0580a; --warn-text: #5a3010;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--white); color: var(--dark); font-family: 'DM Sans', sans-serif; font-size: 16px; line-height: 1.75; font-weight: 300; }
+  .topbar { position: sticky; top: 0; z-index: 100; background: var(--white); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .topbar-logo { font-family: 'DM Serif Display', serif; font-size: 1.15rem; letter-spacing: -0.02em; color: var(--black); text-decoration: none; }
+  .topbar-nav { display: flex; gap: 1.5rem; }
+  .topbar-nav a { font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; letter-spacing: 0.04em; text-transform: uppercase; transition: color 0.2s; }
+  .topbar-nav a:hover { color: var(--black); }
+  .hero { background: var(--black); color: var(--white); padding: 5rem 2rem 4rem; text-align: center; }
+  .hero-label { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-bottom: 1.2rem; }
+  .hero h1 { font-family: 'DM Serif Display', serif; font-size: clamp(2.2rem, 5vw, 3.5rem); font-weight: 400; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 1.2rem; }
+  .hero-meta { font-size: 0.85rem; color: rgba(255,255,255,0.45); display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap; margin-top: 1.5rem; }
+  .layout { max-width: 860px; margin: 0 auto; padding: 4rem 2rem 6rem; }
+  .toc { background: var(--light); border: 1px solid var(--border); border-radius: 2px; padding: 2rem 2.5rem; margin-bottom: 3.5rem; }
+  .toc-title { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 1rem; }
+  .toc ol { list-style: none; counter-reset: toc; columns: 2; column-gap: 2rem; }
+  @media (max-width: 600px) { .toc ol { columns: 1; } .contacts-box, .rights-grid { grid-template-columns: 1fr !important; } }
+  .toc li { counter-increment: toc; padding: 0.3rem 0; font-size: 0.88rem; display: flex; gap: 0.6rem; align-items: baseline; }
+  .toc li::before { content: counter(toc, decimal-leading-zero); font-size: 0.7rem; font-weight: 600; color: var(--muted); flex-shrink: 0; }
+  .toc a { color: var(--dark); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .section { margin-bottom: 3.5rem; }
+  .section-header { display: flex; align-items: baseline; gap: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.8rem; margin-bottom: 1.5rem; }
+  .section-num { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; flex-shrink: 0; }
+  .section-title { font-family: 'DM Serif Display', serif; font-size: 1.35rem; font-weight: 400; letter-spacing: -0.02em; color: var(--black); }
+  p { margin-bottom: 1rem; color: var(--mid); font-size: 0.95rem; }
+  strong { color: var(--dark); font-weight: 600; }
+  a { color: var(--dark); }
+  .subsection { margin-bottom: 1.4rem; }
+  .subsection-title { font-weight: 600; font-size: 0.92rem; color: var(--black); margin-bottom: 0.5rem; }
+  ul.doc-list { list-style: none; margin: 0.5rem 0 1rem 0; padding: 0; }
+  ul.doc-list li { padding: 0.35rem 0 0.35rem 1.2rem; position: relative; font-size: 0.92rem; color: var(--mid); border-bottom: 1px solid var(--border); }
+  ul.doc-list li:last-child { border-bottom: none; }
+  ul.doc-list li::before { content: '—'; position: absolute; left: 0; color: var(--muted); font-size: 0.8rem; }
+  .callout { background: var(--light); border-left: 3px solid var(--black); padding: 1rem 1.4rem; margin: 1.2rem 0; font-size: 0.9rem; color: var(--dark); }
+  .callout strong { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--black); }
+  .warning-callout { background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: 1rem 1.4rem; margin: 1.2rem 0; font-size: 0.9rem; color: var(--warn-text); }
+  .warning-callout strong { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  thead tr { background: var(--black); color: white; }
+  thead th { padding: 0.75rem 1rem; text-align: left; font-weight: 600; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  tbody tr:nth-child(even) { background: var(--light); }
+  tbody td { padding: 0.7rem 1rem; color: var(--mid); border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+  tbody td:first-child { font-weight: 500; color: var(--dark); }
+  .contacts-box { border: 1px solid var(--border); padding: 1.5rem 2rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+  .contact-item label { display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
+  .contact-item a, .contact-item span { font-size: 0.9rem; color: var(--dark); text-decoration: none; }
+  .contact-item a:hover { text-decoration: underline; }
+  .rights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+  .right-item { border: 1px solid var(--border); padding: 1rem 1.2rem; }
+  .right-item .right-name { font-weight: 600; font-size: 0.85rem; color: var(--black); margin-bottom: 0.3rem; }
+  .right-item p { font-size: 0.85rem; margin: 0; }
+  footer { background: var(--black); color: rgba(255,255,255,0.35); text-align: center; padding: 2rem; font-size: 0.78rem; line-height: 1.8; }
+  footer a { color: rgba(255,255,255,0.5); text-decoration: none; }
+  footer a:hover { color: white; }
+  hr.section-divider { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+</style>
+
 </head>
 <body>
-  <header>
-    <div class="wrap">
-      <h1>INFORMATIVA E TERMINI D'USO - HYPEMOVE</h1>
-      <p>Ultimo aggiornamento: 15 Ottobre 2025</p>
+
+<div class="topbar">
+  <a class="topbar-logo" href="#">Hypemove</a>
+  <nav class="topbar-nav">
+    <a href="termini.html">Termini</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="cookie.html">Cookie</a>
+  </nav>
+</div>
+
+
+<div class="hero">
+  <span class="hero-label">Documento legale</span>
+  <h1>Informativa sul Trattamento<br><em>dei Dati Personali</em></h1>
+  <div class="hero-meta">
+    <span>GDPR — Reg. UE 2016/679</span>
+    <span>Versione 1.0</span>
+    <span>In vigore dal 23 maggio 2025</span>
+  </div>
+</div>
+
+<div class="layout">
+
+  <div class="toc">
+    <div class="toc-title">Indice</div>
+    <ol>
+      <li><a href="#p1">Co-Titolari del Trattamento</a></li>
+      <li><a href="#p2">Dati raccolti</a></li>
+      <li><a href="#p3">Finalità e basi giuridiche</a></li>
+      <li><a href="#p4">Fornitori terzi e trasferimento dati</a></li>
+      <li><a href="#p5">Provider di intelligenza artificiale</a></li>
+      <li><a href="#p6">Conservazione dei dati</a></li>
+      <li><a href="#p7">Comunicazioni di marketing</a></li>
+      <li><a href="#p8">Diritti dell'interessato</a></li>
+      <li><a href="#p9">Sicurezza dei dati</a></li>
+      <li><a href="#p10">Minori</a></li>
+      <li><a href="#p11">Modifiche</a></li>
+    </ol>
+  </div>
+
+  <div class="callout">
+    <strong>Nota introduttiva</strong>
+    La presente Informativa descrive come Hypemove raccoglie, utilizza, conserva e protegge i dati personali degli utenti, ai sensi degli artt. 13–14 del Regolamento UE 2016/679 (GDPR) e del D.Lgs. 196/2003 come modificato dal D.Lgs. 101/2018.
+  </div>
+
+  <!-- 1 -->
+  <div class="section" id="p1">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2 class="section-title">Co-Titolari del Trattamento e Contatti</h2>
     </div>
-  </header>
-
-  <main>
-    <h2>Premessa</h2>
-    <p>La presente Informativa e i Termini d'Uso disciplinano le modalità di utilizzo dell'applicazione e del sito web "Hypemove", nonché il trattamento dei dati personali degli utenti ai sensi del Regolamento (UE) 2016/679 ("GDPR") e della normativa italiana vigente. Hypemove è un progetto ideato e gestito da Mattia Carlisi e Danilo Napolitano, attualmente in fase di validazione e distribuito per finalità di test pubblico. Il sito ufficiale del progetto è <a href="https://hypemove.app" target="_blank" rel="noopener">https://hypemove.app</a>.</p>
-
-    <h2>1. Oggetto del Documento</h2>
-    <p>Il presente documento regola: (i) l'utilizzo dell'applicazione e dei servizi offerti da Hypemove, e (ii) il trattamento dei dati personali degli utenti connesso a tale utilizzo. L'accettazione integrale del presente documento è condizione necessaria per la registrazione e l'uso dell'app.</p>
-
-    <h2>2. Co-Titolari del Trattamento e Contatti</h2>
-    <p>I co-titolari del trattamento dei dati personali sono:</p>
-    <ul>
-      <li>Mattia Carlisi e Danilo Napolitano, fondatori del progetto "Hypemove".</li>
-      <li>E-mail di contatto unica: <a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a></li>
-    </ul>
-    <p>I co-titolari decidono congiuntamente le finalità e le modalità del trattamento dei dati personali raccolti tramite il sito e l'app Hypemove.</p>
-
-    <h2>3. Tipologia di Dati Trattati</h2>
-    <p>Hypemove raccoglie e tratta esclusivamente i dati personali strettamente necessari al funzionamento del servizio, tra cui:</p>
-    <ul>
-      <li>Dati identificativi e di contatto (nome, cognome, indirizzo e-mail);</li>
-      <li>Dati tecnici e di utilizzo (indirizzo IP, device ID, log di accesso);</li>
-      <li>Dati di utilizzo dell'applicazione, come progressi e preferenze, anche in forma anonima o aggregata.</li>
-    </ul>
-
-    <h2>4. Finalità e Base Giuridica del Trattamento</h2>
-    <p>I dati personali sono trattati per le seguenti finalità:</p>
-    <ul>
-      <li>a) Registrazione e gestione dell'account utente;</li>
-      <li>b) Fornitura dei servizi e delle funzionalità offerte da Hypemove;</li>
-      <li>c) Comunicazioni di servizio e aggiornamenti tecnici;</li>
-      <li>d) Adempimento di obblighi di legge o regolamentari.</li>
-    </ul>
-    <p>La base giuridica del trattamento è l'esecuzione di un contratto ai sensi dell'art. 6, par. 1, lett. b) del GDPR. Il conferimento dei dati è necessario per la registrazione e l'utilizzo dell'applicazione.</p>
-
-    <h2>5. Modalità di Trattamento e Sicurezza dei Dati</h2>
-    <p>I dati sono trattati in modo lecito, corretto e trasparente, mediante strumenti informatici e digitali. I co-titolari adottano misure tecniche e organizzative idonee a garantire la sicurezza, la riservatezza e l'integrità dei dati personali, in conformità con gli articoli 32 e seguenti del GDPR.</p>
-
-    <h2>6. Durata della Conservazione</h2>
-    <p>I dati personali vengono conservati per la durata del rapporto contrattuale tra l'utente e Hypemove e per un periodo massimo di 12 mesi successivi alla chiusura dell'account o all'ultima interazione con il servizio, salvo obblighi di legge diversi.</p>
-
-    <h2>7. Comunicazione dei Dati a Terzi e Trasferimenti Extra UE</h2>
-    <p>I dati possono essere comunicati a fornitori di servizi tecnologici (es. hosting, database, servizi di analisi) nominati Responsabili del Trattamento ai sensi dell'art. 28 GDPR. Eventuali trasferimenti verso Paesi extra UE (es. Google LLC, Firebase) avvengono nel rispetto degli articoli 44-49 del GDPR, mediante l'adozione di Clausole Contrattuali Standard approvate dalla Commissione Europea.</p>
-
-    <h2>8. Diritti dell'Utente</h2>
-    <p>L'utente può esercitare in qualsiasi momento i diritti previsti dagli articoli 15-22 del GDPR, tra cui:</p>
-    <ul>
-      <li>Accesso ai propri dati personali;</li>
-      <li>Rettifica o cancellazione dei dati ("diritto all'oblio");</li>
-      <li>Limitazione o opposizione al trattamento;</li>
-      <li>Portabilità dei dati;</li>
-      <li>Revoca del consenso, senza pregiudicare la liceità del trattamento basato sul consenso prestato prima della revoca.</li>
-    </ul>
-    <p>Le richieste possono essere inviate via e-mail a: <a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a>.</p>
-
-    <h2>9. Termini d'Uso dell'Applicazione</h2>
-    <p>L'app Hypemove è destinata a utenti adulti e in buone condizioni di salute. L'utente si impegna a utilizzare l'app in modo conforme alle leggi vigenti, al buon senso e al presente documento. È vietato qualsiasi utilizzo improprio dell'applicazione, incluso l'uso dei contenuti per scopi non consentiti o dannosi.</p>
-
-    <h2>10. Esclusione di Responsabilità</h2>
-    <p>I contenuti dell'app e del sito Hypemove, inclusi esercizi, programmi di allenamento, testi e video, hanno esclusivamente finalità informative e di benessere generale. Essi non costituiscono prescrizione medica né sostituiscono il parere di un medico, fisioterapista o altro professionista sanitario qualificato.</p>
-    <p>L'utente utilizza l'applicazione sotto la propria esclusiva responsabilità. I co-titolari del progetto Hypemove non potranno essere ritenuti responsabili per eventuali infortuni, danni fisici o materiali derivanti dall'uso dell'app o dall'esecuzione degli esercizi proposti. In caso di dubbi sulle proprie condizioni fisiche, l'utente è tenuto a consultare un medico prima di iniziare qualsiasi attività.</p>
-
-    <h2>11. Manleva e Limitazioni di Responsabilità</h2>
-    <p>L'utente accetta di manlevare e tenere indenni i co-titolari del progetto Hypemove da qualsiasi pretesa, reclamo o azione legale derivante dall'utilizzo improprio o non conforme dell'applicazione e dei suoi contenuti.</p>
-
-    <h2>12. Accettazione e Validità</h2>
-    <p>L'uso dell'app Hypemove implica l'accettazione integrale della presente Informativa e dei Termini d'Uso. La mancata accettazione del presente documento comporta l'impossibilità di utilizzare l'applicazione. Il consenso espresso mediante la spunta del flag al momento della registrazione costituisce accettazione legale a tutti gli effetti.</p>
-
-    <h2>13. Aggiornamenti del Documento</h2>
-    <p>I co-titolari si riservano il diritto di modificare in qualsiasi momento la presente Informativa e i Termini d'Uso. Le modifiche saranno pubblicate sul sito ufficiale <a href="https://hypemove.app" target="_blank" rel="noopener">https://hypemove.app</a> e considerate valide dal momento della loro pubblicazione.</p>
-
-    <div class="sign">
-      <p><strong>Firmato digitalmente:</strong><br>
-      Mattia Carlisi e Danilo Napolitano<br>
-      Co-titolari del progetto Hypemove<br>
-      <a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a><br>
-      <a href="https://hypemove.app" target="_blank" rel="noopener">https://hypemove.app</a></p>
+    <p>Hypemove è un progetto ideato e gestito congiuntamente da <strong>Mattia Carlisi</strong> e <strong>Danilo Napolitano</strong>, co-fondatori. Entrambi accedono ai dati degli utenti nell'ambito della gestione operativa del Servizio e sono pertanto <strong>Co-Titolari del Trattamento</strong> ai sensi dell'art. 26 GDPR.</p>
+    <p>Ai fini fiscali e contrattuali, il Servizio è gestito da <strong>Mattia Carlisi</strong>, Ditta Individuale, P.IVA <strong>13008420013</strong>, Via Ventimiglia 16 int. 7, Torino (TO), Italia.</p>
+    <p>I Co-Titolari hanno concordato che ogni richiesta relativa al trattamento dei dati personali possa essere indirizzata indifferentemente a entrambi tramite l'unico indirizzo di contatto sotto indicato, che risponderà entro 30 giorni.</p>
+    <div class="contacts-box">
+      <div class="contact-item"><label>Co-Titolare 1</label><span>Mattia Carlisi — P.IVA 13008420013</span></div>
+      <div class="contact-item"><label>Co-Titolare 2</label><span>Danilo Napolitano</span></div>
+      <div class="contact-item"><label>Email unica di contatto</label><a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a></div>
+      <div class="contact-item"><label>Sede operativa</label><span>Via Ventimiglia 16 int. 7, Torino (TO)</span></div>
     </div>
-  </main>
+  </div>
 
-  <footer>
-    © Hypemove - Tutti i diritti riservati
-  </footer>
+  <!-- 2 -->
+  <div class="section" id="p2">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2 class="section-title">Dati raccolti</h2>
+    </div>
+
+    <div class="subsection">
+      <div class="subsection-title">Dati forniti direttamente dall'utente</div>
+      <ul class="doc-list">
+        <li>Indirizzo email (per registrazione e comunicazioni di servizio)</li>
+        <li>Nome o nickname (facoltativo)</li>
+        <li>Data di nascita o dichiarazione di maggiore età</li>
+        <li>Informazioni sul profilo fisico: livello di fitness, obiettivo di allenamento, eventuali vincoli o preferenze dichiarati</li>
+        <li>Dati di pagamento: gestiti interamente da Apple App Store o Google Play Store — i Co-Titolari non vedono né conservano i dati della carta di credito o di qualsiasi altro strumento di pagamento</li>
+      </ul>
+    </div>
+
+    <div class="subsection">
+      <div class="subsection-title">Dati raccolti automaticamente durante l'utilizzo dell'app</div>
+      <ul class="doc-list">
+        <li>Dati di utilizzo: workout completati, workout abbandonati, progressi nella roadmap, streak, interazioni con le funzionalità di gamification</li>
+        <li>Feedback espliciti: esercizi sostituiti, esercizi esclusi, valutazioni di difficoltà, preferenze espresse in-app</li>
+        <li>Dati tecnici: tipo di dispositivo, versione del sistema operativo, versione dell'App, identificativi anonimi del dispositivo</li>
+        <li>Dati di crash, log tecnici e segnalazioni di errore per la risoluzione di problemi</li>
+      </ul>
+    </div>
+
+    <div class="subsection">
+      <div class="subsection-title">Dati raccolti tramite strumenti di analisi (sito web e app)</div>
+      <ul class="doc-list">
+        <li>Dati di navigazione sul sito web: pagine visitate, durata della sessione, provenienza del traffico, tipo di dispositivo e browser — tramite Google Analytics</li>
+        <li>Dati comportamentali in-app: eventi, funzionalità utilizzate, percorso dell'utente all'interno dell'applicazione — tramite Firebase / Google Analytics for Firebase o strumenti analoghi</li>
+      </ul>
+    </div>
+
+    <div class="callout">
+      <strong>Cosa non raccogliamo</strong>
+      Hypemove non raccoglie dati biometrici, dati sanitari ai sensi dell'art. 9 GDPR (categorie particolari), posizione GPS, rubrica contatti o dati di terzi senza consenso esplicito dell'utente.
+    </div>
+  </div>
+
+  <!-- 3 -->
+  <div class="section" id="p3">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2 class="section-title">Finalità e basi giuridiche del trattamento</h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Finalità</th><th>Base giuridica GDPR</th></tr></thead>
+        <tbody>
+          <tr><td>Erogazione del Servizio (account, roadmap, gamification)</td><td>Esecuzione del contratto — art. 6.1.b</td></tr>
+          <tr><td>Gestione abbonamento Premium e fatturazione</td><td>Esecuzione del contratto — art. 6.1.b</td></tr>
+          <tr><td>Personalizzazione AI del percorso (Premium)</td><td>Esecuzione del contratto — art. 6.1.b</td></tr>
+          <tr><td>Comunicazioni di servizio (promemoria, aggiornamenti tecnici, notifiche)</td><td>Legittimo interesse — art. 6.1.f</td></tr>
+          <tr><td>Analisi aggregate e anonime per il miglioramento del prodotto</td><td>Legittimo interesse — art. 6.1.f</td></tr>
+          <tr><td>Analisi comportamentale identificativa tramite strumenti terzi</td><td>Consenso — art. 6.1.a</td></tr>
+          <tr><td>Comunicazioni di marketing, newsletter e promozioni</td><td>Consenso — art. 6.1.a (separato, revocabile)</td></tr>
+          <tr><td>Adempimento obblighi fiscali e contabili</td><td>Obbligo legale — art. 6.1.c</td></tr>
+          <tr><td>Tutela legale in caso di controversie</td><td>Legittimo interesse — art. 6.1.f</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 4 -->
+  <div class="section" id="p4">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2 class="section-title">Fornitori terzi, Responsabili del Trattamento e trasferimento dati</h2>
+    </div>
+    <p>Per erogare il Servizio, i Co-Titolari si avvalgono di fornitori tecnici terzi che trattano dati personali per loro conto in qualità di <strong>Responsabili del Trattamento</strong> ai sensi dell'art. 28 GDPR. Di seguito i principali:</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Fornitore</th><th>Finalità</th><th>Paese / trasferimento extra-UE</th></tr></thead>
+        <tbody>
+          <tr><td>Supabase</td><td>Database, autenticazione, backend</td><td>UE / USA — SCC</td></tr>
+          <tr><td>Google Analytics / Firebase</td><td>Analisi sito web e comportamento in-app</td><td>USA — SCC + DPA Google</td></tr>
+          <tr><td>Resend</td><td>Invio email transazionali e di servizio</td><td>USA — SCC</td></tr>
+          <tr><td>Apple App Store / Google Play</td><td>Distribuzione app e gestione pagamenti</td><td>USA — SCC</td></tr>
+          <tr><td>Provider AI (vedi sez. 05)</td><td>Personalizzazione percorso Premium</td><td>USA — SCC</td></tr>
+          <tr><td>Altri fornitori tecnici</td><td>Infrastruttura, monitoring, sicurezza</td><td>Variabile — garanzie adeguate</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Ove i dati vengano trasferiti fuori dall'Unione Europea, i Co-Titolari garantiscono l'adozione di misure di salvaguardia adeguate ai sensi del Capo V GDPR, in particolare le <strong>Clausole Contrattuali Standard (SCC)</strong> adottate dalla Commissione Europea. <strong>I dati degli utenti non vengono mai venduti a terzi.</strong></p>
+  </div>
+
+  <!-- 5 -->
+  <div class="section" id="p5">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2 class="section-title">Provider di intelligenza artificiale</h2>
+    </div>
+    <p>Il Servizio, in particolare nella versione Premium, utilizza API di sistemi di intelligenza artificiale di terzi per la generazione e la personalizzazione adattiva del percorso di allenamento dell'utente. I provider attualmente utilizzati o valutati includono, a titolo esemplificativo e non esaustivo:</p>
+    <ul class="doc-list">
+      <li><strong>Anthropic, PBC</strong> (Claude API) — sede negli USA</li>
+      <li><strong>OpenAI, LLC</strong> (GPT API) — sede negli USA</li>
+      <li>Altri provider di AI equivalenti, che verranno indicati in aggiornamenti della presente Informativa</li>
+    </ul>
+    <p>Quando il Servizio elabora una richiesta tramite queste API, i dati del profilo utente necessari alla personalizzazione (obiettivo, livello, preferenze, vincoli, storico comportamentale anonimizzato) vengono trasmessi ai server del provider AI per l'elaborazione. Questi provider:</p>
+    <ul class="doc-list">
+      <li>Operano come Responsabili del Trattamento ai sensi di appositi Data Processing Agreement</li>
+      <li>Hanno sede negli USA: il trasferimento avviene nel rispetto delle Clausole Contrattuali Standard EU</li>
+      <li>Non utilizzano i dati trasmessi tramite API per addestrare i propri modelli (in base alle condizioni contrattuali standard dei rispettivi DPA)</li>
+    </ul>
+    <div class="callout">
+      <strong>Cosa questo significa per te</strong>
+      I tuoi dati di profilo (non il tuo nome o email, ma obiettivo, livello e preferenze di allenamento) vengono elaborati da sistemi AI per costruire il tuo percorso personalizzato. Questo trattamento è necessario per erogare la funzionalità Premium e rientra nella base giuridica dell'esecuzione del contratto.
+    </div>
+  </div>
+
+  <!-- 6 -->
+  <div class="section" id="p6">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2 class="section-title">Conservazione dei dati</h2>
+    </div>
+    <ul class="doc-list">
+      <li>Dati di account e profilo: per tutta la durata del rapporto contrattuale e per 2 anni dalla cancellazione dell'account, salvo obblighi di legge più lunghi</li>
+      <li>Dati fiscali e contabili: 10 anni ai sensi della normativa fiscale italiana (D.P.R. 600/1973)</li>
+      <li>Dati di utilizzo e comportamentali in-app: 24 mesi dalla raccolta, poi aggregati e anonimizzati</li>
+      <li>Consenso marketing e relative comunicazioni: fino alla revoca del consenso, poi cancellati entro 30 giorni</li>
+      <li>Log tecnici e dati di crash: massimo 12 mesi</li>
+      <li>Dati trattati per legittimo interesse (es. tutela legale): fino a prescrizione del relativo diritto</li>
+    </ul>
+  </div>
+
+  <!-- 7 -->
+  <div class="section" id="p7">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <h2 class="section-title">Comunicazioni di marketing</h2>
+    </div>
+    <p>Con il tuo <strong>consenso esplicito e separato</strong> — fornito tramite apposito checkbox durante la registrazione o successivamente nelle impostazioni dell'app — potremo inviarti comunicazioni promozionali, newsletter, offerte speciali e aggiornamenti su nuove funzionalità di Hypemove.</p>
+    <p>Il consenso al marketing è <strong>sempre facoltativo</strong>: puoi utilizzare l'App pienamente anche senza averlo fornito. Non condizionare l'accesso al Servizio al consenso marketing è un tuo diritto garantito dal GDPR.</p>
+    <p><strong>Puoi revocare il consenso in qualsiasi momento</strong> tramite:</p>
+    <ul class="doc-list">
+      <li>Il link di disiscrizione presente in ogni email promozionale</li>
+      <li>Le impostazioni di notifica e marketing all'interno dell'App</li>
+      <li>Richiesta diretta a <a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a></li>
+    </ul>
+    <p>La revoca non pregiudica la liceità del trattamento effettuato prima della revoca stessa. I tuoi dati non vengono mai ceduti a terzi per finalità di marketing.</p>
+  </div>
+
+  <!-- 8 -->
+  <div class="section" id="p8">
+    <div class="section-header">
+      <span class="section-num">08</span>
+      <h2 class="section-title">Diritti dell'interessato</h2>
+    </div>
+    <p>Ai sensi degli artt. 15–22 GDPR, hai diritto di:</p>
+    <div class="rights-grid">
+      <div class="right-item"><div class="right-name">Accesso (art. 15)</div><p>Ottenere conferma del trattamento e copia dei tuoi dati personali</p></div>
+      <div class="right-item"><div class="right-name">Rettifica (art. 16)</div><p>Richiedere la correzione di dati inesatti o incompleti</p></div>
+      <div class="right-item"><div class="right-name">Cancellazione (art. 17)</div><p>Richiedere l'eliminazione dei tuoi dati ("diritto all'oblio"), salvo obblighi di conservazione legale</p></div>
+      <div class="right-item"><div class="right-name">Limitazione (art. 18)</div><p>Richiedere la sospensione del trattamento in determinati casi previsti dalla legge</p></div>
+      <div class="right-item"><div class="right-name">Portabilità (art. 20)</div><p>Ricevere i tuoi dati in formato strutturato, leggibile da macchina e trasferibile</p></div>
+      <div class="right-item"><div class="right-name">Opposizione (art. 21)</div><p>Opporti al trattamento basato su legittimo interesse o per finalità di marketing diretto</p></div>
+      <div class="right-item"><div class="right-name">Revoca consenso (art. 7)</div><p>Revocare in qualsiasi momento qualsiasi consenso prestato, senza pregiudizio per il trattamento precedente</p></div>
+      <div class="right-item"><div class="right-name">Reclamo (art. 77)</div><p>Proporre reclamo al Garante per la protezione dei dati personali — <a href="https://www.garanteprivacy.it" target="_blank">garanteprivacy.it</a></p></div>
+    </div>
+    <p style="margin-top:1.2rem;">Per esercitare qualsiasi diritto scrivi a: <strong><a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a></strong>. I Co-Titolari risponderanno entro <strong>30 giorni</strong> dalla ricezione della richiesta.</p>
+  </div>
+
+  <!-- 9 -->
+  <div class="section" id="p9">
+    <div class="section-header">
+      <span class="section-num">09</span>
+      <h2 class="section-title">Sicurezza dei dati</h2>
+    </div>
+    <p>I Co-Titolari adottano misure tecniche e organizzative adeguate — in conformità allo stato dell'arte e ai principi di <em>privacy by design</em> e <em>privacy by default</em> — per proteggere i dati personali da accessi non autorizzati, perdita, distruzione, alterazione o divulgazione non consentita.</p>
+    <p>In caso di violazione dei dati personali (data breach) che presenti un rischio per i diritti e le libertà degli interessati, i Co-Titolari provvederanno a notificare l'evento al Garante per la protezione dei dati personali entro <strong>72 ore</strong> dalla scoperta, ai sensi dell'art. 33 GDPR, e agli utenti interessati senza ingiustificato ritardo ove il rischio sia elevato, ai sensi dell'art. 34 GDPR.</p>
+  </div>
+
+  <!-- 10 -->
+  <div class="section" id="p10">
+    <div class="section-header">
+      <span class="section-num">10</span>
+      <h2 class="section-title">Minori</h2>
+    </div>
+    <p>Il Servizio è riservato esclusivamente a persone che abbiano compiuto <strong>18 anni</strong>. I Co-Titolari non raccolgono consapevolmente dati personali di minori. Qualora venisse rilevata o segnalata la raccolta involontaria di dati di un minore, i Co-Titolari procederanno alla cancellazione immediata e definitiva di tutti i dati associati all'account, senza possibilità di recupero.</p>
+  </div>
+
+  <!-- 11 -->
+  <div class="section" id="p11">
+    <div class="section-header">
+      <span class="section-num">11</span>
+      <h2 class="section-title">Modifiche alla presente Informativa</h2>
+    </div>
+    <p>I Co-Titolari si riservano il diritto di aggiornare la presente Informativa per riflettere modifiche normative, tecniche o operative — inclusa l'introduzione di nuovi fornitori terzi o provider AI. Le modifiche rilevanti saranno comunicate tramite notifica nell'App o via email. La versione aggiornata, con data di entrata in vigore, sarà sempre disponibile su questa pagina.</p>
+  </div>
+
+</div>
+
+<footer>
+  <p>© 2025 Hypemove — Co-fondatori: Mattia Carlisi (P.IVA 13008420013) &amp; Danilo Napolitano</p>
+  <p style="margin-top:0.5rem;">
+    <a href="termini.html">Termini e Condizioni</a> &nbsp;·&nbsp;
+    <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="cookie.html">Cookie Policy</a>
+  </p>
+</footer>
+
 </body>
 </html>

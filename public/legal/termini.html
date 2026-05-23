@@ -1,0 +1,376 @@
+﻿<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Termini e Condizioni d'Uso – Hypemove</title>
+ 
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #0d0d0d; --dark: #1a1a1a; --mid: #444; --muted: #777;
+    --light: #f2f1ef; --white: #fafaf8; --border: #e0deda; --warn-bg: #fff8f0; --warn-border: #c0580a; --warn-text: #5a3010;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--white); color: var(--dark); font-family: 'DM Sans', sans-serif; font-size: 16px; line-height: 1.75; font-weight: 300; }
+  .topbar { position: sticky; top: 0; z-index: 100; background: var(--white); border-bottom: 1px solid var(--border); padding: 0 2rem; display: flex; align-items: center; justify-content: space-between; height: 56px; }
+  .topbar-logo { font-family: 'DM Serif Display', serif; font-size: 1.15rem; letter-spacing: -0.02em; color: var(--black); text-decoration: none; }
+  .topbar-nav { display: flex; gap: 1.5rem; }
+  .topbar-nav a { font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; letter-spacing: 0.04em; text-transform: uppercase; transition: color 0.2s; }
+  .topbar-nav a:hover { color: var(--black); }
+  .hero { background: var(--black); color: var(--white); padding: 5rem 2rem 4rem; text-align: center; }
+  .hero-label { display: inline-block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-bottom: 1.2rem; }
+  .hero h1 { font-family: 'DM Serif Display', serif; font-size: clamp(2.2rem, 5vw, 3.5rem); font-weight: 400; line-height: 1.1; letter-spacing: -0.03em; margin-bottom: 1.2rem; }
+  .hero-meta { font-size: 0.85rem; color: rgba(255,255,255,0.45); display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap; margin-top: 1.5rem; }
+  .layout { max-width: 860px; margin: 0 auto; padding: 4rem 2rem 6rem; }
+  .toc { background: var(--light); border: 1px solid var(--border); border-radius: 2px; padding: 2rem 2.5rem; margin-bottom: 3.5rem; }
+  .toc-title { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 1rem; }
+  .toc ol { list-style: none; counter-reset: toc; columns: 2; column-gap: 2rem; }
+  @media (max-width: 600px) { .toc ol { columns: 1; } .contacts-box, .rights-grid { grid-template-columns: 1fr !important; } }
+  .toc li { counter-increment: toc; padding: 0.3rem 0; font-size: 0.88rem; display: flex; gap: 0.6rem; align-items: baseline; }
+  .toc li::before { content: counter(toc, decimal-leading-zero); font-size: 0.7rem; font-weight: 600; color: var(--muted); flex-shrink: 0; }
+  .toc a { color: var(--dark); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .section { margin-bottom: 3.5rem; }
+  .section-header { display: flex; align-items: baseline; gap: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.8rem; margin-bottom: 1.5rem; }
+  .section-num { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; flex-shrink: 0; }
+  .section-title { font-family: 'DM Serif Display', serif; font-size: 1.35rem; font-weight: 400; letter-spacing: -0.02em; color: var(--black); }
+  p { margin-bottom: 1rem; color: var(--mid); font-size: 0.95rem; }
+  strong { color: var(--dark); font-weight: 600; }
+  a { color: var(--dark); }
+  .subsection { margin-bottom: 1.4rem; }
+  .subsection-title { font-weight: 600; font-size: 0.92rem; color: var(--black); margin-bottom: 0.5rem; }
+  ul.doc-list { list-style: none; margin: 0.5rem 0 1rem 0; padding: 0; }
+  ul.doc-list li { padding: 0.35rem 0 0.35rem 1.2rem; position: relative; font-size: 0.92rem; color: var(--mid); border-bottom: 1px solid var(--border); }
+  ul.doc-list li:last-child { border-bottom: none; }
+  ul.doc-list li::before { content: '—'; position: absolute; left: 0; color: var(--muted); font-size: 0.8rem; }
+  .callout { background: var(--light); border-left: 3px solid var(--black); padding: 1rem 1.4rem; margin: 1.2rem 0; font-size: 0.9rem; color: var(--dark); }
+  .callout strong { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--black); }
+  .warning-callout { background: var(--warn-bg); border-left: 3px solid var(--warn-border); padding: 1rem 1.4rem; margin: 1.2rem 0; font-size: 0.9rem; color: var(--warn-text); }
+  .warning-callout strong { display: block; margin-bottom: 0.3rem; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .table-wrap { overflow-x: auto; margin: 1rem 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  thead tr { background: var(--black); color: white; }
+  thead th { padding: 0.75rem 1rem; text-align: left; font-weight: 600; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  tbody tr:nth-child(even) { background: var(--light); }
+  tbody td { padding: 0.7rem 1rem; color: var(--mid); border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+  tbody td:first-child { font-weight: 500; color: var(--dark); }
+  .contacts-box { border: 1px solid var(--border); padding: 1.5rem 2rem; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+  .contact-item label { display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.3rem; }
+  .contact-item a, .contact-item span { font-size: 0.9rem; color: var(--dark); text-decoration: none; }
+  .contact-item a:hover { text-decoration: underline; }
+  .rights-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+  .right-item { border: 1px solid var(--border); padding: 1rem 1.2rem; }
+  .right-item .right-name { font-weight: 600; font-size: 0.85rem; color: var(--black); margin-bottom: 0.3rem; }
+  .right-item p { font-size: 0.85rem; margin: 0; }
+  footer { background: var(--black); color: rgba(255,255,255,0.35); text-align: center; padding: 2rem; font-size: 0.78rem; line-height: 1.8; }
+  footer a { color: rgba(255,255,255,0.5); text-decoration: none; }
+  footer a:hover { color: white; }
+  hr.section-divider { border: none; border-top: 1px solid var(--border); margin: 3rem 0; }
+</style>
+ 
+</head>
+<body>
+ 
+<div class="topbar">
+  <a class="topbar-logo" href="#">Hypemove</a>
+  <nav class="topbar-nav">
+    <a href="termini.html">Termini</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="cookie.html">Cookie</a>
+  </nav>
+</div>
+ 
+ 
+<div class="hero">
+  <span class="hero-label">Documento legale</span>
+  <h1>Termini e Condizioni<br><em>d'Uso</em></h1>
+  <div class="hero-meta">
+    <span>Versione 1.0</span>
+    <span>In vigore dal 23 maggio 2025</span>
+    <span>Lingua: Italiano</span>
+  </div>
+</div>
+ 
+<div class="layout">
+ 
+  <div class="toc">
+    <div class="toc-title">Indice degli articoli</div>
+    <ol>
+      <li><a href="#art1">Identificazione del Gestore</a></li>
+      <li><a href="#art2">Natura del Servizio</a></li>
+      <li><a href="#art3">Avvertenze sanitarie e rischio</a></li>
+      <li><a href="#art4">Esclusione di responsabilità</a></li>
+      <li><a href="#art5">Registrazione e account</a></li>
+      <li><a href="#art6">Piano gratuito e Premium</a></li>
+      <li><a href="#art7">Proprietà intellettuale</a></li>
+      <li><a href="#art8">Condotte vietate</a></li>
+      <li><a href="#art9">Sospensione del Servizio</a></li>
+      <li><a href="#art10">Modifiche ai Termini</a></li>
+      <li><a href="#art11">Legge e foro competente</a></li>
+      <li><a href="#art12">Contatti</a></li>
+    </ol>
+  </div>
+ 
+  <div class="callout">
+    <strong>Prima di continuare</strong>
+    Leggere attentamente il presente documento prima di utilizzare l'applicazione Hypemove o di sottoscrivere qualsiasi piano a pagamento. L'utilizzo dell'app o il completamento della registrazione implica l'accettazione integrale dei presenti Termini e Condizioni.
+  </div>
+ 
+  <!-- ART 1 -->
+  <div class="section" id="art1">
+    <div class="section-header">
+      <span class="section-num">Art. 01</span>
+      <h2 class="section-title">Identificazione del Gestore e del Progetto</h2>
+    </div>
+    <p>Il servizio denominato <strong>Hypemove</strong> (di seguito "il Servizio" o "l'App") è un progetto ideato e sviluppato da <strong>Mattia Carlisi</strong> e <strong>Danilo Napolitano</strong>, co-fondatori.</p>
+    <p>Ai fini contrattuali e fiscali, il Servizio è gestito e fatturato da <strong>Mattia Carlisi</strong>, Ditta Individuale, P.IVA <strong>13008420013</strong>, con domicilio fiscale in Via Ventimiglia 16 int. 7, Torino (TO), Italia (di seguito "il Gestore").</p>
+    <p>L'applicazione è distribuita tramite Apple App Store e Google Play Store. Il Servizio è rivolto esclusivamente a persone fisiche che abbiano compiuto <strong>18 anni</strong>. Chiunque acceda al Servizio da un Paese diverso dall'Italia è responsabile del rispetto della normativa locale applicabile.</p>
+  </div>
+ 
+  <!-- ART 2 -->
+  <div class="section" id="art2">
+    <div class="section-header">
+      <span class="section-num">Art. 02</span>
+      <h2 class="section-title">Natura del Servizio</h2>
+    </div>
+    <p>Hypemove è un'applicazione mobile di supporto all'attività motoria e alla costruzione di abitudini di movimento. Il Servizio fornisce:</p>
+    <ul class="doc-list">
+      <li>Piani di esercizio fisico strutturati ("roadmap"), suddivisi in sessioni di breve durata</li>
+      <li>Contenuti video e/o testuali relativi a esercizi motori</li>
+      <li>Strumenti di gamification (punti esperienza, streak, monete virtuali, badge) per la motivazione e la continuità</li>
+      <li>Funzionalità di tracciamento dei progressi dell'utente</li>
+      <li>Nella versione Premium: personalizzazione adattiva del percorso tramite algoritmi e sistemi di intelligenza artificiale forniti da terzi</li>
+    </ul>
+    <div class="warning-callout">
+      <strong>Importante — natura non medica del servizio</strong>
+      Hypemove <strong>non è un servizio medico, sanitario, riabilitativo o terapeutico</strong>. I contenuti dell'App non costituiscono diagnosi, prescrizione, trattamento o consulenza medica, fisioterapica o nutrizionale e non sostituiscono in alcun modo il parere di un professionista della salute qualificato.
+    </div>
+  </div>
+ 
+  <!-- ART 3 -->
+  <div class="section" id="art3">
+    <div class="section-header">
+      <span class="section-num">Art. 03</span>
+      <h2 class="section-title">Avvertenze sanitarie, idoneità fisica e assunzione di rischio</h2>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">3.1 — Consulenza medica preventiva obbligatoria</div>
+      <p>Prima di iniziare qualsiasi programma di attività fisica proposto da Hypemove, l'utente è tenuto a consultare il proprio medico curante o uno specialista, in particolare in presenza di:</p>
+      <ul class="doc-list">
+        <li>Patologie cardiovascolari, ipertensione arteriosa o storia di eventi cardiaci</li>
+        <li>Patologie osteoarticolari, muscolari o ortopediche pregresse o in corso</li>
+        <li>Gravidanza o periodo post-partum</li>
+        <li>Patologie respiratorie croniche (asma, BPCO o simili)</li>
+        <li>Diabete o altre patologie metaboliche</li>
+        <li>Uso di farmaci che possono interagire con lo sforzo fisico</li>
+        <li>Sovrappeso significativo o obesità</li>
+        <li>Qualsiasi altra condizione di salute che possa essere influenzata dall'attività fisica</li>
+      </ul>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">3.2 — Assunzione volontaria del rischio</div>
+      <p>L'utente riconosce e accetta che qualsiasi forma di attività fisica comporta un rischio intrinseco di infortunio, anche in assenza di negligenza da parte del Gestore. L'utente partecipa alle attività proposte dall'App in modo volontario, consapevole e sotto la propria esclusiva responsabilità, assumendo su di sé ogni rischio connesso all'esecuzione degli esercizi.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">3.3 — Obbligo di interruzione immediata</div>
+      <p>L'utente si impegna a interrompere immediatamente qualsiasi attività fisica e a consultare un medico in presenza di: dolore acuto o persistente, malessere generale, vertigini, difficoltà respiratorie, dolore toracico, palpitazioni, nausea o qualsiasi altro sintomo anomalo durante o dopo l'esercizio.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">3.4 — Idoneità dichiarata dall'utente</div>
+      <p>Completando la registrazione e accettando i presenti Termini, l'utente dichiara espressamente di essere fisicamente idoneo alla pratica di attività motoria, di non avere controindicazioni mediche note che ne impediscano l'esecuzione, oppure di avere ottenuto il preventivo parere favorevole del proprio medico.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">3.5 — Minori</div>
+      <p>L'utilizzo del Servizio è consentito esclusivamente a persone che abbiano compiuto <strong>18 anni</strong>. L'utente dichiara di essere maggiorenne al momento della registrazione. Qualora un minore acceda al Servizio fornendo false dichiarazioni sull'età, ogni responsabilità ricade esclusivamente sull'utente stesso e, ove applicabile, sui genitori o tutori legali. Il Gestore non raccoglie consapevolmente dati di minori e procederà alla cancellazione immediata dell'account e dei relativi dati qualora ne venisse a conoscenza.</p>
+    </div>
+  </div>
+ 
+  <!-- ART 4 -->
+  <div class="section" id="art4">
+    <div class="section-header">
+      <span class="section-num">Art. 04</span>
+      <h2 class="section-title">Esclusione e limitazione di responsabilità</h2>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.1 — Infortuni e danni fisici</div>
+      <p>Il Gestore, i co-fondatori, i collaboratori e i fornitori di servizi tecnici non assumono alcuna responsabilità per infortuni, danni fisici, lesioni, peggioramenti della salute o conseguenze di qualsiasi natura derivanti, direttamente o indirettamente, dall'utilizzo dei contenuti dell'App, dall'esecuzione degli esercizi proposti, dall'interpretazione dei consigli presenti nel Servizio, o da qualsiasi altra attività intrapresa dall'utente in relazione all'utilizzo dell'App.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.2 — Danni indiretti e consequenziali</div>
+      <p>Nei limiti consentiti dalla normativa applicabile, il Gestore non risponde per danni indiretti, incidentali, consequenziali, punitivi o speciali, incluse perdite di profitto, perdita di dati, interruzione dell'attività o qualsiasi altra perdita immateriale, derivanti dall'uso o dall'impossibilità di utilizzo del Servizio.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.3 — Continuità e qualità del Servizio</div>
+      <p>Il Gestore non garantisce che il Servizio sia disponibile ininterrottamente, senza errori, privo di virus o di altri elementi dannosi. Il Servizio può subire interruzioni per manutenzione, aggiornamenti, cause tecniche o forza maggiore senza che ciò costituisca inadempimento contrattuale.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.4 — Risultati</div>
+      <p>Il Gestore non garantisce il raggiungimento di obiettivi specifici (perdita di peso, aumento della forza, miglioramenti estetici o di performance) attraverso l'utilizzo del Servizio. I risultati dipendono interamente da fattori individuali — genetica, alimentazione, costanza, stato di salute — che esulano dal controllo del Gestore.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.5 — Sistemi di intelligenza artificiale</div>
+      <p>Il Servizio può utilizzare sistemi di intelligenza artificiale forniti da terzi per la personalizzazione del percorso. Il Gestore non garantisce l'accuratezza, la completezza o l'adeguatezza dei contenuti generati da tali sistemi alle specifiche condizioni fisiche dell'utente. L'utente è responsabile della valutazione critica di ogni suggerimento ricevuto dall'App prima di metterlo in pratica.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.6 — Contenuti e servizi di terzi</div>
+      <p>Il Gestore non è responsabile per contenuti, prodotti, servizi o pratiche di terzi accessibili attraverso link, integrazioni o funzionalità presenti nell'App.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">4.7 — Limite massimo di responsabilità economica</div>
+      <p>Fatte salve le norme imperative di legge a tutela del consumatore, la responsabilità massima complessiva del Gestore nei confronti dell'utente, per qualsiasi causa e a qualsiasi titolo, è limitata all'importo effettivamente corrisposto dall'utente per il Servizio nei 12 mesi precedenti all'evento che ha generato il danno. Per gli utenti del piano gratuito, tale limite è pari a zero euro.</p>
+    </div>
+  </div>
+ 
+  <!-- ART 5 -->
+  <div class="section" id="art5">
+    <div class="section-header">
+      <span class="section-num">Art. 05</span>
+      <h2 class="section-title">Registrazione e account utente</h2>
+    </div>
+    <p>Per accedere al Servizio è necessario creare un account fornendo dati veritieri, accurati e aggiornati, inclusa una dichiarazione di età (minimo 18 anni compiuti). L'utente è responsabile della riservatezza delle proprie credenziali di accesso e di tutte le attività svolte tramite il proprio account. In caso di accesso non autorizzato, l'utente è tenuto a informare tempestivamente il Gestore. Il Gestore si riserva il diritto di sospendere o eliminare account che violino i presenti Termini, forniscano dati falsi o siano utilizzati in modo fraudolento.</p>
+  </div>
+ 
+  <!-- ART 6 -->
+  <div class="section" id="art6">
+    <div class="section-header">
+      <span class="section-num">Art. 06</span>
+      <h2 class="section-title">Piano gratuito e Piano Premium</h2>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">6.1 — Piano gratuito (Free)</div>
+      <p>Hypemove offre una versione gratuita che consente l'accesso alla roadmap guidata di base, ai workout brevi e alle funzionalità principali di gamification. Il Gestore si riserva il diritto di modificare le funzionalità incluse nel piano gratuito con ragionevole preavviso all'utente.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">6.2 — Piano Premium: cosa include</div>
+      <p>Il Piano Premium è un abbonamento a pagamento che include, in aggiunta alle funzionalità del piano gratuito:</p>
+      <ul class="doc-list">
+        <li>Personalizzazione adattiva del percorso in base a obiettivi, preferenze, vincoli e progressi dell'utente</li>
+        <li>Accesso a funzionalità di adattamento del piano tramite intelligenza artificiale (ove disponibili)</li>
+        <li>Maggiore flessibilità nella modifica del percorso di allenamento</li>
+        <li>Accesso prioritario a nuove funzionalità</li>
+        <li>Ulteriori benefici descritti dettagliatamente nell'App al momento dell'acquisto</li>
+      </ul>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">6.3 — Prezzi</div>
+      <p>I prezzi del Piano Premium sono quelli indicati nell'App al momento dell'acquisto e possono variare in base al Paese di residenza o alla valuta applicabile. Tutti i prezzi sono comprensivi di IVA ove dovuta per legge.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">6.4 — Rinnovo automatico</div>
+      <p>Il Piano Premium si rinnova automaticamente alla scadenza del periodo sottoscritto (mensile o annuale), addebitando il corrispettivo sul metodo di pagamento registrato, salvo disdetta effettuata prima della data di rinnovo tramite le impostazioni dell'account sullo store di riferimento (Apple App Store o Google Play Store). I dati di pagamento sono gestiti interamente dagli store: il Gestore non ha accesso diretto ai dati della carta di credito o di qualsiasi altro strumento di pagamento dell'utente.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">6.5 — Cancellazione dell'abbonamento</div>
+      <p>L'utente può cancellare l'abbonamento in qualsiasi momento tramite le impostazioni del proprio account sullo store. La cancellazione ha effetto al termine del periodo già pagato in corso. Non sono previsti rimborsi per il periodo già pagato, salvo quanto diversamente previsto dalla normativa consumer applicabile e dalle politiche dello store di riferimento.</p>
+    </div>
+ 
+    <div class="subsection">
+      <div class="subsection-title">6.6 — Diritto di recesso per utenti UE/Italia</div>
+      <p>In conformità al D.Lgs. 206/2005 (Codice del Consumo) e alla Direttiva 2011/83/UE, l'utente residente nell'Unione Europea ha diritto di recedere dal contratto entro 14 giorni dalla sottoscrizione senza fornire alcuna motivazione. Tuttavia, richiedendo espressamente l'accesso immediato al Servizio digitale prima della scadenza del termine di recesso e acconsentendo all'avvio immediato dell'esecuzione del contratto, l'utente riconosce che il diritto di recesso potrà decadere una volta che il Servizio sia stato integralmente fruito. Le richieste di recesso vanno inviate a: <strong>hypemoveapp@gmail.com</strong></p>
+    </div>
+  </div>
+ 
+  <!-- ART 7 -->
+  <div class="section" id="art7">
+    <div class="section-header">
+      <span class="section-num">Art. 07</span>
+      <h2 class="section-title">Proprietà intellettuale</h2>
+    </div>
+    <p>Tutti i contenuti dell'App — testi, video, grafica, loghi, suoni, software, roadmap, algoritmi, struttura del Servizio e qualsiasi altro materiale — sono di proprietà esclusiva del Gestore o dei suoi licenziatari e sono protetti dalla normativa vigente sul diritto d'autore e sulla proprietà intellettuale.</p>
+    <p>L'utente riceve una licenza personale, non esclusiva, non trasferibile e revocabile per l'utilizzo dell'App esclusivamente per scopi personali e non commerciali. È vietata qualsiasi riproduzione, distribuzione, modifica, pubblicazione o sfruttamento commerciale dei contenuti senza previa autorizzazione scritta del Gestore.</p>
+  </div>
+ 
+  <!-- ART 8 -->
+  <div class="section" id="art8">
+    <div class="section-header">
+      <span class="section-num">Art. 08</span>
+      <h2 class="section-title">Condotte vietate</h2>
+    </div>
+    <p>È fatto divieto all'utente di:</p>
+    <ul class="doc-list">
+      <li>Utilizzare il Servizio per scopi illeciti o in violazione della normativa applicabile</li>
+      <li>Tentare di accedere a sistemi, dati o aree non autorizzate del Servizio</li>
+      <li>Condividere le proprie credenziali di accesso o il proprio account con terzi</li>
+      <li>Riprodurre, vendere, rivendere o sfruttare commercialmente qualsiasi parte del Servizio</li>
+      <li>Caricare o trasmettere contenuti illeciti, offensivi, diffamatori o lesivi di diritti di terzi</li>
+      <li>Interferire con il funzionamento tecnico del Servizio o delle infrastrutture ad esso collegate</li>
+      <li>Utilizzare sistemi automatizzati (bot, scraper) per accedere al Servizio</li>
+    </ul>
+  </div>
+ 
+  <!-- ART 9 -->
+  <div class="section" id="art9">
+    <div class="section-header">
+      <span class="section-num">Art. 09</span>
+      <h2 class="section-title">Sospensione e interruzione del Servizio</h2>
+    </div>
+    <p>Il Gestore si riserva il diritto di sospendere, modificare o interrompere il Servizio, in tutto o in parte, in qualsiasi momento, per ragioni tecniche, commerciali o di sicurezza. In caso di interruzione definitiva del Servizio per utenti con Piano Premium attivo, il Gestore provvederà al rimborso proporzionale della quota di abbonamento relativa al periodo non fruito.</p>
+  </div>
+ 
+  <!-- ART 10 -->
+  <div class="section" id="art10">
+    <div class="section-header">
+      <span class="section-num">Art. 10</span>
+      <h2 class="section-title">Modifiche ai Termini</h2>
+    </div>
+    <p>Il Gestore si riserva il diritto di modificare i presenti Termini in qualsiasi momento. Le modifiche saranno comunicate all'utente tramite notifica nell'App o via email almeno <strong>15 giorni prima</strong> dell'entrata in vigore. Il proseguimento dell'utilizzo del Servizio dopo tale data costituisce accettazione delle modifiche. In caso di mancata accettazione, l'utente ha il diritto di recedere dal Servizio senza penali prima della data di entrata in vigore delle modifiche.</p>
+  </div>
+ 
+  <!-- ART 11 -->
+  <div class="section" id="art11">
+    <div class="section-header">
+      <span class="section-num">Art. 11</span>
+      <h2 class="section-title">Legge applicabile e foro competente</h2>
+    </div>
+    <p>I presenti Termini sono regolati dalla legge italiana. Per gli utenti consumatori residenti nell'Unione Europea si applicano le norme imperative di protezione del consumatore del Paese di residenza dell'utente, ove più favorevoli.</p>
+    <p>Per eventuali controversie con utenti consumatori residenti in Italia, il foro competente è quello del luogo di residenza o domicilio elettivo del consumatore, ai sensi dell'art. 33 D.Lgs. 206/2005. Per utenti professionali o residenti fuori dall'Unione Europea, il foro esclusivamente competente è quello di <strong>Torino</strong>.</p>
+    <p>Per la risoluzione alternativa delle controversie online (ODR), gli utenti consumatori UE possono accedere alla piattaforma europea: <a href="https://ec.europa.eu/consumers/odr" target="_blank">https://ec.europa.eu/consumers/odr</a></p>
+  </div>
+ 
+  <!-- ART 12 -->
+  <div class="section" id="art12">
+    <div class="section-header">
+      <span class="section-num">Art. 12</span>
+      <h2 class="section-title">Contatti</h2>
+    </div>
+    <p>Per qualsiasi richiesta, segnalazione o esercizio di diritti contrattuali:</p>
+    <div class="contacts-box">
+      <div class="contact-item"><label>Email assistenza</label><a href="mailto:hypemoveapp@gmail.com">hypemoveapp@gmail.com</a></div>
+      <div class="contact-item"><label>Gestore fiscale</label><span>Mattia Carlisi — P.IVA 13008420013</span></div>
+      <div class="contact-item"><label>Co-fondatori</label><span>Mattia Carlisi &amp; Danilo Napolitano</span></div>
+      <div class="contact-item"><label>Domicilio fiscale</label><span>Via Ventimiglia 16 int. 7, Torino (TO)</span></div>
+    </div>
+  </div>
+ 
+</div>
+ 
+<footer>
+  <p>© 2025 Hypemove — Co-fondatori: Mattia Carlisi (P.IVA 13008420013) &amp; Danilo Napolitano</p>
+  <p style="margin-top:0.5rem;">
+    <a href="termini.html">Termini e Condizioni</a> &nbsp;·&nbsp;
+    <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+    <a href="cookie.html">Cookie Policy</a>
+  </p>
+</footer>
+ 
+</body>
+</html>

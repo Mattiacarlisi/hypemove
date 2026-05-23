@@ -24,7 +24,8 @@ import {
 } from "./lib/analytics.js";
 
 const PRIVACY_URL = "/legal/privacy.html";
-const MARKETING_URL = "/legal/marketing.html";
+const TERMS_URL = "/legal/termini.html";
+const COOKIE_URL = "/legal/cookie.html";
 const IOS_WAITLIST_URL = "#download";
 
 // Link del menu in alto.
@@ -983,8 +984,9 @@ function Footer() {
         <div>
           <h3 className="text-sm font-black uppercase tracking-[0.22em] text-black">Legale</h3>
           <div className="mt-4 space-y-3 text-sm text-black/55">
-            <a href={PRIVACY_URL} className="block transition hover:text-black">Privacy e Termini d'uso</a>
-            <a href={MARKETING_URL} className="block transition hover:text-black">Informativa Marketing</a>
+            <a href={TERMS_URL} className="block transition hover:text-black">Termini e Condizioni</a>
+            <a href={PRIVACY_URL} className="block transition hover:text-black">Privacy Policy</a>
+            <a href={COOKIE_URL} className="block transition hover:text-black">Cookie Policy</a>
           </div>
         </div>
 
