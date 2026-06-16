@@ -61,7 +61,7 @@ const DEF_OV_KEYS = [
 
 // vsIdx = indice nell'array funnelConfig (non il stepIdx). null = nessuna %
 const DEF_FUN_CFG = [
-  { stepIdx: 1,  vsIdx: null },  // First Open
+  { stepIdx: 0,  vsIdx: null },  // Installazioni (Google Play)
   { stepIdx: 2,  vsIdx: 0 },    // Onboarding iniziato vs First Open
   { stepIdx: 3,  vsIdx: 1 },    // Onboarding completato vs Onboarding iniziato
   { stepIdx: 4,  vsIdx: 2 },    // Almeno 1 workout vs Onboarding completato
