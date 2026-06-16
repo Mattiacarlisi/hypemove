@@ -1,0 +1,56 @@
+/* KPI App — styles */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── STAT GRID 5 colonne ── */
+.stats-grid-5 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.stats-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+}
+@media (max-width: 1100px) {
+  .stats-grid-5 { grid-template-columns: repeat(3, 1fr); }
+  .stats-grid-3 { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Chart range filter buttons */
+.filter-btn {
+  background: none;
+  border: 1px solid #2a2a3d;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.filter-btn:hover { border-color: #4a4a6a; color: var(--fg); }
+.filter-btn.active { background: #1e1e40; border-color: #a78bfa; color: #a78bfa; }
+
+/* bar chart: resa con flex inline in JS */
+
+/* ── REFRESH BTN SPINNER ── */
+.spin { animation: spin .7s linear infinite; display: inline-block; }
+.pulse { animation: pulse 1.2s ease-in-out infinite; }
+
+/* ── METRIC TABLE ── */
+.metric-val {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 13px;
+}

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hypemove</title>
+  <link rel="stylesheet" href="css/shared.css">
+  <style>
+    .hub {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .hub-logo {
+      font-family: var(--mono);
+      font-size: 36px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: -1px;
+      margin-bottom: 6px;
+    }
+    .hub-logo span { color: var(--purple); }
+    .hub-tagline {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 56px;
+    }
+    .hub-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      width: 100%;
+      max-width: 600px;
+    }
+    .hub-card {
+      display: block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px 28px;
+      text-decoration: none;
+      transition: border-color .2s, background .2s, transform .2s;
+    }
+    .hub-card:hover {
+      border-color: var(--accent);
+      background: var(--accent-lo);
+      transform: translateY(-3px);
+    }
+    .hub-card-icon { font-size: 30px; margin-bottom: 18px; }
+    .hub-card-title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+      font-family: var(--mono);
+      letter-spacing: -0.3px;
+    }
+    .hub-card-desc {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    .hub-card-cta {
+      display: inline-block;
+      margin-top: 22px;
+      font-size: 11px;
+      color: var(--purple);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    @media (max-width: 520px) {
+      .hub-cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="hub">
+    <div class="hub-logo">Hype<span>move</span></div>
+    <div class="hub-tagline">Scegli un'area</div>
+    <div class="hub-cards">
+      <a href="finance.html" class="hub-card">
+        <div class="hub-card-icon">💰</div>
+        <div class="hub-card-title">Finance</div>
+        <div class="hub-card-desc">Contabilità, movimenti, saldi, tasse e analisi per periodo.</div>
+        <span class="hub-card-cta">Apri →</span>
+      </a>
+      <a href="kpi.html" class="hub-card">
+        <div class="hub-card-icon">📊</div>
+        <div class="hub-card-title">KPI</div>
+        <div class="hub-card-desc">Metriche prodotto, obiettivi sprint, acquisition e retention.</div>
+        <span class="hub-card-cta">Apri →</span>
+      </a>
+    </div>
+  </div>
+</body>
+</html>

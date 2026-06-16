@@ -1,0 +1,89 @@
+/* ── SALDO TABLE ── */
+.saldo-table { width: 100%; border-collapse: collapse; }
+.saldo-table th {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px;
+  color: var(--muted); padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+}
+.saldo-table td { padding: 12px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+.saldo-table tr:last-child td { border-bottom: none; }
+.saldo-table .mono { font-family: var(--mono); }
+
+/* ── VERDETTO ── */
+.verdetto {
+  margin-top: 14px; padding: 14px 16px;
+  border-radius: 8px; border: 1px solid;
+  font-size: 13px; font-weight: 500;
+}
+.verdetto.credito { background: var(--mattia-bg); border-color: var(--mattia); color: var(--mattia); }
+.verdetto.debito  { background: var(--red-bg);    border-color: var(--red);    color: var(--red); }
+.verdetto-amount  { font-family: var(--mono); font-size: 18px; font-weight: 700; display: block; margin-top: 4px; }
+
+/* ── TASSE WIDGET ── */
+.tasse-box {
+  background: var(--amber-bg); border: 1px solid var(--amber);
+  border-radius: var(--radius); padding: 18px 20px;
+}
+.tasse-box .card-title { color: var(--amber); }
+.tasse-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
+.toggle-btn {
+  padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 600;
+  cursor: pointer; border: 1px solid var(--border2); background: transparent; color: var(--muted);
+  transition: all .15s;
+}
+.toggle-btn.active { background: var(--amber); color: #000; border-color: var(--amber); }
+.tasse-input-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.tasse-input {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 7px;
+  color: var(--text); font-family: var(--mono); font-size: 14px; padding: 8px 12px;
+  width: 140px; outline: none;
+}
+.tasse-input:focus { border-color: var(--amber); }
+.tasse-input-label { font-size: 12px; color: var(--muted); }
+.tasse-result { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tasse-item { background: var(--surface); border-radius: 7px; padding: 12px; }
+.tasse-item-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; }
+.tasse-item-value { font-family: var(--mono); font-size: 16px; font-weight: 600; color: var(--amber); margin-top: 4px; }
+
+/* ── TABELLA REGISTRO ── */
+.tipo-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+}
+.tipo-badge.spesa   { background: var(--red-bg);    color: var(--red); }
+.tipo-badge.entrata { background: var(--mattia-bg); color: var(--mattia); }
+.importo.neg { color: var(--red);    font-family: var(--mono); }
+.importo.pos { color: var(--mattia); font-family: var(--mono); }
+
+/* ── CAT EDITOR ── */
+.cat-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.cat-item {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 7px; padding: 8px 12px; font-size: 13px;
+}
+.cat-item-delete {
+  background: none; border: none; color: var(--muted); cursor: pointer; font-size: 15px;
+  line-height: 1; padding: 0 2px; transition: color .15s;
+}
+.cat-item-delete:hover { color: var(--red); }
+.cat-add-row { display: flex; gap: 8px; }
+.cat-add-row input { flex: 1; }
+
+/* ── RIEPILOGO ── */
+.month-bar-wrap { margin-bottom: 6px; }
+.month-bar-label { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.month-bar-track { background: var(--surface2); border-radius: 3px; height: 7px; overflow: hidden; }
+.month-bar-fill  { height: 100%; border-radius: 3px; transition: width .4s; }
+.month-bar-fill.spesa   { background: var(--red); }
+.month-bar-fill.entrata { background: var(--mattia); }
+
+.riepilogo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.riepilogo-table th {
+  font-size: 11px; font-weight: 600; letter-spacing: .7px; color: var(--muted);
+  text-transform: uppercase; padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border);
+}
+.riepilogo-table th:first-child { text-align: left; }
+.riepilogo-table td { padding: 10px 10px; border-bottom: 1px solid var(--border); text-align: right; }
+.riepilogo-table td:first-child { text-align: left; font-weight: 500; }
+.riepilogo-table tr.total-row td { font-weight: 700; color: var(--text); border-top: 1px solid var(--border2); border-bottom: none; }
+.riepilogo-table tr:hover td { background: var(--surface2); }
