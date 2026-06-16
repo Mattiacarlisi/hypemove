@@ -55,7 +55,7 @@ const SPRINT_DASHES = ['none', '8,4', '3,5', '10,3,3,3', '6,2'];
 
 const DEF_OV_KEYS = [
   'users.total','users.new_7d','eng.dau','eng.wau','eng.mau',
-  'sessions.total','sessions.s7d','sessions.duration','sessions.compl','eng.streaks',
+  'sessions.total','sessions.s7d','eng.streaks','users.premium','users.trial',
 ];
 
 // vsIdx = indice nell'array funnelConfig (non il stepIdx). null = nessuna %
@@ -71,6 +71,25 @@ const DEF_FUN_CFG = [
 
 function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
+}
+
+async function loadSettings() {
+  try {
+    const { data, error } = await sb.from('kpi_settings').select('key, value');
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.key === 'overview_keys' && Array.isArray(row.value)) state.overviewKeys = row.value;
+      if (row.key === 'funnel_cfg'   && Array.isArray(row.value)) state.funnelConfig  = row.value;
+    }
+  } catch (e) { console.warn('loadSettings fallback to localStorage', e); }
+}
+
+function saveSetting(key, value) {
+  const lsKey = key === 'overview_keys' ? LS_OV : LS_FUN;
+  localStorage.setItem(lsKey, JSON.stringify(value));
+  sb.from('kpi_settings')
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .then(({ error }) => { if (error) console.warn('saveSetting', error); });
 }
 
 // ── STATE ─────────────────────────────────────────────────────────────
@@ -3263,7 +3282,7 @@ function attachEvents() {
       const idx = state.overviewKeys.indexOf(k);
       if (idx === -1) state.overviewKeys.push(k);
       else state.overviewKeys.splice(idx, 1);
-      localStorage.setItem(LS_OV, JSON.stringify(state.overviewKeys));
+      saveSetting('overview_keys', state.overviewKeys);
       render();
     }));
 
@@ -3294,24 +3313,24 @@ function attachEvents() {
   document.getElementById('funnel-add')?.addEventListener('click', () => {
     const lastIdx = state.funnelConfig.length > 0 ? state.funnelConfig.length - 1 : null;
     state.funnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
-    localStorage.setItem(LS_FUN, JSON.stringify(state.funnelConfig));
+    saveSetting('funnel_cfg', state.funnelConfig);
     render();
   });
   document.getElementById('funnel-reset')?.addEventListener('click', () => {
     state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
-    localStorage.setItem(LS_FUN, JSON.stringify(state.funnelConfig));
+    saveSetting('funnel_cfg', state.funnelConfig);
     render();
   });
   document.querySelectorAll('.funnel-step-sel').forEach(el =>
     el.addEventListener('change', () => {
       state.funnelConfig[+el.dataset.row].stepIdx = +el.value;
-      localStorage.setItem(LS_FUN, JSON.stringify(state.funnelConfig));
+      saveSetting('funnel_cfg', state.funnelConfig);
       render();
     }));
   document.querySelectorAll('.funnel-vs-sel').forEach(el =>
     el.addEventListener('change', () => {
       state.funnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
-      localStorage.setItem(LS_FUN, JSON.stringify(state.funnelConfig));
+      saveSetting('funnel_cfg', state.funnelConfig);
       render();
     }));
   document.querySelectorAll('.funnel-remove').forEach(el =>
@@ -3322,7 +3341,7 @@ function attachEvents() {
         if (r.vsIdx === i) r.vsIdx = null;
         else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
       });
-      localStorage.setItem(LS_FUN, JSON.stringify(state.funnelConfig));
+      saveSetting('funnel_cfg', state.funnelConfig);
       render();
     }));
 
@@ -3764,9 +3783,12 @@ document.addEventListener('keydown', e => {
   }
 });
 
-render();
-fetchData();
-fetchSprints();
-fetchBlockedUsers();
-fetchRecentlyUnblocked();
-startAutoRefresh();
+(async () => {
+  await loadSettings();
+  render();
+  fetchData();
+  fetchSprints();
+  fetchBlockedUsers();
+  fetchRecentlyUnblocked();
+  startAutoRefresh();
+})();
