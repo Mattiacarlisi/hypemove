@@ -44,9 +44,10 @@ const FUNNEL_LABELS = [
   'Premium pagante',
 ];
 
-const LS_OV  = 'hm_overview_keys';
-const LS_FUN = 'hm_funnel_cfg_v2';
-const LS_META_TOKEN = 'hm_meta_token';
+const LS_OV           = 'hm_overview_keys';
+const LS_FUN          = 'hm_funnel_cfg_v2';
+const LS_FUNNEL_DATES = 'hm_funnel_dates';
+const LS_META_TOKEN   = 'hm_meta_token';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
 
@@ -66,6 +67,8 @@ const DEF_FUN_CFG = [
   { stepIdx: 4,  vsIdx: 2 },    // Almeno 1 workout vs Onboarding completato
   { stepIdx: 5,  vsIdx: 3 },    // Primo workout 24h vs Almeno 1 workout
   { stepIdx: 6,  vsIdx: 3 },    // ≥2 workout prima settimana vs Almeno 1 workout
+  { stepIdx: 7,  vsIdx: 3 },    // ≥3 workout prima settimana vs Almeno 1 workout
+  { stepIdx: 9,  vsIdx: 3 },    // 3-day streak vs Almeno 1 workout
   { stepIdx: 10, vsIdx: 2 },    // Premium pagante vs Onboarding completato
 ];
 
@@ -78,15 +81,22 @@ async function loadSettings() {
     const { data, error } = await sb.from('kpi_settings').select('key, value');
     if (error) throw error;
     for (const row of data || []) {
-      if (row.key === 'overview_keys' && Array.isArray(row.value)) state.overviewKeys = row.value;
-      if (row.key === 'funnel_cfg'   && Array.isArray(row.value)) state.funnelConfig  = row.value;
+      if (row.key === 'overview_keys' && Array.isArray(row.value))    state.overviewKeys = row.value;
+      if (row.key === 'funnel_cfg'   && Array.isArray(row.value))     state.funnelConfig  = row.value;
+      if (row.key === 'funnel_dates' && row.value?.from)              { state.funnelFrom = row.value.from; state.funnelTo = row.value.to || TODAY; }
+      if (row.key === 'meta_token'   && typeof row.value === 'string') {
+        state.metaToken = row.value;
+        localStorage.setItem(LS_META_TOKEN, row.value);
+      }
     }
   } catch (e) { console.warn('loadSettings fallback to localStorage', e); }
 }
 
 function saveSetting(key, value) {
-  const lsKey = key === 'overview_keys' ? LS_OV : LS_FUN;
-  localStorage.setItem(lsKey, JSON.stringify(value));
+  if (key === 'overview_keys')   localStorage.setItem(LS_OV,           JSON.stringify(value));
+  else if (key === 'funnel_cfg')   localStorage.setItem(LS_FUN,          JSON.stringify(value));
+  else if (key === 'funnel_dates') localStorage.setItem(LS_FUNNEL_DATES, JSON.stringify(value));
+  else if (key === 'meta_token')   localStorage.setItem(LS_META_TOKEN,   value);
   sb.from('kpi_settings')
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
     .then(({ error }) => { if (error) console.warn('saveSetting', error); });
@@ -97,7 +107,7 @@ function saveSetting(key, value) {
 let state = {
   page: 'overview',
   data: null, chart: null, loading: true, lastUpdated: null, error: null,
-  funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
+  funnel: null, funnelFrom: loadLS(LS_FUNNEL_DATES, {}).from || BETA_START, funnelTo: loadLS(LS_FUNNEL_DATES, {}).to || TODAY,
   funnelLoading: false, funnelError: null,
   retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
   retWeeks: 6, retMinW0: 1,
@@ -3292,6 +3302,7 @@ function attachEvents() {
     const to   = document.getElementById('funnel-to')?.value;
     if (from) state.funnelFrom = from;
     if (to)   state.funnelTo   = to;
+    saveSetting('funnel_dates', { from: state.funnelFrom, to: state.funnelTo });
     state.funnel = null;
     state.metaFunnelData = null;
     state.metaFunnelPeriod = null;
@@ -3481,7 +3492,7 @@ function attachEvents() {
     const val = document.getElementById('meta-token-input')?.value?.trim();
     if (!val) return;
     state.metaToken = val;
-    localStorage.setItem(LS_META_TOKEN, val);
+    saveSetting('meta_token', val);
     state.metaAds = null;
     state.metaCampaigns = null;
     fetchMetaAds();
