@@ -150,6 +150,12 @@ let state = {
   premiumData: null, premiumLoading: false, premiumError: null,
   premiumFrom: BETA_START, premiumTo: TODAY,
   premiumFunnelSteps: new Set(['trial_shown_total','trial_shown','paywall_views','purchase_attempts','premium_activated']),
+  goalsData: null, goalsLoading: false, goalsError: null,
+  goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all',
+  workoutDepthData: null, workoutDepthLoading: false, workoutDepthError: null,
+  workoutDepthFrom: BETA_START, workoutDepthTo: TODAY,
+  workoutDepthGoal: 'all', workoutDepthLevel: 'all',
+  workoutDepthSteps: new Set([1, 2, 3, 5, 10]),
   behaviorData: null, behaviorLoading: false,
   behaviorFrom: BETA_START, behaviorTo: TODAY, behaviorTypeFilter: 'all',
   userActivityOpen: false, userActivityUser: null, userActivityData: null, userActivityLoading: false,
@@ -264,6 +270,39 @@ async function fetchFunnel() {
   state.funnelLoading = false;
   render();
   if (state.metaToken && state.funnel) fetchMetaFunnel();
+}
+
+async function fetchGoals() {
+  state.goalsLoading = true; state.goalsError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_goals', {
+      inizio:    state.goalsFrom,
+      fine:      state.goalsTo,
+      p_gender:  state.goalsGender === 'all' ? null : state.goalsGender,
+    });
+    if (error) throw error;
+    state.goalsData = data;
+  } catch (e) { state.goalsError = e.message || 'Errore caricamento obiettivi'; }
+  state.goalsLoading = false;
+  render();
+}
+
+async function fetchWorkoutDepth() {
+  state.workoutDepthLoading = true; state.workoutDepthError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_workout_depth', {
+      inizio:  state.workoutDepthFrom,
+      fine:    state.workoutDepthTo,
+      p_goal:  state.workoutDepthGoal  === 'all' ? null : state.workoutDepthGoal,
+      p_level: state.workoutDepthLevel === 'all' ? null : +state.workoutDepthLevel,
+    });
+    if (error) throw error;
+    state.workoutDepthData = data;
+  } catch (e) { state.workoutDepthError = e.message || 'Errore caricamento dati'; }
+  state.workoutDepthLoading = false;
+  render();
 }
 
 async function fetchPremium() {
@@ -884,6 +923,153 @@ function page() {
 
 // ── OVERVIEW — customizable ───────────────────────────────────────────
 
+const GOAL_BAR_COLORS = ['#a78bfa', '#22d3ee', '#4ade80', '#f59e0b', '#f43f5e', '#60a5fa', '#fbbf24', '#34d399'];
+
+function goalsCard() {
+  const genderOpts = [
+    { v: 'all', l: 'Tutti' },
+    { v: 'f',   l: 'Donna' },
+    { v: 'm',   l: 'Uomo' },
+  ];
+  const genderBtns = genderOpts.map(g =>
+    `<button class="filter-btn ${state.goalsGender === g.v ? 'active' : ''}" data-goals-gender="${g.v}">${g.l}</button>`
+  ).join('');
+
+  let body;
+  if (state.goalsLoading) {
+    body = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
+  } else if (state.goalsError) {
+    body = `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.goalsError)}</div>`;
+  } else if (!state.goalsData || !state.goalsData.goals?.length) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato nel periodo selezionato</div>`;
+  } else {
+    const d   = state.goalsData;
+    const max = Math.max(...d.goals.map(g => g.n), 1);
+    body = d.goals.map((g, i) => {
+      const label = GOAL_LABEL[g.goal] || g.goal;
+      const pct   = d.total > 0 ? (g.n / d.total * 100).toFixed(1) : '0.0';
+      const w     = (g.n / max * 100).toFixed(1);
+      const color = GOAL_BAR_COLORS[i % GOAL_BAR_COLORS.length];
+      return `
+        <div style="margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:4px">
+            <span style="color:var(--fg)">${esc(label)}</span>
+            <span style="color:var(--muted);font-size:11px">${g.n} utenti · ${pct}%</span>
+          </div>
+          <div style="height:8px;background:#1a1a2a;border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${w}%;background:${color};border-radius:4px"></div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Obiettivi più scelti</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:4px">${genderBtns}</div>
+          <input type="date" id="goals-from" class="form-input" value="${state.goalsFrom}" style="width:130px;padding:5px 8px;font-size:11px">
+          <span style="color:var(--muted);font-size:12px">→</span>
+          <input type="date" id="goals-to" class="form-input" value="${state.goalsTo}" style="width:130px;padding:5px 8px;font-size:11px">
+          <button id="goals-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Calcola</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">obiettivo scelto in onboarding · account interni esclusi</div>
+      ${body}
+    </div>`;
+}
+
+const WORKOUT_DEPTH_STEPS = [1, 2, 3, 4, 5, 7, 10];
+
+function workoutDepthCard() {
+  const d = state.workoutDepthData;
+
+  const goalOpts = ['all', ...Object.keys(GOAL_LABEL)].map(g =>
+    `<option value="${g}" ${state.workoutDepthGoal === g ? 'selected' : ''}>${g === 'all' ? 'Tutti gli obiettivi' : GOAL_LABEL[g]}</option>`
+  ).join('');
+  const levelOpts = ['all', '1', '2', '3'].map(l =>
+    `<option value="${l}" ${state.workoutDepthLevel === l ? 'selected' : ''}>${l === 'all' ? 'Tutti i livelli' : LEVEL_LABEL[l]}</option>`
+  ).join('');
+  const toggles = WORKOUT_DEPTH_STEPS.map(n => {
+    const on = state.workoutDepthSteps.has(n);
+    return `<button class="filter-btn ${on ? 'active' : ''}" data-depth-step="${n}">${n}°</button>`;
+  }).join('');
+
+  let body;
+  if (state.workoutDepthLoading) {
+    body = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
+  } else if (state.workoutDepthError) {
+    body = `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.workoutDepthError)}</div>`;
+  } else if (!d) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato</div>`;
+  } else {
+    const pctOfAttempted = n => d.attempted > 0 ? (n / d.attempted * 100).toFixed(1) : '0.0';
+    const kpiRow = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
+        <div class="card" style="padding:14px 16px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Hanno provato un workout</div>
+          <div style="font-size:26px;font-weight:800;color:#a78bfa;line-height:1">${d.attempted}</div>
+        </div>
+        <div class="card" style="padding:14px 16px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Completato il primo</div>
+          <div style="font-size:26px;font-weight:800;color:#4ade80;line-height:1">${d.completed_first}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">${pctOfAttempted(d.completed_first)}% di chi ha provato</div>
+        </div>
+        <div class="card" style="padding:14px 16px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Abbandonato prima di finire</div>
+          <div style="font-size:26px;font-weight:800;color:#f87171;line-height:1">${d.abandoned_first}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">${pctOfAttempted(d.abandoned_first)}% di chi ha provato</div>
+        </div>
+      </div>`;
+
+    const steps    = WORKOUT_DEPTH_STEPS.filter(n => state.workoutDepthSteps.has(n));
+    const depthMap = {};
+    (d.depth || []).forEach(x => { depthMap[x.n] = x.users; });
+    const base = d.completed_first || 0;
+    const funnelHtml = steps.map((n, i) => {
+      const users     = depthMap[n] ?? 0;
+      const pct       = base > 0 ? (users / base * 100).toFixed(1) : '0.0';
+      const prevUsers = i > 0 ? (depthMap[steps[i - 1]] ?? 0) : null;
+      const drop      = (i > 0 && prevUsers > 0) ? ((1 - users / prevUsers) * 100).toFixed(0) : null;
+      const label     = `${n}° workout`;
+      return `
+        ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
+          ${drop !== null ? `<div style="font-size:10px;color:#ef4444;font-weight:700;white-space:nowrap">-${drop}%</div>` : ''}
+          <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
+        </div>` : ''}
+        <div style="flex:1;background:#111120;border:1px solid #a78bfa33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
+          <div style="font-size:24px;font-weight:800;color:#a78bfa;line-height:1">${users}</div>
+          <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${label}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px">${pct}% del 1°</div>
+        </div>`;
+    }).join('');
+
+    body = `
+      ${kpiRow}
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">${toggles}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">% calcolata su chi ha completato il 1° workout</div>
+      <div style="display:flex;align-items:center;overflow-x:auto">${funnelHtml || '<div style="color:var(--muted);font-size:12px">Seleziona almeno uno step</div>'}</div>`;
+  }
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Continuità nei workout</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <select id="depth-goal" class="form-input" style="padding:5px 8px;font-size:11px">${goalOpts}</select>
+          <select id="depth-level" class="form-input" style="padding:5px 8px;font-size:11px">${levelOpts}</select>
+          <input type="date" id="depth-from" class="form-input" value="${state.workoutDepthFrom}" style="width:130px;padding:5px 8px;font-size:11px">
+          <span style="color:var(--muted);font-size:12px">→</span>
+          <input type="date" id="depth-to" class="form-input" value="${state.workoutDepthTo}" style="width:130px;padding:5px 8px;font-size:11px">
+          <button id="depth-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Calcola</button>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">cohort per data di iscrizione · account interni esclusi</div>
+      ${body}
+    </div>`;
+}
+
 function pageOverview() {
   const keys = state.overviewKeys.filter(k => METRICS[k]);
   const colCount = Math.min(Math.max(keys.length, 1), 5);
@@ -931,6 +1117,10 @@ function pageOverview() {
       ${state.extraCharts?.growth?.length ? growthChart(state.extraCharts.growth, state.growthRange) : chartPlaceholder()}
     </div>
 
+    ${goalsCard()}
+
+    ${workoutDepthCard()}
+
     <div class="grid-2">
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -962,11 +1152,13 @@ function pageOverview() {
 
 const GOAL_LABEL = {
   lose_fat: 'Perdere grasso', tone_lower: 'Tonificare gambe/glutei',
-  tone_upper: 'Tonificare parte superiore', build_muscle: 'Costruire muscoli',
+  tone_upper: 'Tonificare parte superiore', tone_full: 'Tonificare tutto il corpo',
+  build_muscle: 'Costruire muscoli',
   mobility: 'Migliorare mobilità', endurance: 'Resistenza',
   general_fitness: 'Fitness generale', posture: 'Postura',
 };
 const GENDER_LABEL = { m: 'Uomo', f: 'Donna', male: 'Uomo', female: 'Donna', other: 'Altro' };
+const LEVEL_LABEL = { '1': 'Base', '2': 'Intermedio', '3': 'Avanzato' };
 
 function calcAge(birthDate) {
   if (!birthDate) return null;
@@ -3592,6 +3784,40 @@ function attachEvents() {
   document.querySelectorAll('[data-streak-range]').forEach(el =>
     el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
 
+  // Obiettivi (overview)
+  document.querySelectorAll('[data-goals-gender]').forEach(el =>
+    el.addEventListener('click', () => { state.goalsGender = el.dataset.goalsGender; fetchGoals(); }));
+  document.getElementById('goals-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('goals-from')?.value;
+    const to   = document.getElementById('goals-to')?.value;
+    if (from) state.goalsFrom = from;
+    if (to)   state.goalsTo   = to;
+    fetchGoals();
+  });
+
+  // Continuità workout (overview)
+  document.querySelectorAll('[data-depth-step]').forEach(el =>
+    el.addEventListener('click', () => {
+      const n = +el.dataset.depthStep;
+      if (state.workoutDepthSteps.has(n)) {
+        if (state.workoutDepthSteps.size > 1) state.workoutDepthSteps.delete(n);
+      } else {
+        state.workoutDepthSteps.add(n);
+      }
+      render();
+    }));
+  document.getElementById('depth-apply')?.addEventListener('click', () => {
+    const from  = document.getElementById('depth-from')?.value;
+    const to    = document.getElementById('depth-to')?.value;
+    const goal  = document.getElementById('depth-goal')?.value;
+    const level = document.getElementById('depth-level')?.value;
+    if (from)  state.workoutDepthFrom  = from;
+    if (to)    state.workoutDepthTo    = to;
+    if (goal)  state.workoutDepthGoal  = goal;
+    if (level) state.workoutDepthLevel = level;
+    fetchWorkoutDepth();
+  });
+
   // Retention
   document.getElementById('ret-apply')?.addEventListener('click', () => {
     const from = document.getElementById('ret-from')?.value;
@@ -4250,6 +4476,8 @@ document.addEventListener('keydown', e => {
   await loadSettings();
   render();
   fetchData();
+  fetchGoals();
+  fetchWorkoutDepth();
   fetchSprints();
   fetchBlockedUsers();
   fetchRecentlyUnblocked();
