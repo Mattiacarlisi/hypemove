@@ -44,10 +44,11 @@ const FUNNEL_LABELS = [
   'Premium pagante',
 ];
 
-const LS_OV           = 'hm_overview_keys';
-const LS_FUN          = 'hm_funnel_cfg_v2';
-const LS_FUNNEL_DATES = 'hm_funnel_dates';
-const LS_META_TOKEN   = 'hm_meta_token';
+const LS_OV             = 'hm_overview_keys';
+const LS_FUN            = 'hm_funnel_cfg_v2';
+const LS_FUNNEL_DATES   = 'hm_funnel_dates';
+const LS_META_TOKEN     = 'hm_meta_token';
+const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
 
@@ -76,20 +77,26 @@ function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
 }
 
-async function loadSettings() {
+async function loadSettings(retry = true) {
   try {
     const { data, error } = await sb.from('kpi_settings').select('key, value');
     if (error) throw error;
     for (const row of data || []) {
       if (row.key === 'overview_keys' && Array.isArray(row.value))    state.overviewKeys = row.value;
-      if (row.key === 'funnel_cfg'   && Array.isArray(row.value))     state.funnelConfig  = row.value;
-      if (row.key === 'funnel_dates' && row.value?.from)              { state.funnelFrom = row.value.from; state.funnelTo = row.value.to || TODAY; }
       if (row.key === 'meta_token'   && typeof row.value === 'string') {
         state.metaToken = row.value;
         localStorage.setItem(LS_META_TOKEN, row.value);
       }
     }
-  } catch (e) { console.warn('loadSettings fallback to localStorage', e); }
+    state.settingsLoadError = false;
+  } catch (e) {
+    console.warn('loadSettings error', e);
+    if (retry) {
+      await new Promise(r => setTimeout(r, 2000));
+      return loadSettings(false);
+    }
+    state.settingsLoadError = true;
+  }
 }
 
 function saveSetting(key, value) {
@@ -99,7 +106,18 @@ function saveSetting(key, value) {
   else if (key === 'meta_token')   localStorage.setItem(LS_META_TOKEN,   value);
   sb.from('kpi_settings')
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
-    .then(({ error }) => { if (error) console.warn('saveSetting', error); });
+    .then(({ error }) => {
+      if (error) {
+        console.warn('saveSetting', error);
+        if (key === 'meta_token') {
+          state.metaTokenSaveError = true;
+          render();
+        }
+      } else if (key === 'meta_token') {
+        state.metaTokenSaveError = false;
+        state.settingsLoadError = false;
+      }
+    });
 }
 
 // ── STATE ─────────────────────────────────────────────────────────────
@@ -107,15 +125,19 @@ function saveSetting(key, value) {
 let state = {
   page: 'overview',
   data: null, chart: null, loading: true, lastUpdated: null, error: null,
-  funnel: null, funnelFrom: loadLS(LS_FUNNEL_DATES, {}).from || BETA_START, funnelTo: loadLS(LS_FUNNEL_DATES, {}).to || TODAY,
+  funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
   funnelLoading: false, funnelError: null,
   retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
   retWeeks: 6, retMinW0: 1,
   retLoading: false, retError: null,
   overviewKeys: loadLS(LS_OV, DEF_OV_KEYS),
-  funnelConfig: loadLS(LS_FUN, DEF_FUN_CFG),
+  funnelConfig: JSON.parse(JSON.stringify(DEF_FUN_CFG)),
   editingOverview: false,
   editingFunnel: false,
+  savedFunnels: loadLS(LS_SAVED_FUNNELS, []),
+  activeFunnelPreset: null,
+  funnelSaveOpen: false,
+  funnelSaveName: '',
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60,
   sprints: [], sprintsLoading: false,
@@ -154,6 +176,8 @@ let state = {
   aiStatsFrom: new Date(Date.now()-30*864e5).toISOString().slice(0,10),
   aiStatsTo: TODAY,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
+  settingsLoadError: false,
+  metaTokenSaveError: false,
   metaAds: null,
   metaAdsLoading: false,
   metaAdsError: null,
@@ -174,6 +198,12 @@ let state = {
   blockSearchOpen: false,
   blockSearchQuery: '',
   blockSearchResults: [],
+  ueSearchQuery: '',
+  ueSearchResults: [],
+  ueSelectedUser: null,
+  ueFromDateTime: TODAY + 'T00:00',
+  ueData: null,
+  ueLoading: false,
 };
 
 let refreshTimer = null, countdownTimer = null, secondsLeft = 300;
@@ -466,6 +496,83 @@ async function fetchUserActivity(user) {
     state.userActivityData = data || [];
   } catch (e) { console.error('fetchUserActivity', e); }
   state.userActivityLoading = false;
+  render();
+}
+
+let _ueSearchTimer = null;
+
+function renderUeSearchResults() {
+  const container = document.getElementById('ue-search-results');
+  if (!container) return;
+  const results = state.ueSearchResults;
+  if (!results.length) {
+    container.innerHTML = state.ueSearchQuery.length >= 2
+      ? `<div style="font-size:12px;color:var(--muted);padding:6px 0">Nessun utente trovato.</div>`
+      : '';
+    return;
+  }
+  container.innerHTML = `
+    <div style="background:#12121e;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:6px">
+      ${results.map((u, i) => `
+        <div class="ue-result" data-idx="${i}"
+          style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;transition:background .15s"
+          onmouseenter="this.style.background='#1e1e30'" onmouseleave="this.style.background=''">
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:600;color:var(--fg)">${esc(u.name || u.username || '—')} <span style="color:var(--muted);font-weight:400">@${esc(u.username || '')}</span></div>
+            <div style="font-size:11px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.email || '')}</div>
+          </div>
+          <span style="font-size:10px;background:#1e2a1e;color:#4ade80;padding:2px 8px;border-radius:10px;flex-shrink:0">Seleziona</span>
+        </div>`).join('')}
+    </div>`;
+  container.querySelectorAll('.ue-result').forEach(el =>
+    el.addEventListener('click', () => {
+      const u = state.ueSearchResults[+el.dataset.idx];
+      if (!u) return;
+      state.ueSelectedUser  = u;
+      state.ueSearchQuery   = '';
+      state.ueSearchResults = [];
+      state.ueData          = null;
+      render();
+    }));
+}
+
+function searchUsersForExplorer(query) {
+  state.ueSearchQuery = query;
+  clearTimeout(_ueSearchTimer);
+  if (!query || query.length < 2) {
+    state.ueSearchResults = [];
+    renderUeSearchResults();
+    return;
+  }
+  _ueSearchTimer = setTimeout(async () => {
+    try {
+      const { data, error } = await sb.rpc('kpi_search_users', { p_query: query });
+      if (error) throw error;
+      state.ueSearchResults = data || [];
+    } catch (e) { console.error('searchUsersForExplorer', e); state.ueSearchResults = []; }
+    renderUeSearchResults();
+  }, 300);
+}
+
+async function fetchUserExplorer() {
+  if (!state.ueSelectedUser) return;
+  state.ueLoading = true;
+  state.ueData    = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_user_activity', {
+      p_user_id: state.ueSelectedUser.id,
+      lim: 500,
+    });
+    if (error) throw error;
+    let events = data || [];
+    if (state.ueFromDateTime) {
+      const fromMs = new Date(state.ueFromDateTime).getTime();
+      events = events.filter(e => new Date(e.created_at).getTime() >= fromMs);
+    }
+    state.ueData = events;
+  } catch (e) { console.error('fetchUserExplorer', e); state.ueData = []; }
+  state.ueLoading = false;
   render();
 }
 
@@ -878,11 +985,13 @@ const EVENT_LABELS = {
   settings_open: 'Impostazioni aperte', roadmap_node_select: 'Nodo roadmap selezionato',
   roadmap_select: 'Roadmap selezionata', league_tab_switch: 'Tab lega cambiato',
   workout_gen_start: 'Generazione workout AI avviata', chest_open: 'Baule aperto',
+  ai_chat_send: 'Messaggio AI inviato',
   view_Home: 'Home', view_WorkoutDetail: 'Dettaglio workout',
   view_WorkoutComplete: 'Riepilogo workout', view_User: 'Profilo',
-  view_League: 'Classifica', view_ExerciseSearch: 'Ricerca esercizi',
+  view_League: 'Classifica', view_ExerciseSearch: 'Libreria allenamenti',
   view_Dev: 'Schermata Dev', view_PremiumActivated: 'Premium attivato',
   view_RoadmapDetail: 'Dettaglio roadmap', view_Settings: 'Impostazioni',
+  feedback_opened: 'Feedback aperto',
   paywall_product_updated: 'Paywall — prodotto aggiornato',
   paywall_validator_step: 'Paywall — step validazione',
   paywall_billing_error: 'Paywall — errore fatturazione',
@@ -890,6 +999,64 @@ const EVENT_LABELS = {
   paywall_fallback_opened: 'Paywall — fallback aperto',
   paywall_purchase_attempt: 'Tentativo acquisto', trial_offer_shown: 'Offerta trial mostrata',
 };
+
+const EVENT_DESCRIPTIONS = {
+  view_Home:            'L\'utente ha aperto la schermata principale (Home), con roadmap e workout suggeriti. Di solito ci arriva tramite la barra di navigazione in basso.',
+  view_User:            'L\'utente ha visitato la sezione Profilo. Ci arriva tramite l\'icona profilo nella barra di navigazione in basso.',
+  view_WorkoutDetail:   'L\'utente ha aperto il dettaglio di un workout specifico selezionandolo dalla roadmap.',
+  view_WorkoutComplete: 'L\'utente ha completato un workout e visualizzato il riepilogo dei risultati (XP, streak, chiavi guadagnate).',
+  view_League:          'L\'utente ha visitato la Classifica (Lega). Accessibile dalla barra di navigazione in basso.',
+  view_ExerciseSearch:  'L\'utente ha aperto la Libreria allenamenti, accessibile dalla barra di navigazione in basso. Mostra la raccolta di workout disponibili che l\'utente può esplorare.',
+  view_AIChat:          'L\'utente ha aperto la chat con l\'AI Coach.',
+  view_Dev:             'Schermata di sviluppo interna, non visibile agli utenti normali.',
+  view_PremiumActivated:'L\'utente ha visualizzato la schermata di conferma attivazione Premium.',
+  view_RoadmapDetail:   'L\'utente ha aperto il dettaglio di una roadmap.',
+  view_Settings:        'L\'utente ha aperto le impostazioni dell\'app.',
+  exercise_complete:    'L\'utente ha completato un singolo esercizio all\'interno di un workout.',
+  workout_complete:     'L\'utente ha completato l\'intero workout (tutti gli esercizi).',
+  workout_start:        'L\'utente ha avviato un workout dal dettaglio.',
+  workout_abandon:      'L\'utente ha abbandonato il workout prima di completarlo.',
+  app_open:             'L\'utente ha aperto l\'app (cold start o warm start dalla home del telefono).',
+  exit:                 'L\'utente ha chiuso l\'app o è passato ad un\'altra app.',
+  roadmap_node_select:  'L\'utente ha selezionato un nodo sulla roadmap per vedere o avviare il workout.',
+  roadmap_select:       'L\'utente ha cambiato roadmap attiva.',
+  league_tab_switch:    'L\'utente ha cambiato tab nella sezione Classifica (es. Globale vs Amici).',
+  chest_open:           'L\'utente ha aperto un baule raccogliendo le chiavi accumulate.',
+  feedback_opened:           'L\'utente ha aperto la sezione per inviare un feedback agli sviluppatori. Il fatto che l\'abbia aperta non significa necessariamente che abbia inviato qualcosa.',
+  ai_chat_send:              'L\'utente ha inviato un messaggio all\'AI Coach. Ogni occorrenza rappresenta un singolo messaggio spedito nella chat. Se il contatore è 4, l\'utente ha scritto 4 messaggi in quella sessione.',
+  paywall_product_updated:   'Il plugin paywall ha aggiornato i prodotti disponibili (piani, prezzi). Avviene in background all\'avvio.',
+  paywall_validator_step:    'Step interno del processo di validazione abbonamento. Si attiva all\'avvio per verificare se l\'utente è Premium.',
+  paywall_validator_called:  'Il validator dell\'abbonamento è stato chiamato. Parte automaticamente all\'apertura dell\'app.',
+  paywall_plugin_event:      'Evento generico del plugin di pagamento (RevenueCat). Generato automaticamente, non richiede azione utente.',
+  paywall_billing_error:     'Errore nella fatturazione o nella verifica del pagamento.',
+  paywall_fallback_opened:   'Il paywall ha aperto una versione fallback (es. se la connessione è lenta).',
+  paywall_purchase_attempt:  'L\'utente ha tentato di acquistare un piano Premium.',
+  trial_offer_shown:         'All\'utente è stata mostrata l\'offerta del periodo di prova gratuito.',
+};
+
+function showEventTooltip(e, key) {
+  e.stopPropagation();
+  document.getElementById('ev-tooltip')?.remove();
+  const text = EVENT_DESCRIPTIONS[key];
+  if (!text) return;
+  const tip = document.createElement('div');
+  tip.id = 'ev-tooltip';
+  tip.style.cssText = [
+    'position:fixed;z-index:9999',
+    'background:#1a1a2e;border:1px solid #3a3a5c',
+    'border-radius:10px;padding:12px 16px',
+    'font-size:12px;color:#d0d0f0;line-height:1.6',
+    'max-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.7)',
+    'pointer-events:none',
+  ].join(';');
+  tip.textContent = text;
+  const x = Math.min(e.clientX + 12, window.innerWidth - 300);
+  const y = Math.max(e.clientY - 60, 8);
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+  document.body.appendChild(tip);
+  setTimeout(() => document.addEventListener('click', () => tip.remove(), { once: true }), 0);
+}
 
 const TYPE_COLOR  = { action: '#4ade80', navigation: '#60a5fa', click: '#fbbf24', error: '#f87171' };
 const TYPE_LABEL  = { action: 'Azione', navigation: 'Nav', click: 'Click', error: 'Errore' };
@@ -902,6 +1069,73 @@ const SYSTEM_EVENTS = new Set([
   'paywall_plugin_event',
 ]);
 
+function userExplorerSection() {
+  const u      = state.ueSelectedUser;
+  const events = state.ueData || [];
+
+  if (!u && state.ueData === null && !state.ueLoading) {
+    return `
+      <div class="card" style="margin-top:20px;border-style:dashed;opacity:.6">
+        <div style="font-size:12px;color:var(--muted);text-align:center;padding:16px 0">
+          Seleziona un utente nel filtro in alto per vedere il suo flusso di eventi
+        </div>
+      </div>`;
+  }
+
+  let timelineHtml = '';
+  if (state.ueLoading) {
+    timelineHtml = `<div style="padding:32px;color:var(--muted);font-size:12px;text-align:center" class="pulse">Caricamento attività…</div>`;
+  } else if (state.ueData !== null) {
+    if (!events.length) {
+      timelineHtml = `<div style="padding:24px;color:var(--muted);font-size:12px;text-align:center">Nessuna attività nel periodo selezionato.</div>`;
+    } else {
+      const byDay = {};
+      events.forEach(e => {
+        const day = new Date(e.created_at).toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+        if (!byDay[day]) byDay[day] = [];
+        byDay[day].push(e);
+      });
+      const rows = Object.entries(byDay).map(([day, evs]) => {
+        const evRows = evs.map(e => {
+          const t     = new Date(e.created_at).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+          const color = TYPE_COLOR[e.event_type] || '#a78bfa';
+          const label = EVENT_LABELS[e.event_name] || e.event_name;
+          const desc  = e.description || label;
+          return `<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:1px solid #12121e">
+            <span style="font-size:10px;color:var(--muted);width:56px;flex-shrink:0;margin-top:2px;font-family:var(--mono)">${t}</span>
+            <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;color:var(--fg);line-height:1.4">${esc(desc)}</div>
+              ${e.screen && e.screen !== e.event_name ? `<span style="font-size:10px;color:var(--muted)">${esc(e.screen)}</span>` : ''}
+            </div>
+            <span style="font-size:9px;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;flex-shrink:0;margin-top:1px;min-width:36px;text-align:center">${TYPE_LABEL[e.event_type] || e.event_type}</span>
+          </div>`;
+        }).join('');
+        return `<div style="margin-bottom:6px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;
+            letter-spacing:.08em;padding:8px 0 5px;border-bottom:1px solid #2a2a3d;margin-bottom:3px">${day}</div>
+          ${evRows}
+        </div>`;
+      }).join('');
+      timelineHtml = `<div style="font-size:11px;color:var(--muted);margin-bottom:12px">${events.length} eventi trovati</div>${rows}`;
+    }
+  }
+
+  const userName = u ? `${esc(u.name || u.username || '—')} <span style="color:var(--muted);font-weight:400">@${esc(u.username || '')}</span>` : '—';
+  const fromLabel = state.ueFromDateTime
+    ? new Date(state.ueFromDateTime).toLocaleString('it-IT', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+    : '';
+
+  return `
+    <div class="card" style="margin-top:20px">
+      <div style="margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:2px">Sessione utente · <span style="font-weight:400">${userName}</span></div>
+        ${fromLabel ? `<div style="font-size:11px;color:var(--muted)">Dal ${fromLabel}</div>` : ''}
+      </div>
+      ${timelineHtml}
+    </div>`;
+}
+
 function pageBehavior() {
   const QUICK = [
     { label: '7g',    from: new Date(Date.now()-7*864e5).toISOString().slice(0,10),  to: TODAY },
@@ -910,9 +1144,42 @@ function pageBehavior() {
     { label: 'Tutto', from: '', to: '' },
   ];
 
-  const allRows = state.behaviorData || [];
-  const totalEvents  = allRows.reduce((s, r) => s + (+r.total || 0), 0);
-  const totalUsers   = allRows.length ? Math.max(...allRows.map(r => +r.unique_users || 0)) : 0;
+  const isUserMode   = !!(state.ueSelectedUser && state.ueData !== null);
+  const isUserWaiting = !!(state.ueSelectedUser && !state.ueLoading && state.ueData === null);
+  const isUserLoading = !!(state.ueSelectedUser && state.ueLoading);
+
+  let allRows;
+  if (isUserMode) {
+    // Aggrega gli eventi raw dell'utente nello stesso formato di behaviorData.
+    // Conta i user_id univoci reali per rilevare anomalie nel tracking
+    // (se compare >1 utente su un evento mentre ne analizzi 1 solo, c'è un bug).
+    const evMap  = {};
+    const navMap = {};
+    const fallbackId = state.ueSelectedUser?.id || '_user_';
+    for (const e of state.ueData) {
+      const uid = e.user_id || fallbackId;
+      if (e.event_type === 'navigation') {
+        const key = e.event_name || e.screen;
+        if (!navMap[key]) navMap[key] = { event_name: key, event_type: 'navigation', total: 0, _users: new Set() };
+        navMap[key].total++;
+        navMap[key]._users.add(uid);
+      } else {
+        const key = e.event_name;
+        if (!evMap[key]) evMap[key] = { event_name: e.event_name, event_type: e.event_type, total: 0, _users: new Set() };
+        evMap[key].total++;
+        evMap[key]._users.add(uid);
+      }
+    }
+    const finalize = rows => rows.map(r => ({ ...r, unique_users: r._users.size }));
+    allRows = [
+      ...finalize(Object.values(evMap)).sort((a, b) => b.total - a.total),
+      ...finalize(Object.values(navMap)).sort((a, b) => b.total - a.total),
+    ];
+  } else {
+    allRows = state.behaviorData || [];
+  }
+
+  const totalEvents = allRows.reduce((s, r) => s + (+r.total || 0), 0);
 
   const raw    = allRows.filter(r => !SYSTEM_EVENTS.has(r.event_name));
   const tf     = state.behaviorTypeFilter;
@@ -927,9 +1194,13 @@ function pageBehavior() {
     const pct   = Math.round((+r.total / max) * 100);
     const color = TYPE_COLOR[r.event_type] || '#a78bfa';
     const label = EVENT_LABELS[r.event_name] || r.event_name;
+    const hasDesc = !!EVENT_DESCRIPTIONS[r.event_name];
+    const infoBtn = hasDesc
+      ? `<button onclick="showEventTooltip(event,'${esc(r.event_name)}')" style="background:none;border:none;cursor:pointer;color:#4a4a6a;font-size:11px;padding:0 2px;line-height:1;flex-shrink:0" title="Cosa significa?">ℹ</button>`
+      : '';
     return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #1a1a2e">
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</div>
+        <div style="font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:5px">${esc(label)}${infoBtn}</div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
           <div style="flex:1;background:#1e1e30;height:3px;border-radius:2px">
             <div style="width:${pct}%;background:${color};height:100%;border-radius:2px;transition:width .3s"></div>
@@ -938,14 +1209,17 @@ function pageBehavior() {
       </div>
       <div style="text-align:right;flex-shrink:0">
         <div style="font-size:12px;font-weight:600;color:var(--fg)">${(+r.total).toLocaleString('it-IT')}</div>
-        <div style="font-size:10px;color:var(--muted)">${r.unique_users} utenti</div>
+        <div style="font-size:10px;color:var(--muted)">${r.unique_users} ${+r.unique_users === 1 ? 'utente' : 'utenti'}</div>
       </div>
       <span style="font-size:9px;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;flex-shrink:0;min-width:42px;text-align:center">${TYPE_LABEL[r.event_type] || r.event_type}</span>
     </div>`;
   };
 
-  const body = state.behaviorLoading
+  const bodyLoading = state.behaviorLoading || isUserLoading;
+  const body = bodyLoading
     ? `<div class="empty" style="padding:60px"><div class="empty-icon pulse">🖱️</div><div class="empty-text" style="color:var(--muted)">Caricamento…</div></div>`
+    : isUserWaiting
+    ? `<div class="empty" style="padding:60px"><div class="empty-icon">👆</div><div class="empty-text" style="color:var(--muted)">Premi "Carica attività" per vedere gli eventi di questo utente.</div></div>`
     : !raw.length
     ? `<div class="empty" style="padding:60px"><div class="empty-icon">🖱️</div><div class="empty-text" style="color:var(--muted)">Nessun dato nel periodo selezionato.</div></div>`
     : `<div class="grid-2" style="gap:16px;align-items:start">
@@ -967,14 +1241,31 @@ function pageBehavior() {
         </div>
       </div>`;
 
-  const totalBanner = state.behaviorLoading ? '' : `
+  const uName = state.ueSelectedUser ? esc(state.ueSelectedUser.name || state.ueSelectedUser.username || '') : '';
+  const totalBanner = (bodyLoading || isUserWaiting) ? '' : `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:10px 16px;background:#12121e;border:1px solid var(--border);border-radius:10px;width:fit-content">
-      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px">Totale eventi nel periodo</span>
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px">Totale eventi${isUserMode ? ' · ' + uName : ' nel periodo'}</span>
       <span style="font-size:18px;font-weight:700;color:var(--fg);font-family:var(--mono)">${totalEvents.toLocaleString('it-IT')}</span>
     </div>`;
 
+  const ueSel = state.ueSelectedUser;
+  const ueUserFilter = ueSel
+    ? `<div style="display:inline-flex;align-items:center;gap:8px;background:#12121e;border:1px solid #2a2a3d;border-radius:8px;padding:4px 4px 4px 12px">
+        <div style="line-height:1.3">
+          <span style="font-size:12px;font-weight:600;color:var(--fg)">${esc(ueSel.name || ueSel.username || '—')}</span>
+          <span style="font-size:11px;color:var(--muted);margin-left:5px">@${esc(ueSel.username || '')}</span>
+        </div>
+        <button id="ue-clear-user" style="background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;font-family:inherit" title="Rimuovi utente">✕</button>
+      </div>`
+    : `<div style="position:relative">
+        <input id="ue-search" type="text" placeholder="Cerca utente…"
+          value="${esc(state.ueSearchQuery)}"
+          class="form-input" style="width:190px;font-size:12px;padding:5px 10px">
+        <div id="ue-search-results" style="position:absolute;top:calc(100% + 4px);left:0;z-index:50;min-width:340px"></div>
+      </div>`;
+
   return `
-    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:6px">
+    <div class="filter-bar" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
       <span class="filter-label">Periodo rapido</span>
       ${QUICK.map(q => {
         const active = state.behaviorFrom === q.from && state.behaviorTo === q.to;
@@ -989,8 +1280,18 @@ function pageBehavior() {
         style="width:145px;padding:5px 10px;font-size:12px">
       <button id="beh-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Applica</button>
     </div>
+    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:6px;align-items:center">
+      <span class="filter-label">Utente</span>
+      ${ueUserFilter}
+      <div class="filter-sep"></div>
+      <span class="filter-label">Da ora</span>
+      <input type="datetime-local" id="ue-from-time" value="${esc(state.ueFromDateTime)}"
+        class="form-input" style="font-size:12px;padding:5px 10px">
+      ${ueSel ? `<button id="ue-load" class="btn btn-primary" style="font-size:12px;padding:6px 16px">Carica attività</button>` : ''}
+    </div>
     ${totalBanner}
-    ${body}`;
+    ${body}
+    ${userExplorerSection()}`;
 }
 
 function feedbackCard() {
@@ -1554,6 +1855,41 @@ function aiChatPanel() {
 
 // ── FUNNEL — custom builder ───────────────────────────────────────────
 
+function savedFunnelBar() {
+  const { savedFunnels, activeFunnelPreset, funnelSaveOpen, funnelSaveName } = state;
+  const pill = (active) =>
+    `border-radius:20px;border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};` +
+    `background:${active ? 'var(--accent-lo)' : 'var(--surface2)'};` +
+    `color:${active ? 'var(--purple)' : 'var(--muted)'};cursor:pointer;font-size:12px;` +
+    `padding:4px 14px;font-weight:${active ? '600' : '400'};transition:all .15s;font-family:inherit`;
+
+  return `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Funnel</span>
+      <button class="funnel-preset-btn" data-preset-idx="default" style="${pill(activeFunnelPreset === null)}">
+        Default
+      </button>
+      ${savedFunnels.map((f, i) => `
+        <div style="display:inline-flex;align-items:stretch">
+          <button class="funnel-preset-btn" data-preset-idx="${i}"
+            style="${pill(activeFunnelPreset === i)};border-radius:20px 0 0 20px;border-right:none">
+            ${esc(f.name)}
+          </button>
+          <button class="funnel-preset-del" data-preset-idx="${i}"
+            style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>
+        </div>`).join('')}
+      <div style="width:1px;height:16px;background:var(--border);margin:0 4px;align-self:center"></div>
+      ${funnelSaveOpen
+        ? `<div style="display:flex;align-items:center;gap:6px">
+            <input id="funnel-save-name" class="form-input" type="text" placeholder="Nome funnel…"
+              value="${esc(funnelSaveName)}" style="width:160px;padding:4px 10px;font-size:12px" autocomplete="off">
+            <button id="funnel-save-confirm" class="btn btn-primary" style="padding:4px 12px;font-size:12px">Salva</button>
+            <button id="funnel-save-cancel" class="btn btn-ghost" style="padding:4px 10px;font-size:12px">×</button>
+          </div>`
+        : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>`}
+    </div>`;
+}
+
 function pageFunnel() {
   const editPanel = state.editingFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
@@ -1577,6 +1913,7 @@ function pageFunnel() {
     : funnelViz();
 
   return `
+    ${savedFunnelBar()}
     <div class="filter-bar" style="margin-bottom:20px">
       ${state.sprints.length ? `
         <span class="filter-label">Sprint</span>
@@ -1989,8 +2326,8 @@ function pagePremium() {
     <!-- KPI row -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px">
       ${premiumKpi('Abbonati attivi', d.active_premium, null, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ live' : '⏳ in arrivo')}
-      ${premiumKpi('Trial mostrati', f.trial_shown, 'utenti unici', '#22d3ee', 'offerta mostrata (es. post-workout)')}
-      ${premiumKpi('Paywall aperto', f.paywall_views, 'utenti unici', '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% ha cliccato' : 'da paywall_open')}
+      ${premiumKpi('Trial mostrati', f.trial_shown_total, `${f.trial_shown} utenti unici`, '#22d3ee', 'offerta mostrata (es. post-workout)')}
+      ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utenti unici`, '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% ha cliccato' : 'da paywall_open')}
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% CTR sul paywall' : null)}
     </div>
 
@@ -2039,8 +2376,8 @@ function pagePremium() {
     <!-- Subscriptions timeline -->
     ${premiumPurchasesCard(d.recent_purchases)}
 
-    <!-- Excluded accounts -->
-    ${premiumExcludedCard(d.excluded_accounts)}
+    <!-- Excluded accounts — source: blocked_users (gestiti in Sprint) -->
+    ${premiumExcludedCard(state.blockedUsers)}
   `;
 }
 
@@ -2347,6 +2684,7 @@ function premiumExcludedCard(accounts) {
         font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px;user-select:none">
         <span style="font-size:14px">🔒</span>
         <span><strong style="color:var(--fg)">${accounts.length} account interni esclusi</strong> da tutti i conteggi — clicca per vedere</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted);opacity:.7">gestiti in Sprint →</span>
       </summary>
       <div style="border:1px solid #2a2a3d;border-top:none;border-radius:0 0 10px 10px;overflow:hidden">
         <table style="width:100%;font-size:12px;border-collapse:collapse">
@@ -2354,25 +2692,18 @@ function premiumExcludedCard(accounts) {
             <tr style="background:#111120;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:8px 14px">Nome</th>
               <th style="text-align:left;padding:8px 14px">Email</th>
-              <th style="text-align:left;padding:8px 14px">Registrato</th>
               <th style="text-align:left;padding:8px 14px">Motivo esclusione</th>
             </tr>
           </thead>
           <tbody>
-            ${accounts.map(a => {
-              const motivo = a.email.includes('hypemove') ? 'dominio @hypemove'
-                           : a.email.includes('test')    ? 'email con "test"'
-                           : 'email con "carlisi"';
-              return `
+            ${accounts.map(a => `
                 <tr style="border-top:1px solid #1a1a2e">
-                  <td style="padding:8px 14px;color:var(--fg)">${a.nome || '—'}</td>
-                  <td style="padding:8px 14px;color:var(--muted);font-family:monospace;font-size:11px">${a.email}</td>
-                  <td style="padding:8px 14px;color:var(--muted)">${a.registrato}</td>
+                  <td style="padding:8px 14px;color:var(--fg)">${esc(a.nome || a.username || '—')}</td>
+                  <td style="padding:8px 14px;color:var(--muted);font-family:monospace;font-size:11px">${esc(a.email || '')}</td>
                   <td style="padding:8px 14px">
-                    <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:#1a1a30;color:#60a5fa">${motivo}</span>
+                    <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:#1a1a30;color:#60a5fa">${esc(a.motivo || '—')}</span>
                   </td>
-                </tr>`;
-            }).join('')}
+                </tr>`).join('')}
           </tbody>
         </table>
       </div>
@@ -3126,14 +3457,28 @@ function pageMetaAds() {
     { id: 'last_month', label: 'Mese prec.' },
   ];
 
+  const tokenStatus = state.metaTokenSaveError
+    ? '<span style="font-size:11px;color:var(--red)">⚠ Errore salvataggio su Supabase</span>'
+    : state.metaToken
+      ? '<span style="font-size:11px;color:var(--green)">● Token impostato</span>'
+      : '<span style="font-size:11px;color:var(--red)">● Nessun token</span>';
+
+  const settingsErrorBanner = state.settingsLoadError && !state.metaToken
+    ? '<div style="margin-top:10px;padding:8px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;display:flex;align-items:center;gap:10px">' +
+      '<span style="font-size:12px;color:var(--red)">⚠ Impossibile caricare le impostazioni da Supabase. Il token potrebbe essere salvato ma non caricato per un problema di rete.</span>' +
+      '<button id="meta-settings-reload" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;white-space:nowrap">↻ Ricarica</button>' +
+      '</div>'
+    : '';
+
   const tokenSection = '<div class="card" style="margin-bottom:16px">' +
     '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
     '<span style="font-size:12px;color:var(--muted);white-space:nowrap">Token Meta API</span>' +
     '<input id="meta-token-input" type="password" value="' + state.metaToken + '" placeholder="Incolla il token da Meta Developers…" style="flex:1;min-width:200px;background:#0d0d1a;border:1px solid var(--border);color:var(--fg);border-radius:6px;padding:6px 10px;font-size:12px;font-family:monospace"/>' +
     '<button id="meta-token-save" class="btn-primary" style="font-size:12px;padding:6px 14px">Salva</button>' +
-    (state.metaToken ? '<span style="font-size:11px;color:var(--green)">● Token impostato</span>' : '<span style="font-size:11px;color:var(--red)">● Nessun token</span>') +
+    tokenStatus +
     '</div>' +
     '<div style="margin-top:6px;font-size:11px;color:var(--muted)">Il token non scade (System User Token). Rigeneralo solo se lo hai revocato.</div>' +
+    settingsErrorBanner +
     '</div>';
 
   if (!state.metaToken) return '<div class="page-header"><div><div class="page-title">Meta ADS</div><div class="page-sub">Dati campagne pubblicitarie</div></div></div>' +
@@ -3302,7 +3647,7 @@ function attachEvents() {
     const to   = document.getElementById('funnel-to')?.value;
     if (from) state.funnelFrom = from;
     if (to)   state.funnelTo   = to;
-    saveSetting('funnel_dates', { from: state.funnelFrom, to: state.funnelTo });
+    state.activeFunnelPreset = null;
     state.funnel = null;
     state.metaFunnelData = null;
     state.metaFunnelPeriod = null;
@@ -3330,6 +3675,78 @@ function attachEvents() {
   document.getElementById('funnel-reset')?.addEventListener('click', () => {
     state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
     saveSetting('funnel_cfg', state.funnelConfig);
+    render();
+  });
+
+  // Funnel — saved presets
+  document.querySelectorAll('.funnel-preset-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      const idx = el.dataset.presetIdx;
+      if (idx === 'default') {
+        state.activeFunnelPreset = null;
+        state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+        state.funnelFrom = BETA_START;
+        state.funnelTo   = TODAY;
+      } else {
+        const i = +idx;
+        const preset = state.savedFunnels[i];
+        if (!preset) return;
+        state.activeFunnelPreset = i;
+        state.funnelConfig = JSON.parse(JSON.stringify(preset.config));
+        state.funnelFrom   = preset.from;
+        state.funnelTo     = preset.to;
+      }
+      state.funnel = null;
+      state.metaFunnelData = null;
+      state.metaFunnelPeriod = null;
+      fetchFunnel();
+    }));
+
+  document.querySelectorAll('.funnel-preset-del').forEach(el =>
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const i = +el.dataset.presetIdx;
+      state.savedFunnels.splice(i, 1);
+      if (state.activeFunnelPreset === i)      state.activeFunnelPreset = null;
+      else if (state.activeFunnelPreset > i)   state.activeFunnelPreset--;
+      localStorage.setItem(LS_SAVED_FUNNELS, JSON.stringify(state.savedFunnels));
+      render();
+    }));
+
+  document.getElementById('funnel-save-open')?.addEventListener('click', () => {
+    state.funnelSaveOpen = true;
+    state.funnelSaveName = '';
+    render();
+    document.getElementById('funnel-save-name')?.focus();
+  });
+
+  document.getElementById('funnel-save-cancel')?.addEventListener('click', () => {
+    state.funnelSaveOpen = false;
+    render();
+  });
+
+  document.getElementById('funnel-save-name')?.addEventListener('input', e => {
+    state.funnelSaveName = e.target.value;
+  });
+
+  document.getElementById('funnel-save-name')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('funnel-save-confirm')?.click();
+    if (e.key === 'Escape') document.getElementById('funnel-save-cancel')?.click();
+  });
+
+  document.getElementById('funnel-save-confirm')?.addEventListener('click', () => {
+    const name = state.funnelSaveName.trim();
+    if (!name) return;
+    state.savedFunnels.push({
+      name,
+      config: JSON.parse(JSON.stringify(state.funnelConfig)),
+      from: state.funnelFrom,
+      to:   state.funnelTo,
+    });
+    state.activeFunnelPreset = state.savedFunnels.length - 1;
+    state.funnelSaveOpen = false;
+    state.funnelSaveName = '';
+    localStorage.setItem(LS_SAVED_FUNNELS, JSON.stringify(state.savedFunnels));
     render();
   });
   document.querySelectorAll('.funnel-step-sel').forEach(el =>
@@ -3492,10 +3909,18 @@ function attachEvents() {
     const val = document.getElementById('meta-token-input')?.value?.trim();
     if (!val) return;
     state.metaToken = val;
+    state.metaTokenSaveError = false;
     saveSetting('meta_token', val);
     state.metaAds = null;
     state.metaCampaigns = null;
     fetchMetaAds();
+  });
+
+  // Meta ADS — ricarica impostazioni da Supabase
+  document.getElementById('meta-settings-reload')?.addEventListener('click', async () => {
+    await loadSettings();
+    render();
+    if (state.metaToken) fetchMetaAds();
   });
 
   // Meta ADS — refresh
@@ -3608,6 +4033,31 @@ function attachEvents() {
       state.behaviorTypeFilter = el.dataset.behType;
       render();
     }));
+
+  // Behavior — User Explorer
+  const ueSearchEl = document.getElementById('ue-search');
+  if (ueSearchEl) {
+    ueSearchEl.addEventListener('input', e => searchUsersForExplorer(e.target.value.trim()));
+    ueSearchEl.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        state.ueSearchQuery   = '';
+        state.ueSearchResults = [];
+        renderUeSearchResults();
+      }
+    });
+    if (state.ueSearchResults.length) renderUeSearchResults();
+  }
+  document.getElementById('ue-clear-user')?.addEventListener('click', () => {
+    state.ueSelectedUser  = null;
+    state.ueData          = null;
+    state.ueSearchQuery   = '';
+    state.ueSearchResults = [];
+    render();
+  });
+  document.getElementById('ue-from-time')?.addEventListener('change', e => {
+    state.ueFromDateTime = e.target.value;
+  });
+  document.getElementById('ue-load')?.addEventListener('click', fetchUserExplorer);
 
   // User activity modal — open from feedback detail
   document.querySelectorAll('.open-user-activity').forEach(el =>
