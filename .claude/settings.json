@@ -3,7 +3,21 @@
     "allow": [
       "mcp__claude_ai_Supabase__apply_migration",
       "mcp__claude_ai_Supabase__execute_sql",
-      "mcp__claude_ai_Supabase__list_projects"
+      "mcp__claude_ai_Supabase__list_projects",
+      "Bash(node --check public/internal/js/kpi.js)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(chromium-cli --help)",
+      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")",
+      "Bash(npx --yes playwright --version)",
+      "Bash(npm root *)",
+      "Bash(NODE_PATH=$\\(npm root -g\\) node .tmp_pw_check.js)",
+      "Bash(mv .tmp_pw_check.js .tmp_pw_check.cjs)",
+      "Bash(node .tmp_pw_check.cjs)",
+      "Bash(npm install *)",
+      "Read(//tmp/**)",
+      "Bash(node .tmp_pw_check2.cjs)",
+      "Bash(npm uninstall *)"
     ]
   }
 }

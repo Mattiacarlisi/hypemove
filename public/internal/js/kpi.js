@@ -150,6 +150,7 @@ let state = {
   premiumData: null, premiumLoading: false, premiumError: null,
   premiumFrom: BETA_START, premiumTo: TODAY,
   premiumFunnelSteps: new Set(['trial_shown_total','trial_shown','paywall_views','purchase_attempts','premium_activated']),
+  premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all',
   goalsData: null, goalsLoading: false, goalsError: null,
   goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all',
   workoutDepthData: null, workoutDepthLoading: false, workoutDepthError: null,
@@ -2480,8 +2481,98 @@ const PREMIUM_SOURCE_LABELS = {
   'post_workout':           'Post allenamento',
   'onboarding_premium_step':'Onboarding',
   'keys_popup_premium':     'Popup chiavi',
+  'coach_hub_entry':        'Coach hub',
+  'shop_vault_locked':      'Vault shop bloccato',
+  'home_premium_badge':     'Badge Premium home',
+  'onboarding_end':         'Fine onboarding',
+  'ai_premium_feature_locked':'Feature AI bloccata',
   'unknown':                'Sconosciuto',
 };
+
+const PREMIUM_EXPECTED_SOURCES = [
+  'shop_ai_coach',
+  'keys_popup_premium',
+  'ai_chat_quota_exhausted',
+  'post_workout',
+  'onboarding_premium_step',
+  'coach_hub_entry',
+  'shop_vault_locked',
+  'home_premium_badge',
+  'onboarding_end',
+  'ai_premium_feature_locked',
+  'roadmap_premium_locked',
+  'unknown',
+];
+
+function premiumNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function premiumPct(part, total, digits = 1) {
+  return total > 0 ? (part / total * 100).toFixed(digits) + '%' : '0.0%';
+}
+
+function premiumPick(row, keys, fallback = null) {
+  for (const key of keys) {
+    if (row && row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+  }
+  return fallback;
+}
+
+function premiumFormatDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('it-IT', { day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+function premiumPlanLabel(productId) {
+  if (!productId) return 'Non tracciato';
+  if (String(productId).includes('year')) return 'Annuale';
+  if (String(productId).includes('month')) return 'Mensile';
+  return String(productId);
+}
+
+function premiumSourceLabel(source) {
+  return PREMIUM_SOURCE_LABELS[source] || source || 'Sconosciuto';
+}
+
+function premiumErrorSummary(p) {
+  const billingErr = premiumNum(p.billing_err ?? p.billing_errors);
+  const purchaseErr = premiumNum(p.purchase_err ?? p.purchase_errors);
+  const explicit = premiumPick(p, ['errore', 'error', 'error_message', 'msg', 'last_error', 'problema'], '');
+  if (explicit) return String(explicit);
+  if (billingErr && purchaseErr) return `${billingErr} errori billing, ${purchaseErr} errori acquisto`;
+  if (billingErr) return `${billingErr} errori billing`;
+  if (purchaseErr) return `${purchaseErr} errori acquisto`;
+  return '';
+}
+
+function premiumPurchaserModel(p) {
+  const attempts = premiumNum(p.tentativi ?? p.purchase_attempts ?? p.attempts);
+  const activations = premiumNum(p.attivazioni ?? p.activations ?? p.premium_activated);
+  const successAt = premiumPick(p, ['data_successo', 'success_at', 'activated_at', 'last_activation', 'ultimo_successo']);
+  const firstAttempt = premiumPick(p, ['primo_tentativo', 'first_attempt', 'first_attempt_at', 'created_at']);
+  const lastAttempt = premiumPick(p, ['ultimo_tentativo', 'last_attempt', 'last_attempt_at', 'updated_at'], firstAttempt);
+  const errorText = premiumErrorSummary(p);
+  const success = activations > 0 || Boolean(successAt) || premiumPick(p, ['status', 'stato'], '') === 'success';
+  const status = success ? 'Acquisto riuscito' : errorText ? 'Problema da verificare' : 'Tentativo senza successo';
+  return {
+    raw: p,
+    name: premiumPick(p, ['nome', 'name', 'username'], ''),
+    email: premiumPick(p, ['email'], ''),
+    attempts,
+    success,
+    status,
+    product: premiumPick(p, ['prodotto', 'product_id', 'product', 'plan']),
+    source: premiumPick(p, ['sorgente', 'source', 'entry_source'], 'unknown'),
+    firstAttempt,
+    lastAttempt,
+    successAt,
+    errorText,
+  };
+}
 
 function pagePremium() {
   if (state.premiumLoading) return `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Caricamento dati premium...</div>`;
@@ -2490,11 +2581,15 @@ function pagePremium() {
 
   const d = state.premiumData;
   const f = d.funnel;
-  const trialToPaywall = f.trial_shown  > 0 ? (f.paywall_views   / f.trial_shown   * 100).toFixed(1) : '0.0';
-  const paywallToBuy   = f.paywall_views > 0 ? (f.purchase_attempts / f.paywall_views * 100).toFixed(1) : '0.0';
+  const trialToPaywall = f.trial_shown  > 0 ? (f.paywall_views      / f.trial_shown      * 100).toFixed(1) : '0.0';
+  const paywallToBuy   = f.paywall_views > 0 ? (f.purchase_attempts / f.paywall_views    * 100).toFixed(1) : '0.0';
   const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
   const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
   const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
+  const purchasers = (d.purchasers || []).map(premiumPurchaserModel);
+  const successfulUsers = Math.max(purchasers.filter(p => p.success).length, premiumNum(f.premium_activated));
+  const attemptedUsers  = Math.max(f.purchase_attempts, purchasers.length);
+  const buyToSuccess = premiumPct(successfulUsers, attemptedUsers);
 
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap">
@@ -2517,12 +2612,13 @@ function pagePremium() {
       ${state.premiumFrom} → ${state.premiumTo}
     </div>
 
-    <!-- KPI row -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:16px">
-      ${premiumKpi('Abbonati attivi', d.active_premium, null, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ live' : '⏳ in arrivo')}
-      ${premiumKpi('Trial mostrati', f.trial_shown_total, `${f.trial_shown} utenti unici`, '#22d3ee', 'offerta mostrata (es. post-workout)')}
-      ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utenti unici`, '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% ha cliccato' : 'da paywall_open')}
-      ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% CTR sul paywall' : null)}
+    <!-- Dashboard: i numeri che contano, in ordine di funnel -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">
+      ${premiumKpi('Abbonati attivi', d.active_premium, null, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora' : '⏳ ancora nessuno')}
+      ${premiumKpi('Trial visto', f.trial_shown, `${f.trial_shown_total} volte mostrato`, '#22d3ee', 'offerta mostrata (es. post-workout)')}
+      ${premiumKpi('Paywall aperto', f.paywall_views, `${f.paywall_views_total} aperture`, '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% di chi ha visto il trial' : null)}
+      ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% di chi ha aperto il paywall' : null)}
+      ${premiumKpi('Acquisto riuscito', successfulUsers, null, successfulUsers > 0 ? '#4ade80' : 'var(--muted)', attemptedUsers > 0 ? buyToSuccess + ' dei tentativi' : null)}
     </div>
 
     <!-- Conversion funnel -->
@@ -2531,47 +2627,21 @@ function pagePremium() {
       ${premiumFunnelViz(f)}
     </div>
 
-    <!-- Trial sources + Purchase sources side by side -->
-    <div class="grid-2" style="margin-bottom:16px">
-      <div class="card">
-        <div class="card-title" style="margin-bottom:14px">Da dove viene mostrato il trial</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px">trigger dell'offerta · top of funnel</div>
-        ${premiumSourcesChart(d.trial_sources, 'utenti', 'eventi')}
-      </div>
-      <div class="card">
-        <div class="card-title" style="margin-bottom:14px">Da dove si tenta l'acquisto</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px">sorgente al tentativo di acquisto</div>
-        ${premiumSourcesChart(d.sources, 'utenti', 'tentativi')}
-      </div>
-    </div>
+    <!-- Sorgenti: stessa lista, 4 viste a tab -->
+    ${premiumSourcesCard(d, purchasers)}
 
-    <!-- Purchasers list -->
-    ${premiumPurchasersCard(d.purchasers)}
+    <!-- Chi ha tentato / acquistato -->
+    ${premiumPurchasersDetailCard(purchasers)}
 
     <!-- Behavior panel -->
     <div class="card" style="margin-bottom:16px">
       <div class="card-title" style="margin-bottom:14px">Comportamento post-paywall</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">fallback aperto · onboarding saltato</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">fallback aperto · onboarding saltato · chiusura paywall</div>
       ${premiumBehaviorPanel(f, d.fallback_sources)}
     </div>
 
-    <!-- Errors panel -->
-    ${hasRealErrors ? premiumErrorsCard(d.billing_errors, d.purchase_errors) : `
-    <div class="card" style="margin-bottom:16px;border-color:#1a3a1a">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:18px">✓</span>
-        <div>
-          <div style="font-size:13px;font-weight:600;color:#4ade80">Nessun errore rilevato (utenti reali)</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:2px">Gli errori BILLING_UNAVAILABLE erano tutti da sessioni di test interne</div>
-        </div>
-      </div>
-    </div>`}
-
-    <!-- Subscriptions timeline -->
-    ${premiumPurchasesCard(d.recent_purchases)}
-
-    <!-- Excluded accounts — source: blocked_users (gestiti in Sprint) -->
-    ${premiumExcludedCard(state.blockedUsers)}
+    <!-- Diagnostica: qualità tracking, errori, log grezzo, account esclusi (collassata) -->
+    ${premiumDiagnostics(d, f, purchasers, hasRealErrors)}
   `;
 }
 
@@ -2651,6 +2721,70 @@ function premiumSourcesChart(sources, userCol = 'utenti', countCol = 'tentativi'
   }).join('');
 }
 
+const PREMIUM_SOURCE_TABS = [
+  { key: 'trial_sources',   label: 'Offerta trial vista' },
+  { key: 'paywall_sources', label: 'Paywall aperto' },
+  { key: 'sources',         label: 'Tentativo acquisto' },
+  { key: 'conv',            label: 'Acquisto riuscito' },
+];
+
+const PREMIUM_SOURCE_TAB_CAPTIONS = {
+  trial_sources:   "da dove arriva l'offerta del trial · top of funnel",
+  paywall_sources: 'da dove viene aperto il paywall completo',
+  sources:         'da dove parte il tentativo di acquisto',
+  conv:            'da dove arrivano gli acquisti andati a buon fine',
+};
+
+function premiumConvSources(purchasers) {
+  const bySource = {};
+  purchasers.forEach(p => {
+    const key = p.source || 'unknown';
+    if (!bySource[key]) bySource[key] = { source: key, attempts: 0, success: 0 };
+    bySource[key].attempts++;
+    if (p.success) bySource[key].success++;
+  });
+  return Object.values(bySource).sort((a, b) => b.success - a.success || b.attempts - a.attempts);
+}
+
+function premiumConvSourcesChart(rows) {
+  if (!rows?.length) return `<div style="color:var(--muted);font-size:12px">Nessun dato registrato</div>`;
+  const maxSuccess = Math.max(...rows.map(r => r.success), 1);
+  return rows.map(r => {
+    const pct = Math.round(r.success / maxSuccess * 100);
+    return `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <div style="font-size:12px;color:var(--fg)">${esc(premiumSourceLabel(r.source))}</div>
+          <div style="font-size:11px;color:var(--muted)">${r.success} riusciti su ${r.attempts} tentativi · ${premiumPct(r.success, r.attempts)}</div>
+        </div>
+        <div style="background:#1a1a2e;border-radius:3px;height:6px">
+          <div style="background:#4ade80;border-radius:3px;height:6px;width:${pct}%;transition:width .3s"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function premiumSourcesCard(d, purchasers) {
+  const tab = PREMIUM_SOURCE_TABS.some(t => t.key === state.premiumSourceTab) ? state.premiumSourceTab : 'paywall_sources';
+  const tabs = PREMIUM_SOURCE_TABS.map(t => {
+    const on = tab === t.key;
+    return `<button class="filter-btn ${on ? 'active' : ''}" data-source-tab="${t.key}">${t.label}</button>`;
+  }).join('');
+
+  const body = tab === 'conv'            ? premiumConvSourcesChart(premiumConvSources(purchasers))
+             : tab === 'trial_sources'   ? premiumSourcesChart(d.trial_sources, 'utenti', 'eventi')
+             : tab === 'paywall_sources' ? premiumSourcesChart(d.paywall_sources, 'utenti', 'eventi')
+             : premiumSourcesChart(d.sources, 'utenti', 'tentativi');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:10px">Sorgenti</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">${tabs}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">${PREMIUM_SOURCE_TAB_CAPTIONS[tab]}</div>
+      ${body}
+    </div>`;
+}
+
 function premiumBehaviorPanel(f, fallbackSources) {
   const items = [
     { icon: '⚠', label: 'Utenti con paywall fallback', value: f.fallback_users, color: '#f59e0b',
@@ -2723,79 +2857,138 @@ function premiumErrorsCard(billingErrors, purchaseErrors) {
     </div>`;
 }
 
-function premiumPurchasersCard(purchasers) {
+function premiumPurchasersDetailCard(purchasers) {
   if (!purchasers?.length) return `
     <div class="card" style="margin-bottom:16px">
-      <div class="card-title" style="margin-bottom:10px">Chi ha tentato l'acquisto</div>
+      <div class="card-title" style="margin-bottom:10px">Chi ha tentato o acquistato</div>
       <div style="color:var(--muted);font-size:12px;padding:16px 0">Nessun tentativo di acquisto nel periodo selezionato</div>
     </div>`;
 
-  const SOURCE_SHORT = {
-    'shop_ai_coach':          'AI Coach',
-    'ai_chat_quota_exhausted':'AI quota',
-    'roadmap_premium_locked': 'Roadmap',
-    'post_workout':           'Post workout',
-    'onboarding_premium_step':'Onboarding',
-    'keys_popup_premium':     'Chiavi',
-    'unknown':                '—',
-  };
+  const successCount = purchasers.filter(p => p.success).length;
+  const problemCount = purchasers.filter(p => p.errorText).length;
+  const filter = ['all', 'success', 'failed'].includes(state.premiumPurchaserFilter) ? state.premiumPurchaserFilter : 'all';
+  const filtered = purchasers.filter(p => filter === 'success' ? p.success : filter === 'failed' ? !p.success : true);
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (a.success !== b.success) return a.success ? -1 : 1;
+    if (Boolean(a.errorText) !== Boolean(b.errorText)) return a.errorText ? -1 : 1;
+    return premiumNum(b.attempts) - premiumNum(a.attempts);
+  });
+
+  const chips = [
+    { key: 'all',     label: `Tutti (${purchasers.length})` },
+    { key: 'success', label: `Riusciti (${successCount})` },
+    { key: 'failed',  label: `Senza successo (${purchasers.length - successCount})` },
+  ].map(c => `<button class="filter-btn ${filter === c.key ? 'active' : ''}" data-purchaser-filter="${c.key}">${c.label}</button>`).join('');
 
   return `
     <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px">
-        <div class="card-title" style="margin-bottom:0">Chi ha tentato l'acquisto</div>
-        <div style="font-size:11px;color:var(--muted)">${purchasers.length} utent${purchasers.length === 1 ? 'e' : 'i'} · esclusi account interni</div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin-bottom:3px">Chi ha tentato o acquistato</div>
+          <div style="font-size:11px;color:var(--muted)">nome, email, date, stato, piano, sorgente e problemi tracciati · ${problemCount} con problemi</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
       </div>
+      ${!sorted.length ? `<div style="color:var(--muted);font-size:12px;padding:16px 0">Nessun utente in questo filtro</div>` : `
       <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1120px">
           <thead>
             <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Utente</th>
               <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Email</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Stato</th>
               <th style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e">Tentativi</th>
-              <th style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e">Errori</th>
-              <th style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e">Attivato</th>
               <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Prodotto</th>
               <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Via</th>
               <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Primo tentativo</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Ultimo tentativo</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Successo</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Problema / errore</th>
             </tr>
           </thead>
           <tbody>
-            ${purchasers.map(p => {
-              const hasErr   = (p.billing_err + p.purchase_err) > 0;
-              const attivato = p.attivazioni > 0;
-              const prodotto = p.prodotto === 'premium_yearly' ? 'Annuale' : p.prodotto === 'premium_monthly' ? 'Mensile' : p.prodotto || '—';
-              const prodColor = p.prodotto === 'premium_yearly' ? '#a78bfa' : '#4ade80';
+            ${sorted.map(p => {
+              const product = premiumPlanLabel(p.product);
+              const prodColor = product === 'Annuale' ? '#a78bfa' : product === 'Mensile' ? '#4ade80' : 'var(--muted)';
+              const statusColor = p.success ? '#4ade80' : p.errorText ? '#f59e0b' : 'var(--muted)';
+              const statusBg = p.success ? '#102915' : p.errorText ? '#2b210f' : '#171728';
               return `
                 <tr style="border-bottom:1px solid #111120">
-                  <td style="padding:10px 10px">
-                    <div style="font-weight:600;color:var(--fg)">${p.nome || '—'}</div>
-                  </td>
-                  <td style="padding:10px 10px;color:var(--muted);font-family:monospace;font-size:11px">${p.email}</td>
-                  <td style="padding:10px 10px;text-align:center">
-                    <span style="font-weight:700;color:${p.tentativi > 3 ? '#f59e0b' : 'var(--fg)'}">${p.tentativi}</span>
-                  </td>
-                  <td style="padding:10px 10px;text-align:center">
-                    ${hasErr
-                      ? `<span style="font-weight:700;color:#ef4444">${p.billing_err + p.purchase_err}</span>`
-                      : `<span style="color:var(--muted)">—</span>`}
-                  </td>
-                  <td style="padding:10px 10px;text-align:center">
-                    ${attivato
-                      ? `<span style="color:#4ade80;font-size:15px">✓</span>`
-                      : `<span style="color:#2a2a3d;font-size:13px">✗</span>`}
-                  </td>
-                  <td style="padding:10px 10px">
-                    ${p.prodotto
-                      ? `<span style="font-size:10px;padding:2px 7px;border-radius:4px;background:${prodColor}22;color:${prodColor}">${prodotto}</span>`
-                      : '<span style="color:var(--muted)">—</span>'}
-                  </td>
-                  <td style="padding:10px 10px;color:var(--muted);font-size:11px">${SOURCE_SHORT[p.sorgente] || p.sorgente || '—'}</td>
-                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${p.primo_tentativo || '—'}</td>
+                  <td style="padding:10px 10px"><div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(p.name || 'Non tracciato')}</div></td>
+                  <td style="padding:10px 10px;color:var(--muted);font-family:monospace;font-size:11px">${esc(p.email || 'Non tracciata')}</td>
+                  <td style="padding:10px 10px"><span style="font-size:10px;padding:3px 8px;border-radius:999px;background:${statusBg};color:${statusColor};white-space:nowrap">${esc(p.status)}</span></td>
+                  <td style="padding:10px 10px;text-align:center"><span style="font-weight:700;color:${p.attempts > 3 ? '#f59e0b' : 'var(--fg)'}">${p.attempts}</span></td>
+                  <td style="padding:10px 10px"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:#161629;color:${prodColor};white-space:nowrap">${esc(product)}</span></td>
+                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${esc(premiumSourceLabel(p.source))}</td>
+                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${esc(premiumFormatDate(p.firstAttempt) || 'Non tracciato')}</td>
+                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${esc(premiumFormatDate(p.lastAttempt) || 'Non tracciato')}</td>
+                  <td style="padding:10px 10px;color:${p.success ? '#4ade80' : 'var(--muted)'};font-size:11px;white-space:nowrap">${esc(premiumFormatDate(p.successAt) || (p.success ? 'Si' : 'No'))}</td>
+                  <td style="padding:10px 10px;color:${p.errorText ? '#f59e0b' : 'var(--muted)'};font-size:11px;min-width:190px">${esc(p.errorText || 'Nessun errore tracciato')}</td>
                 </tr>`;
             }).join('')}
           </tbody>
         </table>
+      </div>`}
+    </div>`;
+}
+
+function premiumDataQualityCard(d, f, purchasers) {
+  const sourceRows = [
+    ...(d.sources || []),
+    ...(d.trial_sources || []),
+    ...(d.fallback_sources || []),
+  ];
+  const presentSources = new Set(sourceRows.map(s => s.source || 'unknown'));
+  purchasers.forEach(p => presentSources.add(p.source || 'unknown'));
+  const missingSources = PREMIUM_EXPECTED_SOURCES.filter(s => !presentSources.has(s));
+  const unknownRows = sourceRows.filter(s => (s.source || 'unknown') === 'unknown');
+  const unknownEvents = unknownRows.reduce((sum, s) => sum + premiumNum(s.tentativi ?? s.eventi ?? s.n), 0);
+  const missingProduct = purchasers.filter(p => !p.product).length;
+  const missingSuccessDate = purchasers.filter(p => p.success && !p.successAt).length;
+  const missingErrorDetail = purchasers.filter(p => !p.success && !p.errorText).length;
+
+  const issues = [
+    unknownEvents > 0 && `${unknownEvents} eventi con source unknown`,
+    missingProduct > 0 && `${missingProduct} utenti senza prodotto/piano`,
+    missingSuccessDate > 0 && `${missingSuccessDate} successi senza data successo`,
+    missingErrorDetail > 0 && `${missingErrorDetail} tentativi falliti senza errore esplicito`,
+  ].filter(Boolean);
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+        <div>
+          <div class="card-title" style="margin-bottom:3px">Qualita dati Premium</div>
+          <div style="font-size:11px;color:var(--muted)">copertura source, piano, successo ed errori acquisto</div>
+        </div>
+        <div style="font-size:11px;color:${issues.length ? '#f59e0b' : '#4ade80'}">${issues.length ? issues.length + ' punti da migliorare' : 'Tracking pulito nel periodo'}</div>
+      </div>
+      <div class="grid-2">
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Source presenti</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${[...presentSources].sort().map(s => `<span style="font-size:10px;padding:3px 8px;border-radius:999px;background:#111120;color:#60a5fa;border:1px solid #1a2a3d">${esc(premiumSourceLabel(s))}</span>`).join('') || '<span style="font-size:12px;color:var(--muted)">Nessuna source registrata</span>'}
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Source attese non viste</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            ${missingSources.map(s => `<span style="font-size:10px;padding:3px 8px;border-radius:999px;background:#171728;color:var(--muted);border:1px solid #2a2a3d">${esc(premiumSourceLabel(s))}</span>`).join('') || '<span style="font-size:12px;color:#4ade80">Tutte presenti</span>'}
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:14px;border-top:1px solid #1a1a2e;padding-top:12px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Problemi tracking</div>
+        ${issues.length ? issues.map(x => `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #111120">
+            <span style="font-size:12px;color:var(--fg)">${esc(x)}</span>
+            <span style="font-size:10px;color:#f59e0b">da correggere</span>
+          </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Nessun problema evidente nei campi mostrati.</div>'}
+        <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:10px">
+          Per rendere l'analisi affidabile conviene tracciare sempre: entry_source, open_mode,
+          product_id, attempt_id, purchase_status, error_code, error_message, success_at e transaction_id.
+        </div>
       </div>
     </div>`;
 }
@@ -2900,6 +3093,33 @@ function premiumExcludedCard(accounts) {
                 </tr>`).join('')}
           </tbody>
         </table>
+      </div>
+    </details>`;
+}
+
+function premiumDiagnostics(d, f, purchasers, hasRealErrors) {
+  return `
+    <details style="margin-bottom:16px">
+      <summary style="cursor:pointer;padding:12px 16px;background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;
+        font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px;user-select:none">
+        <span style="font-size:14px">🔧</span>
+        <span><strong style="color:var(--fg)">Diagnostica e dati grezzi</strong> — qualità tracking, errori, log abbonamenti, account esclusi</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted);opacity:.7">clicca per espandere →</span>
+      </summary>
+      <div style="margin-top:12px">
+        ${premiumDataQualityCard(d, f, purchasers)}
+        ${hasRealErrors ? premiumErrorsCard(d.billing_errors, d.purchase_errors) : `
+        <div class="card" style="margin-bottom:16px;border-color:#1a3a1a">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:18px">✓</span>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#4ade80">Nessun errore rilevato (utenti reali)</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Gli errori BILLING_UNAVAILABLE erano tutti da sessioni di test interne</div>
+            </div>
+          </div>
+        </div>`}
+        ${premiumPurchasesCard(d.recent_purchases)}
+        ${premiumExcludedCard(state.blockedUsers)}
       </div>
     </details>`;
 }
@@ -4456,6 +4676,20 @@ function attachEvents() {
       } else {
         state.premiumFunnelSteps.add(key);
       }
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-source-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.premiumSourceTab = btn.dataset.sourceTab;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-purchaser-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.premiumPurchaserFilter = btn.dataset.purchaserFilter;
       render();
     });
   });
