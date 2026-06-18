@@ -1344,6 +1344,7 @@ const EVENT_LABELS = {
   view_Paywall: 'Paywall mostrato', paywall_open: 'Paywall aperto (manuale)',
   paywall_step_view: 'Paywall — step visualizzato',
   paywall_plan_select: 'Paywall — piano selezionato',
+  workout_detail_close: 'Dettaglio workout chiuso senza iniziare',
 };
 
 const EVENT_DESCRIPTIONS = {
@@ -1383,6 +1384,7 @@ const EVENT_DESCRIPTIONS = {
   paywall_open:              'L\'utente ha aperto il paywall manualmente, ad esempio toccando un pulsante o una sezione legata a Premium. Non conta le volte in cui il paywall compare automaticamente: solo le aperture volute dall\'utente.',
   paywall_step_view:         'L\'utente ha visualizzato una pagina (step) del paywall a carosello. Se il paywall ha più pagine, ogni pagina vista genera un evento separato: con 3 pagine, vederle tutte in una sola apertura genera 3 eventi.',
   paywall_plan_select:       'L\'utente ha toccato un\'opzione di piano nel paywall, ad esempio passando da mensile ad annuale per vedere prezzo e dettagli. Non significa che abbia acquistato: è solo un cambio della selezione tra le opzioni mostrate.',
+  workout_detail_close:      'L\'utente ha aperto il dettaglio di un workout (la schermata che lo descrive prima di iniziarlo) ma poi è uscito senza avviarlo. Segnala un workout "visto ma scartato": utile per capire quali workout convincono meno a partire.',
 };
 
 function showEventTooltip(e, key) {
