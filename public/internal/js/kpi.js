@@ -49,6 +49,7 @@ const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
 const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
+const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
 
@@ -73,8 +74,22 @@ const DEF_FUN_CFG = [
   { stepIdx: 10, vsIdx: 2 },    // Premium pagante vs Onboarding completato
 ];
 
+// stepIdx qui sotto = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views,
+// 2=view_paywall, 3=plan_select, 4=purchase_attempts, 5=premium_activated)
+const DEF_PREMIUM_FUN_CFG = [
+  { stepIdx: 0, vsIdx: null }, // Offerta trial mostrata
+  { stepIdx: 1, vsIdx: 0 },    // Paywall aperto vs Offerta trial mostrata
+  { stepIdx: 3, vsIdx: 1 },    // Confronta piani vs Paywall aperto
+  { stepIdx: 4, vsIdx: 2 },    // Tentato acquisto vs Confronta piani
+  { stepIdx: 5, vsIdx: 3 },    // Premium attivato vs Tentato acquisto
+];
+
 function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
+}
+
+function savePremiumFunnelConfig() {
+  localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig));
 }
 
 async function loadSettings(retry = true) {
@@ -149,8 +164,11 @@ let state = {
   deleteConfirm: null, // { id, nome } when modal is open
   premiumData: null, premiumLoading: false, premiumError: null,
   premiumFrom: BETA_START, premiumTo: TODAY,
-  premiumFunnelSteps: new Set(['trial_shown_total','trial_shown','paywall_views','purchase_attempts','premium_activated']),
-  premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all',
+  premiumFunnelConfig: loadLS(LS_PREMIUM_FUN, JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG))),
+  editingPremiumFunnel: false,
+  premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all', premiumGender: 'all',
+  sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
+  sprintPremiumFunnelLoading: false, sprintPremiumFunnelError: null,
   goalsData: null, goalsLoading: false, goalsError: null,
   goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all',
   workoutDepthData: null, workoutDepthLoading: false, workoutDepthError: null,
@@ -313,6 +331,7 @@ async function fetchPremium() {
     const { data, error } = await sb.rpc('kpi_premium', {
       inizio: state.premiumFrom,
       fine:   state.premiumTo,
+      p_gender: state.premiumGender,
     });
     if (error) throw error;
     state.premiumData = data;
@@ -727,6 +746,29 @@ async function fetchSprintFunnel() {
     state.metaSprintSel = state.sprintFunnelSel.map(String);
     fetchMetaSprintData();
   }
+}
+
+async function fetchSprintPremiumFunnel() {
+  if (!state.sprintPremiumFunnelSel.length) return;
+  state.sprintPremiumFunnelLoading = true;
+  state.sprintPremiumFunnelError   = null;
+  state.sprintPremiumFunnelData    = {};
+  render();
+  try {
+    const selected = state.sprints.filter(s => state.sprintPremiumFunnelSel.includes(s.id));
+    const results  = await Promise.all(selected.map(s =>
+      sb.rpc('kpi_premium', { inizio: s.inizio, fine: s.fine, p_gender: state.premiumGender })
+        .then(r => ({ id: s.id, data: r.data, error: r.error }))
+    ));
+    const map = {};
+    for (const r of results) {
+      if (r.error) throw r.error;
+      map[r.id] = r.data;
+    }
+    state.sprintPremiumFunnelData = map;
+  } catch (e) { state.sprintPremiumFunnelError = e.message || 'Errore'; }
+  state.sprintPremiumFunnelLoading = false;
+  render();
 }
 
 async function fetchSprintRetention() {
@@ -2583,6 +2625,7 @@ function pagePremium() {
   const f = d.funnel;
   const trialToPaywall = f.trial_shown  > 0 ? (f.paywall_views      / f.trial_shown      * 100).toFixed(1) : '0.0';
   const paywallToBuy   = f.paywall_views > 0 ? (f.purchase_attempts / f.paywall_views    * 100).toFixed(1) : '0.0';
+  const avgOpens = f.paywall_views > 0 ? (f.paywall_views_total / f.paywall_views).toFixed(1) : null;
   const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
   const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
   const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
@@ -2604,28 +2647,46 @@ function pagePremium() {
         <span style="color:var(--muted);font-size:13px">→</span>
         <input type="date" id="premium-to" class="form-input" value="${state.premiumTo}"
           style="width:145px;padding:5px 10px;font-size:12px">
+        <span class="filter-label">Genere</span>
+        <select id="premium-gender" class="form-input" style="width:110px;padding:5px 10px;font-size:12px">
+          <option value="all"    ${state.premiumGender === 'all'    ? 'selected' : ''}>Tutti</option>
+          <option value="male"   ${state.premiumGender === 'male'   ? 'selected' : ''}>Uomini</option>
+          <option value="female" ${state.premiumGender === 'female' ? 'selected' : ''}>Donne</option>
+        </select>
         <button id="premium-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
         <button class="btn btn-ghost" id="premium-refresh" style="font-size:11px;padding:6px 12px">↻</button>
       </div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:16px">
-      ${state.premiumFrom} → ${state.premiumTo}
+      ${state.premiumFrom} → ${state.premiumTo} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
     </div>
 
     <!-- Dashboard: i numeri che contano, in ordine di funnel -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">
       ${premiumKpi('Abbonati attivi', d.active_premium, null, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora' : '⏳ ancora nessuno')}
+      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'periodo di prova attivo in questo momento')}
       ${premiumKpi('Trial visto', f.trial_shown, `${f.trial_shown_total} volte mostrato`, '#22d3ee', 'offerta mostrata (es. post-workout)')}
       ${premiumKpi('Paywall aperto', f.paywall_views, `${f.paywall_views_total} aperture`, '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% di chi ha visto il trial' : null)}
+      ${premiumKpi('Frequenza paywall', avgOpens ? avgOpens + '×' : '—', null, avgOpens ? '#a78bfa' : 'var(--muted)', 'media volte che ogni utente lo rivede, dopo averlo aperto')}
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% di chi ha aperto il paywall' : null)}
       ${premiumKpi('Acquisto riuscito', successfulUsers, null, successfulUsers > 0 ? '#4ade80' : 'var(--muted)', attemptedUsers > 0 ? buyToSuccess + ' dei tentativi' : null)}
     </div>
 
     <!-- Conversion funnel -->
+    ${premiumFunnelEditPanel()}
     <div class="card" style="margin-bottom:16px">
-      <div class="card-title" style="margin-bottom:18px">Funnel di conversione</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
+        ${!state.editingPremiumFunnel ? `<button id="edit-premium-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
+      </div>
       ${premiumFunnelViz(f)}
+      ${(d.plan_selects || []).length ? `
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1a2e;font-size:11px;color:var(--muted)">
+        Confronto piani cliccati: ${d.plan_selects.map(p => `${premiumPlanLabel(p.product_id)} ${p.clic}×`).join(' · ')}
+      </div>` : ''}
     </div>
+
+    ${sprintPremiumFunnelSection()}
 
     <!-- Sorgenti: stessa lista, 4 viste a tab -->
     ${premiumSourcesCard(d, purchasers)}
@@ -2656,44 +2717,211 @@ function premiumKpi(label, value, sub, color, note) {
 }
 
 const FUNNEL_ALL_STEPS = [
-  { key: 'trial_shown_total', label: 'Offerta mostrata',  color: '#0891b2', field: 'trial_shown_total', sub: 'volte totali' },
-  { key: 'trial_shown',       label: 'Utenti raggiunti',  color: '#22d3ee', field: 'trial_shown',       sub: 'utenti unici' },
-  { key: 'paywall_views',     label: 'Paywall aperto',    color: '#a78bfa', field: 'paywall_views',      sub: null },
-  { key: 'purchase_attempts', label: 'Tentato acquisto',  color: '#f59e0b', field: 'purchase_attempts',  sub: null },
-  { key: 'premium_activated', label: 'Premium attivato',  color: '#4ade80', field: 'premium_activated',  sub: null },
+  { key: 'trial_shown',       label: 'Offerta trial mostrata',  color: '#0891b2', field: 'trial_shown_total',       usersField: 'trial_shown' },
+  { key: 'paywall_views',     label: 'Paywall aperto',          color: '#a78bfa', field: 'paywall_views_total',     usersField: 'paywall_views', showFreq: true },
+  { key: 'view_paywall',      label: 'Vista paywall (nuovo)',   color: '#818cf8', field: 'view_paywall_total',      usersField: 'view_paywall' },
+  { key: 'plan_select',       label: 'Confronta piani',         color: '#38bdf8', field: 'plan_select_total',       usersField: 'plan_select' },
+  { key: 'purchase_attempts', label: 'Tentato acquisto',        color: '#f59e0b', field: 'purchase_attempts_total', usersField: 'purchase_attempts' },
+  { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated' },
 ];
 
+function premiumFunnelEditRow(row, i) {
+  const stepOpts = FUNNEL_ALL_STEPS.map((s, idx) =>
+    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${s.label}</option>`
+  ).join('');
+
+  const vsOpts = `<option value="">—</option>` +
+    state.premiumFunnelConfig.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${FUNNEL_ALL_STEPS[r.stepIdx].label}</option>`
+    ).join('');
+
+  return `
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select premium-funnel-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select premium-funnel-vs-sel"   data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost premium-funnel-remove" data-row="${i}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+function premiumFunnelEditPanel() {
+  if (!state.editingPremiumFunnel) return '';
+  return `
+    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+      <div class="card-title" style="margin-bottom:16px">Costruttore funnel Premium</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+        ${state.premiumFunnelConfig.map((row, i) => premiumFunnelEditRow(row, i)).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="premium-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="premium-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
+        <button id="close-premium-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
+      </div>
+    </div>`;
+}
+
 function premiumFunnelViz(f) {
-  const active = FUNNEL_ALL_STEPS.filter(s => state.premiumFunnelSteps.has(s.key));
+  const cfg = state.premiumFunnelConfig;
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:12px">Nessuno step configurato. Apri "Modifica funnel" per aggiungerne uno.</div>`;
 
-  const toggles = FUNNEL_ALL_STEPS.map(s => {
-    const on = state.premiumFunnelSteps.has(s.key);
-    return `<button class="filter-btn ${on ? 'active' : ''}" data-funnel-step="${s.key}"
-      style="border-color:${on ? s.color : ''};color:${on ? s.color : ''}">${s.label}</button>`;
-  }).join('');
+  const rows = cfg.map(row => {
+    const s = FUNNEL_ALL_STEPS[row.stepIdx];
+    return { s, n: f[s.field] ?? 0, users: f[s.usersField] ?? 0 };
+  });
 
-  const html = active.map((s, i) => {
-    const n    = f[s.field] ?? 0;
-    const prev = i > 0 ? (f[active[i-1].field] ?? 0) : null;
-    const top  = f[active[0].field] ?? 0;
-    const drop = prev > 0 ? ((1 - n / prev) * 100).toFixed(0) : null;
-    const pct  = i === 0 ? null : (top > 0 ? (n / top * 100).toFixed(1) + '% del totale' : '—');
-    const note = s.sub ?? (pct || null);
+  const html = cfg.map((row, i) => {
+    const { s, n, users } = rows[i];
+    const vsN    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].n : null;
+    const change = (vsN !== null && vsN > 0) ? ((n / vsN - 1) * 100).toFixed(0) : null;
+    const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
-        ${drop !== null ? `<div style="font-size:10px;color:#ef4444;font-weight:700;white-space:nowrap">-${drop}%</div>` : ''}
+        ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
         <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
       </div>` : ''}
       <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
         <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${n}</div>
         <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
-        ${note ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${note}</div>` : ''}
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
+        ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
       </div>`;
   }).join('');
 
+  return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${html}</div>`;
+}
+
+// ── SPRINT COMPARE — FUNNEL PREMIUM ─────────────────────────────────────
+
+function sprintPremiumFunnelSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintPremiumFunnelOpen;
+
+  const badge = state.sprintPremiumFunnelSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintPremiumFunnelSel.length} sel.</span>`
+    : '';
+
+  const headerEl = `
+    <div id="sprint-premium-funnel-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
+        ${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+
+  if (!isOpen) {
+    return `<div class="card" style="margin-bottom:16px;padding:14px 20px">${headerEl}</div>`;
+  }
+
+  const chips = state.sprints.map((s, i) => {
+    const on    = state.sprintPremiumFunnelSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-premium-funnel-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+    </button>`;
+  }).join('');
+
+  const hasData = Object.keys(state.sprintPremiumFunnelData).length > 0;
+  const body = state.sprintPremiumFunnelLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintPremiumFunnelError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${state.sprintPremiumFunnelError}</div>`
+    : !hasData ? ''
+    : sprintPremiumFunnelCompareView();
+
   return `
-    <div style="display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap">${toggles}</div>
-    <div style="display:flex;align-items:center">${html || '<div style="color:var(--muted);font-size:12px">Seleziona almeno uno step</div>'}</div>`;
+    <div class="card" style="margin-bottom:16px">
+      ${headerEl}
+      <div style="margin-top:18px">
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button id="sprint-premium-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+            ${!state.sprintPremiumFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+          ${!hasData && !state.sprintPremiumFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
+        </div>
+        ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px;overflow-x:auto">${body}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function sprintPremiumFunnelCompareView() {
+  const selected = state.sprints.filter(s => state.sprintPremiumFunnelSel.includes(s.id));
+  if (!selected.length) return '';
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px">
+    ${selected.map((s, i) => `
+      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
+        <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
+        <span style="font-weight:600;color:var(--text)">${s.nome}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
+      </span>`).join('')}
+  </div>`;
+  return legend + sprintPremiumFunnelTable(selected, state.sprintPremiumFunnelData);
+}
+
+function sprintPremiumFunnelTable(selected, dataMap) {
+  const cfg    = state.premiumFunnelConfig;
+  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato nel funnel.</div>`;
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
+        <span>${s.nome}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+    </th>`
+  ).join('');
+
+  const rows = cfg.map((row, i) => {
+    const stepDef = FUNNEL_ALL_STEPS[row.stepIdx];
+    const nums    = selected.map(s => Number(dataMap[s.id]?.funnel?.[stepDef.field] ?? -1));
+    const maxN    = Math.max(...nums.filter(n => n >= 0), 0);
+    const vsRow   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? cfg[row.vsIdx] : null;
+    const vsStep  = vsRow ? FUNNEL_ALL_STEPS[vsRow.stepIdx] : null;
+
+    const cells = selected.map((s, si) => {
+      const fn     = dataMap[s.id]?.funnel || {};
+      const num    = Number(fn[stepDef.field] ?? 0);
+      const users  = Number(fn[stepDef.usersField] ?? 0);
+      const vsN    = vsStep ? Number(fn[vsStep.field] ?? 0) : null;
+      const change = (vsN !== null && vsN > 0) ? ((num / vsN - 1) * 100) : null;
+      const changeStr   = change !== null ? (change > 0 ? '+' : '') + change.toFixed(0) + '%' : '—';
+      const changeColor = change === null ? '' : change < 0 ? 'var(--red)' : 'var(--mattia)';
+      const isBest = num === maxN && maxN > 0;
+      const barW   = maxN > 0 ? Math.round(num / maxN * 100) : 0;
+      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);text-align:right;margin-top:2px">${users} ut.</div>
+        ${change !== null ? `<div style="font-size:10px;font-weight:600;color:${changeColor};text-align:right;margin-top:1px">${changeStr}</div>` : ''}
+      </td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${stepDef.label}</td>${cells}
+    </tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="border-bottom:2px solid var(--border)">
+      <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Step</th>
+      ${headers}
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 }
 
 function premiumSourcesChart(sources, userCol = 'utenti', countCol = 'tentativi') {
@@ -2948,11 +3176,14 @@ function premiumDataQualityCard(d, f, purchasers) {
   const missingSuccessDate = purchasers.filter(p => p.success && !p.successAt).length;
   const missingErrorDetail = purchasers.filter(p => !p.success && !p.errorText).length;
 
+  const premiumMismatch = premiumNum(d.is_premium_sync_mismatch);
+
   const issues = [
     unknownEvents > 0 && `${unknownEvents} eventi con source unknown`,
     missingProduct > 0 && `${missingProduct} utenti senza prodotto/piano`,
     missingSuccessDate > 0 && `${missingSuccessDate} successi senza data successo`,
     missingErrorDetail > 0 && `${missingErrorDetail} tentativi falliti senza errore esplicito`,
+    premiumMismatch > 0 && `${premiumMismatch} utenti con abbonamento attivo su Google Play ma is_premium=false sul profilo (bug di sincronizzazione: rischiano di aver pagato senza accesso) — segnalalo a Danilo`,
   ].filter(Boolean);
 
   return `
@@ -4656,10 +4887,12 @@ function attachEvents() {
 
   // Premium
   document.getElementById('premium-apply')?.addEventListener('click', () => {
-    const from = document.getElementById('premium-from')?.value;
-    const to   = document.getElementById('premium-to')?.value;
-    if (from) state.premiumFrom = from;
-    if (to)   state.premiumTo   = to;
+    const from   = document.getElementById('premium-from')?.value;
+    const to     = document.getElementById('premium-to')?.value;
+    const gender = document.getElementById('premium-gender')?.value;
+    if (from)   state.premiumFrom   = from;
+    if (to)     state.premiumTo     = to;
+    if (gender) state.premiumGender = gender;
     state.premiumData = null;
     fetchPremium();
   });
@@ -4668,17 +4901,63 @@ function attachEvents() {
     fetchPremium();
   });
 
-  document.querySelectorAll('[data-funnel-step]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const key = btn.dataset.funnelStep;
-      if (state.premiumFunnelSteps.has(key)) {
-        if (state.premiumFunnelSteps.size > 1) state.premiumFunnelSteps.delete(key);
-      } else {
-        state.premiumFunnelSteps.add(key);
-      }
-      render();
-    });
+  document.getElementById('edit-premium-funnel')?.addEventListener('click', () => {
+    state.editingPremiumFunnel = true;
+    render();
   });
+  document.getElementById('close-premium-funnel-edit')?.addEventListener('click', () => {
+    state.editingPremiumFunnel = false;
+    render();
+  });
+  document.getElementById('premium-funnel-add')?.addEventListener('click', () => {
+    const lastIdx = state.premiumFunnelConfig.length > 0 ? state.premiumFunnelConfig.length - 1 : null;
+    state.premiumFunnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
+    savePremiumFunnelConfig();
+    render();
+  });
+  document.getElementById('premium-funnel-reset')?.addEventListener('click', () => {
+    state.premiumFunnelConfig = JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG));
+    savePremiumFunnelConfig();
+    render();
+  });
+  document.querySelectorAll('.premium-funnel-step-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.premiumFunnelConfig[+el.dataset.row].stepIdx = +el.value;
+      savePremiumFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.premium-funnel-vs-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.premiumFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
+      savePremiumFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.premium-funnel-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.premiumFunnelConfig.splice(i, 1);
+      state.premiumFunnelConfig.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      savePremiumFunnelConfig();
+      render();
+    }));
+
+  // Premium — confronto sprint
+  document.getElementById('sprint-premium-funnel-toggle')?.addEventListener('click', () => {
+    state.sprintPremiumFunnelOpen = !state.sprintPremiumFunnelOpen;
+    render();
+  });
+  document.querySelectorAll('.sprint-premium-funnel-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.id;
+      const idx = state.sprintPremiumFunnelSel.indexOf(id);
+      if (idx === -1) state.sprintPremiumFunnelSel.push(id);
+      else state.sprintPremiumFunnelSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-premium-funnel-calc')?.addEventListener('click', fetchSprintPremiumFunnel);
 
   document.querySelectorAll('[data-source-tab]').forEach(btn => {
     btn.addEventListener('click', () => {

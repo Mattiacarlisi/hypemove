@@ -17,7 +17,14 @@
       "Bash(npm install *)",
       "Read(//tmp/**)",
       "Bash(node .tmp_pw_check2.cjs)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(node .tmp_pw_check4.cjs)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 6148 //F)",
+      "Bash(awk '{print $5}')",
+      "Bash(xargs -r -I{} taskkill //PID {} //F)",
+      "Bash(node .tmp_pw_check7.cjs)",
+      "Bash(node -e ' *)"
     ]
   }
 }
