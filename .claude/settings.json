@@ -24,7 +24,16 @@
       "Bash(awk '{print $5}')",
       "Bash(xargs -r -I{} taskkill //PID {} //F)",
       "Bash(node .tmp_pw_check7.cjs)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(python -m http.server 8743)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8743/kpi.html)",
+      "Bash(curl -s -L http://localhost:8743/kpi.html)",
+      "Bash(curl -s -I http://localhost:8743/kpi.html)",
+      "Read(//c//**)",
+      "Bash(npm ls *)",
+      "Bash(node _verify_goals.mjs)",
+      "Bash(powershell -NoProfile -Command \"Stop-Process -Id 27284 -Force -ErrorAction SilentlyContinue\")",
+      "Bash(node _verify_goals2.mjs)"
     ]
   }
 }

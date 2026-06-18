@@ -170,7 +170,8 @@ let state = {
   sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
   sprintPremiumFunnelLoading: false, sprintPremiumFunnelError: null,
   goalsData: null, goalsLoading: false, goalsError: null,
-  goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all',
+  goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all', goalsView: 'current',
+  goalChangesData: null, goalChangesLoading: false, goalChangesError: null,
   workoutDepthData: null, workoutDepthLoading: false, workoutDepthError: null,
   workoutDepthFrom: BETA_START, workoutDepthTo: TODAY,
   workoutDepthGoal: 'all', workoutDepthLevel: 'all',
@@ -305,6 +306,26 @@ async function fetchGoals() {
   } catch (e) { state.goalsError = e.message || 'Errore caricamento obiettivi'; }
   state.goalsLoading = false;
   render();
+}
+
+async function fetchGoalChanges() {
+  state.goalChangesLoading = true; state.goalChangesError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_goal_changes', {
+      inizio:    state.goalsFrom,
+      fine:      state.goalsTo,
+      p_gender:  state.goalsGender === 'all' ? null : state.goalsGender,
+    });
+    if (error) throw error;
+    state.goalChangesData = data;
+  } catch (e) { state.goalChangesError = e.message || 'Errore caricamento cambi obiettivo'; }
+  state.goalChangesLoading = false;
+  render();
+}
+
+function fetchActiveGoalsView() {
+  if (state.goalsView === 'changes') fetchGoalChanges(); else fetchGoals();
 }
 
 async function fetchWorkoutDepth() {
@@ -978,47 +999,130 @@ function goalsCard() {
     `<button class="filter-btn ${state.goalsGender === g.v ? 'active' : ''}" data-goals-gender="${g.v}">${g.l}</button>`
   ).join('');
 
+  const viewOpts = [
+    { v: 'current', l: 'Scelte attuali' },
+    { v: 'changes', l: 'Cambi di obiettivo' },
+  ];
+  const viewBtns = viewOpts.map(v =>
+    `<button class="filter-btn ${state.goalsView === v.v ? 'active' : ''}" data-goals-view="${v.v}">${v.l}</button>`
+  ).join('');
+
   let body;
-  if (state.goalsLoading) {
-    body = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
-  } else if (state.goalsError) {
-    body = `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.goalsError)}</div>`;
-  } else if (!state.goalsData || !state.goalsData.goals?.length) {
-    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato nel periodo selezionato</div>`;
+  let noteText;
+
+  if (state.goalsView === 'changes') {
+    noteText = 'cambi di obiettivo registrati nel periodo · account interni esclusi';
+    if (state.goalChangesLoading) {
+      body = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
+    } else if (state.goalChangesError) {
+      body = `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.goalChangesError)}</div>`;
+    } else if (!state.goalChangesData || !state.goalChangesData.total_events) {
+      body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun cambio di obiettivo nel periodo selezionato</div>`;
+    } else {
+      const cd          = state.goalChangesData;
+      const transitions = cd.transitions || [];
+      const to          = cd.changed_to || [];
+      const sumTrans     = transitions.reduce((s, x) => s + x.n, 0);
+      const maxTrans     = Math.max(...transitions.map(x => x.n), 1);
+
+      const glLabel = (goal, level) => {
+        const g = GOAL_LABEL[goal] || goal;
+        const l = level != null ? (LEVEL_LABEL[String(level)] || level) : null;
+        return l ? `${g} <span style="color:var(--muted)">· ${l}</span>` : g;
+      };
+
+      const transRows = sumTrans > 0 ? transitions.map(x => {
+        const pct   = (x.n / sumTrans * 100).toFixed(1);
+        const w     = (x.n / maxTrans * 100).toFixed(1);
+        const color = GOAL_COLOR[x.to_goal] || '#a78bfa';
+        return `
+          <div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:4px;gap:8px">
+              <span style="color:var(--fg)">${glLabel(x.from_goal, x.from_level)} <span style="color:var(--muted)">→</span> ${glLabel(x.to_goal, x.to_level)}</span>
+              <span style="color:var(--muted);font-size:11px;white-space:nowrap">${x.n} volte · ${pct}%</span>
+            </div>
+            <div style="height:8px;background:#1a1a2a;border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:${w}%;background:${color};border-radius:4px"></div>
+            </div>
+          </div>`;
+      }).join('') : `<div style="color:var(--muted);font-size:12px;padding:8px 0">Servono almeno due cambi della stessa persona per ricostruire una transizione: non ce ne sono ancora nel periodo selezionato.</div>`;
+
+      const toLine = to.map(x => `${esc(GOAL_LABEL[x.goal] || x.goal)} ${x.n}×`).join(' · ');
+
+      body = `
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${cd.total_users} utenti hanno cambiato obiettivo · ${cd.total_events} cambi nel periodo</div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Transizioni più frequenti (obiettivo e livello)</div>
+        ${transRows}
+        ${toLine ? `<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1a2e;font-size:11px;color:var(--muted)">Obiettivo scelto più spesso nel cambio (qualsiasi livello): ${toLine}</div>` : ''}
+        <div style="margin-top:10px;font-size:10.5px;color:var(--muted);font-style:italic">Dato sperimentale, campione ancora piccolo: conta solo i cambi successivi al primo per persona (il punto di partenza del primo cambio non è noto). Da leggere con cautela finché i numeri non crescono.</div>`;
+    }
   } else {
-    const d   = state.goalsData;
-    const max = Math.max(...d.goals.map(g => g.n), 1);
-    body = d.goals.map((g, i) => {
-      const label = GOAL_LABEL[g.goal] || g.goal;
-      const pct   = d.total > 0 ? (g.n / d.total * 100).toFixed(1) : '0.0';
-      const w     = (g.n / max * 100).toFixed(1);
-      const color = GOAL_BAR_COLORS[i % GOAL_BAR_COLORS.length];
-      return `
-        <div style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:4px">
-            <span style="color:var(--fg)">${esc(label)}</span>
-            <span style="color:var(--muted);font-size:11px">${g.n} utenti · ${pct}%</span>
-          </div>
-          <div style="height:8px;background:#1a1a2a;border-radius:4px;overflow:hidden">
-            <div style="height:100%;width:${w}%;background:${color};border-radius:4px"></div>
-          </div>
-        </div>`;
-    }).join('');
+    noteText = 'obiettivo scelto in onboarding · account interni esclusi';
+    if (state.goalsLoading) {
+      body = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
+    } else if (state.goalsError) {
+      body = `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.goalsError)}</div>`;
+    } else if (!state.goalsData || !state.goalsData.goals?.length) {
+      body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato nel periodo selezionato</div>`;
+    } else {
+      const d = state.goalsData;
+      const groupsMap = new Map();
+      d.goals.forEach(g => {
+        if (!groupsMap.has(g.goal)) groupsMap.set(g.goal, { goal: g.goal, total: 0, levels: {} });
+        const grp = groupsMap.get(g.goal);
+        grp.total += g.n;
+        grp.levels[g.level === null ? 'none' : g.level] = g.n;
+      });
+      const groups     = [...groupsMap.values()].sort((a, b) => b.total - a.total);
+      const maxLevelN  = Math.max(...d.goals.map(g => g.n), 1);
+      const levelOrder = [1, 2, 3, 'none'];
+      const LEVEL_OPACITY = { 1: 1, 2: 0.7, 3: 0.45, none: 0.3 };
+
+      body = groups.map(grp => {
+        const color   = GOAL_COLOR[grp.goal] || '#a78bfa';
+        const goalPct = d.total > 0 ? (grp.total / d.total * 100).toFixed(1) : '0.0';
+        const levelRows = levelOrder.filter(lv => grp.levels[lv] != null).map(lv => {
+          const n     = grp.levels[lv];
+          const label = lv === 'none' ? 'Senza livello' : LEVEL_LABEL[String(lv)];
+          const pct   = d.total > 0 ? (n / d.total * 100).toFixed(1) : '0.0';
+          const w     = (n / maxLevelN * 100).toFixed(1);
+          return `
+            <div style="margin-bottom:6px;padding-left:14px">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;margin-bottom:3px">
+                <span style="color:var(--muted)">${esc(label)}</span>
+                <span style="color:var(--muted);font-size:10.5px">${n} utenti · ${pct}%</span>
+              </div>
+              <div style="height:6px;background:#1a1a2a;border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:${w}%;background:${color};opacity:${LEVEL_OPACITY[lv]};border-radius:3px"></div>
+              </div>
+            </div>`;
+        }).join('');
+        return `
+          <div style="margin-bottom:14px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px">
+              <span style="color:var(--fg);font-weight:600">${esc(GOAL_LABEL[grp.goal] || grp.goal)}</span>
+              <span style="color:var(--muted);font-size:11px">${grp.total} utenti · ${goalPct}%</span>
+            </div>
+            ${levelRows}
+          </div>`;
+      }).join('');
+    }
   }
 
   return `
     <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
         <div class="card-title" style="margin-bottom:0">Obiettivi più scelti</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <div style="display:flex;gap:4px">${genderBtns}</div>
-          <input type="date" id="goals-from" class="form-input" value="${state.goalsFrom}" style="width:130px;padding:5px 8px;font-size:11px">
-          <span style="color:var(--muted);font-size:12px">→</span>
-          <input type="date" id="goals-to" class="form-input" value="${state.goalsTo}" style="width:130px;padding:5px 8px;font-size:11px">
-          <button id="goals-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Calcola</button>
-        </div>
+        <div style="display:flex;gap:4px">${viewBtns}</div>
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">obiettivo scelto in onboarding · account interni esclusi</div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+        <div style="display:flex;gap:4px">${genderBtns}</div>
+        <input type="date" id="goals-from" class="form-input" value="${state.goalsFrom}" style="width:130px;padding:5px 8px;font-size:11px">
+        <span style="color:var(--muted);font-size:12px">→</span>
+        <input type="date" id="goals-to" class="form-input" value="${state.goalsTo}" style="width:130px;padding:5px 8px;font-size:11px">
+        <button id="goals-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Calcola</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${noteText}</div>
       ${body}
     </div>`;
 }
@@ -1202,6 +1306,9 @@ const GOAL_LABEL = {
 };
 const GENDER_LABEL = { m: 'Uomo', f: 'Donna', male: 'Uomo', female: 'Donna', other: 'Altro' };
 const LEVEL_LABEL = { '1': 'Base', '2': 'Intermedio', '3': 'Avanzato' };
+const GOAL_COLOR = Object.fromEntries(
+  Object.keys(GOAL_LABEL).map((g, i) => [g, GOAL_BAR_COLORS[i % GOAL_BAR_COLORS.length]])
+);
 
 function calcAge(birthDate) {
   if (!birthDate) return null;
@@ -1234,6 +1341,9 @@ const EVENT_LABELS = {
   paywall_plugin_event: 'Paywall — evento plugin',
   paywall_fallback_opened: 'Paywall — fallback aperto',
   paywall_purchase_attempt: 'Tentativo acquisto', trial_offer_shown: 'Offerta trial mostrata',
+  view_Paywall: 'Paywall mostrato', paywall_open: 'Paywall aperto (manuale)',
+  paywall_step_view: 'Paywall — step visualizzato',
+  paywall_plan_select: 'Paywall — piano selezionato',
 };
 
 const EVENT_DESCRIPTIONS = {
@@ -1266,9 +1376,13 @@ const EVENT_DESCRIPTIONS = {
   paywall_validator_called:  'Il validator dell\'abbonamento è stato chiamato. Parte automaticamente all\'apertura dell\'app.',
   paywall_plugin_event:      'Evento generico del plugin di pagamento (RevenueCat). Generato automaticamente, non richiede azione utente.',
   paywall_billing_error:     'Errore nella fatturazione o nella verifica del pagamento.',
-  paywall_fallback_opened:   'Il paywall ha aperto una versione fallback (es. se la connessione è lenta).',
+  paywall_fallback_opened:   'È stata mostrata la versione "di riserva" della schermata paywall, probabilmente perché il template principale non era pronto in tempo. Non indica se l\'apertura è stata manuale o automatica (quello lo dicono "Paywall aperto" e "Paywall mostrato"): segnala solo quale versione della schermata è stata mostrata.',
   paywall_purchase_attempt:  'L\'utente ha tentato di acquistare un piano Premium.',
   trial_offer_shown:         'All\'utente è stata mostrata l\'offerta del periodo di prova gratuito.',
+  view_Paywall:              'Il paywall è stato mostrato all\'utente. Conta ogni visualizzazione, sia quando l\'utente lo apre da solo (es. tap su un pulsante Premium) sia quando compare automaticamente (es. a fine trial o in un punto del percorso). È il totale di tutte le volte che il paywall è apparso.',
+  paywall_open:              'L\'utente ha aperto il paywall manualmente, ad esempio toccando un pulsante o una sezione legata a Premium. Non conta le volte in cui il paywall compare automaticamente: solo le aperture volute dall\'utente.',
+  paywall_step_view:         'L\'utente ha visualizzato una pagina (step) del paywall a carosello. Se il paywall ha più pagine, ogni pagina vista genera un evento separato: con 3 pagine, vederle tutte in una sola apertura genera 3 eventi.',
+  paywall_plan_select:       'L\'utente ha toccato un\'opzione di piano nel paywall, ad esempio passando da mensile ad annuale per vedere prezzo e dettagli. Non significa che abbia acquistato: è solo un cambio della selezione tra le opzioni mostrate.',
 };
 
 function showEventTooltip(e, key) {
@@ -1286,7 +1400,7 @@ function showEventTooltip(e, key) {
     'max-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.7)',
     'pointer-events:none',
   ].join(';');
-  tip.textContent = text;
+  tip.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:#8a8aae;margin-bottom:6px">${esc(key)}</div>${esc(text)}`;
   const x = Math.min(e.clientX + 12, window.innerWidth - 300);
   const y = Math.max(e.clientY - 60, 8);
   tip.style.left = x + 'px';
@@ -2680,13 +2794,11 @@ function pagePremium() {
         ${!state.editingPremiumFunnel ? `<button id="edit-premium-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
       </div>
       ${premiumFunnelViz(f)}
-      ${(d.plan_selects || []).length ? `
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a1a2e;font-size:11px;color:var(--muted)">
-        Confronto piani cliccati: ${d.plan_selects.map(p => `${premiumPlanLabel(p.product_id)} ${p.clic}×`).join(' · ')}
-      </div>` : ''}
-    </div>
 
-    ${sprintPremiumFunnelSection()}
+      <div style="border-top:1px solid #1a1a2e;margin-top:18px;padding-top:18px">
+        ${sprintPremiumFunnelSection()}
+      </div>
+    </div>
 
     <!-- Sorgenti: stessa lista, 4 viste a tab -->
     ${premiumSourcesCard(d, purchasers)}
@@ -2811,7 +2923,7 @@ function sprintPremiumFunnelSection() {
     </div>`;
 
   if (!isOpen) {
-    return `<div class="card" style="margin-bottom:16px;padding:14px 20px">${headerEl}</div>`;
+    return headerEl;
   }
 
   const chips = state.sprints.map((s, i) => {
@@ -2834,20 +2946,18 @@ function sprintPremiumFunnelSection() {
     : sprintPremiumFunnelCompareView();
 
   return `
-    <div class="card" style="margin-bottom:16px">
-      ${headerEl}
-      <div style="margin-top:18px">
-        <div style="margin-bottom:14px">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px">
-          <button id="sprint-premium-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
-            ${!state.sprintPremiumFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
-          ${!hasData && !state.sprintPremiumFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
-        </div>
-        ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px;overflow-x:auto">${body}</div>` : ''}
+    ${headerEl}
+    <div style="margin-top:18px">
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
       </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button id="sprint-premium-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+          ${!state.sprintPremiumFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+        ${!hasData && !state.sprintPremiumFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
+      </div>
+      ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px;overflow-x:auto">${body}</div>` : ''}
     </div>`;
 }
 
@@ -4236,14 +4346,16 @@ function attachEvents() {
     el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
 
   // Obiettivi (overview)
+  document.querySelectorAll('[data-goals-view]').forEach(el =>
+    el.addEventListener('click', () => { state.goalsView = el.dataset.goalsView; fetchActiveGoalsView(); }));
   document.querySelectorAll('[data-goals-gender]').forEach(el =>
-    el.addEventListener('click', () => { state.goalsGender = el.dataset.goalsGender; fetchGoals(); }));
+    el.addEventListener('click', () => { state.goalsGender = el.dataset.goalsGender; fetchActiveGoalsView(); }));
   document.getElementById('goals-apply')?.addEventListener('click', () => {
     const from = document.getElementById('goals-from')?.value;
     const to   = document.getElementById('goals-to')?.value;
     if (from) state.goalsFrom = from;
     if (to)   state.goalsTo   = to;
-    fetchGoals();
+    fetchActiveGoalsView();
   });
 
   // Continuità workout (overview)
