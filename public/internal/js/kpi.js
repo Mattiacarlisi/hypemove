@@ -77,11 +77,10 @@ const DEF_FUN_CFG = [
 // stepIdx qui sotto = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views,
 // 2=view_paywall, 3=plan_select, 4=purchase_attempts, 5=premium_activated)
 const DEF_PREMIUM_FUN_CFG = [
-  { stepIdx: 0, vsIdx: null }, // Offerta trial mostrata
-  { stepIdx: 1, vsIdx: 0 },    // Paywall aperto vs Offerta trial mostrata
-  { stepIdx: 3, vsIdx: 1 },    // Confronta piani vs Paywall aperto
-  { stepIdx: 4, vsIdx: 2 },    // Tentato acquisto vs Confronta piani
-  { stepIdx: 5, vsIdx: 3 },    // Premium attivato vs Tentato acquisto
+  { stepIdx: 1, vsIdx: null }, // Paywall aperto
+  { stepIdx: 3, vsIdx: 0 },    // Confronta piani vs Paywall aperto
+  { stepIdx: 4, vsIdx: 1 },    // Tentato acquisto vs Confronta piani
+  { stepIdx: 5, vsIdx: 2 },    // Premium attivato vs Tentato acquisto
 ];
 
 function loadLS(key, def) {
@@ -2741,7 +2740,7 @@ function pagePremium() {
   const f = d.funnel;
   const trialToPaywall = f.trial_shown  > 0 ? (f.paywall_views      / f.trial_shown      * 100).toFixed(1) : '0.0';
   const paywallToBuy   = f.paywall_views > 0 ? (f.purchase_attempts / f.paywall_views    * 100).toFixed(1) : '0.0';
-  const avgOpens = f.paywall_views > 0 ? (f.paywall_views_total / f.paywall_views).toFixed(1) : null;
+  const avgOpens = f.view_paywall > 0 ? (f.view_paywall_total / f.view_paywall).toFixed(1) : null;
   const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
   const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
   const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
@@ -2783,7 +2782,7 @@ function pagePremium() {
       ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'periodo di prova attivo in questo momento')}
       ${premiumKpi('Trial visto', f.trial_shown, `${f.trial_shown_total} volte mostrato`, '#22d3ee', 'offerta mostrata (es. post-workout)')}
       ${premiumKpi('Paywall aperto', f.paywall_views, `${f.paywall_views_total} aperture`, '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% di chi ha visto il trial' : null)}
-      ${premiumKpi('Frequenza paywall', avgOpens ? avgOpens + '×' : '—', null, avgOpens ? '#a78bfa' : 'var(--muted)', 'media volte che ogni utente lo rivede, dopo averlo aperto')}
+      ${premiumKpi('Frequenza paywall', avgOpens ? avgOpens + '×' : '—', null, avgOpens ? '#a78bfa' : 'var(--muted)', 'media volte che il paywall viene mostrato a ogni utente che lo vede')}
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% di chi ha aperto il paywall' : null)}
       ${premiumKpi('Acquisto riuscito', successfulUsers, null, successfulUsers > 0 ? '#4ade80' : 'var(--muted)', attemptedUsers > 0 ? buyToSuccess + ' dei tentativi' : null)}
     </div>
@@ -2831,12 +2830,12 @@ function premiumKpi(label, value, sub, color, note) {
 }
 
 const FUNNEL_ALL_STEPS = [
-  { key: 'trial_shown',       label: 'Offerta trial mostrata',  color: '#0891b2', field: 'trial_shown_total',       usersField: 'trial_shown' },
-  { key: 'paywall_views',     label: 'Paywall aperto',          color: '#a78bfa', field: 'paywall_views_total',     usersField: 'paywall_views', showFreq: true },
-  { key: 'view_paywall',      label: 'Vista paywall (nuovo)',   color: '#818cf8', field: 'view_paywall_total',      usersField: 'view_paywall' },
-  { key: 'plan_select',       label: 'Confronta piani',         color: '#38bdf8', field: 'plan_select_total',       usersField: 'plan_select' },
-  { key: 'purchase_attempts', label: 'Tentato acquisto',        color: '#f59e0b', field: 'purchase_attempts_total', usersField: 'purchase_attempts' },
-  { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated' },
+  { key: 'trial_shown',       label: 'Offerta trial mostrata',  color: '#0891b2', field: 'trial_shown_total',       usersField: 'trial_shown',  event: 'trial_offer_shown' },
+  { key: 'paywall_views',     label: 'Paywall aperto',          color: '#a78bfa', field: 'paywall_views_total',     usersField: 'paywall_views', showFreq: true, event: 'paywall_open' },
+  { key: 'view_paywall',      label: 'Paywall mostrati',        color: '#818cf8', field: 'view_paywall_total',      usersField: 'view_paywall', event: 'view_Paywall' },
+  { key: 'plan_select',       label: 'Confronta piani',         color: '#38bdf8', field: 'plan_select_total',       usersField: 'plan_select', event: 'paywall_plan_select' },
+  { key: 'purchase_attempts', label: 'Tentato acquisto',        color: '#f59e0b', field: 'purchase_attempts_total', usersField: 'purchase_attempts', event: 'paywall_purchase_attempt' },
+  { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated', event: 'view_PremiumActivated' },
 ];
 
 function premiumFunnelEditRow(row, i) {
@@ -2897,6 +2896,7 @@ function premiumFunnelViz(f) {
       <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
         <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${n}</div>
         <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
+        ${s.event ? `<div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>` : ''}
         <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
       </div>`;
