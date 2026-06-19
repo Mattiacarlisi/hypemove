@@ -85,11 +85,15 @@ const DEF_PREMIUM_FUN_CFG = [
 ];
 
 // catalogo eventi disponibili per il funnel AI Coach — ognuno è un event_name letto da kpi_events_summary
+// (gli ultimi 2 arrivano invece da kpi_ai_chat_workout_events: workout_start/complete con metadata.source='ai_chat')
+// Nota: "workout_gen_start" è stato rimosso dal catalogo — è l'evento del pre-generation job della roadmap
+// Premium (premium_generation_jobs), scorrelato dalla chat AI: non misura "la chat ha proposto un workout".
 const AI_FUNNEL_ALL_STEPS = [
   { key: 'chat_open',    label: 'Chat aperta',       color: '#22d3ee', event: 'view_AIChat' },
   { key: 'hub_open',     label: 'Hub AI aperto',     color: '#60a5fa', event: 'view_CoachAIHub' },
   { key: 'msg_sent',     label: 'Messaggio inviato', color: '#a78bfa', event: 'ai_chat_send', showFreq: true },
-  { key: 'workout_gen',  label: 'Workout generato',  color: '#4ade80', event: 'workout_gen_start' },
+  { key: 'workout_started_chat',   label: 'Workout avviato (da chat)',    color: '#fbbf24', event: 'ai_chat_workout_start' },
+  { key: 'workout_completed_chat', label: 'Workout completato (da chat)', color: '#34d399', event: 'ai_chat_workout_complete' },
 ];
 
 // stepIdx = indice nel catalogo AI_FUNNEL_ALL_STEPS qui sopra. Hub AI (1) escluso di default,
@@ -97,7 +101,8 @@ const AI_FUNNEL_ALL_STEPS = [
 const DEF_AI_FUN_CFG = [
   { stepIdx: 0, vsIdx: null }, // Chat aperta
   { stepIdx: 2, vsIdx: 0 },    // Messaggio inviato vs Chat aperta
-  { stepIdx: 3, vsIdx: 1 },    // Workout generato vs Messaggio inviato
+  { stepIdx: 3, vsIdx: 1 },    // Workout avviato (da chat) vs Messaggio inviato
+  { stepIdx: 4, vsIdx: 2 },    // Workout completato (da chat) vs Workout avviato (da chat)
 ];
 
 function loadLS(key, def) {
@@ -769,12 +774,14 @@ async function fetchAIFunnelEvents() {
   state.aiFunnelEventsLoading = true; state.aiFunnelEventsError = null;
   render();
   try {
-    const { data, error } = await sb.rpc('kpi_events_summary', {
-      p_from: state.aiStatsFrom || null,
-      p_to:   state.aiStatsTo   || null,
-    });
+    const range = { p_from: state.aiStatsFrom || null, p_to: state.aiStatsTo || null };
+    const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
+      sb.rpc('kpi_events_summary', range),
+      sb.rpc('kpi_ai_chat_workout_events', range),
+    ]);
     if (error) throw error;
-    state.aiFunnelEvents = data || [];
+    if (chatWorkoutError) throw chatWorkoutError;
+    state.aiFunnelEvents = [...(data || []), ...(chatWorkoutData || [])];
   } catch (e) { state.aiFunnelEventsError = e.message || 'Errore caricamento funnel AI'; }
   state.aiFunnelEventsLoading = false;
   render();
@@ -1274,6 +1281,39 @@ function workoutDepthCard() {
     </div>`;
 }
 
+function workoutSourceCard() {
+  const s        = state.data?.sessions || {};
+  const total    = s.total || 0;
+  const aiChat   = s.from_ai_chat || 0;
+  const roadmap  = s.from_roadmap ?? Math.max(total - aiChat, 0);
+  const maxN     = Math.max(roadmap, aiChat, 1);
+  const pct      = n => total > 0 ? (n / total * 100).toFixed(1) : '0.0';
+  const rows = [
+    { label: 'Da roadmap', n: roadmap, color: '#a78bfa' },
+    { label: 'Da chat AI', n: aiChat,  color: '#fbbf24' },
+  ];
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:4px">Origine dei workout</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${total} workout totali · ripartizione per origine · esclusi account interni</div>
+      ${rows.map(r => {
+        const w = (r.n / maxN * 100).toFixed(1);
+        return `
+          <div style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:5px">
+              <span style="color:var(--fg)">${r.label}</span>
+              <span style="color:var(--muted);font-size:11px">${r.n} · ${pct(r.n)}%</span>
+            </div>
+            <div style="height:8px;background:#1a1a2a;border-radius:4px;overflow:hidden">
+              <div style="height:100%;width:${w}%;background:${r.color};border-radius:4px"></div>
+            </div>
+          </div>`;
+      }).join('')}
+      <div style="font-size:10.5px;color:var(--muted);margin-top:2px">"Da chat AI" = workout generati dall'AI Coach (workouts.is_ai_generated); il resto arriva dalla roadmap guidata.</div>
+    </div>`;
+}
+
 function pageOverview() {
   const keys = state.overviewKeys.filter(k => METRICS[k]);
   const colCount = Math.min(Math.max(keys.length, 1), 5);
@@ -1309,6 +1349,8 @@ function pageOverview() {
         return stat(m.label, m.get(state.data), '', m.color);
       }).join('')}
     </div>
+
+    ${workoutSourceCard()}
 
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -2166,7 +2208,7 @@ function aiFunnelPanel() {
     ${aiFunnelEditPanel()}
     ${aiFunnelViz(eventsMap)}
     <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
-      "Workout generato" conta l'avvio della generazione AI (evento workout_gen_start), non garantisce che il workout sia stato creato con successo. Per un controllo incrociato guarda "Crea workout" in Tool più usati nella vista Statistiche.
+      "Workout avviato/completato (da chat)" tracciano solo i workout aperti dalla card proposta nella chat AI (metadata.source = ai_chat su workout_start/workout_complete) — disponibili da quando questo tracciamento è stato rilasciato lato app, quindi i dati su periodi precedenti restano a 0.
     </div>
   </div>`;
 }
