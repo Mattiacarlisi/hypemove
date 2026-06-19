@@ -109,6 +109,22 @@ function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
 }
 
+// il catalogo AI_FUNNEL_ALL_STEPS è stato rimaneggiato più volte nel tempo (step rinominati/rimossi):
+// una config salvata in passato in localStorage può contenere uno stepIdx non più valido. Senza
+// questo filtro, AI_FUNNEL_ALL_STEPS[stepIdx] è undefined e aiFunnelViz va in eccezione DENTRO il
+// render() finale di fetchAIFunnelEvents — lo stato interno si aggiorna (loading=false) ma il DOM
+// resta bloccato sullo spinner "Caricamento funnel…" perché l'innerHTML non arriva mai a essere
+// riassegnato.
+function sanitizeAiFunnelConfig(cfg) {
+  if (!Array.isArray(cfg)) return null;
+  const cleaned = cfg.filter(row => row && AI_FUNNEL_ALL_STEPS[row.stepIdx]);
+  if (!cleaned.length) return null;
+  cleaned.forEach((row, i) => {
+    if (typeof row.vsIdx !== 'number' || row.vsIdx < 0 || row.vsIdx >= i) row.vsIdx = null;
+  });
+  return cleaned;
+}
+
 function savePremiumFunnelConfig() {
   localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig));
 }
@@ -230,7 +246,7 @@ let state = {
   aiStatsTo: TODAY,
   aiFunnelOpen: false,
   aiFunnelEvents: null, aiFunnelEventsLoading: false, aiFunnelEventsError: null,
-  aiFunnelConfig: loadLS(LS_AI_FUN, JSON.parse(JSON.stringify(DEF_AI_FUN_CFG))),
+  aiFunnelConfig: sanitizeAiFunnelConfig(loadLS(LS_AI_FUN, null)) || JSON.parse(JSON.stringify(DEF_AI_FUN_CFG)),
   editingAiFunnel: false,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
   settingsLoadError: false,
@@ -2112,7 +2128,9 @@ function aiFunnelEditRow(row, i) {
 
   const vsOpts = `<option value="">—</option>` +
     state.aiFunnelConfig.slice(0, i).map((r, j) =>
-      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${AI_FUNNEL_ALL_STEPS[r.stepIdx].label}</option>`
+      AI_FUNNEL_ALL_STEPS[r.stepIdx]
+        ? `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${AI_FUNNEL_ALL_STEPS[r.stepIdx].label}</option>`
+        : ''
     ).join('');
 
   return `
@@ -2142,7 +2160,7 @@ function aiFunnelEditPanel() {
 }
 
 function aiFunnelViz(eventsMap) {
-  const cfg = state.aiFunnelConfig;
+  const cfg = state.aiFunnelConfig.filter(row => AI_FUNNEL_ALL_STEPS[row.stepIdx]);
   if (!cfg.length) return `<div style="color:var(--muted);font-size:12px">Nessuno step configurato. Apri "Modifica funnel" per aggiungerne uno.</div>`;
 
   const rows = cfg.map(row => {

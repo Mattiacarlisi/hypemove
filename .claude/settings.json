@@ -34,7 +34,8 @@
       "Bash(node _verify_goals.mjs)",
       "Bash(powershell -NoProfile -Command \"Stop-Process -Id 27284 -Force -ErrorAction SilentlyContinue\")",
       "Bash(node _verify_goals2.mjs)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(node .tmp_debug_funnel2.cjs)"
     ]
   }
 }
