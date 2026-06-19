@@ -50,6 +50,7 @@ const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
 const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
 const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v1';
+const LS_AI_FUN         = 'hm_ai_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
 
@@ -83,12 +84,32 @@ const DEF_PREMIUM_FUN_CFG = [
   { stepIdx: 5, vsIdx: 2 },    // Premium attivato vs Tentato acquisto
 ];
 
+// catalogo eventi disponibili per il funnel AI Coach — ognuno è un event_name letto da kpi_events_summary
+const AI_FUNNEL_ALL_STEPS = [
+  { key: 'chat_open',    label: 'Chat aperta',       color: '#22d3ee', event: 'view_AIChat' },
+  { key: 'hub_open',     label: 'Hub AI aperto',     color: '#60a5fa', event: 'view_CoachAIHub' },
+  { key: 'msg_sent',     label: 'Messaggio inviato', color: '#a78bfa', event: 'ai_chat_send', showFreq: true },
+  { key: 'workout_gen',  label: 'Workout generato',  color: '#4ade80', event: 'workout_gen_start' },
+];
+
+// stepIdx = indice nel catalogo AI_FUNNEL_ALL_STEPS qui sopra. Hub AI (1) escluso di default,
+// aggiungibile con "+ Aggiungi step" se serve guardarlo come tappa a parte.
+const DEF_AI_FUN_CFG = [
+  { stepIdx: 0, vsIdx: null }, // Chat aperta
+  { stepIdx: 2, vsIdx: 0 },    // Messaggio inviato vs Chat aperta
+  { stepIdx: 3, vsIdx: 1 },    // Workout generato vs Messaggio inviato
+];
+
 function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
 }
 
 function savePremiumFunnelConfig() {
   localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig));
+}
+
+function saveAiFunnelConfig() {
+  localStorage.setItem(LS_AI_FUN, JSON.stringify(state.aiFunnelConfig));
 }
 
 async function loadSettings(retry = true) {
@@ -166,6 +187,8 @@ let state = {
   premiumFunnelConfig: loadLS(LS_PREMIUM_FUN, JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG))),
   editingPremiumFunnel: false,
   premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all', premiumGender: 'all',
+  premiumFunnelRangeFrom: BETA_START, premiumFunnelRangeTo: TODAY,
+  premiumFunnelRangeData: null, premiumFunnelRangeLoading: false, premiumFunnelRangeError: null,
   sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
   sprintPremiumFunnelLoading: false, sprintPremiumFunnelError: null,
   goalsData: null, goalsLoading: false, goalsError: null,
@@ -200,6 +223,10 @@ let state = {
   aiStatsUsersOpen: false,
   aiStatsFrom: new Date(Date.now()-30*864e5).toISOString().slice(0,10),
   aiStatsTo: TODAY,
+  aiFunnelOpen: false,
+  aiFunnelEvents: null, aiFunnelEventsLoading: false, aiFunnelEventsError: null,
+  aiFunnelConfig: loadLS(LS_AI_FUN, JSON.parse(JSON.stringify(DEF_AI_FUN_CFG))),
+  editingAiFunnel: false,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
   settingsLoadError: false,
   metaTokenSaveError: false,
@@ -357,6 +384,22 @@ async function fetchPremium() {
     state.premiumData = data;
   } catch (e) { state.premiumError = e.message || 'Errore caricamento dati premium'; }
   state.premiumLoading = false;
+  render();
+}
+
+async function fetchPremiumFunnelRange() {
+  state.premiumFunnelRangeLoading = true; state.premiumFunnelRangeError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_premium', {
+      inizio: state.premiumFunnelRangeFrom,
+      fine:   state.premiumFunnelRangeTo,
+      p_gender: state.premiumGender,
+    });
+    if (error) throw error;
+    state.premiumFunnelRangeData = data;
+  } catch (e) { state.premiumFunnelRangeError = e.message || 'Errore caricamento dati funnel'; }
+  state.premiumFunnelRangeLoading = false;
   render();
 }
 
@@ -719,6 +762,21 @@ async function fetchAIStatsUsers() {
     state.aiStatsUsers = data || [];
   } catch (e) { console.error('fetchAIStatsUsers', e); state.aiStatsUsers = []; }
   state.aiStatsUsersLoading = false;
+  render();
+}
+
+async function fetchAIFunnelEvents() {
+  state.aiFunnelEventsLoading = true; state.aiFunnelEventsError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_events_summary', {
+      p_from: state.aiStatsFrom || null,
+      p_to:   state.aiStatsTo   || null,
+    });
+    if (error) throw error;
+    state.aiFunnelEvents = data || [];
+  } catch (e) { state.aiFunnelEventsError = e.message || 'Errore caricamento funnel AI'; }
+  state.aiFunnelEventsLoading = false;
   render();
 }
 
@@ -1386,11 +1444,9 @@ const EVENT_DESCRIPTIONS = {
   workout_detail_close:      'L\'utente ha aperto il dettaglio di un workout (la schermata che lo descrive prima di iniziarlo) ma poi è uscito senza avviarlo. Segnala un workout "visto ma scartato": utile per capire quali workout convincono meno a partire.',
 };
 
-function showEventTooltip(e, key) {
+function renderInfoTooltip(e, innerHtml) {
   e.stopPropagation();
   document.getElementById('ev-tooltip')?.remove();
-  const text = EVENT_DESCRIPTIONS[key];
-  if (!text) return;
   const tip = document.createElement('div');
   tip.id = 'ev-tooltip';
   tip.style.cssText = [
@@ -1401,13 +1457,29 @@ function showEventTooltip(e, key) {
     'max-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.7)',
     'pointer-events:none',
   ].join(';');
-  tip.innerHTML = `<div style="font-family:var(--mono);font-size:10px;color:#8a8aae;margin-bottom:6px">${esc(key)}</div>${esc(text)}`;
+  tip.innerHTML = innerHtml;
   const x = Math.min(e.clientX + 12, window.innerWidth - 300);
   const y = Math.max(e.clientY - 60, 8);
   tip.style.left = x + 'px';
   tip.style.top  = y + 'px';
   document.body.appendChild(tip);
   setTimeout(() => document.addEventListener('click', () => tip.remove(), { once: true }), 0);
+}
+
+function showEventTooltip(e, key) {
+  const text = EVENT_DESCRIPTIONS[key];
+  if (!text) return;
+  renderInfoTooltip(e, `<div style="font-family:var(--mono);font-size:10px;color:#8a8aae;margin-bottom:6px">${esc(key)}</div>${esc(text)}`);
+}
+
+const KPI_INFO_TEXTS = {
+  frequenza_paywall: 'Quante volte in media il paywall viene mostrato a ogni utente che lo vede almeno una volta. Calcolo: totale eventi view_Paywall ÷ utenti unici con almeno un view_Paywall, nel periodo selezionato.',
+};
+
+function showKpiInfo(e, key) {
+  const text = KPI_INFO_TEXTS[key];
+  if (!text) return;
+  renderInfoTooltip(e, esc(text));
 }
 
 const TYPE_COLOR  = { action: '#4ade80', navigation: '#60a5fa', click: '#fbbf24', error: '#f87171' };
@@ -1991,6 +2063,114 @@ function aiStatsPanel() {
   </div>`;
 }
 
+function aiFunnelEditRow(row, i) {
+  const stepOpts = AI_FUNNEL_ALL_STEPS.map((s, idx) =>
+    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${s.label}</option>`
+  ).join('');
+
+  const vsOpts = `<option value="">—</option>` +
+    state.aiFunnelConfig.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${AI_FUNNEL_ALL_STEPS[r.stepIdx].label}</option>`
+    ).join('');
+
+  return `
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select ai-funnel-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select ai-funnel-vs-sel"   data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost ai-funnel-remove" data-row="${i}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+function aiFunnelEditPanel() {
+  if (!state.editingAiFunnel) return '';
+  return `
+    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+      <div class="card-title" style="margin-bottom:16px">Costruttore funnel AI Coach</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+        ${state.aiFunnelConfig.map((row, i) => aiFunnelEditRow(row, i)).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="ai-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="ai-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
+        <button id="close-ai-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
+      </div>
+    </div>`;
+}
+
+function aiFunnelViz(eventsMap) {
+  const cfg = state.aiFunnelConfig;
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:12px">Nessuno step configurato. Apri "Modifica funnel" per aggiungerne uno.</div>`;
+
+  const rows = cfg.map(row => {
+    const s = AI_FUNNEL_ALL_STEPS[row.stepIdx];
+    const e = eventsMap[s.event];
+    return { s, n: e?.total ?? 0, users: e?.unique_users ?? 0 };
+  });
+
+  const html = cfg.map((row, i) => {
+    const { s, n, users } = rows[i];
+    const vsN    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].n : null;
+    const change = (vsN !== null && vsN > 0) ? ((n / vsN - 1) * 100).toFixed(0) : null;
+    const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    return `
+      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
+        ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
+        <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
+      </div>` : ''}
+      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
+        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${n}</div>
+        <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
+        <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
+        ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
+      </div>`;
+  }).join('');
+
+  return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${html}</div>`;
+}
+
+function aiFunnelPanel() {
+  const loading = state.aiFunnelEventsLoading || state.aiStatsLoading;
+  if (loading) {
+    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px" class="pulse">Caricamento funnel…</div>`;
+  }
+  if (state.aiFunnelEventsError) {
+    return `<div style="padding:24px;color:var(--red);font-size:13px">⚠️ ${esc(state.aiFunnelEventsError)}</div>`;
+  }
+  if (!state.aiFunnelEvents) {
+    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">Seleziona un periodo e premi Aggiorna</div>`;
+  }
+
+  const eventsMap = {};
+  state.aiFunnelEvents.forEach(e => { eventsMap[e.event_name] = e; });
+
+  const d = state.aiStatsData;
+  const sideKpi = (label, value, sub, color) => `
+    <div style="background:#12121e;border:1px solid #1e1e30;border-radius:12px;padding:14px 16px;flex:1;min-width:130px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${label}</div>
+      <div style="font-size:20px;font-weight:700;color:${color || 'var(--fg)'}">${value}</div>
+      ${sub ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${sub}</div>` : ''}
+    </div>`;
+  const errPct = d && d.total_calls > 0 ? ((d.errors / d.total_calls) * 100).toFixed(1) : '0.0';
+  const sideKpis = d ? sideKpi('Costo totale', '$' + Number(d.cost_usd).toFixed(3), `~$${Number(d.avg_cost_per_user).toFixed(3)} / utente`)
+    + sideKpi('Errori', Number(d.errors).toLocaleString('it-IT'), errPct + '% delle chiamate AI', d.errors > 0 ? '#e05555' : null) : '';
+
+  return `<div style="padding:24px;overflow-y:auto;height:100%">
+    ${sideKpis ? `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px">${sideKpis}</div>` : ''}
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="card-title" style="margin-bottom:0">Funnel AI Coach</div>
+      ${!state.editingAiFunnel ? `<button id="edit-ai-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
+    </div>
+    ${aiFunnelEditPanel()}
+    ${aiFunnelViz(eventsMap)}
+    <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
+      "Workout generato" conta l'avvio della generazione AI (evento workout_gen_start), non garantisce che il workout sia stato creato con successo. Per un controllo incrociato guarda "Crea workout" in Tool più usati nella vista Statistiche.
+    </div>
+  </div>`;
+}
+
 function aiConversationsModal() {
   if (!state.aiConvOpen) return '';
 
@@ -2046,7 +2226,7 @@ function aiConversationsModal() {
         <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0;flex-wrap:wrap">
           <div style="font-size:15px;font-weight:700;color:var(--fg);flex:1;min-width:120px">Conversazioni AI</div>
 
-          ${state.aiStatsOpen ? `
+          ${(state.aiStatsOpen || state.aiFunnelOpen) ? `
             <span style="font-size:11px;color:var(--muted)">Da</span>
             <input id="ai-stats-from" type="date" class="form-input" value="${esc(state.aiStatsFrom)}"
               style="width:140px;font-size:12px;padding:5px 10px">
@@ -2067,6 +2247,13 @@ function aiConversationsModal() {
             border-radius:8px;padding:5px 12px;cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap">
             📊 Statistiche
           </button>
+          <button id="ai-funnel-toggle" style="
+            background:${state.aiFunnelOpen ? 'var(--accent)' : 'none'};
+            border:1px solid ${state.aiFunnelOpen ? 'var(--accent)' : '#2a2a3d'};
+            color:${state.aiFunnelOpen ? '#fff' : 'var(--muted)'};
+            border-radius:8px;padding:5px 12px;cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap">
+            📈 Funnel
+          </button>
           <button id="ai-conv-close" style="
             background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
             padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
@@ -2077,6 +2264,10 @@ function aiConversationsModal() {
           ${state.aiStatsOpen ? `
             <div style="flex:1;min-width:0;overflow-y:auto">
               ${aiStatsPanel()}
+            </div>
+          ` : state.aiFunnelOpen ? `
+            <div style="flex:1;min-width:0;overflow-y:auto">
+              ${aiFunnelPanel()}
             </div>
           ` : `
             <!-- Session list -->
@@ -2646,21 +2837,6 @@ const PREMIUM_SOURCE_LABELS = {
   'unknown':                'Sconosciuto',
 };
 
-const PREMIUM_EXPECTED_SOURCES = [
-  'shop_ai_coach',
-  'keys_popup_premium',
-  'ai_chat_quota_exhausted',
-  'post_workout',
-  'onboarding_premium_step',
-  'coach_hub_entry',
-  'shop_vault_locked',
-  'home_premium_badge',
-  'onboarding_end',
-  'ai_premium_feature_locked',
-  'roadmap_premium_locked',
-  'unknown',
-];
-
 function premiumNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -2738,7 +2914,7 @@ function pagePremium() {
 
   const d = state.premiumData;
   const f = d.funnel;
-  const trialToPaywall = f.trial_shown  > 0 ? (f.paywall_views      / f.trial_shown      * 100).toFixed(1) : '0.0';
+  const viewToOpen = f.view_paywall > 0 ? (f.paywall_views / f.view_paywall * 100).toFixed(1) : '0.0';
   const paywallToBuy   = f.paywall_views > 0 ? (f.purchase_attempts / f.paywall_views    * 100).toFixed(1) : '0.0';
   const avgOpens = f.view_paywall > 0 ? (f.view_paywall_total / f.view_paywall).toFixed(1) : null;
   const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
@@ -2780,9 +2956,9 @@ function pagePremium() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">
       ${premiumKpi('Abbonati attivi', d.active_premium, null, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora' : '⏳ ancora nessuno')}
       ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'periodo di prova attivo in questo momento')}
-      ${premiumKpi('Trial visto', f.trial_shown, `${f.trial_shown_total} volte mostrato`, '#22d3ee', 'offerta mostrata (es. post-workout)')}
-      ${premiumKpi('Paywall aperto', f.paywall_views, `${f.paywall_views_total} aperture`, '#a78bfa', f.trial_shown > 0 ? trialToPaywall + '% di chi ha visto il trial' : null)}
-      ${premiumKpi('Frequenza paywall', avgOpens ? avgOpens + '×' : '—', null, avgOpens ? '#a78bfa' : 'var(--muted)', 'media volte che il paywall viene mostrato a ogni utente che lo vede')}
+      ${premiumKpi('Paywall mostrati', f.view_paywall_total, `${f.view_paywall} utent${f.view_paywall === 1 ? 'e' : 'i'}`, '#818cf8', 'mostrato all\'utente, sia manualmente che in automatico')}
+      ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', f.view_paywall > 0 ? viewToOpen + '% di chi ha visto il paywall' : null)}
+      ${premiumKpi('Frequenza paywall', avgOpens ? avgOpens + '×' : '—', null, avgOpens ? '#a78bfa' : 'var(--muted)', 'media volte che il paywall viene mostrato a ogni utente che lo vede', 'frequenza_paywall')}
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% di chi ha aperto il paywall' : null)}
       ${premiumKpi('Acquisto riuscito', successfulUsers, null, successfulUsers > 0 ? '#4ade80' : 'var(--muted)', attemptedUsers > 0 ? buyToSuccess + ' dei tentativi' : null)}
     </div>
@@ -2794,7 +2970,8 @@ function pagePremium() {
         <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
         ${!state.editingPremiumFunnel ? `<button id="edit-premium-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
       </div>
-      ${premiumFunnelViz(f)}
+      ${premiumFunnelRangeBar()}
+      ${premiumFunnelViz(state.premiumFunnelRangeData?.funnel || f)}
 
       <div style="border-top:1px solid #1a1a2e;margin-top:18px;padding-top:18px">
         ${sprintPremiumFunnelSection()}
@@ -2807,22 +2984,18 @@ function pagePremium() {
     <!-- Chi ha tentato / acquistato -->
     ${premiumPurchasersDetailCard(purchasers)}
 
-    <!-- Behavior panel -->
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-title" style="margin-bottom:14px">Comportamento post-paywall</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">fallback aperto · onboarding saltato · chiusura paywall</div>
-      ${premiumBehaviorPanel(f, d.fallback_sources)}
-    </div>
-
-    <!-- Diagnostica: qualità tracking, errori, log grezzo, account esclusi (collassata) -->
-    ${premiumDiagnostics(d, f, purchasers, hasRealErrors)}
+    <!-- Diagnostica: errori, log grezzo, account esclusi (collassata) -->
+    ${premiumDiagnostics(d, hasRealErrors)}
   `;
 }
 
-function premiumKpi(label, value, sub, color, note) {
+function premiumKpi(label, value, sub, color, note, infoKey) {
+  const infoBtn = infoKey
+    ? `<button onclick="showKpiInfo(event,'${esc(infoKey)}')" style="background:none;border:none;cursor:pointer;color:#4a4a6a;font-size:11px;padding:0 0 0 4px;line-height:1;vertical-align:middle" title="Come si calcola?">ℹ</button>`
+    : '';
   return `
     <div class="card" style="padding:16px 18px">
-      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">${label}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">${label}${infoBtn}</div>
       <div style="font-size:30px;font-weight:800;color:${color};line-height:1">${value}</div>
       ${sub  ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${sub}</div>` : ''}
       ${note ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid #2a2a3d">${note}</div>` : ''}
@@ -2871,6 +3044,25 @@ function premiumFunnelEditPanel() {
         <button id="premium-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
         <button id="close-premium-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
       </div>
+    </div>`;
+}
+
+function premiumFunnelRangeBar() {
+  const active = !!state.premiumFunnelRangeData;
+  return `
+    <div class="filter-bar" style="margin-bottom:14px;flex-wrap:wrap;gap:6px;align-items:center">
+      <span class="filter-label">Periodo funnel</span>
+      <input type="date" id="premium-funnel-range-from" class="form-input" value="${state.premiumFunnelRangeFrom}"
+        style="width:135px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="premium-funnel-range-to" class="form-input" value="${state.premiumFunnelRangeTo}"
+        style="width:135px;padding:5px 10px;font-size:12px">
+      <button id="premium-funnel-range-apply" class="btn btn-primary" style="padding:5px 14px;font-size:12px">Applica</button>
+      ${active ? `<button id="premium-funnel-range-reset" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;color:var(--muted)">↺ Periodo dashboard</button>` : ''}
+      ${state.premiumFunnelRangeLoading ? `<span style="font-size:11px;color:var(--muted)" class="pulse">Calcolo…</span>`
+        : active ? `<span style="font-size:11px;color:var(--purple)">periodo personalizzato attivo, indipendente da quello sopra</span>`
+        : `<span style="font-size:11px;color:var(--muted)">segue il periodo della dashboard sopra finché non applichi un range diverso qui</span>`}
+      ${state.premiumFunnelRangeError ? `<span style="font-size:11px;color:var(--red)">${esc(state.premiumFunnelRangeError)}</span>` : ''}
     </div>`;
 }
 
@@ -3125,36 +3317,6 @@ function premiumSourcesCard(d, purchasers) {
     </div>`;
 }
 
-function premiumBehaviorPanel(f, fallbackSources) {
-  const items = [
-    { icon: '⚠', label: 'Utenti con paywall fallback', value: f.fallback_users, color: '#f59e0b',
-      note: 'offer_token assente — il billing non carica correttamente' },
-    { icon: '✕', label: 'Chiusura X (onboarding paywall)', value: f.onboarding_skip, color: 'var(--muted)', note: null },
-    ...(f.paywall_close > 0 ? [{ icon: '✕', label: 'Chiusura X (paywall principale)', value: f.paywall_close, color: '#ef4444', note: null }] : []),
-  ];
-  return `
-    ${items.map(item => `
-      <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid #1a1a2e">
-        <div style="font-size:18px;width:24px;text-align:center;flex-shrink:0;margin-top:1px">${item.icon}</div>
-        <div style="flex:1">
-          <div style="display:flex;justify-content:space-between">
-            <div style="font-size:12px;color:var(--fg)">${item.label}</div>
-            <div style="font-size:16px;font-weight:700;color:${item.color}">${item.value}</div>
-          </div>
-          ${item.note ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${item.note}</div>` : ''}
-        </div>
-      </div>`).join('')}
-    ${fallbackSources?.length ? `
-      <div style="margin-top:12px">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Fallback per sorgente</div>
-        ${fallbackSources.map(s => `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:11px">
-            <span style="color:var(--muted)">${PREMIUM_SOURCE_LABELS[s.source] || s.source}</span>
-            <span style="color:#f59e0b;font-weight:600">${s.n}×</span>
-          </div>`).join('')}
-      </div>` : ''}`;
-}
-
 function premiumErrorsCard(billingErrors, purchaseErrors) {
   const errorLevelColor = (errore) => {
     if (errore.includes('non disponibile') || errore.includes('inizializzato')) return '#ef4444';
@@ -3273,69 +3435,6 @@ function premiumPurchasersDetailCard(purchasers) {
     </div>`;
 }
 
-function premiumDataQualityCard(d, f, purchasers) {
-  const sourceRows = [
-    ...(d.sources || []),
-    ...(d.trial_sources || []),
-    ...(d.fallback_sources || []),
-  ];
-  const presentSources = new Set(sourceRows.map(s => s.source || 'unknown'));
-  purchasers.forEach(p => presentSources.add(p.source || 'unknown'));
-  const missingSources = PREMIUM_EXPECTED_SOURCES.filter(s => !presentSources.has(s));
-  const unknownRows = sourceRows.filter(s => (s.source || 'unknown') === 'unknown');
-  const unknownEvents = unknownRows.reduce((sum, s) => sum + premiumNum(s.tentativi ?? s.eventi ?? s.n), 0);
-  const missingProduct = purchasers.filter(p => !p.product).length;
-  const missingSuccessDate = purchasers.filter(p => p.success && !p.successAt).length;
-  const missingErrorDetail = purchasers.filter(p => !p.success && !p.errorText).length;
-
-  const premiumMismatch = premiumNum(d.is_premium_sync_mismatch);
-
-  const issues = [
-    unknownEvents > 0 && `${unknownEvents} eventi con source unknown`,
-    missingProduct > 0 && `${missingProduct} utenti senza prodotto/piano`,
-    missingSuccessDate > 0 && `${missingSuccessDate} successi senza data successo`,
-    missingErrorDetail > 0 && `${missingErrorDetail} tentativi falliti senza errore esplicito`,
-    premiumMismatch > 0 && `${premiumMismatch} utenti con abbonamento attivo su Google Play ma is_premium=false sul profilo (bug di sincronizzazione: rischiano di aver pagato senza accesso) — segnalalo a Danilo`,
-  ].filter(Boolean);
-
-  return `
-    <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px">
-        <div>
-          <div class="card-title" style="margin-bottom:3px">Qualita dati Premium</div>
-          <div style="font-size:11px;color:var(--muted)">copertura source, piano, successo ed errori acquisto</div>
-        </div>
-        <div style="font-size:11px;color:${issues.length ? '#f59e0b' : '#4ade80'}">${issues.length ? issues.length + ' punti da migliorare' : 'Tracking pulito nel periodo'}</div>
-      </div>
-      <div class="grid-2">
-        <div>
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Source presenti</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            ${[...presentSources].sort().map(s => `<span style="font-size:10px;padding:3px 8px;border-radius:999px;background:#111120;color:#60a5fa;border:1px solid #1a2a3d">${esc(premiumSourceLabel(s))}</span>`).join('') || '<span style="font-size:12px;color:var(--muted)">Nessuna source registrata</span>'}
-          </div>
-        </div>
-        <div>
-          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Source attese non viste</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap">
-            ${missingSources.map(s => `<span style="font-size:10px;padding:3px 8px;border-radius:999px;background:#171728;color:var(--muted);border:1px solid #2a2a3d">${esc(premiumSourceLabel(s))}</span>`).join('') || '<span style="font-size:12px;color:#4ade80">Tutte presenti</span>'}
-          </div>
-        </div>
-      </div>
-      <div style="margin-top:14px;border-top:1px solid #1a1a2e;padding-top:12px">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Problemi tracking</div>
-        ${issues.length ? issues.map(x => `
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid #111120">
-            <span style="font-size:12px;color:var(--fg)">${esc(x)}</span>
-            <span style="font-size:10px;color:#f59e0b">da correggere</span>
-          </div>`).join('') : '<div style="font-size:12px;color:var(--muted)">Nessun problema evidente nei campi mostrati.</div>'}
-        <div style="font-size:11px;color:var(--muted);line-height:1.5;margin-top:10px">
-          Per rendere l'analisi affidabile conviene tracciare sempre: entry_source, open_mode,
-          product_id, attempt_id, purchase_status, error_code, error_message, success_at e transaction_id.
-        </div>
-      </div>
-    </div>`;
-}
-
 function premiumPurchasesCard(purchases) {
   const ET_LABEL = {
     'SUBSCRIPTION_PURCHASED': 'Acquistato',
@@ -3440,17 +3539,16 @@ function premiumExcludedCard(accounts) {
     </details>`;
 }
 
-function premiumDiagnostics(d, f, purchasers, hasRealErrors) {
+function premiumDiagnostics(d, hasRealErrors) {
   return `
     <details style="margin-bottom:16px">
       <summary style="cursor:pointer;padding:12px 16px;background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;
         font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px;user-select:none">
         <span style="font-size:14px">🔧</span>
-        <span><strong style="color:var(--fg)">Diagnostica e dati grezzi</strong> — qualità tracking, errori, log abbonamenti, account esclusi</span>
+        <span><strong style="color:var(--fg)">Diagnostica e dati grezzi</strong> — errori, log abbonamenti, account esclusi</span>
         <span style="margin-left:auto;font-size:10px;color:var(--muted);opacity:.7">clicca per espandere →</span>
       </summary>
       <div style="margin-top:12px">
-        ${premiumDataQualityCard(d, f, purchasers)}
         ${hasRealErrors ? premiumErrorsCard(d.billing_errors, d.purchase_errors) : `
         <div class="card" style="margin-bottom:16px;border-color:#1a3a1a">
           <div style="display:flex;align-items:center;gap:10px">
@@ -4967,20 +5065,36 @@ function attachEvents() {
   // AI stats — toggle
   document.getElementById('ai-stats-toggle')?.addEventListener('click', () => {
     state.aiStatsOpen = !state.aiStatsOpen;
+    state.aiFunnelOpen = false;
     if (state.aiStatsOpen && !state.aiStatsData) fetchAIStats();
     else render();
+  });
+
+  // AI funnel — toggle
+  document.getElementById('ai-funnel-toggle')?.addEventListener('click', () => {
+    state.aiFunnelOpen = !state.aiFunnelOpen;
+    state.aiStatsOpen = false;
+    if (state.aiFunnelOpen) {
+      if (!state.aiFunnelEvents) fetchAIFunnelEvents();
+      if (!state.aiStatsData)    fetchAIStats();
+      if (state.aiFunnelEvents && state.aiStatsData) render();
+    } else render();
   });
 
   // AI stats — date inputs
   document.getElementById('ai-stats-from')?.addEventListener('change', e => { state.aiStatsFrom = e.target.value; });
   document.getElementById('ai-stats-to')?.addEventListener('change',   e => { state.aiStatsTo   = e.target.value; });
 
-  // AI stats — apply button
+  // AI stats — apply button (ricalcola anche il funnel AI se è la vista attiva)
   document.getElementById('ai-stats-apply')?.addEventListener('click', () => {
     state.aiStatsData = null;
     state.aiStatsUsers = null;
     state.aiStatsUsersOpen = false;
     fetchAIStats();
+    if (state.aiFunnelOpen) {
+      state.aiFunnelEvents = null;
+      fetchAIFunnelEvents();
+    }
   });
 
   // AI stats — utenti unici card click
@@ -5013,6 +5127,17 @@ function attachEvents() {
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
     state.premiumData = null;
     fetchPremium();
+  });
+  document.getElementById('premium-funnel-range-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('premium-funnel-range-from')?.value;
+    const to   = document.getElementById('premium-funnel-range-to')?.value;
+    if (from) state.premiumFunnelRangeFrom = from;
+    if (to)   state.premiumFunnelRangeTo   = to;
+    fetchPremiumFunnelRange();
+  });
+  document.getElementById('premium-funnel-range-reset')?.addEventListener('click', () => {
+    state.premiumFunnelRangeData = null;
+    render();
   });
 
   document.getElementById('edit-premium-funnel')?.addEventListener('click', () => {
@@ -5055,6 +5180,50 @@ function attachEvents() {
         else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
       });
       savePremiumFunnelConfig();
+      render();
+    }));
+
+  // AI funnel — editor
+  document.getElementById('edit-ai-funnel')?.addEventListener('click', () => {
+    state.editingAiFunnel = true;
+    render();
+  });
+  document.getElementById('close-ai-funnel-edit')?.addEventListener('click', () => {
+    state.editingAiFunnel = false;
+    render();
+  });
+  document.getElementById('ai-funnel-add')?.addEventListener('click', () => {
+    const lastIdx = state.aiFunnelConfig.length > 0 ? state.aiFunnelConfig.length - 1 : null;
+    state.aiFunnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
+    saveAiFunnelConfig();
+    render();
+  });
+  document.getElementById('ai-funnel-reset')?.addEventListener('click', () => {
+    state.aiFunnelConfig = JSON.parse(JSON.stringify(DEF_AI_FUN_CFG));
+    saveAiFunnelConfig();
+    render();
+  });
+  document.querySelectorAll('.ai-funnel-step-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.aiFunnelConfig[+el.dataset.row].stepIdx = +el.value;
+      saveAiFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.ai-funnel-vs-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.aiFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
+      saveAiFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.ai-funnel-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.aiFunnelConfig.splice(i, 1);
+      state.aiFunnelConfig.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      saveAiFunnelConfig();
       render();
     }));
 
