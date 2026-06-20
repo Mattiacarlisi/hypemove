@@ -248,6 +248,8 @@ let state = {
   aiFunnelEvents: null, aiFunnelEventsLoading: false, aiFunnelEventsError: null,
   aiFunnelConfig: sanitizeAiFunnelConfig(loadLS(LS_AI_FUN, null)) || JSON.parse(JSON.stringify(DEF_AI_FUN_CFG)),
   editingAiFunnel: false,
+  sprintAiFunnelOpen: false, sprintAiFunnelSel: [], sprintAiFunnelData: {},
+  sprintAiFunnelLoading: false, sprintAiFunnelError: null,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
   settingsLoadError: false,
   metaTokenSaveError: false,
@@ -869,6 +871,34 @@ async function fetchSprintPremiumFunnel() {
     state.sprintPremiumFunnelData = map;
   } catch (e) { state.sprintPremiumFunnelError = e.message || 'Errore'; }
   state.sprintPremiumFunnelLoading = false;
+  render();
+}
+
+async function fetchSprintAiFunnel() {
+  if (!state.sprintAiFunnelSel.length) return;
+  state.sprintAiFunnelLoading = true;
+  state.sprintAiFunnelError   = null;
+  state.sprintAiFunnelData    = {};
+  render();
+  try {
+    const selected = state.sprints.filter(s => state.sprintAiFunnelSel.includes(s.id));
+    const results  = await Promise.all(selected.map(async s => {
+      const range = { p_from: s.inizio, p_to: s.fine };
+      const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
+        sb.rpc('kpi_events_summary', range),
+        sb.rpc('kpi_ai_chat_workout_events', range),
+      ]);
+      if (error) throw error;
+      if (chatWorkoutError) throw chatWorkoutError;
+      const eventsMap = {};
+      [...(data || []), ...(chatWorkoutData || [])].forEach(e => { eventsMap[e.event_name] = e; });
+      return { id: s.id, eventsMap };
+    }));
+    const map = {};
+    for (const r of results) map[r.id] = r.eventsMap;
+    state.sprintAiFunnelData = map;
+  } catch (e) { state.sprintAiFunnelError = e.message || 'Errore'; }
+  state.sprintAiFunnelLoading = false;
   render();
 }
 
@@ -2228,7 +2258,136 @@ function aiFunnelPanel() {
     <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
       "Workout avviato/completato (da chat)" tracciano solo i workout aperti dalla card proposta nella chat AI (metadata.source = ai_chat su workout_start/workout_complete) — disponibili da quando questo tracciamento è stato rilasciato lato app, quindi i dati su periodi precedenti restano a 0.
     </div>
+    ${sprintAiFunnelSection()}
   </div>`;
+}
+
+// ── AI COACH — CONFRONTO SPRINT ─────────────────────────────────────────
+
+function sprintAiFunnelSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintAiFunnelOpen;
+
+  const badge = state.sprintAiFunnelSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintAiFunnelSel.length} sel.</span>`
+    : '';
+
+  const headerEl = `
+    <div id="sprint-ai-funnel-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
+        ${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+
+  if (!isOpen) {
+    return `<div class="card" style="margin-top:16px;padding:14px 20px">${headerEl}</div>`;
+  }
+
+  const chips = state.sprints.map((s, i) => {
+    const on    = state.sprintAiFunnelSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-ai-funnel-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+    </button>`;
+  }).join('');
+
+  const hasData = Object.keys(state.sprintAiFunnelData).length > 0;
+  const body = state.sprintAiFunnelLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintAiFunnelError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${state.sprintAiFunnelError}</div>`
+    : !hasData ? ''
+    : sprintAiFunnelCompareView();
+
+  return `
+    <div class="card" style="margin-top:16px">
+      ${headerEl}
+      <div style="margin-top:18px">
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button id="sprint-ai-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+            ${!state.sprintAiFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+          ${!hasData && !state.sprintAiFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
+        </div>
+        ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function sprintAiFunnelCompareView() {
+  const selected = state.sprints.filter(s => state.sprintAiFunnelSel.includes(s.id));
+  if (!selected.length) return '';
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px">
+    ${selected.map((s, i) => `
+      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
+        <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
+        <span style="font-weight:600;color:var(--text)">${s.nome}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
+      </span>`).join('')}
+  </div>`;
+  return legend + sprintAiFunnelTable(selected, state.sprintAiFunnelData);
+}
+
+function sprintAiFunnelTable(selected, dataMap) {
+  const cfg    = state.aiFunnelConfig.filter(row => AI_FUNNEL_ALL_STEPS[row.stepIdx]);
+  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
+        <span>${s.nome}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+    </th>`
+  ).join('');
+
+  const rows = cfg.map((row, i) => {
+    const step = AI_FUNNEL_ALL_STEPS[row.stepIdx];
+    const nums = selected.map(s => Number((dataMap[s.id] || {})[step.event]?.total ?? -1));
+    const maxN = Math.max(...nums.filter(n => n >= 0), 0);
+
+    const cells = selected.map((s, si) => {
+      const eventsMap = dataMap[s.id] || {};
+      const num    = Number(eventsMap[step.event]?.total ?? 0);
+      const vsStep = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
+      const vsN    = vsStep ? Number(eventsMap[vsStep.event]?.total ?? 0) : null;
+      const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+      const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+      const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
+      const isBest    = num === maxN && maxN > 0;
+      const barW      = maxN > 0 ? Math.round(num / maxN * 100) : 0;
+      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
+        </div>
+        ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
+      </td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${step.label}</td>${cells}
+    </tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="border-bottom:2px solid var(--border)">
+      <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Step</th>
+      ${headers}
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
 }
 
 function aiConversationsModal() {
@@ -5080,15 +5239,19 @@ function attachEvents() {
       if (f) { state.selectedFeedback = f; render(); document.getElementById('fb-search')?.focus(); }
     }));
 
-  // AI Conversations modal — open
+  // AI Conversations modal — open (di default si apre sul Funnel AI Coach)
   document.getElementById('open-ai-conv')?.addEventListener('click', () => {
     state.aiConvOpen   = true;
+    state.aiFunnelOpen = true;
+    state.aiStatsOpen  = false;
     state.aiSessions   = null;
     state.aiSelectedSession   = null;
     state.aiSessionMessages   = null;
     state.aiSearchQuery = '';
     render();
     fetchAISessionsFull();
+    if (!state.aiFunnelEvents) fetchAIFunnelEvents();
+    if (!state.aiStatsData)    fetchAIStats();
   });
 
   // mini card session rows
@@ -5286,6 +5449,21 @@ function attachEvents() {
       saveAiFunnelConfig();
       render();
     }));
+
+  // AI Coach — confronto sprint
+  document.getElementById('sprint-ai-funnel-toggle')?.addEventListener('click', () => {
+    state.sprintAiFunnelOpen = !state.sprintAiFunnelOpen;
+    render();
+  });
+  document.querySelectorAll('.sprint-ai-funnel-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.id;
+      const idx = state.sprintAiFunnelSel.indexOf(id);
+      if (idx === -1) state.sprintAiFunnelSel.push(id);
+      else state.sprintAiFunnelSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-ai-funnel-calc')?.addEventListener('click', fetchSprintAiFunnel);
 
   // Premium — confronto sprint
   document.getElementById('sprint-premium-funnel-toggle')?.addEventListener('click', () => {
