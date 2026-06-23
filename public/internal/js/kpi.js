@@ -3286,7 +3286,8 @@ function premiumCreativesCard(d) {
     const label    = premiumCreativeLabel(r.variant);
     const toPlans  = r.shown > 0 ? Math.round(r.reached_plans / r.shown * 100) : 0;
     const barW     = Math.round(r.shown / maxShown * 100);
-    const lowSample = r.shownUsers < 10;
+    const shownUsers = premiumNum(r.shown_users);
+    const lowSample = shownUsers < 10;
     const convCol  = r.purchase_attempt > 0 ? `${r.purchase_attempt}` : '—';
     return `
       <tr style="border-bottom:1px solid #111120">
@@ -3299,7 +3300,7 @@ function premiumCreativesCard(d) {
             <div style="flex:1;background:#1a1a2e;border-radius:3px;height:6px;min-width:40px"><div style="background:#818cf8;border-radius:3px;height:6px;width:${barW}%"></div></div>
             <span style="font-weight:700;color:var(--fg);min-width:28px;text-align:right">${r.shown}</span>
           </div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px">${r.shownUsers} utent${r.shownUsers === 1 ? 'e' : 'i'}${lowSample ? ' · <span style="color:#fbbf24">campione basso</span>' : ''}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px">${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}${lowSample ? ' · <span style="color:#fbbf24">campione basso</span>' : ''}</div>
         </td>
         <td style="padding:10px 12px;text-align:center">
           <div style="font-weight:600;color:${toPlans >= 30 ? '#4ade80' : 'var(--fg)'}">${r.reached_plans}</div>
