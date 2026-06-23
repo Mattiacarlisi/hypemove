@@ -76,12 +76,16 @@ const DEF_FUN_CFG = [
 ];
 
 // stepIdx qui sotto = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views,
-// 2=view_paywall, 3=plan_select, 4=purchase_attempts, 5=premium_activated)
+// 2=view_paywall, 3=plan_select, 4=purchase_attempts, 5=premium_activated, 6=paywall_shown).
+// 6 (paywall_shown) è stato AGGIUNTO in coda di proposito: gli indici 0-5 NON cambiano, così le
+// config già salvate in localStorage restano valide. paywall_shown = paywall_step_view con index=0,
+// l'UNICO segnale che copre il 100% delle aperture per OGNI variante (view_Paywall non copre i
+// paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). È il denominatore corretto.
 const DEF_PREMIUM_FUN_CFG = [
-  { stepIdx: 1, vsIdx: null }, // Paywall aperto
-  { stepIdx: 3, vsIdx: 0 },    // Confronta piani vs Paywall aperto
-  { stepIdx: 4, vsIdx: 1 },    // Tentato acquisto vs Confronta piani
-  { stepIdx: 5, vsIdx: 2 },    // Premium attivato vs Tentato acquisto
+  { stepIdx: 6, vsIdx: null }, // Paywall mostrato (tutte le varianti)
+  { stepIdx: 1, vsIdx: 0 },    // Paywall aperto (volontario) vs mostrato
+  { stepIdx: 3, vsIdx: 0 },    // Confronta piani vs mostrato
+  { stepIdx: 4, vsIdx: 2 },    // Tentato acquisto vs Confronta piani
 ];
 
 // catalogo eventi disponibili per il funnel AI Coach — ognuno è un event_name letto da kpi_events_summary
@@ -208,6 +212,7 @@ let state = {
   premiumFunnelConfig: loadLS(LS_PREMIUM_FUN, JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG))),
   editingPremiumFunnel: false,
   premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all', premiumGender: 'all',
+  premiumCreativeSel: null,
   premiumFunnelRangeFrom: BETA_START, premiumFunnelRangeTo: TODAY,
   premiumFunnelRangeData: null, premiumFunnelRangeLoading: false, premiumFunnelRangeError: null,
   sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
@@ -1557,11 +1562,15 @@ function renderInfoTooltip(e, innerHtml) {
 function showEventTooltip(e, key) {
   const text = EVENT_DESCRIPTIONS[key];
   if (!text) return;
-  renderInfoTooltip(e, `<div style="font-family:var(--mono);font-size:10px;color:#8a8aae;margin-bottom:6px">${esc(key)}</div>${esc(text)}`);
+  renderInfoTooltip(e, `<div style="font-family:var(--mono);font-size:11px;color:#a78bfa;margin-bottom:7px;padding-bottom:7px;border-bottom:1px solid #2a2a3d;word-break:break-all">${esc(key)}</div>${esc(text)}`);
 }
 
 const KPI_INFO_TEXTS = {
   frequenza_paywall: 'Quante volte in media il paywall viene mostrato a ogni utente che lo vede almeno una volta. Calcolo: totale eventi view_Paywall ÷ utenti unici con almeno un view_Paywall, nel periodo selezionato.',
+  abbonati_attivi: 'Utenti con un abbonamento attivo ORA, derivato da play_purchases (ultima riga per utente, expires_at futuro, status ≠ revoked, non trial), NON dal flag users.is_premium che è desincronizzato. Esclude account interni. Indipendente dal periodo.',
+  nuovi_acquisti: 'Nuovi acquisti reali nel periodo selezionato: righe play_purchases con event_type=SUBSCRIPTION_PURCHASED. La nota mostra la data e i giorni dall\'ultimo acquisto in assoluto — se cresce, le vendite si sono fermate.',
+  mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 4,99 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
+  paywall_mostrati: 'Quante volte un paywall è stato mostrato, contando paywall_step_view con index=0. È l\'UNICO segnale che copre il 100% delle varianti (view_Paywall non copre i paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). Denominatore corretto del funnel.',
 };
 
 function showKpiInfo(e, key) {
@@ -3133,9 +3142,14 @@ function pagePremium() {
 
   const d = state.premiumData;
   const f = d.funnel;
-  const viewToOpen = f.view_paywall > 0 ? (f.paywall_views / f.view_paywall * 100).toFixed(1) : '0.0';
-  const paywallToBuy   = f.paywall_views > 0 ? (f.purchase_attempts / f.paywall_views    * 100).toFixed(1) : '0.0';
-  const avgOpens = f.view_paywall > 0 ? (f.view_paywall_total / f.view_paywall).toFixed(1) : null;
+  const rc = d.real_conv || {};
+  // denominatore CANONICO del funnel: paywall_shown (step0) copre il 100% delle varianti.
+  // fallback su view_paywall per compatibilità con risposte RPC vecchie (cache).
+  const shownTotal = premiumNum(f.paywall_shown_total ?? f.view_paywall_total);
+  const shownUsers = premiumNum(f.paywall_shown ?? f.view_paywall);
+  const shownToOpen = shownUsers > 0 ? (f.paywall_views / shownUsers * 100).toFixed(1) : '0.0';
+  const shownToBuy  = shownUsers > 0 ? (f.purchase_attempts / shownUsers * 100).toFixed(1) : '0.0';
+  const avgShown = shownUsers > 0 ? (shownTotal / shownUsers).toFixed(1) : null;
   const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
   const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
   const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
@@ -3143,6 +3157,11 @@ function pagePremium() {
   const successfulUsers = Math.max(purchasers.filter(p => p.success).length, premiumNum(f.premium_activated));
   const attemptedUsers  = Math.max(f.purchase_attempts, purchasers.length);
   const buyToSuccess = premiumPct(successfulUsers, attemptedUsers);
+  const lastDays = rc.last_days;
+  const lastNote = lastDays === null || lastDays === undefined
+    ? 'nessun acquisto reale nel periodo'
+    : `ultimo ${rc.last_date} · ${lastDays} g fa`;
+  const lastColor = (rc.new_total > 0) ? '#4ade80' : (lastDays > 14 ? '#ef4444' : 'var(--muted)');
 
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap">
@@ -3171,14 +3190,15 @@ function pagePremium() {
       ${state.premiumFrom} → ${state.premiumTo} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
     </div>
 
-    <!-- Dashboard: i numeri che contano, in ordine di funnel -->
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:16px">
-      ${premiumKpi('Abbonati attivi', d.active_premium, null, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora' : '⏳ ancora nessuno')}
-      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'periodo di prova attivo in questo momento')}
-      ${premiumKpi('Paywall mostrati', f.view_paywall_total, `${f.view_paywall} utent${f.view_paywall === 1 ? 'e' : 'i'}`, '#818cf8', 'mostrato all\'utente, sia manualmente che in automatico')}
-      ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', f.view_paywall > 0 ? viewToOpen + '% di chi ha visto il paywall' : null)}
-      ${premiumKpi('Frequenza paywall', avgOpens ? avgOpens + '×' : '—', null, avgOpens ? '#a78bfa' : 'var(--muted)', 'media volte che il paywall viene mostrato a ogni utente che lo vede', 'frequenza_paywall')}
-      ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', f.paywall_views > 0 ? paywallToBuy + '% di chi ha aperto il paywall' : null)}
+    <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
+      ${premiumKpi('Abbonati attivi', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora (da play_purchases)' : '⏳ ancora nessuno', 'abbonati_attivi')}
+      ${premiumKpi('Nuovi acquisti', premiumNum(rc.new_total), `${rc.new_monthly || 0} mens · ${rc.new_yearly || 0} ann`, lastColor, lastNote, 'nuovi_acquisti')}
+      ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
+      ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', avgShown ? avgShown + '× a testa · copre tutte le varianti' : 'tutte le varianti (step 0)', 'paywall_mostrati')}
+      ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
+      ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% di chi vede il paywall' : null)}
       ${premiumKpi('Acquisto riuscito', successfulUsers, null, successfulUsers > 0 ? '#4ade80' : 'var(--muted)', attemptedUsers > 0 ? buyToSuccess + ' dei tentativi' : null)}
     </div>
 
@@ -3196,6 +3216,12 @@ function pagePremium() {
         ${sprintPremiumFunnelSection()}
       </div>
     </div>
+
+    <!-- Creatività: quale paywall converte di più -->
+    ${premiumCreativesCard(d)}
+
+    <!-- Drop-off per step dentro una creatività -->
+    ${premiumStepDropoffCard(d)}
 
     <!-- Sorgenti: stessa lista, 4 viste a tab -->
     ${premiumSourcesCard(d, purchasers)}
@@ -3221,6 +3247,153 @@ function premiumKpi(label, value, sub, color, note, infoKey) {
     </div>`;
 }
 
+// ── CREATIVITÀ PAYWALL ────────────────────────────────────────────────
+const CREATIVE_LABELS = {
+  onboarding_funnel: 'Funnel standard',
+  coach_ai_chat:     'Coach AI · Chat',
+  coach_ai_memory:   'Coach AI · Memoria',
+  coach_ai_visual:   'Coach AI · Visual',
+  coach_ai_chart:    'Coach AI · Grafici',
+  progress_video:    'Video progressi',
+  video_ad:          'Video annuncio',
+  coach_call:        'Coach call',
+};
+function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
+
+// Tabella di confronto fra le creatività paywall: mostrato → ai piani → plan select → tentativo.
+// Risponde a "quale paywall converte di più". Finché variant_attribution_live è false, plan_select e
+// purchase_attempt delle creatività custom finiscono ancora nel funnel standard (vedi banner).
+function premiumCreativesCard(d) {
+  const rows = (d.creatives || []).slice().sort((a, b) => b.shown - a.shown);
+  const live = !!(d.data_quality && d.data_quality.variant_attribution_live);
+  if (!rows.length) return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:10px">Creatività paywall</div>
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun paywall mostrato nel periodo selezionato.</div>
+    </div>`;
+
+  const maxShown = Math.max(...rows.map(r => r.shown), 1);
+
+  const banner = live ? '' : `
+    <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#fbbf24;line-height:1.5">
+      ⏳ <strong>Attribuzione conversione per creatività in attesa di rilascio app.</strong>
+      Oggi <code style="font-family:var(--mono)">plan_select</code> e <code style="font-family:var(--mono)">purchase_attempt</code> delle creatività custom
+      vengono ancora contati sul <em>Funnel standard</em>. Mostrato e "arriva ai piani" sono invece già corretti per ogni creatività.
+      Le colonne piani/tentativo si popoleranno da sole quando il nuovo build sarà live.
+    </div>`;
+
+  const body = rows.map(r => {
+    const label    = premiumCreativeLabel(r.variant);
+    const toPlans  = r.shown > 0 ? Math.round(r.reached_plans / r.shown * 100) : 0;
+    const barW     = Math.round(r.shown / maxShown * 100);
+    const lowSample = r.shownUsers < 10;
+    const convCol  = r.purchase_attempt > 0 ? `${r.purchase_attempt}` : '—';
+    return `
+      <tr style="border-bottom:1px solid #111120">
+        <td style="padding:10px 12px">
+          <div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(label)}</div>
+          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono)">${esc(r.variant)}</div>
+        </td>
+        <td style="padding:10px 12px;min-width:140px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;background:#1a1a2e;border-radius:3px;height:6px;min-width:40px"><div style="background:#818cf8;border-radius:3px;height:6px;width:${barW}%"></div></div>
+            <span style="font-weight:700;color:var(--fg);min-width:28px;text-align:right">${r.shown}</span>
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px">${r.shownUsers} utent${r.shownUsers === 1 ? 'e' : 'i'}${lowSample ? ' · <span style="color:#fbbf24">campione basso</span>' : ''}</div>
+        </td>
+        <td style="padding:10px 12px;text-align:center">
+          <div style="font-weight:600;color:${toPlans >= 30 ? '#4ade80' : 'var(--fg)'}">${r.reached_plans}</div>
+          <div style="font-size:10px;color:var(--muted)">${toPlans}% del mostrato</div>
+        </td>
+        <td style="padding:10px 12px;text-align:center;color:${r.plan_select > 0 ? 'var(--fg)' : 'var(--muted)'}">${r.plan_select || '—'}</td>
+        <td style="padding:10px 12px;text-align:center;font-weight:700;color:${r.purchase_attempt > 0 ? '#f59e0b' : 'var(--muted)'}">${convCol}</td>
+        <td style="padding:10px 12px;text-align:center;color:${r.errors > 0 ? '#ef4444' : 'var(--muted)'}">${r.errors || '—'}</td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin-bottom:3px">Creatività paywall</div>
+          <div style="font-size:11px;color:var(--muted)">quale paywall viene mostrato di più e dove arriva · ordinato per esposizione</div>
+        </div>
+      </div>
+      ${banner}
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:720px">
+          <thead>
+            <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Mostrato</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">→ ai piani</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Plan select</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Tentato acq.</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Errori</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Drop-off step-by-step DENTRO una singola creatività. Mostra dove gli utenti mollano:
+// per ogni schermata, quanti l'hanno vista, il calo dalla precedente e quanti hanno chiuso lì.
+function premiumStepDropoffCard(d) {
+  const flow  = d.step_flow  || [];
+  const closes = d.step_close || [];
+  if (!flow.length) return '';
+
+  const variants = [...new Set(flow.map(s => s.variant))];
+  const sel = variants.includes(state.premiumCreativeSel) ? state.premiumCreativeSel : variants[0];
+
+  const chips = variants.map(v => {
+    const on = v === sel;
+    return `<button class="filter-btn ${on ? 'active' : ''}" data-creative-sel="${esc(v)}">${esc(premiumCreativeLabel(v))}</button>`;
+  }).join('');
+
+  const steps = flow.filter(s => s.variant === sel).sort((a, b) => a.idx - b.idx);
+  const closeMap = {};
+  closes.filter(c => c.variant === sel).forEach(c => { closeMap[c.step] = c.closed; });
+
+  const stepsHtml = steps.map((s, i) => {
+    const prev   = i > 0 ? steps[i - 1].viewed : null;
+    const drop   = (prev && prev > 0) ? Math.round((1 - s.viewed / prev) * 100) : null;
+    const closed = closeMap[s.step] || 0;
+    const barW   = steps[0].viewed > 0 ? Math.round(s.viewed / steps[0].viewed * 100) : 0;
+    return `
+      ${i > 0 ? `<div style="display:flex;align-items:center;gap:8px;padding:2px 0 2px 14px">
+        <span style="font-size:18px;color:#2a2a3d">↓</span>
+        ${drop !== null ? `<span style="font-size:11px;font-weight:700;color:${drop > 0 ? '#ef4444' : '#4ade80'}">${drop > 0 ? '−' + drop + '% abbandona' : 'stabile'}</span>` : ''}
+      </div>` : ''}
+      <div style="display:flex;align-items:center;gap:12px;background:#111120;border-radius:8px;padding:11px 14px">
+        <span style="font-size:11px;color:#5a5a7a;font-family:var(--mono);width:18px;flex-shrink:0">${s.idx}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;color:var(--fg);font-weight:500">${esc(s.step)}</div>
+          <div style="background:#1a1a2e;border-radius:3px;height:5px;margin-top:5px"><div style="background:#818cf8;border-radius:3px;height:5px;width:${barW}%"></div></div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-weight:700;color:var(--fg)">${s.viewed}</div>
+          <div style="font-size:10px;color:var(--muted)">${s.viewed_users} utent${s.viewed_users === 1 ? 'e' : 'i'}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;min-width:70px">
+          <div style="font-size:11px;color:${closed > 0 ? '#f59e0b' : 'var(--muted)'}">${closed > 0 ? closed + ' chiude qui' : '—'}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:3px">Dove si fermano · per creatività</div>
+        <div style="font-size:11px;color:var(--muted)">scegli una creatività e guarda schermata per schermata quanti proseguono e quanti chiudono</div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">${chips}</div>
+      <div style="display:flex;flex-direction:column;gap:0">${stepsHtml}</div>
+    </div>`;
+}
+
 const FUNNEL_ALL_STEPS = [
   { key: 'trial_shown',       label: 'Offerta trial mostrata',  color: '#0891b2', field: 'trial_shown_total',       usersField: 'trial_shown',  event: 'trial_offer_shown' },
   { key: 'paywall_views',     label: 'Paywall aperto',          color: '#a78bfa', field: 'paywall_views_total',     usersField: 'paywall_views', showFreq: true, event: 'paywall_open' },
@@ -3228,6 +3401,7 @@ const FUNNEL_ALL_STEPS = [
   { key: 'plan_select',       label: 'Confronta piani',         color: '#38bdf8', field: 'plan_select_total',       usersField: 'plan_select', event: 'paywall_plan_select' },
   { key: 'purchase_attempts', label: 'Tentato acquisto',        color: '#f59e0b', field: 'purchase_attempts_total', usersField: 'purchase_attempts', event: 'paywall_purchase_attempt' },
   { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated', event: 'view_PremiumActivated' },
+  { key: 'paywall_shown',     label: 'Paywall mostrato',        color: '#818cf8', field: 'paywall_shown_total',     usersField: 'paywall_shown', event: 'paywall_step_view · step 0' },
 ];
 
 function premiumFunnelEditRow(row, i) {
@@ -3758,16 +3932,49 @@ function premiumExcludedCard(accounts) {
     </details>`;
 }
 
+function premiumDataQualityCard(d) {
+  const q = d.data_quality || {};
+  const items = [];
+  // trial_started: evento morto
+  items.push(q.trial_started_events > 0
+    ? { ok: true,  t: `trial_started: ${q.trial_started_events} eventi`, s: 'evento di conversione trial attivo' }
+    : { ok: false, t: 'trial_started: mai emesso', s: 'NON usarlo come conversione — nel prodotto non esistono prove gratuite, la conversione vera è in play_purchases' });
+  // attribuzione variant
+  items.push(q.variant_attribution_live
+    ? { ok: true,  t: 'Attribuzione creatività: live', s: 'plan_select e purchase_attempt portano il nome della creatività' }
+    : { ok: false, t: 'Attribuzione creatività: non ancora in produzione', s: 'plan_select/purchase_attempt non portano ancora il variant — conversione per creatività non attribuibile finché l\'app non viene rilasciata' });
+  // sync is_premium
+  items.push((q.is_premium_sync_mismatch || 0) > 0
+    ? { ok: false, t: `is_premium desincronizzato: ${q.is_premium_sync_mismatch} utenti`, s: 'pagano (play_purchases attivo) ma users.is_premium=false — bug di sync da fixare lato app/webhook, rischiano di non avere accesso Premium' }
+    : { ok: true,  t: 'is_premium sincronizzato', s: 'nessuno scostamento tra pagamenti e flag premium' });
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:12px">Qualità dati Premium</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${items.map(it => `
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;background:#111120;border-radius:8px;border-left:3px solid ${it.ok ? '#4ade80' : '#ef4444'}">
+            <span style="font-size:14px;flex-shrink:0">${it.ok ? '✓' : '⚠'}</span>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:${it.ok ? '#4ade80' : '#fbbf24'}">${esc(it.t)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">${esc(it.s)}</div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 function premiumDiagnostics(d, hasRealErrors) {
   return `
     <details style="margin-bottom:16px">
       <summary style="cursor:pointer;padding:12px 16px;background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;
         font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px;user-select:none">
         <span style="font-size:14px">🔧</span>
-        <span><strong style="color:var(--fg)">Diagnostica e dati grezzi</strong> — errori, log abbonamenti, account esclusi</span>
+        <span><strong style="color:var(--fg)">Diagnostica e dati grezzi</strong> — qualità dati, errori, log abbonamenti, account esclusi</span>
         <span style="margin-left:auto;font-size:10px;color:var(--muted);opacity:.7">clicca per espandere →</span>
       </summary>
       <div style="margin-top:12px">
+        ${premiumDataQualityCard(d)}
         ${hasRealErrors ? premiumErrorsCard(d.billing_errors, d.purchase_errors) : `
         <div class="card" style="margin-bottom:16px;border-color:#1a3a1a">
           <div style="display:flex;align-items:center;gap:10px">
@@ -5490,6 +5697,13 @@ function attachEvents() {
   document.querySelectorAll('[data-purchaser-filter]').forEach(btn => {
     btn.addEventListener('click', () => {
       state.premiumPurchaserFilter = btn.dataset.purchaserFilter;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-creative-sel]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.premiumCreativeSel = btn.dataset.creativeSel;
       render();
     });
   });
