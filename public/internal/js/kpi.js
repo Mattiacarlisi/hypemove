@@ -3058,6 +3058,8 @@ const PREMIUM_SOURCE_LABELS = {
   'onboarding_premium_step':'Onboarding',
   'keys_popup_premium':     'Popup chiavi',
   'coach_hub_entry':        'Coach hub',
+  'coach_hub_free_preview': 'Coach hub (anteprima)',
+  'coach_hub_chat_memory':  'Coach hub (memoria chat)',
   'shop_vault_locked':      'Vault shop bloccato',
   'home_premium_badge':     'Badge Premium home',
   'onboarding_end':         'Fine onboarding',
@@ -3274,7 +3276,11 @@ function premiumCreativesCard(d) {
 
   const maxShown = Math.max(...rows.map(r => r.shown), 1);
 
-  const banner = live ? '' : `
+  const banner = live ? `
+    <div style="background:#0f2417;border:1px solid #1f5a36;border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:11px;color:#4ade80;line-height:1.5">
+      ✓ <strong>Attribuzione conversione per creatività attiva.</strong>
+      <code style="font-family:var(--mono)">plan_select</code> e <code style="font-family:var(--mono)">purchase_attempt</code> portano ora il nome della creatività: piani e tentativi sono attribuiti a ciascuna.
+    </div>` : `
     <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#fbbf24;line-height:1.5">
       ⏳ <strong>Attribuzione conversione per creatività in attesa di rilascio app.</strong>
       Oggi <code style="font-family:var(--mono)">plan_select</code> e <code style="font-family:var(--mono)">purchase_attempt</code> delle creatività custom
