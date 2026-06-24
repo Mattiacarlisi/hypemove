@@ -49,7 +49,7 @@ const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
 const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
-const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v2';
+const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v3';
 const LS_AI_FUN         = 'hm_ai_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
@@ -78,8 +78,10 @@ const DEF_FUN_CFG = [
 // stepIdx = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views, 2=view_paywall,
 // 3=plan_select, 4=purchase_attempts, 5=premium_activated, 6=paywall_shown, 7=reached_plans,
 // 8=purchased). 6-8 aggiunti in coda così le config salvate vecchie restano valide.
-// Default = il vero funnel di conversione, letto per UTENTI:
+// Default = il vero funnel di conversione monotòno (eventi grande, utenti sotto; paganti = utenti):
 // Mostrato → Arrivato ai piani → Confronta piani → Tentato acquisto → Abbonato pagante (reale).
+// "Paywall aperto" (apertura volontaria) NON è qui: è una modalità d'ingresso parallela (auto vs
+// volontaria), sta come KPI card sopra. Metterlo nell'imbuto darebbe % senza senso.
 // NB: NON usiamo più premium_activated (view_PremiumActivated) come fine: è un mount di schermata
 // lato client che si ripete (10 da 1 utente) e NON indica un pagamento. La conversione vera è
 // `purchased` (play_purchases, per token, esclusi interni e licenze tester).
@@ -3477,7 +3479,7 @@ const FUNNEL_ALL_STEPS = [
   { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated', event: 'view_PremiumActivated' },
   { key: 'paywall_shown',     label: 'Paywall mostrato',        color: '#818cf8', field: 'paywall_shown_total',     usersField: 'paywall_shown', event: 'paywall_step_view · step 0' },
   { key: 'reached_plans',     label: 'Arrivato ai piani',       color: '#38bdf8', field: 'reached_plans_total',     usersField: 'reached_plans', event: 'paywall_step_view · step plans' },
-  { key: 'purchased',         label: 'Abbonato pagante',        color: '#4ade80', field: 'purchased_total',        usersField: 'purchased', event: 'play_purchases (reale)' },
+  { key: 'purchased',         label: 'Abbonato pagante',        color: '#4ade80', field: 'purchased_total',        usersField: 'purchased', usersPrimary: true, event: 'play_purchases (reale)' },
 ];
 
 function premiumFunnelEditRow(row, i) {
@@ -3544,24 +3546,33 @@ function premiumFunnelViz(f) {
     return { s, n: f[s.field] ?? 0, users: f[s.usersField] ?? 0 };
   });
 
-  // Funnel di CONVERSIONE = letto per UTENTI (quante persone avanzano), non per eventi:
-  // il numero grande è "users", il calo % è utenti/utenti-step-precedente, l'evento totale è dettaglio.
+  // Numero grande = EVENTI (quante volte), utenti sotto in piccolo. Eccezione: gli step
+  // `usersPrimary` (Abbonato pagante) mostrano gli UTENTI in grande (lì gli eventi ≈ utenti).
+  // Il calo % di ogni transizione usa la metrica primaria dello step corrente, applicata a
+  // entrambi gli estremi (eventi↔eventi, utenti↔utenti) → niente confronti misti.
   const html = cfg.map((row, i) => {
     const { s, n, users } = rows[i];
-    const vsU    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].users : null;
-    const change = (vsU !== null && vsU > 0) ? ((users / vsU - 1) * 100).toFixed(0) : null;
-    const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    const big      = s.usersPrimary ? users : n;
+    const bigUnit  = s.usersPrimary ? `utent${users === 1 ? 'e' : 'i'}` : 'volte';
+    const subLine  = s.usersPrimary
+      ? (n !== users ? `${n} eventi` : '')
+      : `${users} utent${users === 1 ? 'e' : 'i'}`;
+    const hasVs    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i);
+    const curP     = s.usersPrimary ? users : n;
+    const vsP      = hasVs ? (s.usersPrimary ? rows[row.vsIdx].users : rows[row.vsIdx].n) : null;
+    const change   = (vsP !== null && vsP > 0) ? ((curP / vsP - 1) * 100).toFixed(0) : null;
+    const freq     = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
         <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
       </div>` : ''}
       <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
-        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${users}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:1px">utent${users === 1 ? 'e' : 'i'}</div>
+        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${big}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">${bigUnit}</div>
         <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
         ${s.event ? `<div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>` : ''}
-        ${n !== users ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${n} eventi</div>` : ''}
+        ${subLine ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${subLine}</div>` : ''}
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
       </div>`;
   }).join('');
