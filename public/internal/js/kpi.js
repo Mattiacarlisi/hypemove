@@ -49,7 +49,7 @@ const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
 const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
-const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v1';
+const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v2';
 const LS_AI_FUN         = 'hm_ai_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
@@ -75,38 +75,52 @@ const DEF_FUN_CFG = [
   { stepIdx: 10, vsIdx: 2 },    // Premium pagante vs Onboarding completato
 ];
 
-// stepIdx qui sotto = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views,
-// 2=view_paywall, 3=plan_select, 4=purchase_attempts, 5=premium_activated, 6=paywall_shown).
-// 6 (paywall_shown) è stato AGGIUNTO in coda di proposito: gli indici 0-5 NON cambiano, così le
-// config già salvate in localStorage restano valide. paywall_shown = paywall_step_view con index=0,
-// l'UNICO segnale che copre il 100% delle aperture per OGNI variante (view_Paywall non copre i
-// paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). È il denominatore corretto.
+// stepIdx = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views, 2=view_paywall,
+// 3=plan_select, 4=purchase_attempts, 5=premium_activated, 6=paywall_shown, 7=reached_plans,
+// 8=purchased). 6-8 aggiunti in coda così le config salvate vecchie restano valide.
+// Default = il vero funnel di conversione, letto per UTENTI:
+// Mostrato → Arrivato ai piani → Confronta piani → Tentato acquisto → Abbonato pagante (reale).
+// NB: NON usiamo più premium_activated (view_PremiumActivated) come fine: è un mount di schermata
+// lato client che si ripete (10 da 1 utente) e NON indica un pagamento. La conversione vera è
+// `purchased` (play_purchases, per token, esclusi interni e licenze tester).
 const DEF_PREMIUM_FUN_CFG = [
   { stepIdx: 6, vsIdx: null }, // Paywall mostrato (tutte le varianti)
-  { stepIdx: 1, vsIdx: 0 },    // Paywall aperto (volontario) vs mostrato
-  { stepIdx: 3, vsIdx: 0 },    // Confronta piani vs mostrato
+  { stepIdx: 7, vsIdx: 0 },    // Arrivato ai piani vs mostrato
+  { stepIdx: 3, vsIdx: 1 },    // Confronta piani (plan select) vs ai piani
   { stepIdx: 4, vsIdx: 2 },    // Tentato acquisto vs Confronta piani
+  { stepIdx: 8, vsIdx: 3 },    // Abbonato pagante vs Tentato acquisto
 ];
 
 // catalogo eventi disponibili per il funnel AI Coach — ognuno è un event_name letto da kpi_events_summary
 // (gli ultimi 2 arrivano invece da kpi_ai_chat_workout_events: workout_start/complete con metadata.source='ai_chat')
 // Nota: "workout_gen_start" è stato rimosso dal catalogo — è l'evento del pre-generation job della roadmap
 // Premium (premium_generation_jobs), scorrelato dalla chat AI: non misura "la chat ha proposto un workout".
+// NB: gli indici 0-4 sono STORICI e NON vanno cambiati (le config salvate in localStorage usano
+// stepIdx per posizione). I nuovi step (proposto/abbandonato/quota/chat chiusa) sono AGGIUNTI in coda.
+// "Workout proposto" arriva da kpi_events_summary (ai_chat_workout_proposed): è il nuovo evento
+// testa-funnel rilasciato lato app — finché non è in produzione resterà a 0.
 const AI_FUNNEL_ALL_STEPS = [
   { key: 'chat_open',    label: 'Chat aperta',       color: '#22d3ee', event: 'view_AIChat' },
   { key: 'hub_open',     label: 'Hub AI aperto',     color: '#60a5fa', event: 'view_CoachAIHub' },
   { key: 'msg_sent',     label: 'Messaggio inviato', color: '#a78bfa', event: 'ai_chat_send', showFreq: true },
   { key: 'workout_started_chat',   label: 'Workout avviato (da chat)',    color: '#fbbf24', event: 'ai_chat_workout_start' },
   { key: 'workout_completed_chat', label: 'Workout completato (da chat)', color: '#34d399', event: 'ai_chat_workout_complete' },
+  { key: 'workout_proposed_chat',  label: 'Workout proposto (da chat)',   color: '#38bdf8', event: 'ai_chat_workout_proposed' },
+  { key: 'workout_abandoned_chat', label: 'Workout abbandonato (da chat)',color: '#f43f5e', event: 'ai_chat_workout_abandon' },
+  { key: 'chat_quota',   label: 'Quota AI esaurita', color: '#fb923c', event: 'ai_chat_quota_exhausted' },
+  { key: 'chat_closed',  label: 'Chat chiusa',       color: '#64748b', event: 'ai_chat_close' },
 ];
 
 // stepIdx = indice nel catalogo AI_FUNNEL_ALL_STEPS qui sopra. Hub AI (1) escluso di default,
-// aggiungibile con "+ Aggiungi step" se serve guardarlo come tappa a parte.
+// aggiungibile con "+ Aggiungi step" se serve guardarlo come tappa a parte. "Workout proposto" (5)
+// è escluso dal default finché l'evento non è in produzione (resterebbe a 0); "abbandonato" (6) è
+// mostrato come conteggio a sé (vsIdx null) perché può scattare più volte per lo stesso workout.
 const DEF_AI_FUN_CFG = [
   { stepIdx: 0, vsIdx: null }, // Chat aperta
   { stepIdx: 2, vsIdx: 0 },    // Messaggio inviato vs Chat aperta
   { stepIdx: 3, vsIdx: 1 },    // Workout avviato (da chat) vs Messaggio inviato
   { stepIdx: 4, vsIdx: 2 },    // Workout completato (da chat) vs Workout avviato (da chat)
+  { stepIdx: 6, vsIdx: null }, // Workout abbandonato (da chat) — conteggio a sé
 ];
 
 function loadLS(key, def) {
@@ -2083,15 +2097,9 @@ function aiChatsCard() {
   </div>`;
 }
 
-function aiStatsPanel() {
-  if (state.aiStatsLoading) {
-    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px" class="pulse">Caricamento statistiche…</div>`;
-  }
-  const d = state.aiStatsData;
-  if (!d) {
-    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">Seleziona un periodo e premi Aggiorna</div>`;
-  }
-
+// Griglia KPI delle statistiche AI (chiamate, token, costo, utenti, sessioni, errori).
+// Estratta come helper puro per essere riusata sia dalla pagina AI Coach sia altrove.
+function aiStatsKpiRow(d) {
   const fmt = n => Number(n).toLocaleString('it-IT');
   const fmtK = n => n >= 1000 ? (n/1000).toFixed(1) + 'K' : String(n);
   const errPct = d.total_calls > 0 ? ((d.errors / d.total_calls) * 100).toFixed(1) : '0.0';
@@ -2106,7 +2114,7 @@ function aiStatsPanel() {
   ];
 
   const usersOpen = state.aiStatsUsersOpen;
-  const kpiHtml = kpis.map(k => {
+  return kpis.map(k => {
     const active = k.clickable && usersOpen;
     return `<div ${k.id ? `id="${k.id}"` : ''} style="background:#12121e;border:1px solid ${active ? 'var(--accent)' : '#1e1e30'};border-radius:12px;padding:16px 18px;flex:1;min-width:130px;${k.clickable ? 'cursor:pointer;user-select:none' : ''}">
       <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${k.label}${k.clickable ? ` <span style="font-size:10px;color:${active ? 'var(--accent)' : 'var(--muted)'}">${active ? '▲' : '▼'}</span>` : ''}</div>
@@ -2114,36 +2122,39 @@ function aiStatsPanel() {
       <div style="font-size:11px;color:var(--muted);margin-top:3px">${k.sub}</div>
     </div>`;
   }).join('');
+}
 
-  let usersHtml = '';
-  if (usersOpen) {
-    if (state.aiStatsUsersLoading) {
-      usersHtml = `<div style="padding:12px 0;color:var(--muted);font-size:12px" class="pulse">Caricamento utenti…</div>`;
-    } else {
-      const users = state.aiStatsUsers || [];
-      usersHtml = `
-        <div style="margin-bottom:24px;background:#12121e;border:1px solid var(--accent);border-radius:12px;overflow:hidden">
-          <table style="width:100%;border-collapse:collapse">
-            <thead>
-              <tr style="background:#1e1a3d">
-                <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">#</th>
-                <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">Nome</th>
-                <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">Email</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${users.map((u, i) => `
-                <tr style="border-top:1px solid #1e1e30">
-                  <td style="padding:9px 16px;font-size:11px;color:var(--muted)">${i + 1}</td>
-                  <td style="padding:9px 16px;font-size:13px;color:var(--fg);font-weight:500">${esc(u.name || '—')}</td>
-                  <td style="padding:9px 16px;font-size:12px;color:var(--muted);font-family:monospace">${esc(u.email || '—')}</td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`;
-    }
+// Tabella utenti unici espandibile (toggle dalla card "Utenti unici").
+function aiStatsUsersTable() {
+  if (!state.aiStatsUsersOpen) return '';
+  if (state.aiStatsUsersLoading) {
+    return `<div style="padding:12px 0;color:var(--muted);font-size:12px" class="pulse">Caricamento utenti…</div>`;
   }
+  const users = state.aiStatsUsers || [];
+  return `
+    <div style="margin-bottom:24px;background:#12121e;border:1px solid var(--accent);border-radius:12px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:#1e1a3d">
+            <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">#</th>
+            <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">Nome</th>
+            <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">Email</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map((u, i) => `
+            <tr style="border-top:1px solid #1e1e30">
+              <td style="padding:9px 16px;font-size:11px;color:var(--muted)">${i + 1}</td>
+              <td style="padding:9px 16px;font-size:13px;color:var(--fg);font-weight:500">${esc(u.name || '—')}</td>
+              <td style="padding:9px 16px;font-size:12px;color:var(--muted);font-family:monospace">${esc(u.email || '—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
 
+// Barre dei tool più usati dall'AI Coach.
+function aiToolsBlock(d) {
   const tools = d.top_tools || [];
   const maxCnt = d.max_tool_cnt || 1;
   const TOOL_NICE = {
@@ -2152,7 +2163,7 @@ function aiStatsPanel() {
     save_coach_note: 'Salva nota', propose_workout: 'Propone workout',
     get_roadmap: 'Legge roadmap', get_user_state: 'Stato utente',
   };
-  const toolsHtml = !tools.length
+  return !tools.length
     ? `<div style="color:var(--muted);font-size:12px">Nessun tool usato nel periodo</div>`
     : tools.map(t => {
         const pct = Math.round((t.cnt / maxCnt) * 100);
@@ -2167,13 +2178,6 @@ function aiStatsPanel() {
           </div>
         </div>`;
       }).join('');
-
-  return `<div style="padding:24px;overflow-y:auto;height:100%">
-    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:${usersOpen ? '14px' : '24px'}">${kpiHtml}</div>
-    ${usersHtml}
-    <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px">Tool più usati</div>
-    <div style="max-width:480px">${toolsHtml}</div>
-  </div>`;
 }
 
 function aiFunnelEditRow(row, i) {
@@ -2415,47 +2419,53 @@ function sprintAiFunnelTable(selected, dataMap) {
   </table>`;
 }
 
-function aiConversationsModal() {
-  if (!state.aiConvOpen) return '';
-
+// Lista delle sessioni di chat AI (filtrata per ricerca). Riusata sia dal modal solo-lettura
+// in Overview sia dal browser conversazioni della pagina AI Coach.
+function aiSessionListHtml() {
   const sessions = state.aiSessions || [];
   const q = (state.aiSearchQuery || '').toLowerCase();
   const filtered = q
     ? sessions.filter(s => (s.username || s.email || '').toLowerCase().includes(q))
     : sessions;
 
-  const sessionList = state.aiSessionsLoading
-    ? `<div style="padding:20px;color:var(--muted);font-size:12px" class="pulse">Caricamento sessioni…</div>`
-    : !filtered.length
-    ? `<div style="padding:20px;color:var(--muted);font-size:12px">Nessuna sessione trovata</div>`
-    : filtered.map(s => {
-        const sel = state.aiSelectedSession?.session_id === s.session_id;
-        const date = new Date(s.session_start).toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'2-digit' });
-        const time = new Date(s.session_start).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
-        const user = esc(s.username || s.email || '—');
-        const preview = esc((s.first_msg || '—').slice(0, 60) + ((s.first_msg || '').length > 60 ? '…' : ''));
-        const age2  = calcAge(s.birth_date);
-        const goal2 = GOAL_LABEL[s.primary_goal] || s.primary_goal || null;
-        const meta2 = [goal2, age2 ? age2 + ' anni' : null].filter(Boolean).map(esc).join(' · ');
-        return `<div class="ai-session-list-item" data-session-id="${esc(s.session_id)}"
-          style="padding:12px 14px;border-bottom:1px solid #1a1a2e;cursor:pointer;
-          background:${sel ? '#1e1a3d' : 'transparent'};border-left:3px solid ${sel ? 'var(--accent)' : 'transparent'};
-          transition:background .15s"
-          onmouseenter="if(!this.classList.contains('selected'))this.style.background='#14141f'"
-          onmouseleave="if(!this.classList.contains('selected'))this.style.background='${sel ? '#1e1a3d' : 'transparent'}'">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
-            <span style="font-size:12px;font-weight:600;color:${sel ? 'var(--purple)' : 'var(--fg)'}">${user}</span>
-            <span style="font-size:10px;color:var(--muted)">${date} ${time}</span>
-          </div>
-          ${meta2 ? `<div style="font-size:10px;color:var(--muted);margin-bottom:3px">${meta2}</div>` : ''}
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</span>
-            ${s.msg_count > 1 ? `<span style="font-size:9px;background:#2a2a3d;color:var(--muted);padding:1px 6px;border-radius:10px;flex-shrink:0">${s.msg_count}</span>` : ''}
-          </div>
-        </div>`;
-      }).join('');
+  if (state.aiSessionsLoading) {
+    return `<div style="padding:20px;color:var(--muted);font-size:12px" class="pulse">Caricamento sessioni…</div>`;
+  }
+  if (!filtered.length) {
+    return `<div style="padding:20px;color:var(--muted);font-size:12px">Nessuna sessione trovata</div>`;
+  }
+  return filtered.map(s => {
+    const sel = state.aiSelectedSession?.session_id === s.session_id;
+    const date = new Date(s.session_start).toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'2-digit' });
+    const time = new Date(s.session_start).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+    const user = esc(s.username || s.email || '—');
+    const preview = esc((s.first_msg || '—').slice(0, 60) + ((s.first_msg || '').length > 60 ? '…' : ''));
+    const age2  = calcAge(s.birth_date);
+    const goal2 = GOAL_LABEL[s.primary_goal] || s.primary_goal || null;
+    const meta2 = [goal2, age2 ? age2 + ' anni' : null].filter(Boolean).map(esc).join(' · ');
+    return `<div class="ai-session-list-item" data-session-id="${esc(s.session_id)}"
+      style="padding:12px 14px;border-bottom:1px solid #1a1a2e;cursor:pointer;
+      background:${sel ? '#1e1a3d' : 'transparent'};border-left:3px solid ${sel ? 'var(--accent)' : 'transparent'};
+      transition:background .15s"
+      onmouseenter="if(!this.classList.contains('selected'))this.style.background='#14141f'"
+      onmouseleave="if(!this.classList.contains('selected'))this.style.background='${sel ? '#1e1a3d' : 'transparent'}'">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+        <span style="font-size:12px;font-weight:600;color:${sel ? 'var(--purple)' : 'var(--fg)'}">${user}</span>
+        <span style="font-size:10px;color:var(--muted)">${date} ${time}</span>
+      </div>
+      ${meta2 ? `<div style="font-size:10px;color:var(--muted);margin-bottom:3px">${meta2}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</span>
+        ${s.msg_count > 1 ? `<span style="font-size:9px;background:#2a2a3d;color:var(--muted);padding:1px 6px;border-radius:10px;flex-shrink:0">${s.msg_count}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
 
-  const chatPanel = aiChatPanel();
+// Modal SOLO-LETTURA delle conversazioni, aperto dalla card "Ultimi messaggi all'AI" in Overview.
+// Statistiche e funnel vivono ora nella pagina dedicata AI Coach, non più qui.
+function aiConversationsModal() {
+  if (!state.aiConvOpen) return '';
 
   return `
     <div id="ai-conv-overlay" style="
@@ -2469,35 +2479,10 @@ function aiConversationsModal() {
         <!-- Header -->
         <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0;flex-wrap:wrap">
           <div style="font-size:15px;font-weight:700;color:var(--fg);flex:1;min-width:120px">Conversazioni AI</div>
-
-          ${(state.aiStatsOpen || state.aiFunnelOpen) ? `
-            <span style="font-size:11px;color:var(--muted)">Da</span>
-            <input id="ai-stats-from" type="date" class="form-input" value="${esc(state.aiStatsFrom)}"
-              style="width:140px;font-size:12px;padding:5px 10px">
-            <span style="color:var(--muted);font-size:11px">→</span>
-            <input id="ai-stats-to" type="date" class="form-input" value="${esc(state.aiStatsTo)}"
-              style="width:140px;font-size:12px;padding:5px 10px">
-            <button id="ai-stats-apply" class="btn btn-primary" style="font-size:12px;padding:5px 14px">Aggiorna</button>
-          ` : `
-            <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
-              value="${esc(state.aiSearchQuery)}"
-              class="form-input" style="width:200px;font-size:12px;padding:5px 10px">
-          `}
-
-          <button id="ai-stats-toggle" style="
-            background:${state.aiStatsOpen ? 'var(--accent)' : 'none'};
-            border:1px solid ${state.aiStatsOpen ? 'var(--accent)' : '#2a2a3d'};
-            color:${state.aiStatsOpen ? '#fff' : 'var(--muted)'};
-            border-radius:8px;padding:5px 12px;cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap">
-            📊 Statistiche
-          </button>
-          <button id="ai-funnel-toggle" style="
-            background:${state.aiFunnelOpen ? 'var(--accent)' : 'none'};
-            border:1px solid ${state.aiFunnelOpen ? 'var(--accent)' : '#2a2a3d'};
-            color:${state.aiFunnelOpen ? '#fff' : 'var(--muted)'};
-            border-radius:8px;padding:5px 12px;cursor:pointer;font-size:12px;font-family:inherit;white-space:nowrap">
-            📈 Funnel
-          </button>
+          <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
+            value="${esc(state.aiSearchQuery)}"
+            class="form-input" style="width:200px;font-size:12px;padding:5px 10px">
+          <button id="ai-conv-goto-page" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;white-space:nowrap" title="Apri la pagina AI Coach con statistiche e funnel">📊 Statistiche e funnel →</button>
           <button id="ai-conv-close" style="
             background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
             padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
@@ -2505,24 +2490,14 @@ function aiConversationsModal() {
 
         <!-- Body -->
         <div style="display:flex;flex:1;min-height:0">
-          ${state.aiStatsOpen ? `
-            <div style="flex:1;min-width:0;overflow-y:auto">
-              ${aiStatsPanel()}
-            </div>
-          ` : state.aiFunnelOpen ? `
-            <div style="flex:1;min-width:0;overflow-y:auto">
-              ${aiFunnelPanel()}
-            </div>
-          ` : `
-            <!-- Session list -->
-            <div style="width:280px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">
-              ${sessionList}
-            </div>
-            <!-- Chat panel -->
-            <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-              ${chatPanel}
-            </div>
-          `}
+          <!-- Session list -->
+          <div style="width:280px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">
+            ${aiSessionListHtml()}
+          </div>
+          <!-- Chat panel -->
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+            ${aiChatPanel()}
+          </div>
         </div>
       </div>
     </div>`;
@@ -3396,6 +3371,8 @@ const FUNNEL_ALL_STEPS = [
   { key: 'purchase_attempts', label: 'Tentato acquisto',        color: '#f59e0b', field: 'purchase_attempts_total', usersField: 'purchase_attempts', event: 'paywall_purchase_attempt' },
   { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated', event: 'view_PremiumActivated' },
   { key: 'paywall_shown',     label: 'Paywall mostrato',        color: '#818cf8', field: 'paywall_shown_total',     usersField: 'paywall_shown', event: 'paywall_step_view · step 0' },
+  { key: 'reached_plans',     label: 'Arrivato ai piani',       color: '#38bdf8', field: 'reached_plans_total',     usersField: 'reached_plans', event: 'paywall_step_view · step plans' },
+  { key: 'purchased',         label: 'Abbonato pagante',        color: '#4ade80', field: 'purchased_total',        usersField: 'purchased', event: 'play_purchases (reale)' },
 ];
 
 function premiumFunnelEditRow(row, i) {
@@ -3462,10 +3439,12 @@ function premiumFunnelViz(f) {
     return { s, n: f[s.field] ?? 0, users: f[s.usersField] ?? 0 };
   });
 
+  // Funnel di CONVERSIONE = letto per UTENTI (quante persone avanzano), non per eventi:
+  // il numero grande è "users", il calo % è utenti/utenti-step-precedente, l'evento totale è dettaglio.
   const html = cfg.map((row, i) => {
     const { s, n, users } = rows[i];
-    const vsN    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].n : null;
-    const change = (vsN !== null && vsN > 0) ? ((n / vsN - 1) * 100).toFixed(0) : null;
+    const vsU    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].users : null;
+    const change = (vsU !== null && vsU > 0) ? ((users / vsU - 1) * 100).toFixed(0) : null;
     const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
@@ -3473,10 +3452,11 @@ function premiumFunnelViz(f) {
         <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
       </div>` : ''}
       <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
-        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${n}</div>
+        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${users}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">utent${users === 1 ? 'e' : 'i'}</div>
         <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
         ${s.event ? `<div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>` : ''}
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
+        ${n !== users ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${n} eventi</div>` : ''}
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
       </div>`;
   }).join('');
