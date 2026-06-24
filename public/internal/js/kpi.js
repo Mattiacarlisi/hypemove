@@ -1582,8 +1582,9 @@ function showEventTooltip(e, key) {
 
 const KPI_INFO_TEXTS = {
   frequenza_paywall: 'Quante volte in media il paywall viene mostrato a ogni utente che lo vede almeno una volta. Calcolo: totale eventi view_Paywall ÷ utenti unici con almeno un view_Paywall, nel periodo selezionato.',
-  abbonati_attivi: 'Utenti con un abbonamento attivo ORA, derivato da play_purchases (ultima riga per utente, expires_at futuro, status ≠ revoked, non trial), NON dal flag users.is_premium che è desincronizzato. Esclude account interni. Indipendente dal periodo.',
-  nuovi_acquisti: 'Nuovi acquisti reali nel periodo selezionato: righe play_purchases con event_type=SUBSCRIPTION_PURCHASED. La nota mostra la data e i giorni dall\'ultimo acquisto in assoluto — se cresce, le vendite si sono fermate.',
+  abbonati_attivi: 'Abbonati PAGANTI attivi ORA, contati per purchase_token (l\'identità reale dell\'abbonamento su Google), NON per utente — così lo stesso acquisto non viene contato due volte se è agganciato a più account. Condizioni: ultima riga del token con expires_at futuro, status ≠ revoked, is_trial=false. Esclude i token legati ad account interni bloccati. Indipendente dal periodo.',
+  in_prova_ora: 'Utenti attualmente in prova gratuita 7 giorni: token con is_trial=true ancora attivo (expires_at futuro), dato server di Google. Quando un trial si converte in pagamento, esce da qui ed entra in "Abbonati paganti". Resta 0 finché non parte un trial reale.',
+  nuovi_acquisti: 'Nuovi abbonamenti reali nel periodo (per purchase_token, event_type=SUBSCRIPTION_PURCHASED), esclusi gli account interni e le licenze tester della closed-track (durata < 2 giorni = test accelerati, non clienti). La nota mostra data e giorni dall\'ultimo acquisto reale — se cresce, le vendite si sono fermate.',
   mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 4,99 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
   paywall_mostrati: 'Quante volte un paywall è stato mostrato, contando paywall_step_view con index=0. È l\'UNICO segnale che copre il 100% delle varianti (view_Paywall non copre i paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). Denominatore corretto del funnel.',
 };
@@ -2795,12 +2796,17 @@ function funnelViz() {
   const funnel = state.funnel;
   if (!funnel || !cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato.</div>`;
 
-  const numbers = cfg.map(r => Number(funnel[r.stepIdx]?.numero ?? 0));
+  // numero === null = dato non disponibile per il periodo (es. installs Google Play non ancora
+  // importati per quelle date), distinto da 0 reale. La fonte è la tabella google_play_installs:
+  // se non ha righe nel range la RPC kpi_funnel restituisce null, e qui mostriamo "n.d." invece di "0".
+  const rawNums = cfg.map(r => funnel[r.stepIdx]?.numero);
+  const numbers = rawNums.map(v => Number(v ?? 0));
   const maxN    = Math.max(...numbers, 1);
 
   return cfg.map((row, i) => {
     const n        = numbers[i];
-    const vsN      = (row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i) ? numbers[row.vsIdx] : null;
+    const noData   = rawNums[i] === null || rawNums[i] === undefined;
+    const vsN      = (row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i && !(rawNums[row.vsIdx] === null || rawNums[row.vsIdx] === undefined)) ? numbers[row.vsIdx] : null;
     const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv     = convPct !== null ? convPct.toFixed(1) + '%' : '—';
     const label    = FUNNEL_LABELS[row.stepIdx];
@@ -2816,7 +2822,7 @@ function funnelViz() {
         <div style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
           <div style="height:100%;width:${pct}%;background:${barColor};opacity:.75;border-radius:3px"></div>
         </div>
-        <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0">${n}</div>
+        <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0${noData ? ';color:var(--muted)' : ''}" ${noData ? 'title="Dato non disponibile per questo periodo (tabella google_play_installs non aggiornata)"' : ''}>${noData ? 'n.d.' : n}</div>
         <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
       </div>`;
   }).join('');
@@ -3211,7 +3217,8 @@ function pagePremium() {
     <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
-      ${premiumKpi('Abbonati attivi', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora (da play_purchases)' : '⏳ ancora nessuno', 'abbonati_attivi')}
+      ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora · dato Google (token)' : '⏳ ancora nessuno', 'abbonati_attivi')}
+      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'trial 7gg attivi adesso · da play_purchases (is_trial)', 'in_prova_ora')}
       ${premiumKpi('Nuovi acquisti', premiumNum(rc.new_total), `${rc.new_monthly || 0} mens · ${rc.new_yearly || 0} ann`, lastColor, lastNote, 'nuovi_acquisti')}
       ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', avgShown ? avgShown + '× a testa · copre tutte le varianti' : 'tutte le varianti (step 0)', 'paywall_mostrati')}
@@ -4377,21 +4384,22 @@ function sprintFunnelTable(selected, dataMap) {
 
     const cells = selected.map((s, si) => {
       const data = dataMap[s.id] || [];
-      const num  = Number(data[row.stepIdx]?.numero ?? 0);
-      const vsN  = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i
-        ? Number(data[cfg[row.vsIdx].stepIdx]?.numero ?? 0)
-        : null;
+      const rawNum = data[row.stepIdx]?.numero;
+      const noData = rawNum === null || rawNum === undefined; // dato non disponibile (es. installs non importati)
+      const num  = Number(rawNum ?? 0);
+      const rawVs = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
+      const vsN  = rawVs === null || rawVs === undefined ? null : Number(rawVs);
       const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
-      const isBest    = num === maxN && maxN > 0;
-      const barW      = maxN > 0 ? Math.round(num / maxN * 100) : 0;
+      const isBest    = !noData && num === maxN && maxN > 0;
+      const barW      = noData ? 0 : (maxN > 0 ? Math.round(num / maxN * 100) : 0);
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
           <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
             <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
           </div>
-          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}" ${noData ? 'title="Dato non disponibile per questo periodo"' : ''}>${noData ? 'n.d.' : num}</span>
         </div>
         ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
       </td>`;
