@@ -3355,6 +3355,7 @@ const CREATIVE_LABELS = {
   video_ad:          'Video annuncio',
   coach_call:        'Coach call',
   change_goal_premium: 'Cambio obiettivo',
+  onboarding_results_chart: 'Fine onboarding · Risultati',
 };
 function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
 
