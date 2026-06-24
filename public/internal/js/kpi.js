@@ -1581,7 +1581,7 @@ function showEventTooltip(e, key) {
 }
 
 const KPI_INFO_TEXTS = {
-  frequenza_paywall: 'Quante volte in media il paywall viene mostrato a ogni utente che lo vede almeno una volta. Calcolo: totale eventi view_Paywall ÷ utenti unici con almeno un view_Paywall, nel periodo selezionato.',
+  frequenza_paywall: 'Quante volte in media il paywall viene mostrato a ogni utente che lo vede almeno una volta. Calcolo: paywall mostrati totali (paywall_step_view index=0, tutte le varianti) ÷ utenti unici che l\'hanno visto, nel periodo. Un valore alto significa che mostri il paywall molto spesso alla stessa persona — utile per non risultare insistenti.',
   abbonati_attivi: 'Abbonati PAGANTI attivi ORA, contati per purchase_token (l\'identità reale dell\'abbonamento su Google), NON per utente — così lo stesso acquisto non viene contato due volte se è agganciato a più account. Condizioni: ultima riga del token con expires_at futuro, status ≠ revoked, is_trial=false. Esclude i token legati ad account interni bloccati. Indipendente dal periodo.',
   in_prova_ora: 'Utenti attualmente in prova gratuita 7 giorni: token con is_trial=true ancora attivo (expires_at futuro), dato server di Google. Quando un trial si converte in pagamento, esce da qui ed entra in "Abbonati paganti". Resta 0 finché non parte un trial reale.',
   nuovi_acquisti: 'Nuovi abbonamenti reali nel periodo (per purchase_token, event_type=SUBSCRIPTION_PURCHASED), esclusi gli account interni e le licenze tester della closed-track (durata < 2 giorni = test accelerati, non clienti). La nota mostra data e giorni dall\'ultimo acquisto reale — se cresce, le vendite si sono fermate.',
@@ -3217,7 +3217,8 @@ function pagePremium() {
       ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', lastNote, 'abbonati_attivi')}
       ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'prova gratuita 7gg attiva adesso · da play_purchases (is_trial)', 'in_prova_ora')}
       ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
-      ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', avgShown ? avgShown + '× a testa · copre tutte le varianti' : 'tutte le varianti (step 0)', 'paywall_mostrati')}
+      ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
+      ${premiumKpi('Frequenza paywall', avgShown ? avgShown + '×' : '—', null, avgShown ? '#818cf8' : 'var(--muted)', 'volte in media che ogni utente vede il paywall · alto = mostrato troppo spesso', 'frequenza_paywall')}
       ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% di chi vede il paywall' : null)}
     </div>
