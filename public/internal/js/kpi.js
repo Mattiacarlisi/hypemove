@@ -3337,6 +3337,7 @@ function premiumCreativesCard(d) {
         <td style="padding:8px 12px;vertical-align:middle">${premiumStepPath(steps)}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.plan_select > 0 ? 'var(--fg)' : 'var(--muted)'}">${r.plan_select || '—'}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${r.purchase_attempt > 0 ? '#f59e0b' : 'var(--muted)'}">${convCol}</td>
+        <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${premiumNum(r.purchases) > 0 ? '#4ade80' : 'var(--muted)'}">${premiumNum(r.purchases) || '—'}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.errors > 0 ? '#ef4444' : 'var(--muted)'}">${r.errors || '—'}</td>
       </tr>`;
   }).join('');
@@ -3351,13 +3352,14 @@ function premiumCreativesCard(d) {
       </div>
       ${banner}
       <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:820px">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:900px">
           <thead>
             <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Percorso step → dove si fermano</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Plan select</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Tentato acq.</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Acquisto</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Errori</th>
             </tr>
           </thead>
