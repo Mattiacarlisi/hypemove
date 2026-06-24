@@ -3178,9 +3178,6 @@ function pagePremium() {
   const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
   const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
   const purchasers = (d.purchasers || []).map(premiumPurchaserModel);
-  const successfulUsers = Math.max(purchasers.filter(p => p.success).length, premiumNum(f.premium_activated));
-  const attemptedUsers  = Math.max(f.purchase_attempts, purchasers.length);
-  const buyToSuccess = premiumPct(successfulUsers, attemptedUsers);
   const lastDays = rc.last_days;
   const lastNote = lastDays === null || lastDays === undefined
     ? 'nessun acquisto reale nel periodo'
@@ -3217,14 +3214,12 @@ function pagePremium() {
     <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
-      ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', d.active_premium > 0 ? '✓ paganti ora · dato Google (token)' : '⏳ ancora nessuno', 'abbonati_attivi')}
-      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'trial 7gg attivi adesso · da play_purchases (is_trial)', 'in_prova_ora')}
-      ${premiumKpi('Nuovi acquisti', premiumNum(rc.new_total), `${rc.new_monthly || 0} mens · ${rc.new_yearly || 0} ann`, lastColor, lastNote, 'nuovi_acquisti')}
+      ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', lastNote, 'abbonati_attivi')}
+      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'prova gratuita 7gg attiva adesso · da play_purchases (is_trial)', 'in_prova_ora')}
       ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', avgShown ? avgShown + '× a testa · copre tutte le varianti' : 'tutte le varianti (step 0)', 'paywall_mostrati')}
       ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% di chi vede il paywall' : null)}
-      ${premiumKpi('Acquisto riuscito', successfulUsers, null, successfulUsers > 0 ? '#4ade80' : 'var(--muted)', attemptedUsers > 0 ? buyToSuccess + ' dei tentativi' : null)}
     </div>
 
     <!-- Conversion funnel -->
