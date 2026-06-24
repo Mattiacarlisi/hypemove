@@ -513,6 +513,20 @@ async function searchUsersForBlock(query) {
   }, 300);
 }
 
+// Le metriche escludono i bloccati lato RPC (legge blocked_users live). Quando la lista
+// cambia, azzero le cache delle pagine che dipendono dall'esclusione così si ricalcolano:
+// Premium/Funnel/Retention/Comportamento si rifanno al rientro pagina (refetch on-nav),
+// l'Overview non ha trigger on-nav quindi lo rinfresco subito.
+function invalidateExclusionCaches() {
+  state.premiumData            = null;
+  state.premiumFunnelRangeData = null;
+  state.sprintPremiumFunnelData = {};
+  state.funnel                 = null;
+  state.retention              = null;
+  state.behaviorData           = null;
+  fetchData(); // Overview: refetch immediato (nessun refetch automatico al cambio pagina)
+}
+
 async function addBlockedUser(user) {
   try {
     const { error } = await sb.from('blocked_users').upsert({
@@ -528,6 +542,7 @@ async function addBlockedUser(user) {
     state.blockSearchQuery   = '';
     state.blockSearchResults = [];
     await Promise.all([fetchBlockedUsers(), fetchRecentlyUnblocked()]);
+    invalidateExclusionCaches();
     render();
   } catch (e) { console.error('addBlockedUser', e); alert('Errore aggiunta: ' + e.message); }
 }
@@ -537,6 +552,7 @@ async function removeBlockedUser(id) {
     const { error } = await sb.from('blocked_users').update({ removed_at: new Date().toISOString() }).eq('id', id);
     if (error) throw error;
     await Promise.all([fetchBlockedUsers(), fetchRecentlyUnblocked()]);
+    invalidateExclusionCaches();
     render();
   } catch (e) { console.error('removeBlockedUser', e); }
 }
