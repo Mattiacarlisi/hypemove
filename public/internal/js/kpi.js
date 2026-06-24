@@ -212,7 +212,6 @@ let state = {
   premiumFunnelConfig: loadLS(LS_PREMIUM_FUN, JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG))),
   editingPremiumFunnel: false,
   premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all', premiumGender: 'all',
-  premiumCreativeSel: null,
   premiumFunnelRangeFrom: BETA_START, premiumFunnelRangeTo: TODAY,
   premiumFunnelRangeData: null, premiumFunnelRangeLoading: false, premiumFunnelRangeError: null,
   sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
@@ -3060,6 +3059,7 @@ const PREMIUM_SOURCE_LABELS = {
   'coach_hub_entry':        'Coach hub',
   'coach_hub_free_preview': 'Coach hub (anteprima)',
   'coach_hub_chat_memory':  'Coach hub (memoria chat)',
+  'change_goal_premium':    'Cambio obiettivo',
   'shop_vault_locked':      'Vault shop bloccato',
   'home_premium_badge':     'Badge Premium home',
   'onboarding_end':         'Fine onboarding',
@@ -3219,11 +3219,8 @@ function pagePremium() {
       </div>
     </div>
 
-    <!-- Creatività: quale paywall converte di più -->
+    <!-- Creatività: quale paywall converte di più, col percorso step inline -->
     ${premiumCreativesCard(d)}
-
-    <!-- Drop-off per step dentro una creatività -->
-    ${premiumStepDropoffCard(d)}
 
     <!-- Sorgenti: stessa lista, 4 viste a tab -->
     ${premiumSourcesCard(d, purchasers)}
@@ -3259,8 +3256,35 @@ const CREATIVE_LABELS = {
   progress_video:    'Video progressi',
   video_ad:          'Video annuncio',
   coach_call:        'Coach call',
+  change_goal_premium: 'Cambio obiettivo',
 };
 function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
+
+// Percorso step inline di una creatività: per ogni schermata quanti la raggiungono,
+// con il calo % rispetto alla schermata precedente. Mostra dove si fermano gli utenti.
+function premiumStepPath(steps) {
+  if (!steps || !steps.length) return '<span style="color:var(--muted);font-size:11px">nessuno step</span>';
+  const first = steps[0].viewed || 0;
+  return `<div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap">` +
+    steps.map((s, i) => {
+      const prev    = i > 0 ? steps[i - 1].viewed : null;
+      const drop    = (prev && prev > 0) ? Math.round((1 - s.viewed / prev) * 100) : null;
+      const pctOf1  = first > 0 ? Math.round(s.viewed / first * 100) : 0;
+      const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+      const arrow = i > 0 ? `
+        <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 2px">
+          ${drop !== null ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
+          <span style="font-size:13px;line-height:1">→</span>
+        </div>` : '';
+      const isLast = i === steps.length - 1;
+      return arrow + `
+        <div style="text-align:center;min-width:48px;background:#111120;border:1px solid ${isLast ? '#1f5a3699' : '#1f1f33'};border-radius:6px;padding:5px 6px">
+          <div style="font-weight:700;color:var(--fg);font-size:13px;line-height:1">${s.viewed}</div>
+          <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(s.step)}</div>
+          <div style="font-size:8px;color:#5a5a7a;line-height:1">${pctOf1}%</div>
+        </div>`;
+    }).join('') + `</div>`;
+}
 
 // Tabella di confronto fra le creatività paywall: mostrato → ai piani → plan select → tentativo.
 // Risponde a "quale paywall converte di più". Finché variant_attribution_live è false, plan_select e
@@ -3268,13 +3292,14 @@ function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
 function premiumCreativesCard(d) {
   const rows = (d.creatives || []).slice().sort((a, b) => b.shown - a.shown);
   const live = !!(d.data_quality && d.data_quality.variant_attribution_live);
+  // step per variante (ordinati per idx dalla RPC) → percorso inline in ogni riga
+  const stepsByVariant = {};
+  (d.step_flow || []).forEach(s => { (stepsByVariant[s.variant] = stepsByVariant[s.variant] || []).push(s); });
   if (!rows.length) return `
     <div class="card" style="margin-bottom:16px">
       <div class="card-title" style="margin-bottom:10px">Creatività paywall</div>
       <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun paywall mostrato nel periodo selezionato.</div>
     </div>`;
-
-  const maxShown = Math.max(...rows.map(r => r.shown), 1);
 
   const banner = live ? `
     <div style="background:#0f2417;border:1px solid #1f5a36;border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:11px;color:#4ade80;line-height:1.5">
@@ -3290,31 +3315,21 @@ function premiumCreativesCard(d) {
 
   const body = rows.map(r => {
     const label    = premiumCreativeLabel(r.variant);
-    const toPlans  = r.shown > 0 ? Math.round(r.reached_plans / r.shown * 100) : 0;
-    const barW     = Math.round(r.shown / maxShown * 100);
     const shownUsers = premiumNum(r.shown_users);
     const lowSample = shownUsers < 10;
     const convCol  = r.purchase_attempt > 0 ? `${r.purchase_attempt}` : '—';
+    const steps    = (stepsByVariant[r.variant] || []).slice().sort((a, b) => a.idx - b.idx);
     return `
       <tr style="border-bottom:1px solid #111120">
-        <td style="padding:10px 12px">
+        <td style="padding:10px 12px;vertical-align:top">
           <div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(label)}</div>
           <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono)">${esc(r.variant)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}${lowSample ? ' · <span style="color:#fbbf24">campione basso</span>' : ''}</div>
         </td>
-        <td style="padding:10px 12px;min-width:140px">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div style="flex:1;background:#1a1a2e;border-radius:3px;height:6px;min-width:40px"><div style="background:#818cf8;border-radius:3px;height:6px;width:${barW}%"></div></div>
-            <span style="font-weight:700;color:var(--fg);min-width:28px;text-align:right">${r.shown}</span>
-          </div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px">${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}${lowSample ? ' · <span style="color:#fbbf24">campione basso</span>' : ''}</div>
-        </td>
-        <td style="padding:10px 12px;text-align:center">
-          <div style="font-weight:600;color:${toPlans >= 30 ? '#4ade80' : 'var(--fg)'}">${r.reached_plans}</div>
-          <div style="font-size:10px;color:var(--muted)">${toPlans}% del mostrato</div>
-        </td>
-        <td style="padding:10px 12px;text-align:center;color:${r.plan_select > 0 ? 'var(--fg)' : 'var(--muted)'}">${r.plan_select || '—'}</td>
-        <td style="padding:10px 12px;text-align:center;font-weight:700;color:${r.purchase_attempt > 0 ? '#f59e0b' : 'var(--muted)'}">${convCol}</td>
-        <td style="padding:10px 12px;text-align:center;color:${r.errors > 0 ? '#ef4444' : 'var(--muted)'}">${r.errors || '—'}</td>
+        <td style="padding:8px 12px;vertical-align:middle">${premiumStepPath(steps)}</td>
+        <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.plan_select > 0 ? 'var(--fg)' : 'var(--muted)'}">${r.plan_select || '—'}</td>
+        <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${r.purchase_attempt > 0 ? '#f59e0b' : 'var(--muted)'}">${convCol}</td>
+        <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.errors > 0 ? '#ef4444' : 'var(--muted)'}">${r.errors || '—'}</td>
       </tr>`;
   }).join('');
 
@@ -3323,17 +3338,16 @@ function premiumCreativesCard(d) {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px;flex-wrap:wrap">
         <div>
           <div class="card-title" style="margin-bottom:3px">Creatività paywall</div>
-          <div style="font-size:11px;color:var(--muted)">quale paywall viene mostrato di più e dove arriva · ordinato per esposizione</div>
+          <div style="font-size:11px;color:var(--muted)">percorso step per step di ogni paywall · vedi a quale schermata gli utenti si fermano · ordinato per esposizione</div>
         </div>
       </div>
       ${banner}
       <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:720px">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:820px">
           <thead>
             <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
-              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Mostrato</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">→ ai piani</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Percorso step → dove si fermano</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Plan select</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Tentato acq.</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Errori</th>
@@ -3342,62 +3356,6 @@ function premiumCreativesCard(d) {
           <tbody>${body}</tbody>
         </table>
       </div>
-    </div>`;
-}
-
-// Drop-off step-by-step DENTRO una singola creatività. Mostra dove gli utenti mollano:
-// per ogni schermata, quanti l'hanno vista, il calo dalla precedente e quanti hanno chiuso lì.
-function premiumStepDropoffCard(d) {
-  const flow  = d.step_flow  || [];
-  const closes = d.step_close || [];
-  if (!flow.length) return '';
-
-  const variants = [...new Set(flow.map(s => s.variant))];
-  const sel = variants.includes(state.premiumCreativeSel) ? state.premiumCreativeSel : variants[0];
-
-  const chips = variants.map(v => {
-    const on = v === sel;
-    return `<button class="filter-btn ${on ? 'active' : ''}" data-creative-sel="${esc(v)}">${esc(premiumCreativeLabel(v))}</button>`;
-  }).join('');
-
-  const steps = flow.filter(s => s.variant === sel).sort((a, b) => a.idx - b.idx);
-  const closeMap = {};
-  closes.filter(c => c.variant === sel).forEach(c => { closeMap[c.step] = c.closed; });
-
-  const stepsHtml = steps.map((s, i) => {
-    const prev   = i > 0 ? steps[i - 1].viewed : null;
-    const drop   = (prev && prev > 0) ? Math.round((1 - s.viewed / prev) * 100) : null;
-    const closed = closeMap[s.step] || 0;
-    const barW   = steps[0].viewed > 0 ? Math.round(s.viewed / steps[0].viewed * 100) : 0;
-    return `
-      ${i > 0 ? `<div style="display:flex;align-items:center;gap:8px;padding:2px 0 2px 14px">
-        <span style="font-size:18px;color:#2a2a3d">↓</span>
-        ${drop !== null ? `<span style="font-size:11px;font-weight:700;color:${drop > 0 ? '#ef4444' : '#4ade80'}">${drop > 0 ? '−' + drop + '% abbandona' : 'stabile'}</span>` : ''}
-      </div>` : ''}
-      <div style="display:flex;align-items:center;gap:12px;background:#111120;border-radius:8px;padding:11px 14px">
-        <span style="font-size:11px;color:#5a5a7a;font-family:var(--mono);width:18px;flex-shrink:0">${s.idx}</span>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px;color:var(--fg);font-weight:500">${esc(s.step)}</div>
-          <div style="background:#1a1a2e;border-radius:3px;height:5px;margin-top:5px"><div style="background:#818cf8;border-radius:3px;height:5px;width:${barW}%"></div></div>
-        </div>
-        <div style="text-align:right;flex-shrink:0">
-          <div style="font-weight:700;color:var(--fg)">${s.viewed}</div>
-          <div style="font-size:10px;color:var(--muted)">${s.viewed_users} utent${s.viewed_users === 1 ? 'e' : 'i'}</div>
-        </div>
-        <div style="text-align:right;flex-shrink:0;min-width:70px">
-          <div style="font-size:11px;color:${closed > 0 ? '#f59e0b' : 'var(--muted)'}">${closed > 0 ? closed + ' chiude qui' : '—'}</div>
-        </div>
-      </div>`;
-  }).join('');
-
-  return `
-    <div class="card" style="margin-bottom:16px">
-      <div style="margin-bottom:12px">
-        <div class="card-title" style="margin-bottom:3px">Dove si fermano · per creatività</div>
-        <div style="font-size:11px;color:var(--muted)">scegli una creatività e guarda schermata per schermata quanti proseguono e quanti chiudono</div>
-      </div>
-      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">${chips}</div>
-      <div style="display:flex;flex-direction:column;gap:0">${stepsHtml}</div>
     </div>`;
 }
 
@@ -5708,12 +5666,6 @@ function attachEvents() {
     });
   });
 
-  document.querySelectorAll('[data-creative-sel]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.premiumCreativeSel = btn.dataset.creativeSel;
-      render();
-    });
-  });
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────
