@@ -254,7 +254,6 @@ let state = {
   aiSessionMessages: null,
   aiSessionMessagesLoading: false,
   aiSearchQuery: '',
-  aiStatsOpen: false,
   aiStatsData: null,
   aiStatsLoading: false,
   aiStatsUsers: null,
@@ -262,7 +261,6 @@ let state = {
   aiStatsUsersOpen: false,
   aiStatsFrom: new Date(Date.now()-30*864e5).toISOString().slice(0,10),
   aiStatsTo: TODAY,
-  aiFunnelOpen: false,
   aiFunnelEvents: null, aiFunnelEventsLoading: false, aiFunnelEventsError: null,
   aiFunnelConfig: sanitizeAiFunnelConfig(loadLS(LS_AI_FUN, null)) || JSON.parse(JSON.stringify(DEF_AI_FUN_CFG)),
   editingAiFunnel: false,
@@ -1090,6 +1088,7 @@ function sidebar() {
         ${nav('retention', '🔄', 'Retention')}
         ${nav('sprint',    '🏃', 'Sprint')}
         ${nav('premium',    '💎', 'Premium')}
+        ${nav('ai-coach',   '🤖', 'AI Coach')}
         ${nav('behavior',   '🖱️', 'Comportamento')}
         <div class="nav-section" style="margin-top:8px">Marketing</div>
         ${nav('meta-ads',   '📣', 'Meta ADS')}
@@ -1123,6 +1122,7 @@ function page() {
     case 'metriche':   return pageMetriche();
     case 'sprint':      return pageSprint();
     case 'premium':     return pagePremium();
+    case 'ai-coach':    return pageAICoach();
     case 'behavior':    return pageBehavior();
     case 'meta-ads':    return pageMetaAds();
     default:            return pageOverview();
@@ -1507,6 +1507,11 @@ const EVENT_LABELS = {
   roadmap_select: 'Roadmap selezionata', league_tab_switch: 'Tab lega cambiato',
   workout_gen_start: 'Generazione workout AI avviata', chest_open: 'Baule aperto',
   ai_chat_send: 'Messaggio AI inviato',
+  ai_chat_close: 'Chat AI chiusa', ai_chat_quota_exhausted: 'Quota AI esaurita',
+  ai_chat_workout_proposed: 'Workout proposto in chat',
+  workout_feedback_shown: 'Feedback post-workout mostrato',
+  workout_feedback_replied: 'Feedback post-workout — risposta',
+  workout_feedback_notification_scheduled: 'Notifica feedback schedulata',
   view_Home: 'Home', view_WorkoutDetail: 'Dettaglio workout',
   view_WorkoutComplete: 'Riepilogo workout', view_User: 'Profilo',
   view_League: 'Classifica', view_ExerciseSearch: 'Libreria allenamenti',
@@ -1551,6 +1556,12 @@ const EVENT_DESCRIPTIONS = {
   chest_open:           'L\'utente ha aperto un baule raccogliendo le chiavi accumulate.',
   feedback_opened:           'L\'utente ha aperto la sezione per inviare un feedback agli sviluppatori. Il fatto che l\'abbia aperta non significa necessariamente che abbia inviato qualcosa.',
   ai_chat_send:              'L\'utente ha inviato un messaggio all\'AI Coach. Ogni occorrenza rappresenta un singolo messaggio spedito nella chat. Se il contatore è 4, l\'utente ha scritto 4 messaggi in quella sessione.',
+  ai_chat_close:             'L\'utente ha chiuso la chat con l\'AI Coach.',
+  ai_chat_quota_exhausted:   'L\'utente ha provato a inviare un messaggio ma aveva esaurito la quota giornaliera di chiamate AI. Questo evento porta tipicamente all\'apertura del paywall (entry_source = ai_chat_quota_exhausted).',
+  ai_chat_workout_proposed:  'L\'AI Coach ha mostrato in chat una card di workout proposto. È la testa del funnel "proposta → avvio → completamento": misura quanti workout l\'AI propone, prima che l\'utente decida di avviarli. Evento rilasciato lato app: resta a 0 finché non è in produzione.',
+  workout_feedback_shown:    'È stata mostrata all\'utente la chat di feedback post-workout (in app o aprendo la notifica "+2 min" dopo un abbandono).',
+  workout_feedback_replied:  'L\'utente ha risposto almeno una volta nella chat di feedback post-workout.',
+  workout_feedback_notification_scheduled: 'Dopo un abbandono eleggibile, l\'app ha schedulato la notifica "+2 min" che invita l\'utente a dare un feedback sul workout.',
   paywall_product_updated:   'Il plugin paywall ha aggiornato i prodotti disponibili (piani, prezzi). Avviene in background all\'avvio.',
   paywall_validator_step:    'Step interno del processo di validazione abbonamento. Si attiva all\'avvio per verificare se l\'utente è Premium.',
   paywall_validator_called:  'Il validator dell\'abbonamento è stato chiamato. Parte automaticamente all\'apertura dell\'app.',
@@ -2250,45 +2261,138 @@ function aiFunnelViz(eventsMap) {
   return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${html}</div>`;
 }
 
-function aiFunnelPanel() {
-  const loading = state.aiFunnelEventsLoading || state.aiStatsLoading;
-  if (loading) {
-    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px" class="pulse">Caricamento funnel…</div>`;
-  }
-  if (state.aiFunnelEventsError) {
-    return `<div style="padding:24px;color:var(--red);font-size:13px">⚠️ ${esc(state.aiFunnelEventsError)}</div>`;
-  }
-  if (!state.aiFunnelEvents) {
-    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">Seleziona un periodo e premi Aggiorna</div>`;
-  }
+// Mini-KPI compatto (riusato per engagement chat: quota esaurita, chat chiuse).
+function aiMiniStat(label, value, sub, color) {
+  return `<div style="background:#12121e;border:1px solid #1e1e30;border-radius:12px;padding:14px 16px;flex:1;min-width:150px">
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${label}</div>
+    <div style="font-size:22px;font-weight:700;color:${color || 'var(--fg)'}">${Number(value).toLocaleString('it-IT')}</div>
+    ${sub ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${sub}</div>` : ''}
+  </div>`;
+}
 
-  const eventsMap = {};
-  state.aiFunnelEvents.forEach(e => { eventsMap[e.event_name] = e; });
+// Funnel della chat di FEEDBACK post-workout (flusso separato dalla chat principale).
+// Eventi da kpi_events_summary, già in state.aiFunnelEvents.
+function aiFeedbackChatCard(eventsMap) {
+  const getN = name => Number(eventsMap[name]?.total ?? 0);
+  const getU = name => Number(eventsMap[name]?.unique_users ?? 0);
+  const steps = [
+    { label: 'Notifica feedback schedulata', event: 'workout_feedback_notification_scheduled', color: '#fbbf24' },
+    { label: 'Feedback mostrato',            event: 'workout_feedback_shown',                  color: '#a78bfa' },
+    { label: 'Risposta utente',              event: 'workout_feedback_replied',                color: '#34d399' },
+  ].map(s => ({ ...s, n: getN(s.event), users: getU(s.event) }));
 
+  const boxes = steps.map((s, i) => {
+    const vsN = i > 0 ? steps[i - 1].n : null;
+    const conv = (vsN !== null && vsN > 0) ? (s.n / vsN * 100).toFixed(0) + '%' : null;
+    return `
+      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
+        ${conv !== null ? `<div style="font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap">${conv}</div>` : ''}
+        <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
+      </div>` : ''}
+      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
+        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${s.n}</div>
+        <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
+        <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">${s.users} utent${s.users === 1 ? 'e' : 'i'}</div>
+      </div>`;
+  }).join('');
+
+  return `<div class="card" style="margin-bottom:16px">
+    <div class="card-title" style="margin-bottom:6px">Chat di feedback post-workout</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">Flusso separato dalla chat principale: dopo un workout abbandonato l'app schedula una notifica "+2 min", poi mostra la chat di feedback (in app o da notifica) e l'utente può rispondere. Disponibile da quando il tracciamento è stato rilasciato lato app.</div>
+    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${boxes}</div>
+  </div>`;
+}
+
+// ── PAGINA AI COACH ───────────────────────────────────────────────────
+// Pagina dedicata che raccoglie tutta l'analitica della chat AI: KPI, funnel configurabile,
+// engagement, feedback post-workout, confronto sprint, tool e browser conversazioni.
+function pageAICoach() {
   const d = state.aiStatsData;
-  const sideKpi = (label, value, sub, color) => `
-    <div style="background:#12121e;border:1px solid #1e1e30;border-radius:12px;padding:14px 16px;flex:1;min-width:130px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${label}</div>
-      <div style="font-size:20px;font-weight:700;color:${color || 'var(--fg)'}">${value}</div>
-      ${sub ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${sub}</div>` : ''}
-    </div>`;
-  const errPct = d && d.total_calls > 0 ? ((d.errors / d.total_calls) * 100).toFixed(1) : '0.0';
-  const sideKpis = d ? sideKpi('Costo totale', '$' + Number(d.cost_usd).toFixed(3), `~$${Number(d.avg_cost_per_user).toFixed(3)} / utente`)
-    + sideKpi('Errori', Number(d.errors).toLocaleString('it-IT'), errPct + '% delle chiamate AI', d.errors > 0 ? '#e05555' : null) : '';
 
-  return `<div style="padding:24px;overflow-y:auto;height:100%">
-    ${sideKpis ? `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:18px">${sideKpis}</div>` : ''}
+  const filterBar = `
+    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:6px;align-items:center">
+      <span class="filter-label">Periodo</span>
+      <input id="ai-stats-from" type="date" class="form-input" value="${esc(state.aiStatsFrom)}"
+        style="width:145px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input id="ai-stats-to" type="date" class="form-input" value="${esc(state.aiStatsTo)}"
+        style="width:145px;padding:5px 10px;font-size:12px">
+      <button id="ai-stats-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Aggiorna</button>
+    </div>`;
+
+  // 1. KPI north-star
+  let kpiCard;
+  if (state.aiStatsLoading) {
+    kpiCard = `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento statistiche…</div></div>`;
+  } else if (!d) {
+    kpiCard = `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px">Nessun dato nel periodo selezionato.</div></div>`;
+  } else {
+    kpiCard = `<div class="card" style="margin-bottom:16px">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;${state.aiStatsUsersOpen ? 'margin-bottom:14px' : ''}">${aiStatsKpiRow(d)}</div>
+      ${aiStatsUsersTable()}
+    </div>`;
+  }
+
+  // 2. Funnel AI Coach + 3. engagement + 4. feedback
+  const eventsMap = {};
+  (state.aiFunnelEvents || []).forEach(e => { eventsMap[e.event_name] = e; });
+  const getN = name => Number(eventsMap[name]?.total ?? 0);
+
+  let funnelInner, engagementCard = '', feedbackCardHtml = '';
+  if (state.aiFunnelEventsLoading) {
+    funnelInner = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px" class="pulse">Caricamento funnel…</div>`;
+  } else if (state.aiFunnelEventsError) {
+    funnelInner = `<div style="padding:12px 0;color:var(--red);font-size:13px">⚠️ ${esc(state.aiFunnelEventsError)}</div>`;
+  } else if (!state.aiFunnelEvents) {
+    funnelInner = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">Premi Aggiorna per calcolare il funnel.</div>`;
+  } else {
+    funnelInner = `
+      ${aiFunnelEditPanel()}
+      ${aiFunnelViz(eventsMap)}
+      <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
+        "Workout proposto/avviato/completato/abbandonato (da chat)" tracciano solo i workout legati alla card proposta nella chat AI (<span style="font-family:var(--mono)">ai_chat_workout_proposed</span>, e <span style="font-family:var(--mono)">metadata.source = ai_chat</span> su start/complete/abandon) — disponibili da quando il tracciamento è stato rilasciato lato app, quindi su periodi precedenti restano a 0. <strong>Workout proposto</strong> è il nuovo evento testa-funnel: resta a 0 finché non è in produzione. L'abbandono può scattare più volte per lo stesso workout (salvataggio parziale, zero esercizi, app in background), quindi è mostrato come conteggio a sé.
+      </div>`;
+    engagementCard = `<div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:14px">Engagement chat</div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px">
+        ${aiMiniStat('Chat chiuse', getN('ai_chat_close'), 'chiusure della chat', '#64748b')}
+        ${aiMiniStat('Quota AI esaurita', getN('ai_chat_quota_exhausted'), 'tentativi a quota esaurita → paywall', '#fb923c')}
+      </div>
+    </div>`;
+    feedbackCardHtml = aiFeedbackChatCard(eventsMap);
+  }
+  const funnelCard = `<div class="card" style="margin-bottom:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
       <div class="card-title" style="margin-bottom:0">Funnel AI Coach</div>
-      ${!state.editingAiFunnel ? `<button id="edit-ai-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
+      ${state.aiFunnelEvents && !state.editingAiFunnel ? `<button id="edit-ai-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
     </div>
-    ${aiFunnelEditPanel()}
-    ${aiFunnelViz(eventsMap)}
-    <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
-      "Workout avviato/completato (da chat)" tracciano solo i workout aperti dalla card proposta nella chat AI (metadata.source = ai_chat su workout_start/workout_complete) — disponibili da quando questo tracciamento è stato rilasciato lato app, quindi i dati su periodi precedenti restano a 0.
-    </div>
-    ${sprintAiFunnelSection()}
+    ${funnelInner}
   </div>`;
+
+  // 5. confronto sprint (già pronto)
+  const sprintCard = sprintAiFunnelSection();
+
+  // 6. tool
+  const toolsCard = d ? `<div class="card" style="margin-bottom:16px">
+    <div class="card-title" style="margin-bottom:14px">Tool più usati dall'AI</div>
+    <div style="max-width:520px">${aiToolsBlock(d)}</div>
+  </div>` : '';
+
+  // 7. browser conversazioni (embedded, non più modal)
+  const convCard = `<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #1e1e30">
+      <div class="card-title" style="margin-bottom:0;flex:1">Conversazioni</div>
+      <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
+        value="${esc(state.aiSearchQuery)}" class="form-input" style="width:220px;font-size:12px;padding:5px 10px">
+    </div>
+    <div style="display:flex;height:560px;min-height:0">
+      <div style="width:300px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">${aiSessionListHtml()}</div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">${aiChatPanel()}</div>
+    </div>
+  </div>`;
+
+  return `${filterBar}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${sprintCard}${toolsCard}${convCard}`;
 }
 
 // ── AI COACH — CONFRONTO SPRINT ─────────────────────────────────────────
@@ -4833,6 +4937,12 @@ function attachEvents() {
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
+      if (state.page === 'ai-coach') {
+        if (!state.aiStatsData    && !state.aiStatsLoading)        fetchAIStats();
+        if (!state.aiFunnelEvents && !state.aiFunnelEventsLoading) fetchAIFunnelEvents();
+        if (!state.aiSessions     && !state.aiSessionsLoading)     fetchAISessionsFull();
+        if (!state.sprints.length && !state.sprintsLoading)        fetchSprints();
+      }
       if (state.page === 'behavior'   && !state.behaviorData  && !state.behaviorLoading)  fetchBehavior();
       if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
       render();
@@ -5421,19 +5531,26 @@ function attachEvents() {
       if (f) { state.selectedFeedback = f; render(); document.getElementById('fb-search')?.focus(); }
     }));
 
-  // AI Conversations modal — open (di default si apre sul Funnel AI Coach)
+  // AI Conversations modal — open (solo-lettura: lista sessioni + chat)
   document.getElementById('open-ai-conv')?.addEventListener('click', () => {
-    state.aiConvOpen   = true;
-    state.aiFunnelOpen = true;
-    state.aiStatsOpen  = false;
-    state.aiSessions   = null;
-    state.aiSelectedSession   = null;
-    state.aiSessionMessages   = null;
-    state.aiSearchQuery = '';
+    state.aiConvOpen        = true;
+    state.aiSessions        = null;
+    state.aiSelectedSession = null;
+    state.aiSessionMessages = null;
+    state.aiSearchQuery     = '';
     render();
     fetchAISessionsFull();
-    if (!state.aiFunnelEvents) fetchAIFunnelEvents();
-    if (!state.aiStatsData)    fetchAIStats();
+  });
+
+  // AI modal — vai alla pagina AI Coach (statistiche e funnel)
+  document.getElementById('ai-conv-goto-page')?.addEventListener('click', () => {
+    state.aiConvOpen = false;
+    state.page = 'ai-coach';
+    if (!state.aiStatsData    && !state.aiStatsLoading)        fetchAIStats();
+    if (!state.aiFunnelEvents && !state.aiFunnelEventsLoading) fetchAIFunnelEvents();
+    if (!state.aiSessions     && !state.aiSessionsLoading)     fetchAISessionsFull();
+    if (!state.sprints.length && !state.sprintsLoading)        fetchSprints();
+    render();
   });
 
   // mini card session rows
@@ -5467,39 +5584,18 @@ function attachEvents() {
     document.getElementById('ai-conv-search')?.focus();
   });
 
-  // AI stats — toggle
-  document.getElementById('ai-stats-toggle')?.addEventListener('click', () => {
-    state.aiStatsOpen = !state.aiStatsOpen;
-    state.aiFunnelOpen = false;
-    if (state.aiStatsOpen && !state.aiStatsData) fetchAIStats();
-    else render();
-  });
-
-  // AI funnel — toggle
-  document.getElementById('ai-funnel-toggle')?.addEventListener('click', () => {
-    state.aiFunnelOpen = !state.aiFunnelOpen;
-    state.aiStatsOpen = false;
-    if (state.aiFunnelOpen) {
-      if (!state.aiFunnelEvents) fetchAIFunnelEvents();
-      if (!state.aiStatsData)    fetchAIStats();
-      if (state.aiFunnelEvents && state.aiStatsData) render();
-    } else render();
-  });
-
-  // AI stats — date inputs
+  // AI stats — date inputs (pagina AI Coach)
   document.getElementById('ai-stats-from')?.addEventListener('change', e => { state.aiStatsFrom = e.target.value; });
   document.getElementById('ai-stats-to')?.addEventListener('change',   e => { state.aiStatsTo   = e.target.value; });
 
-  // AI stats — apply button (ricalcola anche il funnel AI se è la vista attiva)
+  // AI stats — apply: ricalcola KPI e funnel insieme (sulla pagina sono sempre entrambi visibili)
   document.getElementById('ai-stats-apply')?.addEventListener('click', () => {
     state.aiStatsData = null;
     state.aiStatsUsers = null;
     state.aiStatsUsersOpen = false;
+    state.aiFunnelEvents = null;
     fetchAIStats();
-    if (state.aiFunnelOpen) {
-      state.aiFunnelEvents = null;
-      fetchAIFunnelEvents();
-    }
+    fetchAIFunnelEvents();
   });
 
   // AI stats — utenti unici card click
