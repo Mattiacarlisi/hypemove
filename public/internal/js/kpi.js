@@ -3265,7 +3265,14 @@ function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
 function premiumStepPath(steps) {
   if (!steps || !steps.length) return '<span style="color:var(--muted);font-size:11px">nessuno step</span>';
   const first = steps[0].viewed || 0;
-  return `<div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap">` +
+  // se il primo step ha idx > 0, il paywall apre direttamente su quella schermata
+  // (salta le precedenti — es. cambio obiettivo che apre sui piani): non è un drop-off.
+  const direct = steps[0].idx > 0
+    ? `<div style="font-size:10px;color:#60a5fa;margin-top:5px">↪ apre diretto su "${esc(steps[0].step)}" (salta le schermate precedenti)</div>`
+    : (steps.length === 1
+        ? `<div style="font-size:10px;color:var(--muted);margin-top:5px">una sola schermata tracciata</div>`
+        : '');
+  const row = `<div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap">` +
     steps.map((s, i) => {
       const prev    = i > 0 ? steps[i - 1].viewed : null;
       const drop    = (prev && prev > 0) ? Math.round((1 - s.viewed / prev) * 100) : null;
@@ -3284,6 +3291,7 @@ function premiumStepPath(steps) {
           <div style="font-size:8px;color:#5a5a7a;line-height:1">${pctOf1}%</div>
         </div>`;
     }).join('') + `</div>`;
+  return `<div>${row}${direct}</div>`;
 }
 
 // Tabella di confronto fra le creatività paywall: mostrato → ai piani → plan select → tentativo.
