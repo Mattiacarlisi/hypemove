@@ -125,6 +125,19 @@ const DEF_AI_FUN_CFG = [
   { stepIdx: 6, vsIdx: null }, // Workout abbandonato (da chat) — conteggio a sé
 ];
 
+// Nomi esatti degli eventi che servono al funnel AI + alla card feedback. Vengono passati a
+// kpi_events_by_name (conteggio per nome SENZA il LIMIT 50 di kpi_events_summary, che tagliava
+// fuori gli eventi rari come ai_chat_workout_proposed/quota/feedback facendoli leggere 0).
+// I nomi 'ai_chat_workout_start/complete/abandon' non esistono come evento grezzo (sono derivati
+// da kpi_ai_chat_workout_events con prefisso): inclusi qui restano innocui (0 righe), li riempie
+// l'altra RPC. Aggiungere uno step al catalogo lo include automaticamente.
+const AI_FUNNEL_EVENT_NAMES = [
+  ...AI_FUNNEL_ALL_STEPS.map(s => s.event),
+  'workout_feedback_notification_scheduled',
+  'workout_feedback_shown',
+  'workout_feedback_replied',
+];
+
 function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
 }
@@ -828,7 +841,7 @@ async function fetchAIFunnelEvents() {
   try {
     const range = { p_from: state.aiStatsFrom || null, p_to: state.aiStatsTo || null };
     const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
-      sb.rpc('kpi_events_summary', range),
+      sb.rpc('kpi_events_by_name', { ...range, p_events: AI_FUNNEL_EVENT_NAMES }),
       sb.rpc('kpi_ai_chat_workout_events', range),
     ]);
     if (error) throw error;
@@ -919,7 +932,7 @@ async function fetchSprintAiFunnel() {
     const results  = await Promise.all(selected.map(async s => {
       const range = { p_from: s.inizio, p_to: s.fine };
       const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
-        sb.rpc('kpi_events_summary', range),
+        sb.rpc('kpi_events_by_name', { ...range, p_events: AI_FUNNEL_EVENT_NAMES }),
         sb.rpc('kpi_ai_chat_workout_events', range),
       ]);
       if (error) throw error;
