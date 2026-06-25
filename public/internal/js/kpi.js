@@ -313,6 +313,12 @@ let state = {
   ueFromDateTime: TODAY + 'T00:00',
   ueData: null,
   ueLoading: false,
+  likedExercises: null,
+  likedLoading: false,
+  likedFilterOpen: false,
+  likedShowAll: false,
+  likedGender: 'all',     // 'all' | 'male' | 'female'
+  likedAge: 'all',        // 'all' | '18-24' | '25-34' | '35-44' | '45-54' | '55-'
 };
 
 let refreshTimer = null, countdownTimer = null, secondsLeft = 300;
@@ -324,22 +330,50 @@ async function fetchData() {
   state.error = null;
   updateHeaderActions();
   try {
-    const [ov, ch, ec] = await Promise.all([
+    const [ov, ch, ec, lk] = await Promise.all([
       sb.rpc('kpi_overview'),
       sb.rpc('kpi_chart_daily', { days_back: 14 }),
       sb.rpc('kpi_extra_charts'),
+      sb.rpc('kpi_liked_exercises', likedExercisesParams()),
     ]);
     if (ov.error) throw ov.error;
     if (ch.error) throw ch.error;
     state.data  = ov.data;
     state.chart = ch.data || [];
     if (!ec.error) state.extraCharts = ec.data;
+    if (!lk.error) state.likedExercises = lk.data;
     state.lastUpdated = new Date();
     await Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
   state.loading = false;
   render();
   startCountdown();
+}
+
+// Mappa i filtri della card "Esercizi piu amati" nei parametri della RPC.
+const LIKED_AGE_RANGES = {
+  '18-24': [18, 24], '25-34': [25, 34], '35-44': [35, 44],
+  '45-54': [45, 54], '55-': [55, null],
+};
+function likedExercisesParams() {
+  const [min, max] = LIKED_AGE_RANGES[state.likedAge] || [null, null];
+  return {
+    p_gender:  state.likedGender === 'all' ? null : state.likedGender,
+    p_age_min: min,
+    p_age_max: max,
+  };
+}
+
+async function fetchLikedExercises() {
+  state.likedLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_liked_exercises', likedExercisesParams());
+    if (error) throw error;
+    state.likedExercises = data;
+  } catch (e) { /* lascia i dati precedenti, log silenzioso */ console.error('liked exercises', e); }
+  state.likedLoading = false;
+  render();
 }
 
 async function fetchRetention() {
@@ -1491,7 +1525,94 @@ function pageOverview() {
     <div class="grid-2" style="margin-top:16px">
       ${feedbackCard()}
       ${aiChatsCard()}
+    </div>
+
+    <div style="margin-top:16px">
+      ${likedExercisesCard()}
     </div>`;
+}
+
+// Card "Esercizi piu amati": classifica degli esercizi a cui gli utenti hanno
+// messo like (cuoricino nella schermata Card dell'app). Dati da kpi_liked_exercises
+// (SECURITY DEFINER, aggrega su tutti gli utenti esclusi i blocked, filtri genere/eta).
+const LIKED_TOP_N = 5;
+const LIKED_AGE_LABELS = {
+  'all': 'Tutte le età', '18-24': '18-24', '25-34': '25-34',
+  '35-44': '35-44', '45-54': '45-54', '55-': '55+',
+};
+function likedExercisesCard() {
+  const d = state.likedExercises;
+
+  const filterActive = state.likedGender !== 'all' || state.likedAge !== 'all';
+  const genderTxt = state.likedGender === 'male' ? 'Uomini' : state.likedGender === 'female' ? 'Donne' : 'Tutti';
+  const filterSummary = [
+    state.likedGender !== 'all' ? genderTxt : null,
+    state.likedAge !== 'all' ? LIKED_AGE_LABELS[state.likedAge] + ' anni' : null,
+  ].filter(Boolean).join(' · ') || 'Tutti gli utenti';
+
+  const head = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="card-title" style="margin-bottom:0">❤️ Esercizi più amati</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${d ? `<div style="font-size:11px;color:var(--muted)">${d.total_likes} like · ${d.distinct_users} utenti</div>` : ''}
+        <button id="liked-filter-toggle" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;${filterActive ? 'color:var(--purple)' : ''}">
+          ${state.likedFilterOpen ? '× Chiudi' : '⚙ Filtri' + (filterActive ? ' •' : '')}
+        </button>
+      </div>
+    </div>`;
+
+  const genderBtns = [['all','Tutti'],['female','Donne'],['male','Uomini']].map(([v,l]) =>
+    `<button class="filter-btn ${state.likedGender===v?'active':''}" data-liked-gender="${v}">${l}</button>`).join('');
+  const ageBtns = Object.entries(LIKED_AGE_LABELS).map(([v,l]) =>
+    `<button class="filter-btn ${state.likedAge===v?'active':''}" data-liked-age="${v}">${l}</button>`).join('');
+  const filterPanel = state.likedFilterOpen ? `
+    <div style="background:#12121e;border:1px solid #1e1e30;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Genere</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${genderBtns}</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Fascia d'età</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${ageBtns}</div>
+    </div>` : '';
+
+  const sub = `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">like totali per esercizio · ${esc(filterSummary)} · esclusi account interni</div>`;
+
+  let body;
+  if (!d) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0" class="pulse">Caricamento…</div>`;
+  } else if (!(d.exercises || []).length) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">${filterActive
+      ? 'Nessun like per questo filtro. Prova ad allargare genere o fascia d\'età.'
+      : 'Nessun like ancora. Compaiono qui quando gli utenti mettono il cuoricino a un esercizio.'}</div>`;
+  } else {
+    const full     = d.exercises;
+    const showAll  = state.likedShowAll;
+    const list     = showAll ? full : full.slice(0, LIKED_TOP_N);
+    const maxLikes = Math.max(...full.map(e => e.likes), 1);
+    const rows = list.map((e, i) => {
+      const pct  = Math.round((e.likes / maxLikes) * 100);
+      const date = new Date(e.last_like).toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
+      return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #1e1e30">
+        <div style="font-size:11px;color:var(--muted);width:18px;text-align:right;flex:none">${i + 1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:5px">
+            <span style="font-size:12px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.name || e.slug || ('#' + e.id))}</span>
+            <span style="font-size:10px;color:var(--muted);flex:none">${e.users} utent${e.users === 1 ? 'e' : 'i'} · ${date}</span>
+          </div>
+          <div style="height:6px;background:#1e1e30;border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#e0556e,#e07a8a);border-radius:4px"></div>
+          </div>
+        </div>
+        <div style="font-size:13px;font-weight:700;color:var(--purple);width:34px;text-align:right;flex:none">${e.likes}</div>
+      </div>`;
+    }).join('');
+    const moreBtn = full.length > LIKED_TOP_N
+      ? `<button id="liked-show-all" class="btn btn-ghost" style="font-size:11px;padding:6px 12px;margin-top:12px;width:100%">
+          ${showAll ? '↑ Mostra solo i primi ' + LIKED_TOP_N : '↓ Vedi tutti (' + full.length + ')'}
+        </button>`
+      : '';
+    body = rows + moreBtn;
+  }
+
+  const dim = state.likedLoading ? 'opacity:.5;pointer-events:none' : '';
+  return `<div class="card"><div style="${dim}">${head}${filterPanel}${sub}${body}</div></div>`;
 }
 
 const GOAL_LABEL = {
@@ -4978,6 +5099,24 @@ function attachEvents() {
     el.addEventListener('click', () => { state.weeklyRange = +el.dataset.weeklyRange; render(); }));
   document.querySelectorAll('[data-streak-range]').forEach(el =>
     el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
+
+  // Esercizi piu amati: filtri genere/eta + toggle "vedi tutti"
+  document.getElementById('liked-filter-toggle')?.addEventListener('click', () => {
+    state.likedFilterOpen = !state.likedFilterOpen; render();
+  });
+  document.getElementById('liked-show-all')?.addEventListener('click', () => {
+    state.likedShowAll = !state.likedShowAll; render();
+  });
+  document.querySelectorAll('[data-liked-gender]').forEach(el =>
+    el.addEventListener('click', () => {
+      if (state.likedGender === el.dataset.likedGender) return;
+      state.likedGender = el.dataset.likedGender; state.likedShowAll = false; fetchLikedExercises();
+    }));
+  document.querySelectorAll('[data-liked-age]').forEach(el =>
+    el.addEventListener('click', () => {
+      if (state.likedAge === el.dataset.likedAge) return;
+      state.likedAge = el.dataset.likedAge; state.likedShowAll = false; fetchLikedExercises();
+    }));
 
   // Obiettivi (overview)
   document.querySelectorAll('[data-goals-view]').forEach(el =>
