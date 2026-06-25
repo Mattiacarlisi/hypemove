@@ -113,16 +113,19 @@ const AI_FUNNEL_ALL_STEPS = [
   { key: 'chat_closed',  label: 'Chat chiusa',       color: '#64748b', event: 'ai_chat_close' },
 ];
 
-// stepIdx = indice nel catalogo AI_FUNNEL_ALL_STEPS qui sopra. Hub AI (1) escluso di default,
-// aggiungibile con "+ Aggiungi step" se serve guardarlo come tappa a parte. "Workout proposto" (5)
-// è escluso dal default finché l'evento non è in produzione (resterebbe a 0); "abbandonato" (6) è
-// mostrato come conteggio a sé (vsIdx null) perché può scattare più volte per lo stesso workout.
+// stepIdx = indice nel catalogo AI_FUNNEL_ALL_STEPS qui sopra; vsIdx = posizione (in questo array)
+// dello step con cui calcolare la % di conversione. Flusso fissato: chat → messaggio → proposto →
+// avviato → abbandonato → completato → quota → hub. Nota: "abbandonato" può scattare più volte per
+// lo stesso workout (salvataggio parziale, zero esercizi, app in background).
 const DEF_AI_FUN_CFG = [
-  { stepIdx: 0, vsIdx: null }, // Chat aperta
-  { stepIdx: 2, vsIdx: 0 },    // Messaggio inviato vs Chat aperta
-  { stepIdx: 3, vsIdx: 1 },    // Workout avviato (da chat) vs Messaggio inviato
-  { stepIdx: 4, vsIdx: 2 },    // Workout completato (da chat) vs Workout avviato (da chat)
-  { stepIdx: 6, vsIdx: null }, // Workout abbandonato (da chat) — conteggio a sé
+  { stepIdx: 0, vsIdx: null }, // 0 Chat aperta
+  { stepIdx: 2, vsIdx: 0 },    // 1 Messaggio inviato vs Chat aperta
+  { stepIdx: 5, vsIdx: 1 },    // 2 Workout proposto vs Messaggio inviato
+  { stepIdx: 3, vsIdx: 2 },    // 3 Workout avviato vs Workout proposto
+  { stepIdx: 6, vsIdx: 2 },    // 4 Workout abbandonato vs Workout proposto
+  { stepIdx: 4, vsIdx: 4 },    // 5 Workout completato vs Workout abbandonato
+  { stepIdx: 7, vsIdx: 5 },    // 6 Quota AI esaurita vs Workout completato
+  { stepIdx: 1, vsIdx: 6 },    // 7 Hub AI aperto vs Quota AI esaurita
 ];
 
 // Nomi esatti degli eventi che servono al funnel AI + alla card feedback. Vengono passati a
@@ -2365,9 +2368,7 @@ function pageAICoach() {
     funnelInner = `
       ${aiFunnelEditPanel()}
       ${aiFunnelViz(eventsMap)}
-      <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.5">
-        "Workout proposto/avviato/completato/abbandonato (da chat)" tracciano solo i workout legati alla card proposta nella chat AI (<span style="font-family:var(--mono)">ai_chat_workout_proposed</span>, e <span style="font-family:var(--mono)">metadata.source = ai_chat</span> su start/complete/abandon) — disponibili da quando il tracciamento è stato rilasciato lato app, quindi su periodi precedenti restano a 0. <strong>Workout proposto</strong> è il nuovo evento testa-funnel: resta a 0 finché non è in produzione. L'abbandono può scattare più volte per lo stesso workout (salvataggio parziale, zero esercizi, app in background), quindi è mostrato come conteggio a sé.
-      </div>`;
+      ${sprintAiFunnelSection()}`;
     engagementCard = `<div class="card" style="margin-bottom:16px">
       <div class="card-title" style="margin-bottom:14px">Engagement chat</div>
       <div style="display:flex;flex-wrap:wrap;gap:10px">
@@ -2385,10 +2386,7 @@ function pageAICoach() {
     ${funnelInner}
   </div>`;
 
-  // 5. confronto sprint (già pronto)
-  const sprintCard = sprintAiFunnelSection();
-
-  // 6. tool
+  // tool
   const toolsCard = d ? `<div class="card" style="margin-bottom:16px">
     <div class="card-title" style="margin-bottom:14px">Tool più usati dall'AI</div>
     <div style="max-width:520px">${aiToolsBlock(d)}</div>
@@ -2407,7 +2405,7 @@ function pageAICoach() {
     </div>
   </div>`;
 
-  return `${filterBar}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${sprintCard}${toolsCard}${convCard}`;
+  return `${filterBar}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${toolsCard}${convCard}`;
 }
 
 // ── AI COACH — CONFRONTO SPRINT ─────────────────────────────────────────
