@@ -42,6 +42,9 @@
 .filter-btn:hover { border-color: #4a4a6a; color: var(--fg); }
 .filter-btn.active { background: #1e1e40; border-color: #a78bfa; color: #a78bfa; }
 
+/* step box cliccabile nel percorso creatività paywall */
+.premium-step-box:hover { border-color: #a78bfa !important; background: #18182b !important; }
+
 /* bar chart: resa con flex inline in JS */
 
 /* ── REFRESH BTN SPINNER ── */

@@ -34,7 +34,8 @@ const SUPABASE_URL = 'https://fiwskdxntgcredypplub.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpd3NrZHhudGdjcmVkeXBwbHViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMzIxNzAsImV4cCI6MjA2NDYwODE3MH0.W5b8A2zfm0Oeo746SXcANdeRhd2HsAMk5ND9Uc-q7Uo';
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const FIN_SELECT = 'id,mese,data_esatta,descrizione,tipo,categoria,importo,chi,note';
+const FIN_SELECT = 'id,mese,data_esatta,descrizione,tipo,categoria,importo,chi,note,rule_id';
+const RIC_SELECT = 'id,descrizione,tipo,categoria,importo,chi,note,giorno,mese_inizio,prossimo_mese,stato';
 
 // DB row (snake_case) <-> oggetto in memoria (camelCase, come prima)
 function rowToItem(r) {
@@ -48,6 +49,7 @@ function rowToItem(r) {
     importo: Number(r.importo),
     chi: r.chi,
     note: r.note || "",
+    ruleId: r.rule_id || null,        // != null => generato da una ricorrente
   };
 }
 function itemToRow(it) {
@@ -60,18 +62,99 @@ function itemToRow(it) {
     importo: it.importo,
     chi: it.chi,
     note: it.note || "",
+    rule_id: it.ruleId ?? null,
   };
+}
+
+// Regola ricorrente DB <-> memoria
+function ruleRowToObj(r) {
+  return {
+    id: r.id,
+    descrizione: r.descrizione,
+    tipo: r.tipo,
+    categoria: r.categoria,
+    importo: Number(r.importo),         // magnitudine positiva
+    chi: r.chi,
+    note: r.note || "",
+    giorno: r.giorno,
+    meseInizio: r.mese_inizio,
+    prossimoMese: r.prossimo_mese,
+    stato: r.stato,
+  };
+}
+
+// ── HELPER MESI ──────────────────────────────────────────────────────────────
+function currentMeseStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+function addMese(mese, n) {
+  let [y, m] = mese.split("-").map(Number);
+  const idx = (y * 12 + (m - 1)) + n;
+  y = Math.floor(idx / 12);
+  m = (idx % 12) + 1;
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+function meseGiornoDate(mese, giorno) {
+  const [y, m] = mese.split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();           // ultimo giorno del mese
+  const g = Math.min(Math.max(parseInt(giorno) || 1, 1), last);
+  return `${mese}-${String(g).padStart(2, "0")}`;
 }
 
 // Carica tutti i movimenti + le categorie dal DB nello state in memoria.
 async function dbLoad() {
-  const [movRes, catRes] = await Promise.all([
+  const [movRes, catRes, ricRes] = await Promise.all([
     sb.from('finance_movimenti').select(FIN_SELECT).order('mese', { ascending: true }).order('id', { ascending: true }),
     sb.from('finance_settings').select('value').eq('key', 'categorie').maybeSingle(),
+    sb.from('finance_ricorrenti').select(RIC_SELECT).order('created_at', { ascending: true }),
   ]);
   if (movRes.error) throw movRes.error;
+  if (ricRes.error) throw ricRes.error;
   state.movimenti = (movRes.data || []).map(rowToItem);
+  state.ricorrenti = (ricRes.data || []).map(ruleRowToObj);
   if (catRes.data && catRes.data.value) state.categorie = catRes.data.value;
+}
+
+// Genera i movimenti mancanti per ogni ricorrente attiva, da prossimoMese fino al mese corrente.
+// Viene chiamata all'avvio e dopo create/riattiva. Avanza prossimoMese sul DB cosi' non duplica.
+async function generaRicorrenti() {
+  const cur = currentMeseStr();
+  const nuovi = [];
+  const ruleUpdates = [];
+  for (const r of state.ricorrenti) {
+    if (r.stato !== "attiva") continue;
+    let m = r.prossimoMese;
+    let advanced = false;
+    while (m <= cur) {
+      nuovi.push({
+        mese: m,
+        data_esatta: meseGiornoDate(m, r.giorno),
+        descrizione: r.descrizione,
+        tipo: r.tipo,
+        categoria: r.categoria,
+        importo: r.importo * (r.tipo === "Spesa" ? -1 : 1),
+        chi: r.chi,
+        note: r.note || "",
+        rule_id: r.id,
+      });
+      m = addMese(m, 1);
+      advanced = true;
+    }
+    if (advanced) ruleUpdates.push({ id: r.id, prossimoMese: m });
+  }
+  if (!nuovi.length) return;
+
+  const { data, error } = await sb.from('finance_movimenti').insert(nuovi).select(FIN_SELECT);
+  if (error) throw error;
+  state.movimenti = [...state.movimenti, ...data.map(rowToItem)];
+
+  for (const u of ruleUpdates) {
+    const { error: e2 } = await sb.from('finance_ricorrenti').update({ prossimo_mese: u.prossimoMese }).eq('id', u.id);
+    if (e2) throw e2;
+    const rr = state.ricorrenti.find(x => x.id === u.id);
+    if (rr) rr.prossimoMese = u.prossimoMese;
+  }
 }
 
 async function dbSaveCategorie() {
@@ -81,12 +164,26 @@ async function dbSaveCategorie() {
 }
 
 // Sostituisce completamente il contenuto del DB (usato da import e reset).
-// Svuota finance_movimenti e reinserisce, poi salva le categorie.
-async function dbReplaceAll(movimenti, categorie) {
-  const del = await sb.from('finance_movimenti').delete().gte('id', 0);
-  if (del.error) throw del.error;
+// Svuota finance_movimenti + finance_ricorrenti e reinserisce, poi salva le categorie.
+async function dbReplaceAll(movimenti, categorie, ricorrenti = []) {
+  const delMov = await sb.from('finance_movimenti').delete().gte('id', 0);
+  if (delMov.error) throw delMov.error;
+  const delRic = await sb.from('finance_ricorrenti').delete().gte('id', 0);
+  if (delRic.error) throw delRic.error;
+
+  // Le ricorrenti ottengono nuovi id: i movimenti importati perdono il collegamento (rule_id=null)
+  // ma restano nel registro con importi corretti. Le regole continuano a generare i mesi futuri.
+  if (ricorrenti.length) {
+    const ricRows = ricorrenti.map(r => ({
+      descrizione: r.descrizione, tipo: r.tipo, categoria: r.categoria,
+      importo: r.importo, chi: r.chi, note: r.note || "",
+      giorno: r.giorno || 1, mese_inizio: r.meseInizio, prossimo_mese: r.prossimoMese, stato: r.stato || "attiva",
+    }));
+    const insRic = await sb.from('finance_ricorrenti').insert(ricRows);
+    if (insRic.error) throw insRic.error;
+  }
   if (movimenti.length) {
-    const rows = movimenti.map(itemToRow);
+    const rows = movimenti.map(m => { const r = itemToRow(m); r.rule_id = null; return r; });
     const ins = await sb.from('finance_movimenti').insert(rows);
     if (ins.error) throw ins.error;
   }
@@ -99,6 +196,7 @@ async function dbReplaceAll(movimenti, categorie) {
 let state = {
   page: "dashboard",
   movimenti: [],                       // caricati dal DB all'avvio
+  ricorrenti: [],                      // regole di spesa/entrata ricorrente
   categorie: structuredClone(INITIAL_CATS),
   loading: true,                       // true finche' il primo load dal DB non e' finito
   dbError: null,                       // messaggio se la connessione al DB fallisce
@@ -187,7 +285,7 @@ function fmtEuroPlain(n) {
 
 // ── ACTIONS ───────────────────────────────────────────────────────────────────
 function openAdd() {
-  setState({ modal: "add", form: { mese: "", dataEsatta: "", descrizione: "", tipo: "Spesa", categoria: "", importo: "", chi: "Mattia", note: "" }});
+  setState({ modal: "add", form: { mese: "", dataEsatta: "", descrizione: "", tipo: "Spesa", categoria: "", importo: "", chi: "Mattia", note: "", ricorrente: false, giorno: "" }});
 }
 function openEdit(item) {
   setState({ modal: "edit", editItem: item, form: { ...item, importo: Math.abs(item.importo) }});
@@ -203,6 +301,28 @@ async function saveMovimento() {
     showToast("Compila tutti i campi obbligatori.", "error"); return;
   }
   const importoNum = parseFloat(f.importo) * (f.tipo === "Spesa" ? -1 : 1);
+
+  // Nuova SPESA/ENTRATA RICORRENTE: crea una regola e genera i mesi dall'inizio fino a oggi.
+  if (state.modal === "add" && f.ricorrente) {
+    const giorno = parseInt(f.giorno) || (f.dataEsatta ? parseInt(f.dataEsatta.slice(8, 10)) : 1) || 1;
+    const ruleRow = {
+      descrizione: f.descrizione, tipo: f.tipo, categoria: f.categoria,
+      importo: parseFloat(f.importo), chi: f.chi, note: f.note || "",
+      giorno, mese_inizio: f.mese, prossimo_mese: f.mese, stato: "attiva",
+    };
+    try {
+      const { data, error } = await sb.from('finance_ricorrenti').insert(ruleRow).select(RIC_SELECT).single();
+      if (error) throw error;
+      state.ricorrenti = [...state.ricorrenti, ruleRowToObj(data)];
+      await generaRicorrenti();
+      closeModal();
+      showToast("Ricorrente creata ✓", "success");
+    } catch (e) {
+      console.error(e);
+      showToast("Errore salvataggio ricorrente.", "error");
+    }
+    return;
+  }
 
   try {
     if (state.modal === "add") {
@@ -236,6 +356,45 @@ async function deleteMovimento() {
     console.error(e);
     showToast("Errore eliminazione sul database.", "error");
   }
+}
+
+async function pausaRicorrente(id) {
+  try {
+    const { error } = await sb.from('finance_ricorrenti').update({ stato: 'pausa' }).eq('id', id);
+    if (error) throw error;
+    const r = state.ricorrenti.find(x => x.id === id);
+    if (r) r.stato = 'pausa';
+    render();
+    showToast("Ricorrente messa in pausa.", "success");
+  } catch (e) { console.error(e); showToast("Errore aggiornamento ricorrente.", "error"); }
+}
+
+async function riattivaRicorrente(id) {
+  // Riparte dal mese corrente: i mesi trascorsi in pausa NON vengono recuperati.
+  const cur = currentMeseStr();
+  try {
+    const { error } = await sb.from('finance_ricorrenti').update({ stato: 'attiva', prossimo_mese: cur }).eq('id', id);
+    if (error) throw error;
+    const r = state.ricorrenti.find(x => x.id === id);
+    if (r) { r.stato = 'attiva'; r.prossimoMese = cur; }
+    await generaRicorrenti();
+    render();
+    showToast("Ricorrente riattivata ✓", "success");
+  } catch (e) { console.error(e); showToast("Errore aggiornamento ricorrente.", "error"); }
+}
+
+async function eliminaRicorrente(id) {
+  const r = state.ricorrenti.find(x => x.id === id);
+  if (!confirm(`Eliminare la ricorrente "${r ? r.descrizione : ''}"?\n\nI movimenti già registrati restano nel registro, ma non ne verranno creati di nuovi.`)) return;
+  try {
+    const { error } = await sb.from('finance_ricorrenti').delete().eq('id', id);
+    if (error) throw error;
+    state.ricorrenti = state.ricorrenti.filter(x => x.id !== id);
+    // i movimenti collegati ora hanno rule_id NULL (ON DELETE SET NULL): aggiorno in memoria
+    state.movimenti = state.movimenti.map(m => m.ruleId === id ? { ...m, ruleId: null } : m);
+    render();
+    showToast("Ricorrente eliminata.", "success");
+  } catch (e) { console.error(e); showToast("Errore eliminazione ricorrente.", "error"); }
 }
 
 function showToast(msg, type="success") {
@@ -311,6 +470,7 @@ function renderSidebar() {
       <div class="nav-section">Overview</div>
       ${nav("dashboard","📊","Dashboard")}
       ${nav("registro","📋","Registro")}
+      ${nav("ricorrenti","🔁","Ricorrenti")}
       <div class="nav-section" style="margin-top:10px">Analisi</div>
       ${nav("riepilogo","📅","Riepilogo")}
       ${nav("categorie","🏷️","Categorie")}
@@ -326,6 +486,7 @@ function renderSidebar() {
 function renderPage() {
   if (state.page === "dashboard")    return renderDashboard();
   if (state.page === "registro")     return renderRegistro();
+  if (state.page === "ricorrenti")   return renderRicorrenti();
   if (state.page === "riepilogo")    return renderRiepilogo();
   if (state.page === "categorie")    return renderCategorieView();
   if (state.page === "impostazioni") return renderImpostazioni();
@@ -758,7 +919,7 @@ function renderRegistro() {
           <tr>
             <td style="color:var(--muted);font-size:12px">${meseLabelIT(item.mese)}</td>
             <td style="font-size:12px;color:var(--muted);white-space:nowrap">${item.dataEsatta}</td>
-            <td style="font-weight:500">${item.descrizione}</td>
+            <td style="font-weight:500">${item.descrizione}${item.ruleId ? ` <span title="Generato da una spesa ricorrente" style="font-size:11px;opacity:.7">🔁</span>` : ""}</td>
             <td><span class="tipo-badge ${item.tipo.toLowerCase()}">${item.tipo}</span></td>
             <td style="color:var(--muted);font-size:12px">${item.categoria}</td>
             <td class="importo ${item.importo<0?"neg":"pos"}" style="text-align:right">${fmtEuro(item.importo)}</td>
@@ -773,6 +934,59 @@ function renderRegistro() {
       </table>
     </div>
   </div>`;
+}
+
+// ── RICORRENTI ────────────────────────────────────────────────────────────────
+function renderRicorrenti() {
+  const ric = state.ricorrenti.slice().sort((a, b) =>
+    (a.stato === b.stato ? 0 : a.stato === "attiva" ? -1 : 1) ||
+    a.descrizione.localeCompare(b.descrizione));
+
+  const card = (r) => {
+    const attiva = r.stato === "attiva";
+    const segno = r.tipo === "Spesa" ? "−" : "+";
+    const nGenerati = state.movimenti.filter(m => m.ruleId === r.id).length;
+    return `
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;${attiva ? "" : "opacity:.7"}">
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:600">${r.descrizione}</span>
+          <span class="badge ${attiva ? "green" : "amber"}">${attiva ? "Attiva" : "In pausa"}</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted)">
+          <span style="font-family:var(--mono);color:${r.tipo === "Spesa" ? "var(--red)" : "var(--mattia)"}">${segno} ${fmtEuroPlain(r.importo)}/mese</span>
+          · ${r.categoria || "—"} · ${r.chi || "—"} · ogni mese il giorno ${r.giorno}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">
+          Da ${meseLabelIT(r.meseInizio)} · ${nGenerati} movimenti generati${attiva ? ` · prossimo: ${meseLabelIT(r.prossimoMese)}` : ""}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        ${attiva
+          ? `<button class="btn btn-ghost" style="font-size:12px;padding:6px 12px" data-ric-pausa="${r.id}">⏸ Pausa</button>`
+          : `<button class="btn btn-primary" style="font-size:12px;padding:6px 12px" data-ric-riattiva="${r.id}">▶ Riattiva</button>`}
+        <button class="btn btn-red" style="font-size:12px;padding:6px 12px" data-ric-elimina="${r.id}">🗑 Elimina</button>
+      </div>
+    </div>`;
+  };
+
+  return `
+  <div class="page-header">
+    <div class="page-title">Spese ricorrenti</div>
+    <div class="page-sub">Regole che generano un movimento ogni mese in automatico all'apertura. Metti in pausa quando sospendi, riattiva quando riprende.</div>
+  </div>
+
+  ${ric.length === 0 ? `
+    <div class="card">
+      <div class="empty">
+        <div class="empty-icon">🔁</div>
+        <div class="empty-text">Nessuna spesa ricorrente</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px;max-width:420px;margin-left:auto;margin-right:auto">
+          Per crearne una vai su <b>Registro → ＋ Aggiungi</b> e attiva l'opzione <b>“🔁 Ripeti ogni mese”</b>.
+          L'app creerà i movimenti dal mese di inizio fino a oggi e continuerà ogni mese.
+        </div>
+      </div>
+    </div>` : ric.map(card).join("")}`;
 }
 
 // ── RIEPILOGO ─────────────────────────────────────────────────────────────────
@@ -950,21 +1164,34 @@ function renderModal() {
   const isEdit = state.modal === "edit";
   const f = state.form;
   const cats = f.tipo === "Entrata" ? state.categorie.entrata : state.categorie.spesa;
+  const isRecur = !isEdit && f.ricorrente;
 
   return `
   <div class="modal-overlay" id="overlay">
     <div class="modal">
-      <div class="modal-title">${isEdit?"Modifica movimento":"Nuovo movimento"}</div>
-      <div class="modal-sub">${isEdit?"Aggiorna i dati del movimento selezionato.":"Compila tutti i campi per aggiungere un movimento."}</div>
+      <div class="modal-title">${isEdit?"Modifica movimento":(isRecur?"Nuova ricorrente":"Nuovo movimento")}</div>
+      <div class="modal-sub">${isEdit?"Aggiorna i dati del movimento selezionato.":(isRecur?"Verrà creato un movimento ogni mese, dal mese di inizio fino a oggi.":"Compila tutti i campi per aggiungere un movimento.")}</div>
       <div class="form-grid">
+        ${!isEdit ? `
+        <div class="form-field full">
+          <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="f_ricorrente" ${f.ricorrente?"checked":""} style="width:16px;height:16px;accent-color:var(--purple,#a78bfa);cursor:pointer">
+            🔁 Ripeti ogni mese (spesa/entrata ricorrente)
+          </label>
+        </div>` : ""}
         <div class="form-field">
-          <label class="form-label">Mese *</label>
+          <label class="form-label">${isRecur?"Mese di inizio *":"Mese *"}</label>
           <input class="form-input" type="month" id="f_mese" value="${f.mese||""}">
         </div>
+        ${isRecur ? `
+        <div class="form-field">
+          <label class="form-label">Giorno del mese</label>
+          <input class="form-input" type="number" min="1" max="28" id="f_giorno" placeholder="es. 22" value="${f.giorno || (f.dataEsatta ? f.dataEsatta.slice(8,10) : '')}">
+        </div>` : `
         <div class="form-field">
           <label class="form-label">Data esatta</label>
           <input class="form-input" type="date" id="f_data" value="${f.dataEsatta||""}">
-        </div>
+        </div>`}
         <div class="form-field full">
           <label class="form-label">Descrizione *</label>
           <input class="form-input" type="text" id="f_desc" placeholder="Es. Abbonamento Figma" value="${f.descrizione||""}">
@@ -1002,7 +1229,7 @@ function renderModal() {
       </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="modalClose">Annulla</button>
-        <button class="btn btn-primary" id="modalSave">${isEdit?"Salva modifiche":"Aggiungi"}</button>
+        <button class="btn btn-primary" id="modalSave">${isEdit?"Salva modifiche":(isRecur?"Crea ricorrente":"Aggiungi")}</button>
       </div>
     </div>
   </div>`;
@@ -1045,11 +1272,20 @@ function attachEvents() {
   const mcd = document.getElementById("modalConfirmDelete");
   if (mcd) mcd.addEventListener("click", deleteMovimento);
 
-  const fields = { f_mese:"mese", f_data:"dataEsatta", f_desc:"descrizione", f_tipo:"tipo", f_cat:"categoria", f_importo:"importo", f_chi:"chi", f_note:"note" };
+  const fields = { f_mese:"mese", f_data:"dataEsatta", f_desc:"descrizione", f_tipo:"tipo", f_cat:"categoria", f_importo:"importo", f_chi:"chi", f_note:"note", f_giorno:"giorno" };
   Object.entries(fields).forEach(([id,key]) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener(el.tagName==="SELECT"?"change":"input", () => updateForm(key, el.value));
   });
+  const fRic = document.getElementById("f_ricorrente");
+  if (fRic) fRic.addEventListener("change", () => { state.form = { ...state.form, ricorrente: fRic.checked }; render(); });
+
+  document.querySelectorAll("[data-ric-pausa]").forEach(el =>
+    el.addEventListener("click", () => pausaRicorrente(parseInt(el.dataset.ricPausa))));
+  document.querySelectorAll("[data-ric-riattiva]").forEach(el =>
+    el.addEventListener("click", () => riattivaRicorrente(parseInt(el.dataset.ricRiattiva))));
+  document.querySelectorAll("[data-ric-elimina]").forEach(el =>
+    el.addEventListener("click", () => eliminaRicorrente(parseInt(el.dataset.ricElimina))));
 
   document.querySelectorAll("[data-delcat-spesa]").forEach(el =>
     el.addEventListener("click", () => delCat("Spesa", el.dataset.delcatSpesa)));
@@ -1078,7 +1314,7 @@ function attachEvents() {
 
   const btnExport = document.getElementById("btnExport");
   if (btnExport) btnExport.addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify({movimenti:state.movimenti,categorie:state.categorie}, null, 2)], {type:"application/json"});
+    const blob = new Blob([JSON.stringify({movimenti:state.movimenti,categorie:state.categorie,ricorrenti:state.ricorrenti}, null, 2)], {type:"application/json"});
     const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="hypemove-finance.json"; a.click();
   });
   const btnImport = document.getElementById("btnImport");
@@ -1092,7 +1328,7 @@ function attachEvents() {
       if (!d.movimenti || !d.categorie) { showToast("File non valido.", "error"); return; }
       if (!confirm("Importare questo file SOVRASCRIVERÀ tutti i dati sul database. Continuare?")) return;
       try {
-        await dbReplaceAll(d.movimenti, d.categorie);
+        await dbReplaceAll(d.movimenti, d.categorie, d.ricorrenti || []);
         await dbLoad();
         render();
         showToast("Importato con successo ✓", "success");
@@ -1117,6 +1353,7 @@ async function boot() {
   setState({ loading: true, dbError: null });
   try {
     await dbLoad();
+    try { await generaRicorrenti(); } catch (e) { console.error("genera ricorrenti", e); }
     setState({ loading: false });
   } catch (e) {
     console.error(e);

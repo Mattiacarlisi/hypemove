@@ -248,13 +248,22 @@ let state = {
   premiumFunnelRangeData: null, premiumFunnelRangeLoading: false, premiumFunnelRangeError: null,
   sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
   sprintPremiumFunnelLoading: false, sprintPremiumFunnelError: null,
+  // dettaglio utenti che hanno raggiunto uno step di una creatività (modal su click step box)
+  stepUsersModal: null, // { variant, step, label } quando aperto
+  stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
   goalsData: null, goalsLoading: false, goalsError: null,
   goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all', goalsView: 'current',
   goalChangesData: null, goalChangesLoading: false, goalChangesError: null,
   workoutDepthData: null, workoutDepthLoading: false, workoutDepthError: null,
   workoutDepthFrom: BETA_START, workoutDepthTo: TODAY,
-  workoutDepthGoal: 'all', workoutDepthLevel: 'all',
+  workoutDepthGoal: 'all', workoutDepthLevel: 'all', workoutDepthGender: 'all',
   workoutDepthSteps: new Set([1, 2, 3, 5, 10]),
+  // vista unificata "Continuità nei workout": 'depth' (quanti workout) | 'weekly' (ritorno settimanale)
+  continuityView: 'depth', continuityWeeks: 6,
+  continuityRet: null, continuityRetLoading: false, continuityRetError: null,
+  // confronto: 'none' (segmento singolo) | 'goal' (confronta obiettivi) | 'level' (confronta livelli)
+  continuityCompare: 'none',
+  continuityCmpData: null, continuityCmpLoading: false, continuityCmpError: null,
   behaviorData: null, behaviorLoading: false,
   behaviorFrom: BETA_START, behaviorTo: TODAY, behaviorTypeFilter: 'all',
   userActivityOpen: false, userActivityUser: null, userActivityData: null, userActivityLoading: false,
@@ -445,20 +454,91 @@ function fetchActiveGoalsView() {
   if (state.goalsView === 'changes') fetchGoalChanges(); else fetchGoals();
 }
 
+// Carica la vista attiva della card "Continuità nei workout".
+function fetchContinuityView() {
+  if (state.continuityCompare !== 'none') return fetchContinuityCompare();
+  if (state.continuityView === 'weekly') fetchContinuityRetention(); else fetchWorkoutDepth();
+}
+
+// Segmenti confrontati: gli obiettivi reali, oppure i 3 livelli.
+function continuityCompareSegments() {
+  if (state.continuityCompare === 'level') {
+    return [1, 2, 3].map(lv => ({ key: String(lv), label: LEVEL_LABEL[String(lv)], goal: null, level: lv }));
+  }
+  return Object.keys(GOAL_LABEL).map(g => ({ key: g, label: GOAL_LABEL[g], goal: g, level: null }));
+}
+
+// Carica i dati per ogni segmento (vista attiva), rispettando gli altri filtri.
+async function fetchContinuityCompare() {
+  state.continuityCmpLoading = true; state.continuityCmpError = null;
+  render();
+  const segs   = continuityCompareSegments();
+  const gender = state.workoutDepthGender === 'all' ? null : state.workoutDepthGender;
+  // Quando confronto gli obiettivi tengo il filtro livello; quando confronto i livelli tengo il filtro obiettivo.
+  const fixedGoal  = state.continuityCompare === 'goal'  ? null : (state.workoutDepthGoal  === 'all' ? null : state.workoutDepthGoal);
+  const fixedLevel = state.continuityCompare === 'level' ? null : (state.workoutDepthLevel === 'all' ? null : +state.workoutDepthLevel);
+  try {
+    const results = await Promise.all(segs.map(async seg => {
+      const goal  = seg.goal  ?? fixedGoal;
+      const level = seg.level ?? fixedLevel;
+      if (state.continuityView === 'weekly') {
+        const { data, error } = await sb.rpc('kpi_retention', {
+          inizio: state.workoutDepthFrom, fine: state.workoutDepthTo,
+          min_workouts: 1, max_weeks: state.continuityWeeks, min_w0: 1,
+          p_goal: goal, p_level: level, p_gender: gender,
+        });
+        if (error) throw error;
+        return { seg, data: data || [] };
+      }
+      const { data, error } = await sb.rpc('kpi_workout_depth', {
+        inizio: state.workoutDepthFrom, fine: state.workoutDepthTo,
+        p_goal: goal, p_level: level, p_gender: gender,
+      });
+      if (error) throw error;
+      return { seg, data };
+    }));
+    state.continuityCmpData = { view: state.continuityView, rows: results };
+  } catch (e) { state.continuityCmpError = e.message || 'Errore caricamento confronto'; }
+  state.continuityCmpLoading = false;
+  render();
+}
+
 async function fetchWorkoutDepth() {
   state.workoutDepthLoading = true; state.workoutDepthError = null;
   render();
   try {
     const { data, error } = await sb.rpc('kpi_workout_depth', {
-      inizio:  state.workoutDepthFrom,
-      fine:    state.workoutDepthTo,
-      p_goal:  state.workoutDepthGoal  === 'all' ? null : state.workoutDepthGoal,
-      p_level: state.workoutDepthLevel === 'all' ? null : +state.workoutDepthLevel,
+      inizio:   state.workoutDepthFrom,
+      fine:     state.workoutDepthTo,
+      p_goal:   state.workoutDepthGoal   === 'all' ? null : state.workoutDepthGoal,
+      p_level:  state.workoutDepthLevel  === 'all' ? null : +state.workoutDepthLevel,
+      p_gender: state.workoutDepthGender === 'all' ? null : state.workoutDepthGender,
     });
     if (error) throw error;
     state.workoutDepthData = data;
   } catch (e) { state.workoutDepthError = e.message || 'Errore caricamento dati'; }
   state.workoutDepthLoading = false;
+  render();
+}
+
+async function fetchContinuityRetention() {
+  state.continuityRetLoading = true; state.continuityRetError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_retention', {
+      inizio:       state.workoutDepthFrom,
+      fine:         state.workoutDepthTo,
+      min_workouts: 1,
+      max_weeks:    state.continuityWeeks,
+      min_w0:       1,
+      p_goal:   state.workoutDepthGoal   === 'all' ? null : state.workoutDepthGoal,
+      p_level:  state.workoutDepthLevel  === 'all' ? null : +state.workoutDepthLevel,
+      p_gender: state.workoutDepthGender === 'all' ? null : state.workoutDepthGender,
+    });
+    if (error) throw error;
+    state.continuityRet = data || [];
+  } catch (e) { state.continuityRetError = e.message || 'Errore caricamento ritorno settimanale'; }
+  state.continuityRetLoading = false;
   render();
 }
 
@@ -475,6 +555,27 @@ async function fetchPremium() {
     state.premiumData = data;
   } catch (e) { state.premiumError = e.message || 'Errore caricamento dati premium'; }
   state.premiumLoading = false;
+  render();
+}
+
+// Apre il modal e carica la lista degli utenti che hanno raggiunto uno step di una creatività.
+// Usa lo stesso periodo/genere della pagina Premium (state.premiumFrom/To/Gender).
+async function fetchStepUsers(variant, step, label) {
+  state.stepUsersModal = { variant, step, label };
+  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_premium_step_users', {
+      p_variant: variant,
+      p_step:    step,
+      inizio:    state.premiumFrom,
+      fine:      state.premiumTo,
+      p_gender:  state.premiumGender,
+    });
+    if (error) throw error;
+    state.stepUsersData = data;
+  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti step'; }
+  state.stepUsersLoading = false;
   render();
 }
 
@@ -1066,7 +1167,8 @@ function layout() {
     ${deleteConfirmModal()}
     ${feedbackModal()}
     ${aiConversationsModal()}
-    ${userActivityModal()}`;
+    ${userActivityModal()}
+    ${stepUsersModal()}`;
 }
 
 function deleteConfirmModal() {
@@ -1324,93 +1426,237 @@ function goalsCard() {
 }
 
 const WORKOUT_DEPTH_STEPS = [1, 2, 3, 4, 5, 7, 10];
+const CONTINUITY_WEEKS_OPTS = [4, 6, 8, 12];
 
+// Card unificata "Continuità nei workout".
+// Due viste che condividono gli stessi filtri (obiettivo · livello · genere · date):
+//  - 'depth'  → quanti workout fa chi si iscrive (1°, 2°, 3°… funnel di profondità)
+//  - 'weekly' → quanti tornano nelle settimane successive al primo workout (retention)
 function workoutDepthCard() {
-  const d = state.workoutDepthData;
-
   const goalOpts = ['all', ...Object.keys(GOAL_LABEL)].map(g =>
     `<option value="${g}" ${state.workoutDepthGoal === g ? 'selected' : ''}>${g === 'all' ? 'Tutti gli obiettivi' : GOAL_LABEL[g]}</option>`
   ).join('');
   const levelOpts = ['all', '1', '2', '3'].map(l =>
     `<option value="${l}" ${state.workoutDepthLevel === l ? 'selected' : ''}>${l === 'all' ? 'Tutti i livelli' : LEVEL_LABEL[l]}</option>`
   ).join('');
-  const toggles = WORKOUT_DEPTH_STEPS.map(n => {
-    const on = state.workoutDepthSteps.has(n);
-    return `<button class="filter-btn ${on ? 'active' : ''}" data-depth-step="${n}">${n}°</button>`;
-  }).join('');
+  const genderOpts = [
+    { v: 'all', l: 'Tutti' }, { v: 'f', l: 'Donna' }, { v: 'm', l: 'Uomo' },
+  ].map(g => `<button class="filter-btn ${state.workoutDepthGender === g.v ? 'active' : ''}" data-depth-gender="${g.v}">${g.l}</button>`).join('');
 
-  let body;
-  if (state.workoutDepthLoading) {
-    body = `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
-  } else if (state.workoutDepthError) {
-    body = `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.workoutDepthError)}</div>`;
-  } else if (!d) {
-    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato</div>`;
-  } else {
-    const pctOfAttempted = n => d.attempted > 0 ? (n / d.attempted * 100).toFixed(1) : '0.0';
-    const kpiRow = `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px">
-        <div class="card" style="padding:14px 16px">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Hanno provato un workout</div>
-          <div style="font-size:26px;font-weight:800;color:#a78bfa;line-height:1">${d.attempted}</div>
-        </div>
-        <div class="card" style="padding:14px 16px">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Completato il primo</div>
-          <div style="font-size:26px;font-weight:800;color:#4ade80;line-height:1">${d.completed_first}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">${pctOfAttempted(d.completed_first)}% di chi ha provato</div>
-        </div>
-        <div class="card" style="padding:14px 16px">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Abbandonato prima di finire</div>
-          <div style="font-size:26px;font-weight:800;color:#f87171;line-height:1">${d.abandoned_first}</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">${pctOfAttempted(d.abandoned_first)}% di chi ha provato</div>
-        </div>
-      </div>`;
+  const isWeekly = state.continuityView === 'weekly';
+  const viewBtns = [
+    { v: 'depth',  l: 'Quanti workout' },
+    { v: 'weekly', l: 'Ritorno settimanale' },
+  ].map(v => `<button class="filter-btn ${state.continuityView === v.v ? 'active' : ''}" data-continuity-view="${v.v}">${v.l}</button>`).join('');
 
-    const steps    = WORKOUT_DEPTH_STEPS.filter(n => state.workoutDepthSteps.has(n));
-    const depthMap = {};
-    (d.depth || []).forEach(x => { depthMap[x.n] = x.users; });
-    const base = d.completed_first || 0;
-    const funnelHtml = steps.map((n, i) => {
-      const users     = depthMap[n] ?? 0;
-      const pct       = base > 0 ? (users / base * 100).toFixed(1) : '0.0';
-      const prevUsers = i > 0 ? (depthMap[steps[i - 1]] ?? 0) : null;
-      const drop      = (i > 0 && prevUsers > 0) ? ((1 - users / prevUsers) * 100).toFixed(0) : null;
-      const label     = `${n}° workout`;
-      return `
-        ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
-          ${drop !== null ? `<div style="font-size:10px;color:#ef4444;font-weight:700;white-space:nowrap">-${drop}%</div>` : ''}
-          <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
-        </div>` : ''}
-        <div style="flex:1;background:#111120;border:1px solid #a78bfa33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
-          <div style="font-size:24px;font-weight:800;color:#a78bfa;line-height:1">${users}</div>
-          <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${label}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:3px">${pct}% del 1°</div>
-        </div>`;
-    }).join('');
+  const compareBtns = [
+    { v: 'none',  l: 'Singolo' },
+    { v: 'goal',  l: 'Confronta obiettivi' },
+    { v: 'level', l: 'Confronta livelli' },
+  ].map(c => `<button class="filter-btn ${state.continuityCompare === c.v ? 'active' : ''}" data-continuity-compare="${c.v}">${c.l}</button>`).join('');
 
-    body = `
-      ${kpiRow}
-      <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap">${toggles}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">% calcolata su chi ha completato il 1° workout</div>
-      <div style="display:flex;align-items:center;overflow-x:auto">${funnelHtml || '<div style="color:var(--muted);font-size:12px">Seleziona almeno uno step</div>'}</div>`;
-  }
+  // In confronto, la dimensione confrontata è scomposta: il relativo filtro non si applica.
+  const goalDisabled  = state.continuityCompare === 'goal';
+  const levelDisabled = state.continuityCompare === 'level';
+
+  const noteText = isWeekly
+    ? 'cohort per data del 1° workout · quanti tornano nelle settimane successive · account interni esclusi'
+    : 'cohort per data di iscrizione · quanti workout completano dopo l\'iscrizione · account interni esclusi';
+
+  const body = state.continuityCompare !== 'none'
+    ? continuityCompareBody()
+    : (isWeekly ? continuityWeeklyBody() : continuityDepthBody());
 
   return `
     <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px">
         <div class="card-title" style="margin-bottom:0">Continuità nei workout</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <select id="depth-goal" class="form-input" style="padding:5px 8px;font-size:11px">${goalOpts}</select>
-          <select id="depth-level" class="form-input" style="padding:5px 8px;font-size:11px">${levelOpts}</select>
-          <input type="date" id="depth-from" class="form-input" value="${state.workoutDepthFrom}" style="width:130px;padding:5px 8px;font-size:11px">
-          <span style="color:var(--muted);font-size:12px">→</span>
-          <input type="date" id="depth-to" class="form-input" value="${state.workoutDepthTo}" style="width:130px;padding:5px 8px;font-size:11px">
-          <button id="depth-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Calcola</button>
-        </div>
+        <div style="display:flex;gap:4px">${viewBtns}</div>
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">cohort per data di iscrizione · account interni esclusi</div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="display:flex;gap:4px">${genderOpts}</div>
+        <select id="depth-goal" class="form-input" ${goalDisabled ? 'disabled' : ''} style="padding:5px 8px;font-size:11px;${goalDisabled ? 'opacity:.4' : ''}">${goalOpts}</select>
+        <select id="depth-level" class="form-input" ${levelDisabled ? 'disabled' : ''} style="padding:5px 8px;font-size:11px;${levelDisabled ? 'opacity:.4' : ''}">${levelOpts}</select>
+        <input type="date" id="depth-from" class="form-input" value="${state.workoutDepthFrom}" style="width:130px;padding:5px 8px;font-size:11px">
+        <span style="color:var(--muted);font-size:12px">→</span>
+        <input type="date" id="depth-to" class="form-input" value="${state.workoutDepthTo}" style="width:130px;padding:5px 8px;font-size:11px">
+        <button id="depth-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Calcola</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--muted)">Confronto:</span>${compareBtns}
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">${noteText}</div>
       ${body}
     </div>`;
+}
+
+// Confronto: stessa vista (profondità o settimanale) ripetuta per ogni obiettivo o livello.
+function continuityCompareBody() {
+  if (state.continuityCmpLoading) return `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento confronto...</div>`;
+  if (state.continuityCmpError)   return `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.continuityCmpError)}</div>`;
+  const cmp = state.continuityCmpData;
+  if (!cmp || !cmp.rows?.length) return `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato</div>`;
+
+  return cmp.view === 'weekly' ? continuityCompareWeekly(cmp.rows) : continuityCompareDepth(cmp.rows);
+}
+
+// Tabella confronto — profondità: righe = segmenti, colonne = stadi del funnel (% sugli iscritti).
+function continuityCompareDepth(rows) {
+  const steps = WORKOUT_DEPTH_STEPS.filter(n => state.workoutDepthSteps.has(n));
+  const pctCell = (n, denom) => {
+    if (!denom) return `<span style="color:var(--muted)">—</span>`;
+    const p = n / denom * 100;
+    const col = p >= 40 ? '#4ade80' : p >= 20 ? '#fbbf24' : p > 0 ? '#f87171' : 'var(--muted)';
+    return `${n} <span style="color:${col};font-weight:600">${p.toFixed(0)}%</span>`;
+  };
+  const head = `
+    <tr>
+      <th style="text-align:left">${state.continuityCompare === 'level' ? 'Livello' : 'Obiettivo'}</th>
+      <th>Iscritti</th>
+      <th>Provato</th>
+      ${steps.map(n => `<th>${n}°</th>`).join('')}
+    </tr>`;
+  const body = rows.map(({ seg, data }) => {
+    const cohort = data?.cohort_total || 0;
+    const dm = {}; (data?.depth || []).forEach(x => { dm[x.n] = x.users; });
+    return `
+      <tr>
+        <td style="text-align:left;color:var(--fg);font-weight:500">${esc(seg.label)}</td>
+        <td class="metric-val" style="font-size:13px">${cohort}</td>
+        <td style="font-size:12px">${pctCell(data?.attempted || 0, cohort)}</td>
+        ${steps.map(n => `<td style="font-size:12px">${pctCell(dm[n] ?? 0, cohort)}</td>`).join('')}
+      </tr>`;
+  }).join('');
+  const toggles = WORKOUT_DEPTH_STEPS.map(n =>
+    `<button class="filter-btn ${state.workoutDepthSteps.has(n) ? 'active' : ''}" data-depth-step="${n}">${n}°</button>`
+  ).join('');
+  return `
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:11px;color:var(--muted);margin-right:2px">Mostra step:</span>${toggles}
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">% calcolata sugli iscritti di ogni segmento</div>
+    <table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// Tabella confronto — settimanale: righe = segmenti, colonne = settimane (% di ritorno).
+function continuityCompareWeekly(rows) {
+  const maxW = state.continuityWeeks;
+  const weeks = Array.from({ length: maxW + 1 }, (_, i) => i);
+  const pctCell = (p, hasBase) => {
+    if (!hasBase) return `<span style="color:var(--muted)">—</span>`;
+    const col = p >= 40 ? '#4ade80' : p >= 20 ? '#fbbf24' : p > 0 ? '#f87171' : 'var(--muted)';
+    return `<span style="color:${col};font-weight:600">${p}%</span>`;
+  };
+  const head = `
+    <tr>
+      <th style="text-align:left">${state.continuityCompare === 'level' ? 'Livello' : 'Obiettivo'}</th>
+      <th>Base</th>
+      ${weeks.map(w => `<th>W${w}</th>`).join('')}
+    </tr>`;
+  const body = rows.map(({ seg, data }) => {
+    const byWeek = {}; (data || []).forEach(r => { byWeek[r.week] = r; });
+    const base = data?.[0]?.eligible ?? 0;
+    return `
+      <tr>
+        <td style="text-align:left;color:var(--fg);font-weight:500">${esc(seg.label)}</td>
+        <td class="metric-val" style="font-size:13px">${base}</td>
+        ${weeks.map(w => `<td style="font-size:12px">${pctCell(Number(byWeek[w]?.retention_pct ?? 0), base > 0)}</td>`).join('')}
+      </tr>`;
+  }).join('');
+  return `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Base = utenti col 1° workout nel periodo · % = quanti tornano in quella settimana</div>
+    <table class="data-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// Vista 1 — profondità: di chi si iscrive, quanti completano 1, 2, 3… workout.
+function continuityDepthBody() {
+  if (state.workoutDepthLoading) return `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
+  if (state.workoutDepthError)   return `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.workoutDepthError)}</div>`;
+  const d = state.workoutDepthData;
+  if (!d) return `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun dato</div>`;
+
+  const cohort = d.cohort_total || 0;
+  const depthMap = {};
+  (d.depth || []).forEach(x => { depthMap[x.n] = x.users; });
+
+  // Stadi del funnel: Iscritti → Hanno provato → 1° → step selezionati.
+  const steps = WORKOUT_DEPTH_STEPS.filter(n => state.workoutDepthSteps.has(n));
+  const stages = [
+    { label: 'Iscritti',                key: 'cohort',    n: cohort },
+    { label: 'Hanno provato un workout', key: 'attempted', n: d.attempted || 0 },
+    ...steps.map(n => ({ label: `${n}° workout completato`, key: `d${n}`, n: depthMap[n] ?? 0 })),
+  ];
+  const denom = cohort || stages[0].n || 1;
+
+  const toggles = WORKOUT_DEPTH_STEPS.map(n =>
+    `<button class="filter-btn ${state.workoutDepthSteps.has(n) ? 'active' : ''}" data-depth-step="${n}">${n}°</button>`
+  ).join('');
+
+  const rows = stages.map((s, i) => {
+    const pct  = denom > 0 ? (s.n / denom * 100) : 0;
+    const w    = Math.max(pct, s.n > 0 ? 1.5 : 0);
+    const prev = i > 0 ? stages[i - 1].n : null;
+    const drop = (i > 0 && prev > 0) ? Math.round((1 - s.n / prev) * 100) : null;
+    const first = i === 0;
+    return `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;margin-bottom:4px;gap:8px">
+          <span style="color:var(--fg);font-weight:${first ? '600' : '500'}">${esc(s.label)}</span>
+          <span style="color:var(--muted);font-size:11px;white-space:nowrap">${s.n} · ${pct.toFixed(1)}%${drop !== null ? ` <span style="color:#f87171">↓ ${drop}%</span>` : ''}</span>
+        </div>
+        <div style="height:10px;background:#1a1a2a;border-radius:5px;overflow:hidden">
+          <div style="height:100%;width:${w}%;background:${first ? '#6b7280' : '#a78bfa'};border-radius:5px"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+      <span style="font-size:11px;color:var(--muted);margin-right:2px">Mostra step:</span>${toggles}
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:12px">percentuali calcolate sugli iscritti del periodo · ↓ = calo rispetto allo stadio precedente</div>
+    ${rows}`;
+}
+
+// Vista 2 — ritorno settimanale: di chi fa il 1° workout, quanti tornano nelle settimane dopo.
+function continuityWeeklyBody() {
+  const weekBtns = CONTINUITY_WEEKS_OPTS.map(w =>
+    `<button class="filter-btn ${state.continuityWeeks === w ? 'active' : ''}" data-continuity-weeks="${w}">${w} sett.</button>`
+  ).join('');
+  const header = `<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:11px;color:var(--muted);margin-right:2px">Settimane:</span>${weekBtns}</div>`;
+
+  if (state.continuityRetLoading) return header + `<div style="padding:32px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento...</div>`;
+  if (state.continuityRetError)   return header + `<div style="color:var(--red);font-size:12px;padding:12px 0">${esc(state.continuityRetError)}</div>`;
+  const rows = state.continuityRet;
+  if (!rows || !rows.length) return header + `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun utente con un primo workout nel periodo selezionato</div>`;
+
+  const base = rows[0]?.eligible ?? 0;
+  if (!base) return header + `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun utente con un primo workout nel periodo selezionato</div>`;
+
+  const bars = rows.map((r, i) => {
+    const pct  = Number(r.retention_pct);
+    const w    = Math.max(pct, r.retained > 0 ? 1.5 : 0);
+    const prev = i > 0 ? Number(rows[i - 1].retention_pct) : null;
+    const drop = (i > 0 && prev > 0) ? Math.round(prev - pct) : null;
+    const color = pct >= 40 ? '#4ade80' : pct >= 20 ? '#fbbf24' : pct > 0 ? '#f87171' : '#2a2a3a';
+    const label = r.week === 0 ? 'Settimana 0 (primo workout)' : `Settimana ${r.week}`;
+    return `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;margin-bottom:4px;gap:8px">
+          <span style="color:var(--fg);font-weight:${r.week === 0 ? '600' : '500'}">${label}</span>
+          <span style="color:var(--muted);font-size:11px;white-space:nowrap">${r.retained} di ${base} · ${pct}%${drop !== null ? ` <span style="color:#f87171">↓ ${drop} pt</span>` : ''}</span>
+        </div>
+        <div style="height:10px;background:#1a1a2a;border-radius:5px;overflow:hidden">
+          <div style="height:100%;width:${w}%;background:${color};border-radius:5px"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    ${header}
+    <div style="font-size:11px;color:var(--muted);margin-bottom:12px"><strong style="color:var(--fg)">${base} utenti</strong> hanno fatto il 1° workout nel periodo · % = quanti hanno fatto almeno 1 workout in quella settimana</div>
+    ${bars}`;
 }
 
 function workoutSourceCard() {
@@ -1615,12 +1861,13 @@ function likedExercisesCard() {
   return `<div class="card"><div style="${dim}">${head}${filterPanel}${sub}${body}</div></div>`;
 }
 
+// Solo gli obiettivi realmente offerti/scelti nel prodotto (vedi user_profile.primary_goal).
+// Ordine per diffusione. Se in futuro si aggiunge un programma, va inserito qui.
 const GOAL_LABEL = {
-  lose_fat: 'Perdere grasso', tone_lower: 'Tonificare gambe/glutei',
-  tone_upper: 'Tonificare parte superiore', tone_full: 'Tonificare tutto il corpo',
-  build_muscle: 'Costruire muscoli',
-  mobility: 'Migliorare mobilità', endurance: 'Resistenza',
-  general_fitness: 'Fitness generale', posture: 'Postura',
+  lose_fat: 'Perdere grasso',
+  tone_full: 'Tonificare tutto il corpo',
+  tone_lower: 'Tonificare gambe/glutei',
+  mobility: 'Migliorare mobilità',
 };
 const GENDER_LABEL = { m: 'Uomo', f: 'Donna', male: 'Uomo', female: 'Donna', other: 'Altro' };
 const LEVEL_LABEL = { '1': 'Base', '2': 'Intermedio', '3': 'Avanzato' };
@@ -3518,7 +3765,8 @@ function premiumStepPath(steps) {
         </div>` : '';
       const isLast = i === steps.length - 1;
       return arrow + `
-        <div style="text-align:center;min-width:48px;background:#111120;border:1px solid ${isLast ? '#1f5a3699' : '#1f1f33'};border-radius:6px;padding:5px 6px">
+        <div class="premium-step-box" data-variant="${esc(s.variant)}" data-step="${esc(s.step)}" title="Vedi gli utenti che si sono fermati qui"
+          style="text-align:center;min-width:48px;background:#111120;border:1px solid ${isLast ? '#1f5a3699' : '#1f1f33'};border-radius:6px;padding:5px 6px;cursor:pointer;transition:border-color .12s,background .12s">
           <div style="font-weight:700;color:var(--fg);font-size:13px;line-height:1">${s.viewed}</div>
           <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(s.step)}</div>
           <div style="font-size:8px;color:#5a5a7a;line-height:1">${pctOf1}%</div>
@@ -3598,6 +3846,75 @@ function premiumCreativesCard(d) {
           </thead>
           <tbody>${body}</tbody>
         </table>
+      </div>
+    </div>`;
+}
+
+// Modal con la lista degli utenti che hanno raggiunto uno step di una creatività paywall.
+// Per ogni utente: giorno, ora, nome, email. Aperto cliccando su un box del percorso step.
+function stepUsersModal() {
+  if (!state.stepUsersModal) return '';
+  const { variant, step, label } = state.stepUsersModal;
+  const d = state.stepUsersData;
+  const users = (d && d.users) || [];
+
+  const body = state.stepUsersLoading
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px" class="pulse">Caricamento utenti…</div>`
+    : state.stepUsersError
+    ? `<div style="padding:24px;color:var(--red);font-size:13px">⚠️ ${esc(state.stepUsersError)}</div>`
+    : !users.length
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Nessun utente per questo step nel periodo selezionato.</div>`
+    : `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:#0f0f1a">
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Giorno</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Ora</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Nome</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Email</th>
+            <th style="text-align:center;padding:8px 14px;border-bottom:1px solid #1e1e30">Viste</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(u => `
+            <tr style="border-bottom:1px solid #15151f">
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(u.giorno || '—')}</td>
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(u.ora || '—')}</td>
+              <td style="padding:9px 14px;color:var(--fg)">${esc(u.nome || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(u.email)}" style="color:#a78bfa;text-decoration:none">${esc(u.email || '—')}</a></td>
+              <td style="padding:9px 14px;text-align:center;color:${u.views > 1 ? 'var(--fg)' : 'var(--muted)'}">${u.views || 1}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  const count = d ? d.total_users : null;
+
+  return `
+    <div id="step-users-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:640px;height:min(80vh,620px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700;color:var(--fg)">
+              ${esc(label)} <span style="color:var(--muted);font-weight:400">·</span> step <span style="color:#a78bfa">${esc(step)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">
+              utenti che hanno raggiunto questo step${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${state.premiumFrom} → ${state.premiumTo}
+            </div>
+          </div>
+          <button id="step-users-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;min-height:0">
+          ${body}
+        </div>
       </div>
     </div>`;
 }
@@ -5132,6 +5449,26 @@ function attachEvents() {
   });
 
   // Continuità workout (overview)
+  document.querySelectorAll('[data-continuity-view]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.continuityView = el.dataset.continuityView;
+      fetchContinuityView();   // ricarica la vista scelta con i filtri correnti
+    }));
+  document.querySelectorAll('[data-continuity-compare]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.continuityCompare = el.dataset.continuityCompare;
+      fetchContinuityView();
+    }));
+  document.querySelectorAll('[data-depth-gender]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.workoutDepthGender = el.dataset.depthGender;
+      fetchContinuityView();
+    }));
+  document.querySelectorAll('[data-continuity-weeks]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.continuityWeeks = +el.dataset.continuityWeeks;
+      fetchContinuityView();
+    }));
   document.querySelectorAll('[data-depth-step]').forEach(el =>
     el.addEventListener('click', () => {
       const n = +el.dataset.depthStep;
@@ -5151,7 +5488,7 @@ function attachEvents() {
     if (to)    state.workoutDepthTo    = to;
     if (goal)  state.workoutDepthGoal  = goal;
     if (level) state.workoutDepthLevel = level;
-    fetchWorkoutDepth();
+    fetchContinuityView();
   });
 
   // Retention
@@ -5791,6 +6128,20 @@ function attachEvents() {
     state.premiumData = null;
     fetchPremium();
   });
+  // click su un box del percorso step di una creatività → lista utenti che lo hanno raggiunto
+  document.querySelectorAll('.premium-step-box').forEach(el =>
+    el.addEventListener('click', () => {
+      const variant = el.dataset.variant;
+      const step    = el.dataset.step;
+      const label   = premiumCreativeLabel(variant);
+      fetchStepUsers(variant, step, label);
+    }));
+  document.getElementById('step-users-close')?.addEventListener('click', () => {
+    state.stepUsersModal = null; state.stepUsersData = null; render();
+  });
+  document.getElementById('step-users-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.stepUsersModal = null; state.stepUsersData = null; render(); }
+  });
   document.getElementById('premium-funnel-range-apply')?.addEventListener('click', () => {
     const from = document.getElementById('premium-funnel-range-from')?.value;
     const to   = document.getElementById('premium-funnel-range-to')?.value;
@@ -5940,6 +6291,7 @@ function attachEvents() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (state.stepUsersModal)    { state.stepUsersModal = null; state.stepUsersData = null; render(); return; }
     if (state.userActivityOpen)  { state.userActivityOpen = false; render(); return; }
     if (state.aiConvOpen)        { state.aiConvOpen = false; render(); return; }
     if (state.feedbackModalOpen) { state.feedbackModalOpen = false; render(); return; }
