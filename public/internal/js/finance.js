@@ -26,120 +26,82 @@ const INITIAL_CATS = {
   entrata: ["Abbonamenti Utenti","Sponsorizzazioni","Consulenze","Vendita Prodotti","Grant & Finanziamenti","Altro"],
 };
 
-// ── FILE BACKUP ────────────────────────────────────────────────────────────────
-const FILE_BACKUP_SUPPORTED = typeof window !== "undefined" && !!window.showSaveFilePicker;
-let fileHandle = null;
+// ── DATABASE (Supabase) ──────────────────────────────────────────────────────────
+// I dati vivono su tabelle dedicate (finance_movimenti, finance_settings) nello stesso
+// progetto Supabase dell'app, ma completamente isolate: nessuna tabella dell'app viene toccata.
+// Cosi' i dati sono identici e accessibili da qualsiasi dispositivo.
+const SUPABASE_URL = 'https://fiwskdxntgcredypplub.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpd3NrZHhudGdjcmVkeXBwbHViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMzIxNzAsImV4cCI6MjA2NDYwODE3MH0.W5b8A2zfm0Oeo746SXcANdeRhd2HsAMk5ND9Uc-q7Uo';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-async function idbOpen() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open("hm_finance", 1);
-    r.onupgradeneeded = e => e.target.result.createObjectStore("kv");
-    r.onsuccess = e => res(e.target.result);
-    r.onerror = rej;
-  });
+const FIN_SELECT = 'id,mese,data_esatta,descrizione,tipo,categoria,importo,chi,note';
+
+// DB row (snake_case) <-> oggetto in memoria (camelCase, come prima)
+function rowToItem(r) {
+  return {
+    id: r.id,
+    mese: r.mese,
+    dataEsatta: r.data_esatta,
+    descrizione: r.descrizione,
+    tipo: r.tipo,
+    categoria: r.categoria,
+    importo: Number(r.importo),
+    chi: r.chi,
+    note: r.note || "",
+  };
 }
-async function idbGet(key) {
-  const db = await idbOpen();
-  return new Promise(res => {
-    const r = db.transaction("kv").objectStore("kv").get(key);
-    r.onsuccess = e => res(e.target.result ?? null);
-    r.onerror = () => res(null);
-  });
-}
-async function idbSet(key, val) {
-  const db = await idbOpen();
-  return new Promise(res => {
-    const r = db.transaction("kv", "readwrite").objectStore("kv").put(val, key);
-    r.onsuccess = () => res();
-    r.onerror = () => res();
-  });
+function itemToRow(it) {
+  return {
+    mese: it.mese,
+    data_esatta: it.dataEsatta || (it.mese ? it.mese + "-01" : null),
+    descrizione: it.descrizione,
+    tipo: it.tipo,
+    categoria: it.categoria,
+    importo: it.importo,
+    chi: it.chi,
+    note: it.note || "",
+  };
 }
 
-async function initFileBackup() {
-  if (!FILE_BACKUP_SUPPORTED) return;
-  const handle = await idbGet("fileHandle");
-  if (!handle) return;
-  state.fileHandleStored = true;
-  try {
-    const perm = await handle.queryPermission({ mode: "readwrite" });
-    if (perm === "granted") {
-      fileHandle = handle;
-      const file = await fileHandle.getFile();
-      const data = JSON.parse(await file.text());
-      if (data.movimenti && data.categorie) {
-        state.movimenti = data.movimenti;
-        state.categorie = data.categorie;
-        if (data.nextId) state.nextId = data.nextId;
-        localStorage.setItem("hm_movimenti", JSON.stringify(state.movimenti));
-        localStorage.setItem("hm_categorie", JSON.stringify(state.categorie));
-        localStorage.setItem("hm_nextId", String(state.nextId));
-      }
-    }
-  } catch(e) {
-    console.warn("File backup init:", e);
+// Carica tutti i movimenti + le categorie dal DB nello state in memoria.
+async function dbLoad() {
+  const [movRes, catRes] = await Promise.all([
+    sb.from('finance_movimenti').select(FIN_SELECT).order('mese', { ascending: true }).order('id', { ascending: true }),
+    sb.from('finance_settings').select('value').eq('key', 'categorie').maybeSingle(),
+  ]);
+  if (movRes.error) throw movRes.error;
+  state.movimenti = (movRes.data || []).map(rowToItem);
+  if (catRes.data && catRes.data.value) state.categorie = catRes.data.value;
+}
+
+async function dbSaveCategorie() {
+  const { error } = await sb.from('finance_settings')
+    .upsert({ key: 'categorie', value: state.categorie, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+// Sostituisce completamente il contenuto del DB (usato da import e reset).
+// Svuota finance_movimenti e reinserisce, poi salva le categorie.
+async function dbReplaceAll(movimenti, categorie) {
+  const del = await sb.from('finance_movimenti').delete().gte('id', 0);
+  if (del.error) throw del.error;
+  if (movimenti.length) {
+    const rows = movimenti.map(itemToRow);
+    const ins = await sb.from('finance_movimenti').insert(rows);
+    if (ins.error) throw ins.error;
   }
-}
-
-async function setupFileBackup() {
-  if (!FILE_BACKUP_SUPPORTED) return;
-  try {
-    const handle = await window.showSaveFilePicker({
-      suggestedName: "hypemove-finance-backup.json",
-      types: [{ description: "JSON", accept: { "application/json": [".json"] } }],
-    });
-    fileHandle = handle;
-    await idbSet("fileHandle", handle);
-    state.fileHandleStored = true;
-    await writeToFile();
-    showToast("Backup su file attivo ✓", "success");
-    render();
-  } catch(e) {
-    if (e.name !== "AbortError") showToast("Errore configurazione backup.", "error");
-  }
-}
-
-async function reconnectFileBackup() {
-  if (!FILE_BACKUP_SUPPORTED) return;
-  try {
-    const handle = await idbGet("fileHandle");
-    if (!handle) { setupFileBackup(); return; }
-    const perm = await handle.requestPermission({ mode: "readwrite" });
-    if (perm === "granted") {
-      fileHandle = handle;
-      const file = await fileHandle.getFile();
-      const data = JSON.parse(await file.text());
-      if (data.movimenti && data.categorie) {
-        state.movimenti = data.movimenti;
-        state.categorie = data.categorie;
-        if (data.nextId) state.nextId = data.nextId;
-      }
-      showToast("Backup riconnesso ✓", "success");
-      render();
-    }
-  } catch(e) {
-    if (e.name !== "AbortError") showToast("Errore riconnessione.", "error");
-  }
-}
-
-async function writeToFile() {
-  if (!fileHandle) return;
-  try {
-    const w = await fileHandle.createWritable();
-    await w.write(JSON.stringify({ movimenti: state.movimenti, categorie: state.categorie, nextId: state.nextId }, null, 2));
-    await w.close();
-  } catch(e) {
-    console.warn("Errore scrittura file:", e);
-    fileHandle = null;
-    render();
-  }
+  const up = await sb.from('finance_settings')
+    .upsert({ key: 'categorie', value: categorie, updated_at: new Date().toISOString() });
+  if (up.error) throw up.error;
 }
 
 // ── STATE ──────────────────────────────────────────────────────────────────────
 let state = {
   page: "dashboard",
-  movimenti: JSON.parse(localStorage.getItem("hm_movimenti") || "null") || INITIAL_DATA,
-  categorie: JSON.parse(localStorage.getItem("hm_categorie") || "null") || INITIAL_CATS,
-  nextId: parseInt(localStorage.getItem("hm_nextId") || "20"),
+  movimenti: [],                       // caricati dal DB all'avvio
+  categorie: structuredClone(INITIAL_CATS),
+  loading: true,                       // true finche' il primo load dal DB non e' finito
+  dbError: null,                       // messaggio se la connessione al DB fallisce
   // filtri
   periodoFilter: "tutto",
   annoFilter: "tutto",
@@ -148,10 +110,6 @@ let state = {
   tipoFilter: "tutto",
   catFilter: "tutto",
   chiFilter: "tutto",
-  // tasse
-  tasseModo: "percentuale",
-  tassePerc: 26,
-  tasseEuro: 0,
   // modal
   modal: null,
   editItem: null,
@@ -163,20 +121,11 @@ let state = {
   newCatEntrata: "",
   // toast
   toast: null,
-  // file backup
-  fileHandleStored: false,
   // grafico
   chartTipo: "barre",
   chartShowSpese: true,
   chartShowEntrate: true,
 };
-
-function save() {
-  localStorage.setItem("hm_movimenti", JSON.stringify(state.movimenti));
-  localStorage.setItem("hm_categorie", JSON.stringify(state.categorie));
-  localStorage.setItem("hm_nextId", String(state.nextId));
-  writeToFile();
-}
 
 function setState(patch) {
   Object.assign(state, patch);
@@ -211,14 +160,6 @@ function totali(movimenti) {
   const saldoMattia = pagMattia - quota;
   const saldoDanilo = pagDanilo - quota;
   return { spese, entrate, saldo, pagMattia, pagDanilo, quota, saldoMattia, saldoDanilo };
-}
-
-function tasseSuEntrate(entrate) {
-  if (state.tasseModo === "percentuale") {
-    return entrate * (state.tassePerc / 100);
-  } else {
-    return state.tasseEuro;
-  }
 }
 
 function mesiUnici(movimenti) {
@@ -256,32 +197,45 @@ function openDelete(id) {
 }
 function closeModal() { setState({ modal: null, editItem: null, deleteId: null }); }
 
-function saveMovimento() {
+async function saveMovimento() {
   const f = state.form;
   if (!f.descrizione || !f.importo || !f.mese || !f.categoria) {
     showToast("Compila tutti i campi obbligatori.", "error"); return;
   }
   const importoNum = parseFloat(f.importo) * (f.tipo === "Spesa" ? -1 : 1);
 
-  if (state.modal === "add") {
-    const nuovoMese = f.mese;
-    const nuovoItem = { ...f, id: state.nextId++, importo: importoNum, mese: nuovoMese, dataEsatta: f.dataEsatta || nuovoMese+"-01" };
-    state.movimenti = [...state.movimenti, nuovoItem];
-  } else {
-    state.movimenti = state.movimenti.map(x => x.id === state.editItem.id
-      ? { ...f, id: x.id, importo: importoNum }
-      : x);
+  try {
+    if (state.modal === "add") {
+      const row = itemToRow({ ...f, importo: importoNum });
+      const { data, error } = await sb.from('finance_movimenti').insert(row).select(FIN_SELECT).single();
+      if (error) throw error;
+      state.movimenti = [...state.movimenti, rowToItem(data)];
+    } else {
+      const row = itemToRow({ ...f, importo: importoNum });
+      const { data, error } = await sb.from('finance_movimenti').update(row).eq('id', state.editItem.id).select(FIN_SELECT).single();
+      if (error) throw error;
+      state.movimenti = state.movimenti.map(x => x.id === data.id ? rowToItem(data) : x);
+    }
+    closeModal();
+    showToast("Salvato ✓", "success");
+  } catch (e) {
+    console.error(e);
+    showToast("Errore salvataggio sul database.", "error");
   }
-  save();
-  closeModal();
-  showToast("Salvato ✓", "success");
 }
 
-function deleteMovimento() {
-  state.movimenti = state.movimenti.filter(x => x.id !== state.deleteId);
-  save();
-  closeModal();
-  showToast("Eliminato.", "success");
+async function deleteMovimento() {
+  const id = state.deleteId;
+  try {
+    const { error } = await sb.from('finance_movimenti').delete().eq('id', id);
+    if (error) throw error;
+    state.movimenti = state.movimenti.filter(x => x.id !== id);
+    closeModal();
+    showToast("Eliminato.", "success");
+  } catch (e) {
+    console.error(e);
+    showToast("Errore eliminazione sul database.", "error");
+  }
 }
 
 function showToast(msg, type="success") {
@@ -297,20 +251,20 @@ function updateForm(key, val) {
   }
 }
 
-function addCat(tipo, nome) {
+async function addCat(tipo, nome) {
   if (!nome.trim()) return;
   const key = tipo === "Spesa" ? "spesa" : "entrata";
   if (state.categorie[key].includes(nome.trim())) return;
   state.categorie = { ...state.categorie, [key]: [...state.categorie[key], nome.trim()] };
-  save();
   setState({ newCatSpesa: tipo === "Spesa" ? "" : state.newCatSpesa, newCatEntrata: tipo === "Entrata" ? "" : state.newCatEntrata });
+  try { await dbSaveCategorie(); } catch (e) { console.error(e); showToast("Errore salvataggio categorie.", "error"); }
 }
 
-function delCat(tipo, nome) {
+async function delCat(tipo, nome) {
   const key = tipo === "Spesa" ? "spesa" : "entrata";
   state.categorie = { ...state.categorie, [key]: state.categorie[key].filter(c => c !== nome) };
-  save();
   render();
+  try { await dbSaveCategorie(); } catch (e) { console.error(e); showToast("Errore salvataggio categorie.", "error"); }
 }
 
 // ── RENDER ────────────────────────────────────────────────────────────────────
@@ -319,31 +273,23 @@ function render() {
   attachEvents();
 }
 
-function renderFileBackupBanner() {
-  if (!FILE_BACKUP_SUPPORTED) {
-    return `<div style="background:var(--red-bg);border:1px solid var(--red);border-radius:var(--radius);padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--red)">
-      ⚠️ Il tuo browser non supporta il backup automatico su file. Usa Chrome o Edge per questa funzione.
+function renderDbBanner() {
+  if (state.dbError) {
+    return `
+    <div style="background:var(--red-bg);border:1px solid var(--red);border-radius:var(--radius);padding:11px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--red)">⚠️ Impossibile connettersi al database — ${state.dbError}</span>
+      <button class="btn" style="background:var(--red);color:#fff;font-size:12px;padding:6px 14px" id="btnRetryDb">Riprova</button>
     </div>`;
   }
-  if (fileHandle) return "";
-  return `
-  <div style="background:var(--amber-bg);border:1px solid var(--amber);border-radius:var(--radius);padding:11px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-    <span style="font-size:13px;color:var(--amber)">⚠️ Backup su file non attivo — i dati sono solo nel browser</span>
-    <div style="display:flex;gap:8px;flex-shrink:0">
-      ${state.fileHandleStored
-        ? `<button class="btn" style="background:var(--amber);color:#000;font-size:12px;padding:6px 14px" id="btnReconnectFile">Riconnetti file</button>`
-        : `<button class="btn" style="background:var(--amber);color:#000;font-size:12px;padding:6px 14px" id="btnSetupFile">Attiva backup su file</button>`
-      }
-    </div>
-  </div>`;
+  return "";
 }
 
 function html() {
   return `
     ${renderSidebar()}
     <div class="main">
-      ${renderFileBackupBanner()}
-      ${renderPage()}
+      ${renderDbBanner()}
+      ${state.loading ? `<div style="padding:40px;text-align:center;color:var(--muted);font-size:14px">Caricamento dati dal database…</div>` : renderPage()}
     </div>
     ${state.modal ? renderModal() : ""}
     ${state.toast ? `<div class="toast ${state.toast.type}">${state.toast.msg}</div>` : ""}
@@ -595,10 +541,7 @@ function renderDashboard() {
       <div class="stat-sub">Di cui spese/entrate</div>
     </div>
   </div>
-  <div class="grid-2">
-    ${renderSaldoCard(t)}
-    ${renderTasseCard(t)}
-  </div>
+  ${renderSaldoCard(t)}
   ${renderSpeseCatCard(fm)}`;
   }
 
@@ -732,50 +675,6 @@ function renderSaldoCard(t) {
         : `<span class="name-${chi_deve.toLowerCase()}">${chi_deve}</span> deve a <span class="name-${chi_riceve.toLowerCase()}">${chi_riceve}</span>`}
       ${diff > 0 ? `<span class="verdetto-amount">${fmtEuroPlain(diff)}</span>` : ""}
     </div>
-  </div>`;
-}
-
-function renderTasseCard(t) {
-  const entr = Math.abs(t.entrate);
-  const tasse = tasseSuEntrate(entr);
-  const netto = entr - tasse;
-
-  return `
-  <div class="tasse-box">
-    <div class="card-title">🧾 Stima Tasse su Entrate</div>
-    <div class="tasse-toggle">
-      <button class="toggle-btn ${state.tasseModo==="percentuale"?"active":""}" data-tasse-modo="percentuale">% Percentuale</button>
-      <button class="toggle-btn ${state.tasseModo==="fisso"?"active":""}" data-tasse-modo="fisso">€ Importo fisso</button>
-    </div>
-    <div class="tasse-input-row">
-      ${state.tasseModo === "percentuale"
-        ? `<input class="tasse-input" type="number" min="0" max="100" step="0.5" id="tassePerc" value="${state.tassePerc}">
-           <span class="tasse-input-label">% sulle entrate (modifica fino a quando non hai la cifra esatta)</span>`
-        : `<input class="tasse-input" type="number" min="0" step="0.01" id="tasseEuro" value="${state.tasseEuro}">
-           <span class="tasse-input-label">€ importo tasse già definitivo</span>`
-      }
-    </div>
-    <div class="tasse-result">
-      <div class="tasse-item">
-        <div class="tasse-item-label">Entrate lorde</div>
-        <div class="tasse-item-value" style="color:var(--mattia)">${fmtEuroPlain(entr)}</div>
-      </div>
-      <div class="tasse-item">
-        <div class="tasse-item-label">${state.tasseModo==="percentuale"?`Tasse (${state.tassePerc}%)`:"Tasse (fisso)"}</div>
-        <div class="tasse-item-value">${fmtEuroPlain(tasse)}</div>
-      </div>
-      <div class="tasse-item">
-        <div class="tasse-item-label">Entrate nette</div>
-        <div class="tasse-item-value" style="color:var(--mattia)">${fmtEuroPlain(netto)}</div>
-      </div>
-      <div class="tasse-item">
-        <div class="tasse-item-label">Saldo finale (netto)</div>
-        <div class="tasse-item-value" style="color:${(t.saldo+tasse)>=0?"var(--mattia)":"var(--red)"}">
-          ${fmtEuro(t.saldo - (state.tasseModo==="percentuale" ? entr*(state.tassePerc/100) : state.tasseEuro))}
-        </div>
-      </div>
-    </div>
-    ${entr === 0 ? `<div style="font-size:11px;color:var(--muted);margin-top:10px">Nessuna entrata nel periodo selezionato.</div>` : ""}
   </div>`;
 }
 
@@ -1020,10 +919,10 @@ function renderImpostazioni() {
     </div>
     <div class="settings-section">
       <div class="settings-title">Dati</div>
-      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">I dati sono salvati nel browser (localStorage). Per condividerli con Danilo, esporta e invia il file JSON.</p>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">I dati sono salvati su database cloud (Supabase) e sincronizzati su tutti i dispositivi. L'export serve solo come backup locale.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-ghost" id="btnExport">⬇ Esporta JSON</button>
-        <label class="btn btn-ghost" style="cursor:pointer">⬆ Importa JSON<input type="file" accept=".json" id="btnImport" style="display:none"></label>
+        <button class="btn btn-ghost" id="btnExport">⬇ Esporta JSON (backup)</button>
+        <label class="btn btn-ghost" style="cursor:pointer">⬆ Importa JSON (sovrascrive il DB)<input type="file" accept=".json" id="btnImport" style="display:none"></label>
         <button class="btn btn-red" id="btnReset">↺ Reset dati iniziali</button>
       </div>
     </div>
@@ -1130,13 +1029,6 @@ function attachEvents() {
   const catF = document.getElementById("catFilter");
   if (catF) catF.addEventListener("change", () => setState({ catFilter: catF.value }));
 
-  document.querySelectorAll("[data-tasse-modo]").forEach(el =>
-    el.addEventListener("click", () => setState({ tasseModo: el.dataset.tasseModo })));
-  const tp = document.getElementById("tassePerc");
-  if (tp) tp.addEventListener("input", () => setState({ tassePerc: parseFloat(tp.value)||0 }));
-  const te = document.getElementById("tasseEuro");
-  if (te) te.addEventListener("input", () => setState({ tasseEuro: parseFloat(te.value)||0 }));
-
   const btnAdd = document.getElementById("btnAdd");
   if (btnAdd) btnAdd.addEventListener("click", openAdd);
   document.querySelectorAll("[data-edit]").forEach(el =>
@@ -1181,10 +1073,8 @@ function attachEvents() {
       if (s === "entrate") setState({ chartShowEntrate: !state.chartShowEntrate });
     }));
 
-  const btnSetupFile = document.getElementById("btnSetupFile");
-  if (btnSetupFile) btnSetupFile.addEventListener("click", setupFileBackup);
-  const btnReconnectFile = document.getElementById("btnReconnectFile");
-  if (btnReconnectFile) btnReconnectFile.addEventListener("click", reconnectFileBackup);
+  const btnRetryDb = document.getElementById("btnRetryDb");
+  if (btnRetryDb) btnRetryDb.addEventListener("click", boot);
 
   const btnExport = document.getElementById("btnExport");
   if (btnExport) btnExport.addEventListener("click", () => {
@@ -1195,29 +1085,42 @@ function attachEvents() {
   if (btnImport) btnImport.addEventListener("change", e => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
+    reader.onload = async ev => {
+      let d;
+      try { d = JSON.parse(ev.target.result); }
+      catch { showToast("Errore lettura file.", "error"); return; }
+      if (!d.movimenti || !d.categorie) { showToast("File non valido.", "error"); return; }
+      if (!confirm("Importare questo file SOVRASCRIVERÀ tutti i dati sul database. Continuare?")) return;
       try {
-        const d = JSON.parse(ev.target.result);
-        if (d.movimenti && d.categorie) {
-          state.movimenti = d.movimenti; state.categorie = d.categorie;
-          state.nextId = Math.max(...d.movimenti.map(x=>x.id)) + 1;
-          save(); showToast("Importato con successo ✓", "success");
-        } else showToast("File non valido.", "error");
-      } catch { showToast("Errore lettura file.", "error"); }
+        await dbReplaceAll(d.movimenti, d.categorie);
+        await dbLoad();
+        render();
+        showToast("Importato con successo ✓", "success");
+      } catch (err) { console.error(err); showToast("Errore import sul database.", "error"); }
     };
     reader.readAsText(file);
   });
   const btnReset = document.getElementById("btnReset");
-  if (btnReset) btnReset.addEventListener("click", () => {
-    if (confirm("Vuoi davvero resettare ai dati iniziali? Perderai le modifiche.")) {
-      state.movimenti = INITIAL_DATA; state.categorie = INITIAL_CATS; state.nextId = 20;
-      save(); showToast("Reset completato.", "success");
-    }
+  if (btnReset) btnReset.addEventListener("click", async () => {
+    if (!confirm("Vuoi davvero resettare ai dati iniziali sul database? Perderai le modifiche.")) return;
+    try {
+      await dbReplaceAll(INITIAL_DATA, INITIAL_CATS);
+      await dbLoad();
+      render();
+      showToast("Reset completato.", "success");
+    } catch (err) { console.error(err); showToast("Errore reset sul database.", "error"); }
   });
 }
 
 // ── BOOT ──────────────────────────────────────────────────────────────────────
-(async () => {
-  await initFileBackup();
-  render();
-})();
+async function boot() {
+  setState({ loading: true, dbError: null });
+  try {
+    await dbLoad();
+    setState({ loading: false });
+  } catch (e) {
+    console.error(e);
+    setState({ loading: false, dbError: (e && e.message) ? e.message : "errore sconosciuto" });
+  }
+}
+boot();
