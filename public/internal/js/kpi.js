@@ -232,6 +232,7 @@ let state = {
   funnelSaveName: '',
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60,
+  engagementByAge: null, engagementByAgeLoading: false, ageEngRange: 0,
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
   sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '' },
@@ -339,11 +340,12 @@ async function fetchData() {
   state.error = null;
   updateHeaderActions();
   try {
-    const [ov, ch, ec, lk] = await Promise.all([
+    const [ov, ch, ec, lk, ag] = await Promise.all([
       sb.rpc('kpi_overview'),
       sb.rpc('kpi_chart_daily', { days_back: 14 }),
       sb.rpc('kpi_extra_charts'),
       sb.rpc('kpi_liked_exercises', likedExercisesParams()),
+      sb.rpc('kpi_engagement_by_age', ageEngParams()),
     ]);
     if (ov.error) throw ov.error;
     if (ch.error) throw ch.error;
@@ -351,6 +353,7 @@ async function fetchData() {
     state.chart = ch.data || [];
     if (!ec.error) state.extraCharts = ec.data;
     if (!lk.error) state.likedExercises = lk.data;
+    if (!ag.error) state.engagementByAge = ag.data;
     state.lastUpdated = new Date();
     await Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
@@ -382,6 +385,27 @@ async function fetchLikedExercises() {
     state.likedExercises = data;
   } catch (e) { /* lascia i dati precedenti, log silenzioso */ console.error('liked exercises', e); }
   state.likedLoading = false;
+  render();
+}
+
+// Mappa il periodo selezionato (giorni indietro, 0 = tutto) nei parametri della RPC
+// kpi_engagement_by_age. p_to resta null = oggi.
+function ageEngParams() {
+  if (!state.ageEngRange) return { p_from: null, p_to: null };
+  const from = new Date();
+  from.setDate(from.getDate() - state.ageEngRange);
+  return { p_from: from.toISOString().slice(0, 10), p_to: null };
+}
+
+async function fetchEngagementByAge() {
+  state.engagementByAgeLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_engagement_by_age', ageEngParams());
+    if (error) throw error;
+    state.engagementByAge = data;
+  } catch (e) { console.error('engagement by age', e); }
+  state.engagementByAgeLoading = false;
   render();
 }
 
@@ -1745,6 +1769,8 @@ function pageOverview() {
 
     ${workoutDepthCard()}
 
+    ${engagementByAgeCard()}
+
     <div class="grid-2">
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -1776,6 +1802,81 @@ function pageOverview() {
     <div style="margin-top:16px">
       ${likedExercisesCard()}
     </div>`;
+}
+
+// Card "Engagement per fascia d'età": per ogni fascia mostra utenti che hanno fatto
+// almeno 1 workout nel periodo, workout totali, media/mediana/max sessioni per utente
+// attivo. Dati da kpi_engagement_by_age (SECURITY DEFINER, esclude i blocked_users live
+// → si aggiorna da solo se cambio la lista esclusi). Periodo selezionabile.
+const AGE_ENG_RANGES = [30, 90, 180, 0];
+function engagementByAgeCard() {
+  const rows = state.engagementByAge || [];
+  const periodTxt = state.ageEngRange ? 'ultimi ' + state.ageEngRange + ' giorni' : 'tutto il periodo';
+
+  const head = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="card-title" style="margin-bottom:0">🎂 Engagement per fascia d'età</div>
+      <div style="display:flex;gap:4px">
+        ${AGE_ENG_RANGES.map(r => `<button class="filter-btn ${state.ageEngRange===r?'active':''}" data-age-eng-range="${r}">${r ? r+'g' : 'Tutto'}</button>`).join('')}
+      </div>
+    </div>`;
+  const sub = `<div style="font-size:11px;color:var(--muted);margin-bottom:14px">attivi/workout/media sul periodo (${periodTxt}) · <b>non attivi</b> = onboardati che non si sono <b>mai</b> allenati (all-time) · esclusi account interni</div>`;
+
+  let body;
+  if (state.engagementByAgeLoading && !rows.length) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0" class="pulse">Caricamento…</div>`;
+  } else if (!rows.length) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun workout nel periodo selezionato.</div>`;
+  } else {
+    const totAttivi  = rows.reduce((s, r) => s + (r.utenti_attivi || 0), 0);
+    const totInattivi= rows.reduce((s, r) => s + (r.non_attivi || 0), 0);
+    const totWorkout = rows.reduce((s, r) => s + (r.workout_totali || 0), 0);
+    const totMedia   = totAttivi ? (totWorkout / totAttivi) : 0;
+    const totMax     = rows.reduce((s, r) => Math.max(s, r.max_sessioni || 0), 0);
+    const maxAttivi  = Math.max(...rows.map(r => r.utenti_attivi || 0), 1);
+    const fmt        = v => (v === null || v === undefined) ? '—' : v;
+
+    const th = (t, alignRight) => `<th style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding:0 0 8px;text-align:${alignRight ? 'right' : 'left'}">${t}</th>`;
+    const td = (v, alignRight, strong) => `<td style="font-size:13px;padding:9px 0;border-bottom:1px solid #1e1e30;text-align:${alignRight ? 'right' : 'left'};${strong ? 'font-weight:700;color:var(--purple)' : 'color:var(--fg)'}">${v}</td>`;
+
+    const bodyRows = rows.map(r => {
+      const pct = Math.round(((r.utenti_attivi || 0) / maxAttivi) * 100);
+      return `<tr>
+        <td style="padding:9px 0;border-bottom:1px solid #1e1e30">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:13px;font-weight:600;color:var(--fg);width:48px;flex:none">${esc(r.fascia)}</span>
+            <div style="flex:1;height:6px;background:#1e1e30;border-radius:4px;overflow:hidden;min-width:40px">
+              <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#7c5cff,#a98bff);border-radius:4px"></div>
+            </div>
+          </div>
+        </td>
+        ${td(r.utenti_attivi, true)}
+        ${td('<span style="color:var(--muted)">' + (r.non_attivi || 0) + '</span>', true)}
+        ${td(r.workout_totali, true)}
+        ${td(fmt(r.media_per_attivo), true, true)}
+        ${td(fmt(r.mediana_per_attivo), true)}
+        ${td(r.max_sessioni, true)}
+      </tr>`;
+    }).join('');
+
+    const totalRow = `<tr>
+      ${td('<span style="font-weight:700">Totale</span>', false)}
+      ${td('<span style="font-weight:700">' + totAttivi + '</span>', true)}
+      ${td('<span style="font-weight:700;color:var(--muted)">' + totInattivi + '</span>', true)}
+      ${td('<span style="font-weight:700">' + totWorkout + '</span>', true)}
+      ${td('<span style="font-weight:700;color:var(--purple)">' + (Math.round(totMedia * 10) / 10) + '</span>', true)}
+      ${td('—', true)}
+      ${td('<span style="font-weight:700">' + totMax + '</span>', true)}
+    </tr>`;
+
+    body = `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        ${th('Fascia')}${th('Attivi', true)}${th('Non attivi', true)}${th('Workout', true)}${th('Media', true)}${th('Mediana', true)}${th('Max', true)}
+      </tr></thead>
+      <tbody>${bodyRows}${totalRow}</tbody>
+    </table></div>`;
+  }
+
+  return `<div class="card" style="margin-bottom:16px">${head}${sub}${body}</div>`;
 }
 
 // Card "Esercizi piu amati": classifica degli esercizi a cui gli utenti hanno
@@ -5416,6 +5517,12 @@ function attachEvents() {
     el.addEventListener('click', () => { state.weeklyRange = +el.dataset.weeklyRange; render(); }));
   document.querySelectorAll('[data-streak-range]').forEach(el =>
     el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
+  document.querySelectorAll('[data-age-eng-range]').forEach(el =>
+    el.addEventListener('click', () => {
+      const r = +el.dataset.ageEngRange;
+      if (state.ageEngRange === r) return;
+      state.ageEngRange = r; fetchEngagementByAge();
+    }));
 
   // Esercizi piu amati: filtri genere/eta + toggle "vedi tutti"
   document.getElementById('liked-filter-toggle')?.addEventListener('click', () => {
