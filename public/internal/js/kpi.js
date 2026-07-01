@@ -232,7 +232,7 @@ let state = {
   funnelSaveName: '',
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60,
-  engagementByAge: null, engagementByAgeLoading: false, ageEngRange: 0,
+  engagementByAge: null, engagementByAgeLoading: false, ageEngFrom: null, ageEngTo: null,
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
   sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '' },
@@ -388,13 +388,16 @@ async function fetchLikedExercises() {
   render();
 }
 
-// Mappa il periodo selezionato (giorni indietro, 0 = tutto) nei parametri della RPC
-// kpi_engagement_by_age. p_to resta null = oggi.
+// Parametri periodo per la RPC kpi_engagement_by_age. from/to null = tutto (nessun limite).
 function ageEngParams() {
-  if (!state.ageEngRange) return { p_from: null, p_to: null };
+  return { p_from: state.ageEngFrom || null, p_to: state.ageEngTo || null };
+}
+// Date di un preset rapido (giorni indietro; 0 = tutto → null/null).
+function ageEngPresetDates(days) {
+  if (!days) return { from: null, to: null };
   const from = new Date();
-  from.setDate(from.getDate() - state.ageEngRange);
-  return { p_from: from.toISOString().slice(0, 10), p_to: null };
+  from.setDate(from.getDate() - days);
+  return { from: from.toISOString().slice(0, 10), to: TODAY };
 }
 
 async function fetchEngagementByAge() {
@@ -1811,12 +1814,24 @@ function pageOverview() {
 const AGE_ENG_RANGES = [30, 90, 180, 0];
 function engagementByAgeCard() {
   const rows = state.engagementByAge || [];
-  const periodTxt = state.ageEngRange ? 'ultimi ' + state.ageEngRange + ' giorni' : 'tutto il periodo';
+  const from = state.ageEngFrom, to = state.ageEngTo;
+  const periodTxt = (!from && !to) ? 'tutto il periodo'
+    : (from || 'inizio') + ' → ' + (to || 'oggi');
 
-  const head = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+  const presetBtns = AGE_ENG_RANGES.map(r => {
+    const d = ageEngPresetDates(r);
+    const active = (from || null) === d.from && (to || null) === d.to;
+    return `<button class="filter-btn ${active?'active':''}" data-age-eng-range="${r}">${r ? r+'g' : 'Tutto'}</button>`;
+  }).join('');
+
+  const head = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
       <div class="card-title" style="margin-bottom:0">🎂 Engagement per fascia d'età</div>
-      <div style="display:flex;gap:4px">
-        ${AGE_ENG_RANGES.map(r => `<button class="filter-btn ${state.ageEngRange===r?'active':''}" data-age-eng-range="${r}">${r ? r+'g' : 'Tutto'}</button>`).join('')}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;gap:4px">${presetBtns}</div>
+        <input type="date" id="age-eng-from" class="form-input" value="${from || ''}" style="width:130px;padding:5px 8px;font-size:11px">
+        <span style="font-size:11px;color:var(--muted)">→</span>
+        <input type="date" id="age-eng-to" class="form-input" value="${to || ''}" style="width:130px;padding:5px 8px;font-size:11px">
+        <button id="age-eng-apply" class="btn btn-primary" style="padding:5px 12px;font-size:11px">Applica</button>
       </div>
     </div>`;
   const sub = `<div style="font-size:11px;color:var(--muted);margin-bottom:14px">attivi/workout/media sul periodo (${periodTxt}) · <b>non attivi</b> = onboardati che non si sono <b>mai</b> allenati (all-time) · esclusi account interni</div>`;
@@ -5519,10 +5534,15 @@ function attachEvents() {
     el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
   document.querySelectorAll('[data-age-eng-range]').forEach(el =>
     el.addEventListener('click', () => {
-      const r = +el.dataset.ageEngRange;
-      if (state.ageEngRange === r) return;
-      state.ageEngRange = r; fetchEngagementByAge();
+      const d = ageEngPresetDates(+el.dataset.ageEngRange);
+      if ((state.ageEngFrom || null) === d.from && (state.ageEngTo || null) === d.to) return;
+      state.ageEngFrom = d.from; state.ageEngTo = d.to; fetchEngagementByAge();
     }));
+  document.getElementById('age-eng-apply')?.addEventListener('click', () => {
+    state.ageEngFrom = document.getElementById('age-eng-from')?.value || null;
+    state.ageEngTo   = document.getElementById('age-eng-to')?.value   || null;
+    fetchEngagementByAge();
+  });
 
   // Esercizi piu amati: filtri genere/eta + toggle "vedi tutti"
   document.getElementById('liked-filter-toggle')?.addEventListener('click', () => {
