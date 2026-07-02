@@ -42,6 +42,16 @@ const FUNNEL_LABELS = [
   '≥5 workout prima settimana',
   '3-day streak',
   'Premium pagante',
+  // Step basati su eventi (user_events), coorte = nuovi iscritti del periodo. Gli indici 11-17
+  // devono restare allineati con gli ord della RPC kpi_funnel (aggiunti in coda per non rompere
+  // le config salvate in localStorage, che referenziano gli step per stepIdx).
+  'Vede il paywall (fine onboarding)',   // 11 · paywall_step_view · source=onboarding_end
+  'Chiude il paywall onboarding',        // 12 · paywall_close · source=onboarding_end
+  'Arriva in Home',                      // 13 · view_Home
+  'Apre workout detail',                 // 14 · view_WorkoutDetail
+  'Preme Start (inizia workout)',        // 15 · workout_start
+  'Fa ≥1 esercizio',                     // 16 · exercise_complete
+  'Completa workout (evento)',           // 17 · workout_complete
 ];
 
 const LS_OV             = 'hm_overview_keys';
@@ -236,7 +246,15 @@ let state = {
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
   sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '' },
+  sprintFunnelEditId: null,   // id dello sprint di cui stiamo editando il funnel (pagina Sprint)
+  sprintFunnelEdit: null,     // working copy dell'array config in editing
+  sprintFunnelSaving: false,
+  funnelAssignOpen: false,    // pannello "assegna funnel corrente a sprint" (pagina Funnel)
+  funnelAssignSel: [],        // sprint id selezionati nel pannello assegna
+  funnelAssignSaving: false,
+  funnelOverwriteConfirm: null, // { kind:'assign'|'sprint', names:[…] } — modal "digita Modifica" quando si sovrascrive un funnel già custom
   sprintFunnelOpen: false, sprintFunnelSel: [], sprintFunnelData: {}, sprintFunnelLoading: false, sprintFunnelError: null,
+  sprintFunnelHiddenSteps: [], // stepIdx nascosti SOLO in visualizzazione confronto (session-only, non persistito, non tocca i funnel)
   sprintRetOpen: false, sprintRetSel: [], sprintRetData: {}, sprintRetLoading: false, sprintRetError: null,
   sprintRetCustom: false, sprintRetMin: 1, sprintRetWeeks: 6, sprintRetMinW0: 1,
   deleteConfirm: null, // { id, nome } when modal is open
@@ -1192,6 +1210,7 @@ function layout() {
       ${state.error ? pageError() : !state.data ? pageSkeleton() : page()}
     </div>
     ${deleteConfirmModal()}
+    ${funnelOverwriteModal()}
     ${feedbackModal()}
     ${aiConversationsModal()}
     ${userActivityModal()}
@@ -1232,6 +1251,48 @@ function deleteConfirmModal() {
           <button id="delete-confirm-btn" class="btn" style="
             flex:1;background:#ef4444;color:#fff;border:none;opacity:0.4;cursor:not-allowed;
             transition:opacity .15s">Elimina</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Modal di conferma quando si sta per sovrascrivere il funnel di uno sprint GIÀ personalizzato
+// (da "Assegna a sprint" o dall'editor per-sprint). Richiede di digitare "Modifica".
+function funnelOverwriteModal() {
+  if (!state.funnelOverwriteConfirm) return '';
+  const { names } = state.funnelOverwriteConfirm;
+  const list = names.map(n => `<strong style="color:var(--fg)">${esc(n)}</strong>`).join(', ');
+  return `
+    <div id="overwrite-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000">
+      <div style="
+        background:#13131f;border:1px solid #2a2a3d;border-radius:16px;
+        padding:32px;width:380px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <div style="width:36px;height:36px;border-radius:50%;background:rgba(251,191,36,0.15);
+            display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📌</div>
+          <div style="font-size:16px;font-weight:700;color:var(--fg)">Funnel già personalizzato</div>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:20px;margin-left:48px;line-height:1.6">
+          ${names.length > 1 ? `Gli sprint ${list} hanno` : `Lo sprint ${list} ha`} già un funnel personalizzato.
+          Sei sicuro di voler modificare? Mattia ci ha messo tanta cura. 🥲
+        </div>
+        <div style="background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;padding:16px;margin-bottom:20px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">
+            Digita <span style="color:var(--amber);font-weight:700">Modifica</span> per poter modificare
+          </div>
+          <input id="overwrite-confirm-input" type="text" autocomplete="off" spellcheck="false"
+            placeholder="Modifica"
+            style="width:100%;background:none;border:none;outline:none;color:var(--amber);
+              font-size:16px;font-weight:700;font-family:monospace;letter-spacing:.08em;
+              caret-color:var(--amber)"/>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="overwrite-cancel-btn" class="btn btn-ghost" style="flex:1">Annulla</button>
+          <button id="overwrite-confirm-btn" class="btn" style="
+            flex:1;background:var(--amber);color:#1a1a28;border:none;font-weight:700;opacity:0.4;cursor:not-allowed;
+            transition:opacity .15s">Sovrascrivi</button>
         </div>
       </div>
     </div>`;
@@ -3293,9 +3354,11 @@ function pageFunnel() {
       <input type="date" id="funnel-to" class="form-input" value="${state.funnelTo}"
         style="width:145px;padding:5px 10px;font-size:12px">
       <button id="funnel-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
-      ${!state.editingFunnel ? `<button id="edit-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;margin-left:auto">⚙ Modifica funnel</button>` : ''}
+      ${state.sprints.length ? `<button id="funnel-assign-open" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;margin-left:auto">📌 Assegna a sprint</button>` : ''}
+      ${!state.editingFunnel ? `<button id="edit-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;${state.sprints.length ? '' : 'margin-left:auto'}">⚙ Modifica funnel</button>` : ''}
     </div>
 
+    ${funnelAssignPanel()}
     ${editPanel}
 
     <div class="card">
@@ -3309,6 +3372,43 @@ function pageFunnel() {
     ${metaFunnelSection()}
     </div>
     ${sprintFunnelSection()}`;
+}
+
+// Pannello "Assegna a sprint": scrive il funnel CORRENTE (state.funnelConfig) nella colonna
+// funnel_config degli sprint selezionati. Utile per applicare lo stesso funnel a più sprint in un clic.
+function funnelAssignPanel() {
+  if (!state.funnelAssignOpen || !state.sprints.length) return '';
+  const cur = JSON.stringify(state.funnelConfig);
+  const chips = state.sprints.map((s, i) => {
+    const on   = state.funnelAssignSel.includes(s.id);
+    const same = JSON.stringify(sprintFunnelCfg(s)) === cur;
+    const custom = Array.isArray(s.funnel_config) && s.funnel_config.length;
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="funnel-assign-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+      ${same ? '<span style="font-size:9px;color:var(--mattia);font-weight:700">· già uguale</span>'
+             : custom ? '<span style="font-size:9px;color:var(--amber);font-weight:700">· 📌 custom</span>'
+                      : '<span style="font-size:9px;color:var(--muted)">· default</span>'}
+    </button>`;
+  }).join('');
+  const n = state.funnelAssignSel.length;
+  return `
+    <div class="card" style="margin-bottom:20px;border:1px solid var(--accent)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:0">📌 Assegna il funnel corrente a…</div>
+        <button id="funnel-assign-close" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;color:var(--muted)">×</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">
+        Copia l'ordinamento di step attualmente nel builder negli sprint selezionati (sovrascrive il loro funnel). Poi li puoi affinare singolarmente nella pagina Sprint.
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>
+      <button id="funnel-assign-save" class="btn btn-primary" style="font-size:12px;padding:6px 16px" ${n && !state.funnelAssignSaving ? '' : 'disabled'}>
+        ${state.funnelAssignSaving ? 'Salvataggio…' : `Salva su ${n} sprint`}
+      </button>
+    </div>`;
 }
 
 function metaFunnelSection() {
@@ -3358,13 +3458,122 @@ function funnelEditRow(row, i) {
     ).join('');
 
   return `
-    <div style="display:flex;align-items:center;gap:8px">
+    <div class="funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+      <span class="funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
       <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
       <select class="form-select funnel-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
       <select class="form-select funnel-vs-sel"   data-row="${i}" style="width:200px;font-size:12px;padding:5px 8px">${vsOpts}</select>
       <button class="btn btn-ghost funnel-remove" data-row="${i}"
         style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
     </div>`;
+}
+
+// Riordina in place una riga di una config funnel da `from` a `to`, rimappando i riferimenti vsIdx
+// (che puntano alla POSIZIONE di una riga precedente). Un riferimento che finirebbe dopo la propria
+// riga diventa non valido → lo azzeriamo (la viz mostrerebbe '—' comunque). Usato sia dal funnel
+// principale sia dall'editor per-sprint.
+function reorderFunnelCfg(cfg, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= cfg.length || to >= cfg.length) return false;
+  cfg.forEach((r, idx) => { r._oid = idx; });          // tag posizione originale
+  const [moved] = cfg.splice(from, 1);
+  cfg.splice(to, 0, moved);
+  const newPos = {};
+  cfg.forEach((r, idx) => { newPos[r._oid] = idx; });   // vecchia posizione → nuova
+  cfg.forEach((r, idx) => {
+    if (r.vsIdx !== null && r.vsIdx !== undefined) {
+      const t = newPos[r.vsIdx];
+      r.vsIdx = (t !== undefined && t < idx) ? t : null;
+    }
+    delete r._oid;
+  });
+  return true;
+}
+
+function moveFunnelRow(from, to) {
+  if (!reorderFunnelCfg(state.funnelConfig, from, to)) return;
+  saveSetting('funnel_cfg', state.funnelConfig);
+  render();
+}
+
+// Config funnel effettiva di uno sprint: la sua personalizzazione se presente, altrimenti il default.
+function sprintFunnelCfg(sprint) {
+  return (sprint && Array.isArray(sprint.funnel_config) && sprint.funnel_config.length)
+    ? sprint.funnel_config
+    : DEF_FUN_CFG;
+}
+
+// Riga dell'editor funnel per-sprint (pagina Sprint). Opera su state.sprintFunnelEdit, classi dedicate.
+function sprintCfgEditRow(row, i) {
+  const cfg = state.sprintFunnelEdit || [];
+  const stepOpts = FUNNEL_LABELS.map((l, idx) =>
+    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${l}</option>`).join('');
+  const vsOpts = `<option value="">—</option>` +
+    cfg.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${FUNNEL_LABELS[r.stepIdx]}</option>`).join('');
+  return `
+    <div class="sprint-cfg-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+      <span class="sprint-cfg-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select sprint-cfg-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select sprint-cfg-vs-sel"   data-row="${i}" style="width:200px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost sprint-cfg-remove" data-row="${i}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+function moveSprintCfgRow(from, to) {
+  if (!state.sprintFunnelEdit) return;
+  if (!reorderFunnelCfg(state.sprintFunnelEdit, from, to)) return;
+  render();
+}
+
+// Scrive il funnel corrente del builder negli sprint selezionati nel pannello "Assegna a sprint".
+// Chiamata direttamente, o dal modal di conferma se qualche sprint era già personalizzato.
+async function doFunnelAssignSave() {
+  state.funnelAssignSaving = true;
+  render();
+  const cfg = JSON.parse(JSON.stringify(state.funnelConfig));
+  try {
+    const results = await Promise.all(state.funnelAssignSel.map(id =>
+      sb.from('sprints').update({ funnel_config: cfg }).eq('id', id)));
+    const err = results.find(r => r.error);
+    if (err) throw err.error;
+    state.funnelAssignSaving = false;
+    state.funnelAssignOpen   = false;
+    state.funnelAssignSel    = [];
+    state.sprintFunnelData   = {}; // il confronto va ricalcolato/ridisegnato con le nuove config
+    await fetchSprints();
+  } catch (e) {
+    state.funnelAssignSaving = false;
+    console.error('funnel-assign-save', e);
+    alert('Errore salvataggio: ' + (e.message || e));
+    render();
+  }
+}
+
+// Salva la working copy dell'editor per-sprint su sprints.funnel_config.
+// Chiamata direttamente, o dal modal di conferma se lo sprint era già personalizzato.
+async function doSprintCfgSave() {
+  state.sprintFunnelSaving = true;
+  render();
+  const id  = state.sprintFunnelEditId;
+  const cfg = JSON.parse(JSON.stringify(state.sprintFunnelEdit));
+  try {
+    const res = await sb.from('sprints').update({ funnel_config: cfg }).eq('id', id);
+    if (res.error) throw res.error;
+    state.sprintFunnelSaving = false;
+    state.sprintFunnelEditId = null;
+    state.sprintFunnelEdit   = null;
+    state.sprintFunnelData   = {}; // confronto da ricalcolare
+    await fetchSprints();
+  } catch (e) {
+    state.sprintFunnelSaving = false;
+    console.error('sprint-cfg-save', e);
+    alert('Errore salvataggio: ' + (e.message || e));
+    render();
+  }
 }
 
 function funnelViz() {
@@ -4648,6 +4857,31 @@ function premiumDiagnostics(d, hasRealErrors) {
 
 // ── SPRINT ────────────────────────────────────────────────────────────
 
+// Editor inline del funnel di uno sprint (compare solo per lo sprint in editing). Opera su
+// state.sprintFunnelEdit (working copy); il salvataggio scrive sprints.funnel_config nel DB.
+function sprintFunnelEditor(s) {
+  if (state.sprintFunnelEditId !== s.id || !state.sprintFunnelEdit) return '';
+  const rows = state.sprintFunnelEdit.map((row, i) => sprintCfgEditRow(row, i)).join('');
+  return `
+    <div style="margin-left:24px;margin-top:10px;background:var(--surface2);border-radius:10px;padding:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">Funnel dello sprint “${s.nome}”</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+        Trascina ⠿ per riordinare. Le modifiche si salvano nel DB solo con “Salva”.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">${rows}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="sprint-cfg-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="sprint-cfg-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
+        <button id="sprint-cfg-clear" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)"
+          title="Rimuovi la personalizzazione: lo sprint tornerà a usare il funnel di default">🗑 Rimuovi personalizzazione</button>
+        <button id="sprint-cfg-save" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto" ${state.sprintFunnelSaving ? 'disabled' : ''}>
+          ${state.sprintFunnelSaving ? 'Salvataggio…' : '✓ Salva'}
+        </button>
+        <button id="sprint-cfg-close" class="btn btn-ghost" style="font-size:12px;padding:6px 12px">Chiudi</button>
+      </div>
+    </div>`;
+}
+
 function pageSprint() {
   const sprints = state.sprints;
 
@@ -4707,6 +4941,8 @@ function pageSprint() {
                   </div>
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0">
+                  <button class="btn btn-ghost sprint-funnel-edit" data-id="${s.id}"
+                    style="font-size:11px;padding:4px 10px">🎯 Funnel</button>
                   <button class="btn btn-ghost sprint-edit" data-id="${s.id}"
                     style="font-size:11px;padding:4px 10px">✏ Modifica</button>
                   <button class="btn btn-ghost sprint-delete" data-id="${s.id}"
@@ -4714,6 +4950,12 @@ function pageSprint() {
                 </div>
               </div>
               ${s.note ? `<div style="margin-left:24px;font-size:12px;color:var(--muted);line-height:1.6;white-space:pre-wrap">${s.note}</div>` : ''}
+              <div style="margin-left:24px;font-size:11px;color:var(--muted)">
+                Funnel: ${Array.isArray(s.funnel_config) && s.funnel_config.length
+                  ? `<span style="color:var(--amber);font-weight:600">📌 personalizzato (${s.funnel_config.length} step)</span>`
+                  : `<span>default</span>`}
+              </div>
+              ${sprintFunnelEditor(s)}
             </div>`;
         }).join('')}
       </div>`;
@@ -4862,7 +5104,8 @@ function sprintFunnelCompareView() {
         <span style="font-weight:600;color:var(--text)">${s.nome}</span>
         <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
       </span>`).join('')}
-  </div>`;
+  </div>
+  <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">Ogni sprint usa il suo funnel (o quello di default). La cella <span style="color:#3a3a55">·</span> indica uno step non incluso nel funnel di quello sprint. I funnel si modificano nella pagina <strong style="color:var(--text)">Sprint</strong> o si assegnano da qui col pulsante “Assegna a sprint”.</div>`;
   return legend + sprintFunnelTable(selected, state.sprintFunnelData);
 }
 
@@ -5021,8 +5264,32 @@ function sprintRetentionChart(selected, dataMap) {
 }
 
 function sprintFunnelTable(selected, dataMap) {
-  const cfg    = state.funnelConfig;
   const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+
+  // Ogni sprint ha la sua config (o il default). La tabella mostra l'UNIONE di tutti gli step
+  // usati dagli sprint selezionati: dove uno sprint non include uno step, la cella resta vuota.
+  // L'ordine dell'unione preserva quello dei funnel (appende gli step nuovi man mano che compaiono).
+  const cfgOf  = {};
+  selected.forEach(s => { cfgOf[s.id] = sprintFunnelCfg(s); });
+  const unionSteps = [];
+  selected.forEach(s => cfgOf[s.id].forEach(r => {
+    if (!unionSteps.includes(r.stepIdx)) unionSteps.push(r.stepIdx);
+  }));
+
+  // Filtro di sola visualizzazione: righe nascoste dall'occhio (session-only, niente persistenza,
+  // le % restano calcolate sul funnel completo — nascondere non altera i numeri).
+  const hiddenSteps  = (state.sprintFunnelHiddenSteps || []).filter(idx => unionSteps.includes(idx));
+  const visibleSteps = unionSteps.filter(idx => !hiddenSteps.includes(idx));
+  const hiddenBar = hiddenSteps.length ? `
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:14px">
+      <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Righe nascoste</span>
+      ${hiddenSteps.map(idx => `
+        <button class="sprint-step-show" data-step="${idx}" title="Mostra di nuovo questa riga"
+          style="cursor:pointer;padding:3px 10px;font-size:11px;border-radius:20px;border:1px dashed #3a3a55;background:transparent;color:var(--muted);display:inline-flex;align-items:center;gap:5px">
+          👁 ${FUNNEL_LABELS[idx] || ''}
+        </button>`).join('')}
+      <button id="sprint-steps-show-all" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;color:var(--purple)">Mostra tutte</button>
+    </div>` : '';
 
   const headers = selected.map((s, i) => `
     <th style="text-align:right;padding:10px 16px;white-space:nowrap">
@@ -5034,18 +5301,30 @@ function sprintFunnelTable(selected, dataMap) {
     </th>`
   ).join('');
 
-  const rows = cfg.map((row, i) => {
-    const label = FUNNEL_LABELS[row.stepIdx] || '';
-    const nums  = selected.map(s => Number((dataMap[s.id] || [])[row.stepIdx]?.numero ?? -1));
-    const maxN  = Math.max(...nums.filter(n => n >= 0), 0);
+  const rows = visibleSteps.map(stepIdx => {
+    const label = FUNNEL_LABELS[stepIdx] || '';
+    // maxN calcolato solo sugli sprint che includono questo step (per la barra relativa)
+    const nums = selected.map(s => {
+      const has = cfgOf[s.id].some(r => r.stepIdx === stepIdx);
+      if (!has) return -1;
+      return Number((dataMap[s.id] || [])[stepIdx]?.numero ?? -1);
+    });
+    const maxN = Math.max(...nums.filter(n => n >= 0), 0);
 
     const cells = selected.map((s, si) => {
-      const data = dataMap[s.id] || [];
-      const rawNum = data[row.stepIdx]?.numero;
+      const cfg     = cfgOf[s.id];
+      const rowPos  = cfg.findIndex(r => r.stepIdx === stepIdx);
+      // Lo sprint non include questo step nel suo funnel → cella vuota.
+      if (rowPos === -1) {
+        return `<td style="padding:6px 16px;text-align:center;color:#3a3a55;font-size:12px">·</td>`;
+      }
+      const row    = cfg[rowPos];
+      const data   = dataMap[s.id] || [];
+      const rawNum = data[stepIdx]?.numero;
       const noData = rawNum === null || rawNum === undefined; // dato non disponibile (es. installs non importati)
-      const num  = Number(rawNum ?? 0);
-      const rawVs = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
-      const vsN  = rawVs === null || rawVs === undefined ? null : Number(rawVs);
+      const num    = Number(rawNum ?? 0);
+      const rawVs  = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < rowPos ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
+      const vsN    = rawVs === null || rawVs === undefined ? null : Number(rawVs);
       const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
@@ -5063,7 +5342,13 @@ function sprintFunnelTable(selected, dataMap) {
     }).join('');
 
     return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${label}</td>${cells}
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="sprint-step-hide" data-step="${stepIdx}" title="Nascondi questa riga (solo visualizzazione)"
+            style="cursor:pointer;background:none;border:none;padding:0;font-size:11px;color:#3a3a55;line-height:1;flex-shrink:0">👁</button>
+          <span>${label}</span>
+        </div>
+      </td>${cells}
     </tr>`;
   }).join('');
 
@@ -5107,7 +5392,7 @@ function sprintFunnelTable(selected, dataMap) {
            '<tr style="' + bg + '"><td style="' + lbl + ';padding:6px 16px 12px 16px">CPAU</td>' + cpauCells + '</tr>';
   })();
 
-  return `<table style="width:100%;border-collapse:collapse">
+  return `${hiddenBar}<table style="width:100%;border-collapse:collapse">
     <thead><tr style="border-bottom:2px solid var(--border)">
       <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Step</th>
       ${headers}
@@ -5801,6 +6086,73 @@ function attachEvents() {
       render();
     }));
 
+  // Funnel — drag & drop per riordinare gli step. La maniglia inizia il drag; l'intera riga è
+  // drop target. L'indice di partenza viaggia in dataTransfer (niente stato globale).
+  document.querySelectorAll('.funnel-drag').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.row);
+      e.dataTransfer.effectAllowed = 'move';
+      el.closest('.funnel-row')?.style.setProperty('opacity', '0.4');
+    });
+    el.addEventListener('dragend', () => {
+      el.closest('.funnel-row')?.style.setProperty('opacity', '1');
+    });
+  });
+  document.querySelectorAll('.funnel-row').forEach(rowEl => {
+    rowEl.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      rowEl.style.borderTop = '2px solid var(--purple)';
+    });
+    rowEl.addEventListener('dragleave', () => { rowEl.style.borderTop = ''; });
+    rowEl.addEventListener('drop', e => {
+      e.preventDefault();
+      rowEl.style.borderTop = '';
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to   = +rowEl.dataset.row;
+      if (!Number.isNaN(from)) moveFunnelRow(from, to);
+    });
+  });
+
+  // Funnel — "Assegna a sprint": copia il funnel corrente negli sprint selezionati (DB).
+  document.getElementById('funnel-assign-open')?.addEventListener('click', () => {
+    state.funnelAssignOpen = !state.funnelAssignOpen;
+    if (state.funnelAssignOpen) {
+      // preseleziona gli sprint che hanno già esattamente questo funnel (comodo per confermare)
+      const cur = JSON.stringify(state.funnelConfig);
+      state.funnelAssignSel = state.sprints.filter(s => JSON.stringify(sprintFunnelCfg(s)) === cur).map(s => s.id);
+    }
+    render();
+  });
+  document.getElementById('funnel-assign-close')?.addEventListener('click', () => {
+    state.funnelAssignOpen = false;
+    render();
+  });
+  document.querySelectorAll('.funnel-assign-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const i = state.funnelAssignSel.indexOf(id);
+      if (i === -1) state.funnelAssignSel.push(id); else state.funnelAssignSel.splice(i, 1);
+      render();
+    }));
+  document.getElementById('funnel-assign-save')?.addEventListener('click', () => {
+    if (!state.funnelAssignSel.length || state.funnelAssignSaving) return;
+    // Se tra i selezionati c'è uno sprint con funnel GIÀ personalizzato (e diverso da quello che
+    // stiamo per scrivere), chiedi conferma col modal "digita Modifica".
+    const cur = JSON.stringify(state.funnelConfig);
+    const customized = state.sprints.filter(s =>
+      state.funnelAssignSel.includes(s.id) &&
+      Array.isArray(s.funnel_config) && s.funnel_config.length &&
+      JSON.stringify(s.funnel_config) !== cur);
+    if (customized.length) {
+      state.funnelOverwriteConfirm = { kind: 'assign', names: customized.map(s => s.nome) };
+      render();
+      document.getElementById('overwrite-confirm-input')?.focus();
+      return;
+    }
+    doFunnelAssignSave();
+  });
+
   // Funnel — sprint selector
   document.getElementById('funnel-sprint-sel')?.addEventListener('change', e => {
     const sprint = state.sprints.find(s => s.id === e.target.value);
@@ -5857,6 +6209,110 @@ function attachEvents() {
       document.getElementById('delete-confirm-input')?.focus();
     }));
 
+  // Sprint — editor funnel per-sprint
+  document.querySelectorAll('.sprint-funnel-edit').forEach(el =>
+    el.addEventListener('click', () => {
+      const s = state.sprints.find(sp => sp.id === el.dataset.id);
+      if (!s) return;
+      if (state.sprintFunnelEditId === s.id) { // toggle: chiudi se già aperto su questo sprint
+        state.sprintFunnelEditId = null;
+        state.sprintFunnelEdit   = null;
+      } else {
+        state.sprintFunnelEditId = s.id;
+        state.sprintFunnelEdit   = JSON.parse(JSON.stringify(sprintFunnelCfg(s)));
+      }
+      render();
+    }));
+  document.getElementById('sprint-cfg-add')?.addEventListener('click', () => {
+    const last = state.sprintFunnelEdit.length ? state.sprintFunnelEdit.length - 1 : null;
+    state.sprintFunnelEdit.push({ stepIdx: 0, vsIdx: last });
+    render();
+  });
+  document.getElementById('sprint-cfg-reset')?.addEventListener('click', () => {
+    state.sprintFunnelEdit = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+    render();
+  });
+  document.querySelectorAll('.sprint-cfg-step-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintFunnelEdit[+el.dataset.row].stepIdx = +el.value;
+      render();
+    }));
+  document.querySelectorAll('.sprint-cfg-vs-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintFunnelEdit[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
+      render();
+    }));
+  document.querySelectorAll('.sprint-cfg-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.sprintFunnelEdit.splice(i, 1);
+      state.sprintFunnelEdit.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      render();
+    }));
+  document.querySelectorAll('.sprint-cfg-drag').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.row);
+      e.dataTransfer.effectAllowed = 'move';
+      el.closest('.sprint-cfg-row')?.style.setProperty('opacity', '0.4');
+    });
+    el.addEventListener('dragend', () => {
+      el.closest('.sprint-cfg-row')?.style.setProperty('opacity', '1');
+    });
+  });
+  document.querySelectorAll('.sprint-cfg-row').forEach(rowEl => {
+    rowEl.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; rowEl.style.borderTop = '2px solid var(--purple)'; });
+    rowEl.addEventListener('dragleave', () => { rowEl.style.borderTop = ''; });
+    rowEl.addEventListener('drop', e => {
+      e.preventDefault();
+      rowEl.style.borderTop = '';
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to   = +rowEl.dataset.row;
+      if (!Number.isNaN(from)) moveSprintCfgRow(from, to);
+    });
+  });
+  document.getElementById('sprint-cfg-close')?.addEventListener('click', () => {
+    state.sprintFunnelEditId = null;
+    state.sprintFunnelEdit   = null;
+    render();
+  });
+  document.getElementById('sprint-cfg-save')?.addEventListener('click', () => {
+    if (!state.sprintFunnelEditId || state.sprintFunnelSaving) return;
+    // Sprint già personalizzato (e la modifica cambia davvero qualcosa) → conferma "digita Modifica".
+    const s = state.sprints.find(sp => sp.id === state.sprintFunnelEditId);
+    const isCustom = s && Array.isArray(s.funnel_config) && s.funnel_config.length;
+    const changed  = isCustom && JSON.stringify(s.funnel_config) !== JSON.stringify(state.sprintFunnelEdit);
+    if (changed) {
+      state.funnelOverwriteConfirm = { kind: 'sprint', names: [s.nome] };
+      render();
+      document.getElementById('overwrite-confirm-input')?.focus();
+      return;
+    }
+    doSprintCfgSave();
+  });
+  document.getElementById('sprint-cfg-clear')?.addEventListener('click', async () => {
+    if (!state.sprintFunnelEditId || state.sprintFunnelSaving) return;
+    state.sprintFunnelSaving = true;
+    render();
+    const id = state.sprintFunnelEditId;
+    try {
+      const res = await sb.from('sprints').update({ funnel_config: null }).eq('id', id);
+      if (res.error) throw res.error;
+      state.sprintFunnelSaving = false;
+      state.sprintFunnelEditId = null;
+      state.sprintFunnelEdit   = null;
+      state.sprintFunnelData   = {};
+      await fetchSprints();
+    } catch (e) {
+      state.sprintFunnelSaving = false;
+      console.error('sprint-cfg-clear', e);
+      alert('Errore: ' + (e.message || e));
+      render();
+    }
+  });
+
   // Delete confirm modal
   const delInput = document.getElementById('delete-confirm-input');
   const delBtn   = document.getElementById('delete-confirm-btn');
@@ -5885,6 +6341,34 @@ function attachEvents() {
     });
     document.getElementById('delete-overlay')?.addEventListener('click', e => {
       if (e.target === e.currentTarget) { state.deleteConfirm = null; render(); }
+    });
+  }
+
+  // Overwrite confirm modal (funnel sprint già personalizzato — digita "Modifica")
+  const owInput = document.getElementById('overwrite-confirm-input');
+  const owBtn   = document.getElementById('overwrite-confirm-btn');
+  if (owInput && owBtn) {
+    owInput.addEventListener('input', () => {
+      const ok = owInput.value === 'Modifica';
+      owBtn.style.opacity = ok ? '1' : '0.4';
+      owBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+    });
+    owInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && owInput.value === 'Modifica') owBtn.click();
+    });
+    owBtn.addEventListener('click', () => {
+      if (owInput.value !== 'Modifica') return;
+      const kind = state.funnelOverwriteConfirm?.kind;
+      state.funnelOverwriteConfirm = null;
+      if (kind === 'assign')      doFunnelAssignSave();
+      else if (kind === 'sprint') doSprintCfgSave();
+    });
+    document.getElementById('overwrite-cancel-btn')?.addEventListener('click', () => {
+      state.funnelOverwriteConfirm = null;
+      render();
+    });
+    document.getElementById('overwrite-overlay')?.addEventListener('click', e => {
+      if (e.target === e.currentTarget) { state.funnelOverwriteConfirm = null; render(); }
     });
   }
 
@@ -5920,6 +6404,23 @@ function attachEvents() {
   // Sprint — confronto funnel (in pageFunnel)
   document.getElementById('sprint-funnel-toggle')?.addEventListener('click', () => {
     state.sprintFunnelOpen = !state.sprintFunnelOpen;
+    render();
+  });
+  // Nascondi/mostra righe del confronto — filtro di sola visualizzazione, session-only
+  document.querySelectorAll('.sprint-step-hide').forEach(el =>
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.step;
+      if (!state.sprintFunnelHiddenSteps.includes(idx)) state.sprintFunnelHiddenSteps.push(idx);
+      render();
+    }));
+  document.querySelectorAll('.sprint-step-show').forEach(el =>
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.step;
+      state.sprintFunnelHiddenSteps = state.sprintFunnelHiddenSteps.filter(i => i !== idx);
+      render();
+    }));
+  document.getElementById('sprint-steps-show-all')?.addEventListener('click', () => {
+    state.sprintFunnelHiddenSteps = [];
     render();
   });
   document.querySelectorAll('.sprint-funnel-chip').forEach(el =>
@@ -6422,6 +6923,7 @@ document.addEventListener('keydown', e => {
     if (state.userActivityOpen)  { state.userActivityOpen = false; render(); return; }
     if (state.aiConvOpen)        { state.aiConvOpen = false; render(); return; }
     if (state.feedbackModalOpen) { state.feedbackModalOpen = false; render(); return; }
+    if (state.funnelOverwriteConfirm) { state.funnelOverwriteConfirm = null; render(); return; }
     if (state.deleteConfirm)     { state.deleteConfirm = null; render(); }
   }
 });
