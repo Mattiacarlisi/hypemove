@@ -88,19 +88,29 @@ const DEF_FUN_CFG = [
 // stepIdx = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views, 2=view_paywall,
 // 3=plan_select, 4=purchase_attempts, 5=premium_activated, 6=paywall_shown, 7=reached_plans,
 // 8=purchased). 6-8 aggiunti in coda così le config salvate vecchie restano valide.
-// Default = il vero funnel di conversione monotòno (eventi grande, utenti sotto; paganti = utenti):
-// Mostrato → Arrivato ai piani → Confronta piani → Tentato acquisto → Abbonato pagante (reale).
+// Default = il vero funnel di conversione monotòno (eventi grande, utenti sotto; conversione = utenti):
+// Mostrato → Arrivato ai piani → Confronta piani → Tentato acquisto → Utenti in prova → Utenti paganti.
+// Gli ultimi due box sono separati apposta: "in prova" = ha inserito la carta ed è nel trial gratuito ora;
+// "paganti" = trial finito e pagamento reale in corso. Il calo In prova→Paganti = tasso di conversione del trial.
 // "Paywall aperto" (apertura volontaria) NON è qui: è una modalità d'ingresso parallela (auto vs
 // volontaria), sta come KPI card sopra. Metterlo nell'imbuto darebbe % senza senso.
-// NB: NON usiamo più premium_activated (view_PremiumActivated) come fine: è un mount di schermata
-// lato client che si ripete (10 da 1 utente) e NON indica un pagamento. La conversione vera è
-// `purchased` (play_purchases, per token, esclusi interni e licenze tester).
+// NB: NON usiamo premium_activated (view_PremiumActivated) come fine: è un mount di schermata lato
+// client che si ripete e NON indica un pagamento. Le conversioni vere sono in play_purchases per token
+// (include CLIENT_VERIFIED, quindi anche conversioni senza RTDN Google), esclusi interni e licenze tester.
+// stepIdx 8 = "Conversione (trial/acq.)" resta nel catalogo per chi vuole il totale in un box solo.
 const DEF_PREMIUM_FUN_CFG = [
   { stepIdx: 6, vsIdx: null }, // Paywall mostrato (tutte le varianti)
   { stepIdx: 7, vsIdx: 0 },    // Arrivato ai piani vs mostrato
   { stepIdx: 3, vsIdx: 1 },    // Confronta piani (plan select) vs ai piani
   { stepIdx: 4, vsIdx: 2 },    // Tentato acquisto vs Confronta piani
-  { stepIdx: 8, vsIdx: 3 },    // Abbonato pagante vs Tentato acquisto
+  { stepIdx: 9, vsIdx: 3 },    // Utenti in prova vs Tentato acquisto
+  { stepIdx: 10, vsIdx: 4 },   // Utenti paganti vs Utenti in prova (= tasso conversione trial→pagante)
+];
+// Config vecchia (fine = "Conversione" unico, stepIdx 8): la migriamo alla nuova a due box separati
+// così chi era sul default vede In prova → Paganti senza dover resettare a mano. Le config CUSTOM restano.
+const OLD_PREMIUM_FUN_CFG_V1 = [
+  { stepIdx: 6, vsIdx: null }, { stepIdx: 7, vsIdx: 0 }, { stepIdx: 3, vsIdx: 1 },
+  { stepIdx: 4, vsIdx: 2 }, { stepIdx: 8, vsIdx: 3 },
 ];
 
 // catalogo eventi disponibili per il funnel AI Coach — ognuno è un event_name letto da kpi_events_summary
@@ -173,6 +183,16 @@ function sanitizeAiFunnelConfig(cfg) {
 
 function savePremiumFunnelConfig() {
   localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig));
+}
+
+// Carica la config del funnel Premium da localStorage, migrando il vecchio default (fine unico
+// "Conversione") al nuovo (In prova → Paganti). Non referenzia FUNNEL_ALL_STEPS: è un const definito
+// più in basso, chiamare qui a init darebbe TDZ.
+function loadPremiumFunnelConfig() {
+  const saved = loadLS(LS_PREMIUM_FUN, null);
+  if (!saved || !Array.isArray(saved) || !saved.length) return JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG));
+  if (JSON.stringify(saved) === JSON.stringify(OLD_PREMIUM_FUN_CFG_V1)) return JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG));
+  return saved;
 }
 
 function saveAiFunnelConfig() {
@@ -260,7 +280,7 @@ let state = {
   deleteConfirm: null, // { id, nome } when modal is open
   premiumData: null, premiumLoading: false, premiumError: null,
   premiumFrom: BETA_START, premiumTo: TODAY,
-  premiumFunnelConfig: loadLS(LS_PREMIUM_FUN, JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG))),
+  premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
   premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all', premiumGender: 'all',
   premiumFunnelRangeFrom: BETA_START, premiumFunnelRangeTo: TODAY,
@@ -3926,13 +3946,22 @@ function premiumPurchaserModel(p) {
   const firstAttempt = premiumPick(p, ['primo_tentativo', 'first_attempt', 'first_attempt_at', 'created_at']);
   const lastAttempt = premiumPick(p, ['ultimo_tentativo', 'last_attempt', 'last_attempt_at', 'updated_at'], firstAttempt);
   const errorText = premiumErrorSummary(p);
-  const success = activations > 0 || Boolean(successAt) || premiumPick(p, ['status', 'stato'], '') === 'success';
-  const status = success ? 'Acquisto riuscito' : errorText ? 'Problema da verificare' : 'Tentativo senza successo';
+  // Il vero successo è la conversione reale in play_purchases (trial o pagamento), NON view_PremiumActivated
+  // (un mount di schermata che si ripete). conv_state arriva dalla RPC: paid / trial / churned / none.
+  const convState = premiumPick(p, ['conv_state'], 'none');
+  const success = convState === 'paid' || convState === 'trial';
+  const status =
+      convState === 'paid'    ? 'Pagante'
+    : convState === 'trial'   ? 'In prova'
+    : convState === 'churned' ? 'Scaduto / annullato'
+    : errorText               ? 'Problema da verificare'
+    :                           'Tentativo senza successo';
   return {
     raw: p,
     name: premiumPick(p, ['nome', 'name', 'username'], ''),
     email: premiumPick(p, ['email'], ''),
     attempts,
+    convState,
     success,
     status,
     product: premiumPick(p, ['prodotto', 'product_id', 'product', 'plan']),
@@ -3965,8 +3994,8 @@ function pagePremium() {
   const purchasers = (d.purchasers || []).map(premiumPurchaserModel);
   const lastDays = rc.last_days;
   const lastNote = lastDays === null || lastDays === undefined
-    ? 'nessun acquisto reale nel periodo'
-    : `ultimo ${rc.last_date} · ${lastDays} g fa`;
+    ? 'nessuna conversione nel periodo'
+    : `ultima conversione ${rc.last_date} · ${lastDays} g fa`;
   const lastColor = (rc.new_total > 0) ? '#4ade80' : (lastDays > 14 ? '#ef4444' : 'var(--muted)');
 
   return `
@@ -4100,9 +4129,10 @@ function premiumStepPath(steps) {
   return `<div>${row}${direct}</div>`;
 }
 
-// Tabella di confronto fra le creatività paywall: mostrato → ai piani → plan select → tentativo.
-// Risponde a "quale paywall converte di più". Finché variant_attribution_live è false, plan_select e
-// purchase_attempt delle creatività custom finiscono ancora nel funnel standard (vedi banner).
+// Tabella di confronto fra le creatività paywall: mostrato → ai piani → plan select → tentativo → in prova → pagante.
+// Risponde a "quale paywall converte di più" e "chi è in trial vs chi paga davvero". In prova/Pagante sono
+// attribuiti per token (include CLIENT_VERIFIED, quindi anche conversioni senza RTDN di Google) allo stato ATTUALE.
+// Finché variant_attribution_live è false, plan_select e purchase_attempt delle custom finiscono nel funnel standard (banner).
 function premiumCreativesCard(d) {
   const rows = (d.creatives || []).slice().sort((a, b) => b.shown - a.shown);
   const live = !!(d.data_quality && d.data_quality.variant_attribution_live);
@@ -4143,6 +4173,7 @@ function premiumCreativesCard(d) {
         <td style="padding:8px 12px;vertical-align:middle">${premiumStepPath(steps)}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.plan_select > 0 ? 'var(--fg)' : 'var(--muted)'}">${r.plan_select || '—'}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${r.purchase_attempt > 0 ? '#f59e0b' : 'var(--muted)'}">${convCol}</td>
+        <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${premiumNum(r.trials) > 0 ? '#22d3ee' : 'var(--muted)'}">${premiumNum(r.trials) || '—'}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${premiumNum(r.purchases) > 0 ? '#4ade80' : 'var(--muted)'}">${premiumNum(r.purchases) || '—'}</td>
         <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.errors > 0 ? '#ef4444' : 'var(--muted)'}">${r.errors || '—'}</td>
       </tr>`;
@@ -4153,19 +4184,20 @@ function premiumCreativesCard(d) {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px;flex-wrap:wrap">
         <div>
           <div class="card-title" style="margin-bottom:3px">Creatività paywall</div>
-          <div style="font-size:11px;color:var(--muted)">percorso step per step di ogni paywall · vedi a quale schermata gli utenti si fermano · ordinato per esposizione</div>
+          <div style="font-size:11px;color:var(--muted)">percorso step per step di ogni paywall · <span style="color:#22d3ee">In prova</span> = carta inserita, trial attivo ora · <span style="color:#4ade80">Pagante</span> = trial finito e pagamento reale · ordinato per esposizione</div>
         </div>
       </div>
       ${banner}
       <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:900px">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1000px">
           <thead>
             <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Percorso step → dove si fermano</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Plan select</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Tentato acq.</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Acquisto</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Ha inserito la carta ed è in prova gratuita adesso">In prova</th>
+              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Prova finita e pagamento reale in corso">Pagante</th>
               <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Errori</th>
             </tr>
           </thead>
@@ -4253,7 +4285,9 @@ const FUNNEL_ALL_STEPS = [
   { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated', event: 'view_PremiumActivated' },
   { key: 'paywall_shown',     label: 'Paywall mostrato',        color: '#818cf8', field: 'paywall_shown_total',     usersField: 'paywall_shown', event: 'paywall_step_view · step 0' },
   { key: 'reached_plans',     label: 'Arrivato ai piani',       color: '#38bdf8', field: 'reached_plans_total',     usersField: 'reached_plans', event: 'paywall_step_view · step plans' },
-  { key: 'purchased',         label: 'Abbonato pagante',        color: '#4ade80', field: 'purchased_total',        usersField: 'purchased', usersPrimary: true, event: 'play_purchases (reale)' },
+  { key: 'purchased',         label: 'Conversione (trial/acq.)', color: '#4ade80', field: 'purchased_total',        usersField: 'purchased', usersPrimary: true, event: 'play_purchases · trial o acquisto' },
+  { key: 'trials_conv',       label: 'Utenti in prova',         color: '#22d3ee', field: 'trials_total',           usersField: 'trials', usersPrimary: true, event: 'play_purchases · trial attivo' },
+  { key: 'paid_conv',         label: 'Utenti paganti',          color: '#4ade80', field: 'paid_total',             usersField: 'paid',   usersPrimary: true, event: 'play_purchases · pagamento reale' },
 ];
 
 function premiumFunnelEditRow(row, i) {
@@ -4514,14 +4548,14 @@ const PREMIUM_SOURCE_TABS = [
   { key: 'trial_sources',   label: 'Offerta trial vista' },
   { key: 'paywall_sources', label: 'Paywall aperto' },
   { key: 'sources',         label: 'Tentativo acquisto' },
-  { key: 'conv',            label: 'Acquisto riuscito' },
+  { key: 'conv',            label: 'Convertiti (trial/pag.)' },
 ];
 
 const PREMIUM_SOURCE_TAB_CAPTIONS = {
   trial_sources:   "da dove arriva l'offerta del trial · top of funnel",
   paywall_sources: 'da dove viene aperto il paywall completo',
   sources:         'da dove parte il tentativo di acquisto',
-  conv:            'da dove arrivano gli acquisti andati a buon fine',
+  conv:            'da dove arrivano le conversioni reali (trial o pagamento)',
 };
 
 function premiumConvSources(purchasers) {
@@ -4636,8 +4670,8 @@ function premiumPurchasersDetailCard(purchasers) {
 
   const chips = [
     { key: 'all',     label: `Tutti (${purchasers.length})` },
-    { key: 'success', label: `Riusciti (${successCount})` },
-    { key: 'failed',  label: `Senza successo (${purchasers.length - successCount})` },
+    { key: 'success', label: `Convertiti (${successCount})` },
+    { key: 'failed',  label: `Non convertiti (${purchasers.length - successCount})` },
   ].map(c => `<button class="filter-btn ${filter === c.key ? 'active' : ''}" data-purchaser-filter="${c.key}">${c.label}</button>`).join('');
 
   return `
@@ -4645,7 +4679,7 @@ function premiumPurchasersDetailCard(purchasers) {
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;flex-wrap:wrap">
         <div>
           <div class="card-title" style="margin-bottom:3px">Chi ha tentato o acquistato</div>
-          <div style="font-size:11px;color:var(--muted)">nome, email, date, stato, piano, sorgente e problemi tracciati · ${problemCount} con problemi</div>
+          <div style="font-size:11px;color:var(--muted)">stato = conversione reale (<span style="color:#22d3ee">In prova</span> / <span style="color:#4ade80">Pagante</span>) da play_purchases, non più view_PremiumActivated · ${problemCount} con problemi</div>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
       </div>
@@ -4670,8 +4704,8 @@ function premiumPurchasersDetailCard(purchasers) {
             ${sorted.map(p => {
               const product = premiumPlanLabel(p.product);
               const prodColor = product === 'Annuale' ? '#a78bfa' : product === 'Mensile' ? '#4ade80' : 'var(--muted)';
-              const statusColor = p.success ? '#4ade80' : p.errorText ? '#f59e0b' : 'var(--muted)';
-              const statusBg = p.success ? '#102915' : p.errorText ? '#2b210f' : '#171728';
+              const statusColor = p.convState === 'paid' ? '#4ade80' : p.convState === 'trial' ? '#22d3ee' : p.convState === 'churned' ? '#ef4444' : p.errorText ? '#f59e0b' : 'var(--muted)';
+              const statusBg    = p.convState === 'paid' ? '#102915' : p.convState === 'trial' ? '#0e2a30' : p.convState === 'churned' ? '#2a1414' : p.errorText ? '#2b210f' : '#171728';
               return `
                 <tr style="border-bottom:1px solid #111120">
                   <td style="padding:10px 10px"><div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(p.name || 'Non tracciato')}</div></td>
