@@ -52,6 +52,7 @@ const FUNNEL_LABELS = [
   'Preme Start (inizia workout)',        // 15 · workout_start
   'Fa ≥1 esercizio',                     // 16 · exercise_complete
   'Completa workout (evento)',           // 17 · workout_complete
+  'Trial iniziato',                      // 18 · play_purchases is_trial=true (ha iniziato la prova)
 ];
 
 const LS_OV             = 'hm_overview_keys';
@@ -290,6 +291,9 @@ let state = {
   // dettaglio utenti che hanno raggiunto uno step di una creatività (modal su click step box)
   stepUsersModal: null, // { variant, step, label } quando aperto
   stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
+  premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
+  funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
+  funnelStepUsersData: null, funnelStepUsersLoading: false, funnelStepUsersError: null,
   goalsData: null, goalsLoading: false, goalsError: null,
   goalsFrom: BETA_START, goalsTo: TODAY, goalsGender: 'all', goalsView: 'current',
   goalChangesData: null, goalChangesLoading: false, goalChangesError: null,
@@ -481,6 +485,23 @@ async function fetchFunnel() {
   state.funnelLoading = false;
   render();
   if (state.metaToken && state.funnel) fetchMetaFunnel();
+}
+
+// Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
+// per uno specifico periodo (in confronto sprint = il periodo di quello sprint).
+async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome) {
+  state.funnelStepUsersModal = { stepIdx, label, sprintNome, inizio, fine };
+  state.funnelStepUsersData = null;
+  state.funnelStepUsersError = null;
+  state.funnelStepUsersLoading = true;
+  render();
+  try {
+    const res = await sb.rpc('kpi_funnel_step_users', { p_step: stepIdx, inizio, fine });
+    if (res.error) throw res.error;
+    state.funnelStepUsersData = res.data || [];
+  } catch (e) { state.funnelStepUsersError = e.message || 'Errore sconosciuto'; }
+  state.funnelStepUsersLoading = false;
+  render();
 }
 
 async function fetchGoals() {
@@ -1234,7 +1255,9 @@ function layout() {
     ${feedbackModal()}
     ${aiConversationsModal()}
     ${userActivityModal()}
-    ${stepUsersModal()}`;
+    ${stepUsersModal()}
+    ${premiumBucketModal()}
+    ${funnelStepUsersModal()}`;
 }
 
 function deleteConfirmModal() {
@@ -3949,9 +3972,10 @@ function premiumPurchaserModel(p) {
   // Il vero successo è la conversione reale in play_purchases (trial o pagamento), NON view_PremiumActivated
   // (un mount di schermata che si ripete). conv_state arriva dalla RPC: paid / trial / churned / none.
   const convState = premiumPick(p, ['conv_state'], 'none');
+  const canceling = premiumPick(p, ['canceling'], false) === true;
   const success = convState === 'paid' || convState === 'trial';
   const status =
-      convState === 'paid'    ? 'Pagante'
+      convState === 'paid'    ? (canceling ? 'Pagante · in disdetta' : 'Pagante')
     : convState === 'trial'   ? 'In prova'
     : convState === 'at_risk' ? 'A rischio (pagamento)'
     : convState === 'churned' ? 'Scaduto / annullato'
@@ -3963,6 +3987,7 @@ function premiumPurchaserModel(p) {
     email: premiumPick(p, ['email'], ''),
     attempts,
     convState,
+    canceling,
     success,
     status,
     product: premiumPick(p, ['prodotto', 'product_id', 'product', 'plan']),
@@ -4029,12 +4054,17 @@ function pagePremium() {
     <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
-      ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', lastNote, 'abbonati_attivi')}
-      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'prova gratuita 7gg attiva adesso · da play_purchases (is_trial)', 'in_prova_ora')}
+      ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', lastNote, 'abbonati_attivi', 'paying')}
+      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'prova gratuita 7gg attiva adesso · da play_purchases (is_trial)', 'in_prova_ora', 'trialing')}
       ${(() => {
         const ar = d.at_risk || { grace: 0, on_hold: 0 };
         const arTot = (ar.grace || 0) + (ar.on_hold || 0);
-        return premiumKpi('A rischio', arTot, arTot > 0 ? `${ar.grace || 0} grace · ${ar.on_hold || 0} hold` : null, arTot > 0 ? '#f59e0b' : 'var(--muted)', 'pagamento fallito ma accesso ancora attivo (grace) o sospeso (hold) · NON contati tra i paganti');
+        return premiumKpi('A rischio', arTot, arTot > 0 ? `${ar.grace || 0} grace · ${ar.on_hold || 0} hold` : null, arTot > 0 ? '#f59e0b' : 'var(--muted)', 'pagamento fallito ma accesso ancora attivo (grace) o sospeso (hold) · NON contati tra i paganti', null, 'at_risk');
+      })()}
+      ${(() => {
+        const canc = d.canceling || 0;
+        const cancP = d.canceled_period || 0;
+        return premiumKpi('In disdetta', canc, cancP > 0 ? `${cancP} disdett${cancP === 1 ? 'a' : 'e'} nel periodo` : null, canc > 0 ? '#f472b6' : 'var(--muted)', 'paganti attivi che hanno già annullato il rinnovo · restano fino a scadenza poi escono (churn in arrivo)', null, 'canceling');
       })()}
       ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
@@ -4061,9 +4091,6 @@ function pagePremium() {
     <!-- Creatività: quale paywall converte di più, col percorso step inline -->
     ${premiumCreativesCard(d)}
 
-    <!-- Sorgenti: stessa lista, 4 viste a tab -->
-    ${premiumSourcesCard(d, purchasers)}
-
     <!-- Chi ha tentato / acquistato -->
     ${premiumPurchasersDetailCard(purchasers)}
 
@@ -4072,16 +4099,20 @@ function pagePremium() {
   `;
 }
 
-function premiumKpi(label, value, sub, color, note, infoKey) {
+function premiumKpi(label, value, sub, color, note, infoKey, bucket) {
   const infoBtn = infoKey
     ? `<button onclick="showKpiInfo(event,'${esc(infoKey)}')" style="background:none;border:none;cursor:pointer;color:#4a4a6a;font-size:11px;padding:0 0 0 4px;line-height:1;vertical-align:middle" title="Come si calcola?">ℹ</button>`
     : '';
+  const clickAttr = bucket ? ` data-premium-bucket="${esc(bucket)}" title="Clicca per la lista utenti"` : '';
+  const clickStyle = bucket ? 'cursor:pointer;' : '';
+  const clickHint = bucket ? `<div style="font-size:10px;color:#5a5a7a;margin-top:6px">clicca per la lista ›</div>` : '';
   return `
-    <div class="card" style="padding:16px 18px">
+    <div class="card"${clickAttr} style="padding:16px 18px;${clickStyle}">
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">${label}${infoBtn}</div>
       <div style="font-size:30px;font-weight:800;color:${color};line-height:1">${value}</div>
       ${sub  ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${sub}</div>` : ''}
       ${note ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid #2a2a3d">${note}</div>` : ''}
+      ${clickHint}
     </div>`;
 }
 
@@ -4278,6 +4309,129 @@ function stepUsersModal() {
         <div style="flex:1;overflow-y:auto;min-height:0">
           ${body}
         </div>
+      </div>
+    </div>`;
+}
+
+// Modale lista utenti per i KPI cliccabili (Abbonati paganti / In prova / A rischio / In disdetta).
+// I dati arrivano già in state.premiumData.subscribers (nessuna fetch): filtriamo per bucket.
+const PREMIUM_BUCKET_META = {
+  paying:    { title: 'Abbonati paganti', color: '#4ade80', desc: 'pagamento incassato · accesso attivo' },
+  trialing:  { title: 'In prova ora',     color: '#22d3ee', desc: 'prova gratuita attiva adesso' },
+  at_risk:   { title: 'A rischio',        color: '#f59e0b', desc: 'pagamento fallito · grace period o account hold' },
+  canceling: { title: 'In disdetta',      color: '#f472b6', desc: 'pagante che ha già annullato il rinnovo · esce a scadenza' },
+};
+
+function premiumBucketModal() {
+  const key = state.premiumBucketModal;
+  if (!key) return '';
+  const meta = PREMIUM_BUCKET_META[key] || { title: key, color: '#818cf8', desc: '' };
+  const all = (state.premiumData && state.premiumData.subscribers) || [];
+  const rows = all.filter(s => s[key] === true);
+
+  const body = !rows.length
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Nessun utente in questa lista.</div>`
+    : `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:#0f0f1a">
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Nome</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Email</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Piano</th>
+            <th style="text-align:right;padding:8px 14px;border-bottom:1px solid #1e1e30">Prezzo</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Inizio</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Scadenza</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(s => `
+            <tr style="border-bottom:1px solid #15151f">
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.nome || '—')}${(s.canceling && key !== 'canceling') ? ' <span style="color:#f472b6;font-size:10px">· in disdetta</span>' : ''}</td>
+              <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(s.email)}" style="color:#a78bfa;text-decoration:none">${esc(s.email || '—')}</a></td>
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.piano || '—')}</td>
+              <td style="padding:9px 14px;text-align:right;color:var(--fg);white-space:nowrap">${s.prezzo != null ? '€ ' + Number(s.prezzo).toFixed(2).replace('.', ',') : '—'}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.inizio || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.scadenza || '—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  return `
+    <div id="premium-bucket-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:720px;height:min(80vh,620px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700;color:${meta.color}">${esc(meta.title)} <span style="color:var(--muted);font-weight:400">· ${rows.length}</span></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${esc(meta.desc)} · stato attuale</div>
+          </div>
+          <button id="premium-bucket-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:0">${body}</div>
+      </div>
+    </div>`;
+}
+
+// Modale "chi è nello step del funnel" (Premium pagante / Trial iniziato). Fetch dedicata per periodo.
+function funnelStepUsersModal() {
+  const m = state.funnelStepUsersModal;
+  if (!m) return '';
+  const rows = state.funnelStepUsersData || [];
+  const body = state.funnelStepUsersLoading
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px" class="pulse">Caricamento utenti…</div>`
+    : state.funnelStepUsersError
+    ? `<div style="padding:24px;color:var(--red);font-size:13px">⚠️ ${esc(state.funnelStepUsersError)}</div>`
+    : !rows.length
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Nessun utente per questo step in questo periodo.</div>`
+    : `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:#0f0f1a">
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Nome</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Email</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Piano</th>
+            <th style="text-align:right;padding:8px 14px;border-bottom:1px solid #1e1e30">Prezzo</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Inizio</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Scadenza</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(s => `
+            <tr style="border-bottom:1px solid #15151f">
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.nome || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(s.email)}" style="color:#a78bfa;text-decoration:none">${esc(s.email || '—')}</a></td>
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.piano || '—')}</td>
+              <td style="padding:9px 14px;text-align:right;color:var(--fg);white-space:nowrap">${s.prezzo != null ? '€ ' + Number(s.prezzo).toFixed(2).replace('.', ',') : '—'}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.inizio || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.scadenza || '—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  return `
+    <div id="funnel-step-users-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:720px;height:min(80vh,620px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700;color:var(--fg)">${esc(m.label)} <span style="color:var(--muted);font-weight:400">· ${rows.length}</span></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${esc(m.sprintNome || '')} · ${esc(m.inizio)} → ${esc(m.fine)}</div>
+          </div>
+          <button id="funnel-step-users-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:0">${body}</div>
       </div>
     </div>`;
 }
@@ -4710,8 +4864,8 @@ function premiumPurchasersDetailCard(purchasers) {
             ${sorted.map(p => {
               const product = premiumPlanLabel(p.product);
               const prodColor = product === 'Annuale' ? '#a78bfa' : product === 'Mensile' ? '#4ade80' : 'var(--muted)';
-              const statusColor = p.convState === 'paid' ? '#4ade80' : p.convState === 'trial' ? '#22d3ee' : p.convState === 'at_risk' ? '#f59e0b' : p.convState === 'churned' ? '#ef4444' : p.errorText ? '#f59e0b' : 'var(--muted)';
-              const statusBg    = p.convState === 'paid' ? '#102915' : p.convState === 'trial' ? '#0e2a30' : p.convState === 'at_risk' ? '#2b210f' : p.convState === 'churned' ? '#2a1414' : p.errorText ? '#2b210f' : '#171728';
+              const statusColor = p.convState === 'paid' ? (p.canceling ? '#f472b6' : '#4ade80') : p.convState === 'trial' ? '#22d3ee' : p.convState === 'at_risk' ? '#f59e0b' : p.convState === 'churned' ? '#ef4444' : p.errorText ? '#f59e0b' : 'var(--muted)';
+              const statusBg    = p.convState === 'paid' ? (p.canceling ? '#2c1622' : '#102915') : p.convState === 'trial' ? '#0e2a30' : p.convState === 'at_risk' ? '#2b210f' : p.convState === 'churned' ? '#2a1414' : p.errorText ? '#2b210f' : '#171728';
               return `
                 <tr style="border-bottom:1px solid #111120">
                   <td style="padding:10px 10px"><div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(p.name || 'Non tracciato')}</div></td>
@@ -5375,7 +5529,9 @@ function sprintFunnelTable(selected, dataMap) {
           <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
             <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
           </div>
-          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}" ${noData ? 'title="Dato non disponibile per questo periodo"' : ''}>${noData ? 'n.d.' : num}</span>
+          ${(stepIdx === 10 || stepIdx === 18) && !noData && num > 0
+            ? `<span class="funnel-step-users" data-step="${stepIdx}" data-inizio="${esc(s.inizio)}" data-fine="${esc(s.fine)}" data-label="${esc(label)}" data-sprint="${esc(s.nome)}" title="Vedi chi sono questi utenti" style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${colors[si]};cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${num}</span>`
+            : `<span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}" ${noData ? 'title="Dato non disponibile per questo periodo"' : ''}>${noData ? 'n.d.' : num}</span>`}
         </div>
         ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
       </td>`;
@@ -6796,6 +6952,30 @@ function attachEvents() {
     state.premiumData = null;
     fetchPremium();
   });
+  // Click su un KPI cliccabile (paganti / in prova / a rischio / in disdetta) → modale lista utenti.
+  document.querySelectorAll('[data-premium-bucket]').forEach(el =>
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return; // non aprire se si clicca la ℹ
+      state.premiumBucketModal = el.dataset.premiumBucket;
+      render();
+    }));
+  document.getElementById('premium-bucket-close')?.addEventListener('click', () => {
+    state.premiumBucketModal = null; render();
+  });
+  document.getElementById('premium-bucket-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.premiumBucketModal = null; render(); }
+  });
+  // Click su una cella cliccabile del funnel (Premium pagante / Trial iniziato) → lista utenti di quel periodo/sprint.
+  document.querySelectorAll('.funnel-step-users').forEach(el =>
+    el.addEventListener('click', () => {
+      fetchFunnelStepUsers(+el.dataset.step, el.dataset.inizio, el.dataset.fine, el.dataset.label, el.dataset.sprint);
+    }));
+  document.getElementById('funnel-step-users-close')?.addEventListener('click', () => {
+    state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render();
+  });
+  document.getElementById('funnel-step-users-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render(); }
+  });
   // click su un box del percorso step di una creatività → lista utenti che lo hanno raggiunto
   document.querySelectorAll('.premium-step-box').forEach(el =>
     el.addEventListener('click', () => {
@@ -6960,6 +7140,8 @@ function attachEvents() {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (state.stepUsersModal)    { state.stepUsersModal = null; state.stepUsersData = null; render(); return; }
+    if (state.premiumBucketModal){ state.premiumBucketModal = null; render(); return; }
+    if (state.funnelStepUsersModal){ state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render(); return; }
     if (state.userActivityOpen)  { state.userActivityOpen = false; render(); return; }
     if (state.aiConvOpen)        { state.aiConvOpen = false; render(); return; }
     if (state.feedbackModalOpen) { state.feedbackModalOpen = false; render(); return; }
