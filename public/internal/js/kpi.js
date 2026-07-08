@@ -3953,6 +3953,7 @@ function premiumPurchaserModel(p) {
   const status =
       convState === 'paid'    ? 'Pagante'
     : convState === 'trial'   ? 'In prova'
+    : convState === 'at_risk' ? 'A rischio (pagamento)'
     : convState === 'churned' ? 'Scaduto / annullato'
     : errorText               ? 'Problema da verificare'
     :                           'Tentativo senza successo';
@@ -4030,6 +4031,11 @@ function pagePremium() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
       ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', lastNote, 'abbonati_attivi')}
       ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'prova gratuita 7gg attiva adesso · da play_purchases (is_trial)', 'in_prova_ora')}
+      ${(() => {
+        const ar = d.at_risk || { grace: 0, on_hold: 0 };
+        const arTot = (ar.grace || 0) + (ar.on_hold || 0);
+        return premiumKpi('A rischio', arTot, arTot > 0 ? `${ar.grace || 0} grace · ${ar.on_hold || 0} hold` : null, arTot > 0 ? '#f59e0b' : 'var(--muted)', 'pagamento fallito ma accesso ancora attivo (grace) o sospeso (hold) · NON contati tra i paganti');
+      })()}
       ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
       ${premiumKpi('Frequenza paywall', avgShown ? avgShown + '×' : '—', null, avgShown ? '#818cf8' : 'var(--muted)', 'volte in media che ogni utente vede il paywall · alto = mostrato troppo spesso', 'frequenza_paywall')}
@@ -4704,8 +4710,8 @@ function premiumPurchasersDetailCard(purchasers) {
             ${sorted.map(p => {
               const product = premiumPlanLabel(p.product);
               const prodColor = product === 'Annuale' ? '#a78bfa' : product === 'Mensile' ? '#4ade80' : 'var(--muted)';
-              const statusColor = p.convState === 'paid' ? '#4ade80' : p.convState === 'trial' ? '#22d3ee' : p.convState === 'churned' ? '#ef4444' : p.errorText ? '#f59e0b' : 'var(--muted)';
-              const statusBg    = p.convState === 'paid' ? '#102915' : p.convState === 'trial' ? '#0e2a30' : p.convState === 'churned' ? '#2a1414' : p.errorText ? '#2b210f' : '#171728';
+              const statusColor = p.convState === 'paid' ? '#4ade80' : p.convState === 'trial' ? '#22d3ee' : p.convState === 'at_risk' ? '#f59e0b' : p.convState === 'churned' ? '#ef4444' : p.errorText ? '#f59e0b' : 'var(--muted)';
+              const statusBg    = p.convState === 'paid' ? '#102915' : p.convState === 'trial' ? '#0e2a30' : p.convState === 'at_risk' ? '#2b210f' : p.convState === 'churned' ? '#2a1414' : p.errorText ? '#2b210f' : '#171728';
               return `
                 <tr style="border-bottom:1px solid #111120">
                   <td style="padding:10px 10px"><div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(p.name || 'Non tracciato')}</div></td>
