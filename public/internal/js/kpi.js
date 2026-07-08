@@ -55,6 +55,33 @@ const FUNNEL_LABELS = [
   'Trial iniziato',                      // 18 · play_purchases is_trial=true (ha iniziato la prova)
 ];
 
+// Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_events, UNION user_events+anonymous_events).
+// Minimo e focalizzato sull'onboarding: le 9 schermate del wizard free (in ordine di flusso), più
+// first_open come testa/denominatore e onboarding_complete come endpoint. Nomi amichevoli già pronti;
+// l'event_name reale è mostrato tra parentesi nel menu. Le view_Onboarding* appaiono subito anche se
+// non ancora in prod (mostreranno 0 finché l'app non le emette). Aggiungere una voce qui = disponibile
+// nel menu. NON è il posto per gli step del funnel standard (quelli girano sul funnel-utenti).
+const EVENT_CATALOG = [
+  { event: 'first_open',                          label: 'Download / primo avvio' },
+  { event: 'view_OnboardingConfirmation',         label: 'Onboarding · Conferma email' },
+  { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario' },
+  { event: 'view_OnboardingName',                 label: 'Onboarding · Nome' },
+  { event: 'view_OnboardingAge',                  label: 'Onboarding · Età' },
+  { event: 'view_OnboardingGender',               label: 'Onboarding · Genere' },
+  { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo' },
+  { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo' },
+  { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello' },
+  { event: 'view_OnboardingNotifications',        label: 'Onboarding · Notifiche' },
+  { event: 'onboarding_complete',                 label: 'Onboarding · Completato (fine)' },
+];
+
+// Etichetta leggibile di uno step evento: label salvata → catalogo → nome grezzo.
+function eventStepLabel(row) {
+  if (row && row.label) return row.label;
+  const c = EVENT_CATALOG.find(e => e.event === (row && row.event));
+  return c ? c.label : ((row && row.event) || '');
+}
+
 const LS_OV             = 'hm_overview_keys';
 const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
@@ -249,6 +276,7 @@ let state = {
   page: 'overview',
   data: null, chart: null, loading: true, lastUpdated: null, error: null,
   funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
+  funnelSprintId: '',          // sprint scelto nel selettore periodo della pagina Funnel ('' = periodo libero)
   funnelLoading: false, funnelError: null,
   retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
   retWeeks: 6, retMinW0: 1,
@@ -257,7 +285,11 @@ let state = {
   funnelConfig: JSON.parse(JSON.stringify(DEF_FUN_CFG)),
   editingOverview: false,
   editingFunnel: false,
-  savedFunnels: loadLS(LS_SAVED_FUNNELS, []),
+  funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_events)
+  eventFunnelConfig: [],       // [{event, source, label, vsIdx}] — step del funnel a eventi in editing
+  eventFunnel: null,           // risultato RPC kpi_funnel_events: {steps:[{idx,event,source,numero}]}
+  eventFunnelLoading: false, eventFunnelError: null,
+  savedFunnels: [],           // funnel salvati/nominati — ora dal DB (funnel_definitions), non più localStorage
   activeFunnelPreset: null,
   funnelSaveOpen: false,
   funnelSaveName: '',
@@ -275,6 +307,7 @@ let state = {
   funnelAssignSaving: false,
   funnelOverwriteConfirm: null, // { kind:'assign'|'sprint', names:[…] } — modal "digita Modifica" quando si sovrascrive un funnel già custom
   sprintFunnelOpen: false, sprintFunnelSel: [], sprintFunnelData: {}, sprintFunnelLoading: false, sprintFunnelError: null,
+  sprintFunnelDef: null,       // id di una funnel_definition da applicare UGUALE a tutti gli sprint nel confronto; null = Base (ogni sprint il suo funnel_config)
   sprintFunnelHiddenSteps: [], // stepIdx nascosti SOLO in visualizzazione confronto (session-only, non persistito, non tocca i funnel)
   sprintRetOpen: false, sprintRetSel: [], sprintRetData: {}, sprintRetLoading: false, sprintRetError: null,
   sprintRetCustom: false, sprintRetMin: 1, sprintRetWeeks: 6, sprintRetMinW0: 1,
@@ -487,6 +520,23 @@ async function fetchFunnel() {
   if (state.metaToken && state.funnel) fetchMetaFunnel();
 }
 
+// Calcola il funnel a eventi (kpi_funnel_events legge la UNION user_events + anonymous_events).
+async function fetchEventFunnel() {
+  const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
+  if (!steps.length) { state.eventFunnel = null; render(); return; }
+  state.eventFunnelLoading = true;
+  state.eventFunnelError = null;
+  render();
+  try {
+    const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
+    const res = await sb.rpc('kpi_funnel_events', { inizio: state.funnelFrom, fine: state.funnelTo, p_steps });
+    if (res.error) throw res.error;
+    state.eventFunnel = res.data;
+  } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
+  state.eventFunnelLoading = false;
+  render();
+}
+
 // Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
 // per uno specifico periodo (in confronto sprint = il periodo di quello sprint).
 async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome) {
@@ -689,6 +739,33 @@ async function fetchSprints() {
     state.sprints = res.data || [];
   } catch (e) { console.error('fetchSprints', e); }
   state.sprintsLoading = false;
+  render();
+}
+
+// Funnel salvati/nominati — caricati dal DB (funnel_definitions). Un tempo vivevano in localStorage
+// (hm_saved_funnels_v1): alla prima esecuzione li migriamo nel DB e svuotiamo la chiave, così diventano
+// condivisi (Danilo li vede) e non si perdono pulendo il browser. La forma runtime tiene .name/.config
+// per compatibilità col codice di render/apply esistente, più .id (per delete) e .tipo/.steps.
+async function fetchFunnelDefinitions() {
+  try {
+    const legacy = loadLS(LS_SAVED_FUNNELS, null);
+    if (Array.isArray(legacy) && legacy.length) {
+      const rows = legacy.map(f => ({
+        nome:  f.name || 'Senza nome',
+        tipo:  'catalog',
+        steps: Array.isArray(f.config) ? f.config : [],
+      }));
+      const ins = await sb.from('funnel_definitions').insert(rows);
+      if (!ins.error) localStorage.removeItem(LS_SAVED_FUNNELS);
+      else console.error('migrazione saved funnels', ins.error);
+    }
+    const res = await sb.from('funnel_definitions').select('*').order('created_at', { ascending: true });
+    if (res.error) throw res.error;
+    state.savedFunnels = (res.data || []).map(r => ({
+      id: r.id, name: r.nome, descrizione: r.descrizione,
+      tipo: r.tipo, config: r.steps, steps: r.steps,
+    }));
+  } catch (e) { console.error('fetchFunnelDefinitions', e); }
   render();
 }
 
@@ -3338,9 +3415,9 @@ function savedFunnelBar() {
       </button>
       ${savedFunnels.map((f, i) => `
         <div style="display:inline-flex;align-items:stretch">
-          <button class="funnel-preset-btn" data-preset-idx="${i}"
+          <button class="funnel-preset-btn" data-preset-idx="${i}" title="${(f.tipo || 'catalog') === 'event' ? 'Funnel a eventi' : 'Funnel da catalogo'}"
             style="${pill(activeFunnelPreset === i)};border-radius:20px 0 0 20px;border-right:none">
-            ${esc(f.name)}
+            ${(f.tipo || 'catalog') === 'event' ? '⚡ ' : ''}${esc(f.name)}
           </button>
           <button class="funnel-preset-del" data-preset-idx="${i}"
             style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>
@@ -3353,11 +3430,13 @@ function savedFunnelBar() {
             <button id="funnel-save-confirm" class="btn btn-primary" style="padding:4px 12px;font-size:12px">Salva</button>
             <button id="funnel-save-cancel" class="btn btn-ghost" style="padding:4px 10px;font-size:12px">×</button>
           </div>`
-        : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>`}
+        : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>
+           <button id="funnel-new-event" class="btn btn-ghost" style="padding:4px 12px;font-size:12px" title="Crea un funnel a eventi liberi (es. schermate onboarding)">⚡ Nuovo funnel eventi</button>`}
     </div>`;
 }
 
 function pageFunnel() {
+  if (state.funnelMode === 'event') return pageFunnelEvent();
   const editPanel = state.editingFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
       <div class="card-title" style="margin-bottom:16px">Costruttore Funnel</div>
@@ -3385,8 +3464,8 @@ function pageFunnel() {
       ${state.sprints.length ? `
         <span class="filter-label">Sprint</span>
         <select id="funnel-sprint-sel" class="form-select" style="font-size:12px;padding:5px 10px;min-width:160px">
-          <option value="">— Periodo libero —</option>
-          ${state.sprints.map(s => `<option value="${s.id}">${s.nome}</option>`).join('')}
+          <option value="" ${!state.funnelSprintId ? 'selected' : ''}>— Periodo libero —</option>
+          ${state.sprints.map(s => `<option value="${s.id}" ${state.funnelSprintId === s.id ? 'selected' : ''}>${s.nome}</option>`).join('')}
         </select>
         <div class="filter-sep"></div>
       ` : ''}
@@ -3415,6 +3494,137 @@ function pageFunnel() {
     ${metaFunnelSection()}
     </div>
     ${sprintFunnelSection()}`;
+}
+
+// ── FUNNEL A EVENTI (kpi_funnel_events, UNION user_events + anonymous_events) ──────────
+// Builder libero: ogni step è un event_name qualsiasi (es. le schermate onboarding view_Onboarding*).
+// Serve a costruire funnel iper-specifici che il catalogo fisso non copre.
+
+function pageFunnelEvent() {
+  const cfg = state.eventFunnelConfig || [];
+
+  const editor = `
+    <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div class="card-title" style="margin-bottom:0">Costruttore funnel onboarding</div>
+        <span style="font-size:11px;color:var(--muted)">Scegli le schermate in ordine; il “% vs” calcola il calo tra uno step e l'altro</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+        ${cfg.length ? cfg.map((row, i) => eventFunnelEditRow(row, i)).join('')
+          : `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuno step. Aggiungi il primo evento del funnel.</div>`}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="event-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="event-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Calcola</button>
+      </div>
+    </div>`;
+
+  const body = state.eventFunnelLoading
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo funnel...</div></div>`
+    : state.eventFunnelError
+    ? `<div style="padding:20px;color:var(--red);font-size:13px">⚠️ ${esc(state.eventFunnelError)}</div>`
+    : !state.eventFunnel
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon">🎯</div><div class="empty-text" style="color:var(--muted)">Aggiungi gli step e clicca Calcola.</div></div>`
+    : eventFunnelViz();
+
+  return `
+    ${savedFunnelBar()}
+    <div class="filter-bar" style="margin-bottom:20px">
+      ${state.sprints.length ? `
+        <span class="filter-label">Sprint</span>
+        <select id="funnel-sprint-sel" class="form-select" style="font-size:12px;padding:5px 10px;min-width:160px">
+          <option value="" ${!state.funnelSprintId ? 'selected' : ''}>— Periodo libero —</option>
+          ${state.sprints.map(s => `<option value="${s.id}" ${state.funnelSprintId === s.id ? 'selected' : ''}>${s.nome}</option>`).join('')}
+        </select>
+        <div class="filter-sep"></div>
+      ` : ''}
+      <span class="filter-label">Periodo</span>
+      <input type="date" id="funnel-from" class="form-input" value="${state.funnelFrom}" style="width:145px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="funnel-to" class="form-input" value="${state.funnelTo}" style="width:145px;padding:5px 10px;font-size:12px">
+      <button id="event-funnel-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
+    </div>
+
+    ${editor}
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:4px">Funnel a eventi</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:20px">
+        ${state.funnelFrom} → ${state.funnelTo} · legge user_events + anonymous_events (attribuzione via sessione) · esclusi bloccati
+      </div>
+      ${body}
+    </div>`;
+}
+
+// Riga editor del funnel a eventi. row = {event, label, vsIdx}. Menu a tendina dal catalogo curato
+// (nome amichevole + event_name tra parentesi); vsIdx = posizione di uno step precedente per la %.
+function eventFunnelEditRow(row, i) {
+  const cfg = state.eventFunnelConfig || [];
+  const opts = EVENT_CATALOG.slice();
+  // se lo step salvato punta a un evento non in catalogo, lo aggiungo per non perderlo
+  if (row.event && !opts.some(o => o.event === row.event)) opts.push({ event: row.event, label: row.event });
+  const stepOpts = `<option value="" ${!row.event ? 'selected' : ''}>— scegli evento —</option>` +
+    opts.map(o =>
+      `<option value="${esc(o.event)}" ${row.event === o.event ? 'selected' : ''}>${esc(o.label)}${o.label !== o.event ? ` (${esc(o.event)})` : ''}</option>`).join('');
+  const vsOpts = `<option value="">—</option>` +
+    cfg.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${esc(eventStepLabel(r) || ('step ' + (j + 1)))}</option>`).join('');
+  return `
+    <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select event-funnel-name" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select event-funnel-vs" data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+function eventFunnelViz() {
+  const cfg  = state.eventFunnelConfig || [];
+  const data = (state.eventFunnel && state.eventFunnel.steps) || [];
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato.</div>`;
+  // allinea i risultati per posizione (la RPC ritorna idx = posizione dello step inviato)
+  const numById = {};
+  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
+  const nums = cfg.map((_, i) => numById[i] ?? 0);
+  const maxN = Math.max(...nums, 1);
+
+  return cfg.map((row, i) => {
+    const n     = nums[i];
+    const label = eventStepLabel(row) || ('step ' + (i + 1));
+    const vsN   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? nums[row.vsIdx] : null;
+    const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+    const conv    = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+    const isLow   = convPct !== null && convPct < 20;
+    const isGood  = convPct !== null && convPct >= 50;
+    const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
+    const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
+    return `
+      <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
+        <div style="width:230px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">
+          ${esc(label)}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}</div>
+        </div>
+        <div style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
+          <div style="height:100%;width:${(n / maxN) * 100}%;background:${barColor};opacity:.75;border-radius:3px"></div>
+        </div>
+        <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0">${n}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
+      </div>`;
+  }).join('');
+}
+
+// Persiste la config del funnel a eventi. Se è attivo un funnel salvato di tipo 'event', riscrive i suoi
+// step nel DB (come persistFunnelConfig per i catalog). Mantiene aggiornata la copia in memoria.
+async function persistEventFunnelConfig() {
+  const i = state.activeFunnelPreset;
+  if (i === null || i === undefined) return;
+  const preset = state.savedFunnels[i];
+  if (!preset || !preset.id || (preset.tipo || 'catalog') !== 'event') return;
+  const steps = JSON.parse(JSON.stringify(state.eventFunnelConfig));
+  preset.config = steps; preset.steps = steps;
+  const upd = await sb.from('funnel_definitions')
+    .update({ steps, updated_at: new Date().toISOString() })
+    .eq('id', preset.id);
+  if (upd.error) console.error('persist event funnel', upd.error);
 }
 
 // Pannello "Assegna a sprint": scrive il funnel CORRENTE (state.funnelConfig) nella colonna
@@ -3535,8 +3745,27 @@ function reorderFunnelCfg(cfg, from, to) {
 
 function moveFunnelRow(from, to) {
   if (!reorderFunnelCfg(state.funnelConfig, from, to)) return;
-  saveSetting('funnel_cfg', state.funnelConfig);
+  persistFunnelConfig();
   render();
+}
+
+// Persiste la config di lavoro del builder. Salva SEMPRE la copia di lavoro in localStorage (come prima),
+// e se è attivo un funnel SALVATO (activeFunnelPreset ≠ null) riscrive gli step su QUEL funnel nel DB.
+// Così "modifica → chiudi → cambia funnel → torna" ritrova le modifiche (prima restavano solo nella
+// copia temporanea e il preset ricaricava la sua fotografia originale). Aggiorna anche la copia in
+// memoria (savedFunnels[i]) senza refetch, così l'indice attivo resta valido.
+async function persistFunnelConfig() {
+  saveSetting('funnel_cfg', state.funnelConfig);
+  const i = state.activeFunnelPreset;
+  if (i === null || i === undefined) return;
+  const preset = state.savedFunnels[i];
+  if (!preset || !preset.id) return;
+  const steps = JSON.parse(JSON.stringify(state.funnelConfig));
+  preset.config = steps; preset.steps = steps;
+  const upd = await sb.from('funnel_definitions')
+    .update({ steps, updated_at: new Date().toISOString() })
+    .eq('id', preset.id);
+  if (upd.error) console.error('persist funnel def', upd.error);
 }
 
 // Config funnel effettiva di uno sprint: la sua personalizzazione se presente, altrimenti il default.
@@ -5278,14 +5507,35 @@ function sprintFunnelSection() {
           <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
         </div>
-        <div style="display:flex;align-items:center;gap:12px">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
           <button id="sprint-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
             ${!state.sprintFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+          ${sprintFunnelDefSelector()}
           ${!hasData && !state.sprintFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
         </div>
         ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
       </div>
     </div>`;
+}
+
+// Selettore "quale funnel confrontare": Base (ogni sprint usa il suo funnel_config) oppure una
+// definizione salvata applicata IDENTICA a tutti gli sprint (stesso metro). Per ora lista le sole
+// definizioni tipo 'catalog' (gli event-based avranno la loro tabella dedicata nell'incremento successivo).
+function sprintFunnelDefSelector() {
+  const defs = (state.savedFunnels || []).filter(d => (d.tipo || 'catalog') === 'catalog');
+  if (!defs.length) return ''; // nessun funnel salvato → solo Base, selettore inutile
+  const opts = [`<option value="" ${!state.sprintFunnelDef ? 'selected' : ''}>Base (ogni sprint il suo)</option>`]
+    .concat(defs.map(d => `<option value="${esc(d.id)}" ${state.sprintFunnelDef === d.id ? 'selected' : ''}>${esc(d.name)}</option>`))
+    .join('');
+  return `
+    <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Funnel</span>
+    <select id="sprint-funnel-def-sel" class="form-select" style="font-size:12px;padding:5px 10px;min-width:180px">${opts}</select>`;
+}
+
+// La definizione (catalog) attualmente selezionata per il confronto, o null se siamo in modalità Base.
+function activeSprintFunnelDef() {
+  if (!state.sprintFunnelDef) return null;
+  return (state.savedFunnels || []).find(d => d.id === state.sprintFunnelDef && (d.tipo || 'catalog') === 'catalog') || null;
 }
 
 function sprintFunnelCompareView() {
@@ -5298,9 +5548,14 @@ function sprintFunnelCompareView() {
         <span style="font-weight:600;color:var(--text)">${s.nome}</span>
         <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
       </span>`).join('')}
-  </div>
-  <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">Ogni sprint usa il suo funnel (o quello di default). La cella <span style="color:#3a3a55">·</span> indica uno step non incluso nel funnel di quello sprint. I funnel si modificano nella pagina <strong style="color:var(--text)">Sprint</strong> o si assegnano da qui col pulsante “Assegna a sprint”.</div>`;
-  return legend + sprintFunnelTable(selected, state.sprintFunnelData);
+  </div>`;
+  const def = activeSprintFunnelDef();
+  const note = def
+    ? `Confronto sul funnel <strong style="color:var(--text)">${esc(def.name)}</strong>: gli <strong style="color:var(--text)">stessi step</strong> applicati a ogni sprint (stesso metro). Il funnel base di ogni sprint non viene toccato — torni a vederlo scegliendo “Base”.`
+    : `Ogni sprint usa il suo funnel (o quello di default). La cella <span style="color:#3a3a55">·</span> indica uno step non incluso nel funnel di quello sprint. I funnel si modificano nella pagina <strong style="color:var(--text)">Sprint</strong> o si assegnano da qui col pulsante “Assegna a sprint”.`;
+  return legend +
+    `<div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">${note}</div>` +
+    sprintFunnelTable(selected, state.sprintFunnelData);
 }
 
 // ── SPRINT COMPARE — RETENTION ────────────────────────────────────────
@@ -5463,8 +5718,11 @@ function sprintFunnelTable(selected, dataMap) {
   // Ogni sprint ha la sua config (o il default). La tabella mostra l'UNIONE di tutti gli step
   // usati dagli sprint selezionati: dove uno sprint non include uno step, la cella resta vuota.
   // L'ordine dell'unione preserva quello dei funnel (appende gli step nuovi man mano che compaiono).
+  // Modalità Base → ogni sprint usa il SUO funnel_config. Modalità definizione → gli stessi step
+  // (config della definizione) applicati a TUTTI gli sprint, così il confronto è a parità di metro.
+  const def   = activeSprintFunnelDef();
   const cfgOf  = {};
-  selected.forEach(s => { cfgOf[s.id] = sprintFunnelCfg(s); });
+  selected.forEach(s => { cfgOf[s.id] = def ? def.config : sprintFunnelCfg(s); });
   const unionSteps = [];
   selected.forEach(s => cfgOf[s.id].forEach(r => {
     if (!unionSteps.includes(r.stepIdx)) unionSteps.push(r.stepIdx);
@@ -6156,6 +6414,11 @@ function attachEvents() {
     const to   = document.getElementById('funnel-to')?.value;
     if (from) state.funnelFrom = from;
     if (to)   state.funnelTo   = to;
+    // se le date non coincidono più con lo sprint selezionato, il periodo è ora "libero"
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    if (!selSprint || selSprint.inizio !== state.funnelFrom || selSprint.fine !== state.funnelTo) {
+      state.funnelSprintId = '';
+    }
     state.activeFunnelPreset = null;
     state.funnel = null;
     state.metaFunnelData = null;
@@ -6178,12 +6441,12 @@ function attachEvents() {
   document.getElementById('funnel-add')?.addEventListener('click', () => {
     const lastIdx = state.funnelConfig.length > 0 ? state.funnelConfig.length - 1 : null;
     state.funnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
-    saveSetting('funnel_cfg', state.funnelConfig);
+    persistFunnelConfig();
     render();
   });
   document.getElementById('funnel-reset')?.addEventListener('click', () => {
     state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
-    saveSetting('funnel_cfg', state.funnelConfig);
+    persistFunnelConfig();
     render();
   });
 
@@ -6193,32 +6456,62 @@ function attachEvents() {
       const idx = el.dataset.presetIdx;
       if (idx === 'default') {
         state.activeFunnelPreset = null;
+        state.funnelMode = 'catalog';
         state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
         state.funnelFrom = BETA_START;
         state.funnelTo   = TODAY;
-      } else {
-        const i = +idx;
-        const preset = state.savedFunnels[i];
-        if (!preset) return;
-        state.activeFunnelPreset = i;
-        state.funnelConfig = JSON.parse(JSON.stringify(preset.config));
-        state.funnelFrom   = preset.from;
-        state.funnelTo     = preset.to;
+        state.funnel = null;
+        state.metaFunnelData = null;
+        state.metaFunnelPeriod = null;
+        fetchFunnel();
+        return;
       }
-      state.funnel = null;
-      state.metaFunnelData = null;
-      state.metaFunnelPeriod = null;
-      fetchFunnel();
+      const i = +idx;
+      const preset = state.savedFunnels[i];
+      if (!preset) return;
+      state.activeFunnelPreset = i;
+      if ((preset.tipo || 'catalog') === 'event') {
+        state.funnelMode = 'event';
+        state.eventFunnelConfig = JSON.parse(JSON.stringify(preset.steps || preset.config || []));
+        state.eventFunnel = null;
+        fetchEventFunnel();
+      } else {
+        state.funnelMode = 'catalog';
+        state.funnelConfig = JSON.parse(JSON.stringify(preset.config));
+        state.funnel = null;
+        state.metaFunnelData = null;
+        state.metaFunnelPeriod = null;
+        fetchFunnel();
+      }
     }));
 
+  // Nuovo funnel a eventi: apre il builder vuoto in modalità evento
+  document.getElementById('funnel-new-event')?.addEventListener('click', () => {
+    state.funnelMode = 'event';
+    state.activeFunnelPreset = null;
+    state.eventFunnelConfig = [{ event: '', label: '', vsIdx: null }];
+    state.eventFunnel = null;
+    state.eventFunnelError = null;
+    render();
+  });
+
   document.querySelectorAll('.funnel-preset-del').forEach(el =>
-    el.addEventListener('click', e => {
+    el.addEventListener('click', async e => {
       e.stopPropagation();
       const i = +el.dataset.presetIdx;
-      state.savedFunnels.splice(i, 1);
-      if (state.activeFunnelPreset === i)      state.activeFunnelPreset = null;
-      else if (state.activeFunnelPreset > i)   state.activeFunnelPreset--;
-      localStorage.setItem(LS_SAVED_FUNNELS, JSON.stringify(state.savedFunnels));
+      const preset = state.savedFunnels[i];
+      if (!preset) return;
+      const wasActive = state.activeFunnelPreset === i;
+      if (preset.id) {
+        const del = await sb.from('funnel_definitions').delete().eq('id', preset.id);
+        if (del.error) { console.error('delete funnel', del.error); alert('Errore eliminazione funnel: ' + del.error.message); return; }
+      }
+      state.activeFunnelPreset = null; // gli indici cambiano dopo il refetch: si riparte da Default
+      await fetchFunnelDefinitions();
+      if (wasActive) {
+        state.funnelMode = 'catalog';
+        state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+      }
       render();
     }));
 
@@ -6243,31 +6536,71 @@ function attachEvents() {
     if (e.key === 'Escape') document.getElementById('funnel-save-cancel')?.click();
   });
 
-  document.getElementById('funnel-save-confirm')?.addEventListener('click', () => {
+  document.getElementById('funnel-save-confirm')?.addEventListener('click', async () => {
     const name = state.funnelSaveName.trim();
     if (!name) return;
-    state.savedFunnels.push({
-      name,
-      config: JSON.parse(JSON.stringify(state.funnelConfig)),
-      from: state.funnelFrom,
-      to:   state.funnelTo,
-    });
-    state.activeFunnelPreset = state.savedFunnels.length - 1;
+    const isEvent = state.funnelMode === 'event';
+    const steps = JSON.parse(JSON.stringify(isEvent ? state.eventFunnelConfig : state.funnelConfig));
     state.funnelSaveOpen = false;
     state.funnelSaveName = '';
-    localStorage.setItem(LS_SAVED_FUNNELS, JSON.stringify(state.savedFunnels));
+    render();
+    const ins = await sb.from('funnel_definitions').insert({ nome: name, tipo: isEvent ? 'event' : 'catalog', steps });
+    if (ins.error) { console.error('save funnel', ins.error); alert('Errore salvataggio funnel: ' + ins.error.message); return; }
+    await fetchFunnelDefinitions();
+    state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order by created_at asc)
     render();
   });
+
+  // ── Builder funnel a eventi ──────────────────────────────────────────
+  document.getElementById('event-funnel-add')?.addEventListener('click', () => {
+    const last = state.eventFunnelConfig.length ? state.eventFunnelConfig.length - 1 : null;
+    state.eventFunnelConfig.push({ event: '', label: '', vsIdx: last });
+    persistEventFunnelConfig();
+    render();
+  });
+  const eventCalc = () => {
+    const from = document.getElementById('funnel-from')?.value;
+    const to   = document.getElementById('funnel-to')?.value;
+    if (from) state.funnelFrom = from;
+    if (to)   state.funnelTo   = to;
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    if (!selSprint || selSprint.inizio !== state.funnelFrom || selSprint.fine !== state.funnelTo) state.funnelSprintId = '';
+    fetchEventFunnel();
+  };
+  document.getElementById('event-funnel-calc')?.addEventListener('click', eventCalc);
+  document.getElementById('event-funnel-apply')?.addEventListener('click', eventCalc);
+  document.querySelectorAll('.event-funnel-name').forEach(el =>
+    el.addEventListener('change', () => {
+      const row = state.eventFunnelConfig[+el.dataset.row];
+      row.event = el.value;
+      const c = EVENT_CATALOG.find(e => e.event === el.value);
+      row.label = c ? c.label : '';   // etichetta presa dal catalogo
+      persistEventFunnelConfig();
+      render();                        // aggiorna le opzioni "% vs" degli step successivi
+    }));
+  document.querySelectorAll('.event-funnel-vs').forEach(el =>
+    el.addEventListener('change', () => { state.eventFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value; persistEventFunnelConfig(); render(); }));
+  document.querySelectorAll('.event-funnel-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.eventFunnelConfig.splice(i, 1);
+      state.eventFunnelConfig.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      persistEventFunnelConfig();
+      render();
+    }));
   document.querySelectorAll('.funnel-step-sel').forEach(el =>
     el.addEventListener('change', () => {
       state.funnelConfig[+el.dataset.row].stepIdx = +el.value;
-      saveSetting('funnel_cfg', state.funnelConfig);
+      persistFunnelConfig();
       render();
     }));
   document.querySelectorAll('.funnel-vs-sel').forEach(el =>
     el.addEventListener('change', () => {
       state.funnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
-      saveSetting('funnel_cfg', state.funnelConfig);
+      persistFunnelConfig();
       render();
     }));
   document.querySelectorAll('.funnel-remove').forEach(el =>
@@ -6278,7 +6611,7 @@ function attachEvents() {
         if (r.vsIdx === i) r.vsIdx = null;
         else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
       });
-      saveSetting('funnel_cfg', state.funnelConfig);
+      persistFunnelConfig();
       render();
     }));
 
@@ -6351,13 +6684,15 @@ function attachEvents() {
 
   // Funnel — sprint selector
   document.getElementById('funnel-sprint-sel')?.addEventListener('change', e => {
+    state.funnelSprintId = e.target.value; // '' = periodo libero
     const sprint = state.sprints.find(s => s.id === e.target.value);
     if (sprint) {
       state.funnelFrom = sprint.inizio;
       state.funnelTo   = sprint.fine;
-      state.funnel     = null;
-      fetchFunnel();
     }
+    if (state.funnelMode === 'event') { fetchEventFunnel(); return; }
+    state.funnel = null;
+    fetchFunnel();
   });
 
   // Sprint — CRUD
@@ -6600,6 +6935,13 @@ function attachEvents() {
   // Sprint — confronto funnel (in pageFunnel)
   document.getElementById('sprint-funnel-toggle')?.addEventListener('click', () => {
     state.sprintFunnelOpen = !state.sprintFunnelOpen;
+    render();
+  });
+  // Selettore "quale funnel confrontare": Base vs una definizione (catalog) applicata a tutti gli sprint.
+  // I dati (kpi_funnel per sprint) coprono già tutti gli step del catalogo: basta ridisegnare, niente refetch.
+  document.getElementById('sprint-funnel-def-sel')?.addEventListener('change', el => {
+    state.sprintFunnelDef = el.target.value || null;
+    state.sprintFunnelHiddenSteps = []; // reset del filtro di visualizzazione: gli step cambiano tra funnel
     render();
   });
   // Nascondi/mostra righe del confronto — filtro di sola visualizzazione, session-only
@@ -7157,6 +7499,7 @@ document.addEventListener('keydown', e => {
   fetchGoals();
   fetchWorkoutDepth();
   fetchSprints();
+  fetchFunnelDefinitions();
   fetchBlockedUsers();
   fetchRecentlyUnblocked();
   startAutoRefresh();
