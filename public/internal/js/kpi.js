@@ -288,6 +288,7 @@ let state = {
   funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_events)
   eventFunnelConfig: [],       // [{event, source, label, vsIdx}] — step del funnel a eventi in editing
   eventFunnel: null,           // risultato RPC kpi_funnel_events: {steps:[{idx,event,source,numero}]}
+  eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
   eventFunnelLoading: false, eventFunnelError: null,
   savedFunnels: [],           // funnel salvati/nominati — ora dal DB (funnel_definitions), non più localStorage
   activeFunnelPreset: null,
@@ -529,7 +530,9 @@ async function fetchEventFunnel() {
   render();
   try {
     const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
-    const res = await sb.rpc('kpi_funnel_events', { inizio: state.funnelFrom, fine: state.funnelTo, p_steps });
+    const args = { inizio: state.funnelFrom, fine: state.funnelTo, p_steps };
+    if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider; // 'google' | 'email'
+    const res = await sb.rpc('kpi_funnel_events', args);
     if (res.error) throw res.error;
     state.eventFunnel = res.data;
   } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
@@ -763,7 +766,7 @@ async function fetchFunnelDefinitions() {
     if (res.error) throw res.error;
     state.savedFunnels = (res.data || []).map(r => ({
       id: r.id, name: r.nome, descrizione: r.descrizione,
-      tipo: r.tipo, config: r.steps, steps: r.steps,
+      tipo: r.tipo, config: r.steps, steps: r.steps, provider: r.provider || null,
     }));
   } catch (e) { console.error('fetchFunnelDefinitions', e); }
   render();
@@ -2293,7 +2296,7 @@ const KPI_INFO_TEXTS = {
   abbonati_attivi: 'Abbonati PAGANTI attivi ORA, contati per purchase_token (l\'identità reale dell\'abbonamento su Google), NON per utente — così lo stesso acquisto non viene contato due volte se è agganciato a più account. Condizioni: ultima riga del token con expires_at futuro, status ≠ revoked, is_trial=false. Esclude i token legati ad account interni bloccati. Indipendente dal periodo.',
   in_prova_ora: 'Utenti attualmente in prova gratuita 7 giorni: token con is_trial=true ancora attivo (expires_at futuro), dato server di Google. Quando un trial si converte in pagamento, esce da qui ed entra in "Abbonati paganti". Resta 0 finché non parte un trial reale.',
   nuovi_acquisti: 'Nuovi abbonamenti reali nel periodo (per purchase_token, event_type=SUBSCRIPTION_PURCHASED), esclusi gli account interni e le licenze tester della closed-track (durata < 2 giorni = test accelerati, non clienti). La nota mostra data e giorni dall\'ultimo acquisto reale — se cresce, le vendite si sono fermate.',
-  mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 4,99 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
+  mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 6,99 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
   paywall_mostrati: 'Quante volte un paywall è stato mostrato, contando paywall_step_view con index=0. È l\'UNICO segnale che copre il 100% delle varianti (view_Paywall non copre i paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). Denominatore corretto del funnel.',
 };
 
@@ -3542,6 +3545,13 @@ function pageFunnelEvent() {
       <input type="date" id="funnel-from" class="form-input" value="${state.funnelFrom}" style="width:145px;padding:5px 10px;font-size:12px">
       <span style="color:var(--muted)">→</span>
       <input type="date" id="funnel-to" class="form-input" value="${state.funnelTo}" style="width:145px;padding:5px 10px;font-size:12px">
+      <div class="filter-sep"></div>
+      <span class="filter-label">Registrazione</span>
+      <select id="event-funnel-provider" class="form-select" style="font-size:12px;padding:5px 10px;min-width:130px" title="Filtra per metodo di registrazione. Le sessioni che non si sono mai iscritte non hanno provider → escluse quando filtri.">
+        <option value="" ${!state.eventFunnelProvider ? 'selected' : ''}>Tutti</option>
+        <option value="google" ${state.eventFunnelProvider === 'google' ? 'selected' : ''}>Google</option>
+        <option value="email" ${state.eventFunnelProvider === 'email' ? 'selected' : ''}>Email</option>
+      </select>
       <button id="event-funnel-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
     </div>
 
@@ -3550,7 +3560,7 @@ function pageFunnelEvent() {
     <div class="card">
       <div class="card-title" style="margin-bottom:4px">Funnel a eventi</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-        ${state.funnelFrom} → ${state.funnelTo} · legge user_events + anonymous_events (attribuzione via sessione) · esclusi bloccati
+        ${state.funnelFrom} → ${state.funnelTo}${state.eventFunnelProvider ? ` · solo registrati con <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : 'Email'}</strong>` : ''} · legge user_events + anonymous_events (attribuzione via sessione) · esclusi bloccati
       </div>
       ${body}
     </div>`;
@@ -3620,9 +3630,9 @@ async function persistEventFunnelConfig() {
   const preset = state.savedFunnels[i];
   if (!preset || !preset.id || (preset.tipo || 'catalog') !== 'event') return;
   const steps = JSON.parse(JSON.stringify(state.eventFunnelConfig));
-  preset.config = steps; preset.steps = steps;
+  preset.config = steps; preset.steps = steps; preset.provider = state.eventFunnelProvider;
   const upd = await sb.from('funnel_definitions')
-    .update({ steps, updated_at: new Date().toISOString() })
+    .update({ steps, provider: state.eventFunnelProvider, updated_at: new Date().toISOString() })
     .eq('id', preset.id);
   if (upd.error) console.error('persist event funnel', upd.error);
 }
@@ -4295,7 +4305,7 @@ function pagePremium() {
         const cancP = d.canceled_period || 0;
         return premiumKpi('In disdetta', canc, cancP > 0 ? `${cancP} disdett${cancP === 1 ? 'a' : 'e'} nel periodo` : null, canc > 0 ? '#f472b6' : 'var(--muted)', 'paganti attivi che hanno già annullato il rinnovo · restano fino a scadenza poi escono (churn in arrivo)', null, 'canceling');
       })()}
-      ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×4,99 + annuali×2,50', 'mrr_stimato')}
+      ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×6,99 + annuali×2,50', 'mrr_stimato')}
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
       ${premiumKpi('Frequenza paywall', avgShown ? avgShown + '×' : '—', null, avgShown ? '#818cf8' : 'var(--muted)', 'volte in media che ogni utente vede il paywall · alto = mostrato troppo spesso', 'frequenza_paywall')}
       ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
@@ -6473,6 +6483,7 @@ function attachEvents() {
       if ((preset.tipo || 'catalog') === 'event') {
         state.funnelMode = 'event';
         state.eventFunnelConfig = JSON.parse(JSON.stringify(preset.steps || preset.config || []));
+        state.eventFunnelProvider = preset.provider || null;
         state.eventFunnel = null;
         fetchEventFunnel();
       } else {
@@ -6544,7 +6555,7 @@ function attachEvents() {
     state.funnelSaveOpen = false;
     state.funnelSaveName = '';
     render();
-    const ins = await sb.from('funnel_definitions').insert({ nome: name, tipo: isEvent ? 'event' : 'catalog', steps });
+    const ins = await sb.from('funnel_definitions').insert({ nome: name, tipo: isEvent ? 'event' : 'catalog', steps, provider: isEvent ? state.eventFunnelProvider : null });
     if (ins.error) { console.error('save funnel', ins.error); alert('Errore salvataggio funnel: ' + ins.error.message); return; }
     await fetchFunnelDefinitions();
     state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order by created_at asc)
@@ -6569,6 +6580,11 @@ function attachEvents() {
   };
   document.getElementById('event-funnel-calc')?.addEventListener('click', eventCalc);
   document.getElementById('event-funnel-apply')?.addEventListener('click', eventCalc);
+  document.getElementById('event-funnel-provider')?.addEventListener('change', el => {
+    state.eventFunnelProvider = el.target.value || null;
+    persistEventFunnelConfig(); // se un funnel evento è attivo, salva anche il provider
+    fetchEventFunnel();
+  });
   document.querySelectorAll('.event-funnel-name').forEach(el =>
     el.addEventListener('change', () => {
       const row = state.eventFunnelConfig[+el.dataset.row];
