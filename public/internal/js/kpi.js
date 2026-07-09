@@ -82,6 +82,24 @@ function eventStepLabel(row) {
   return c ? c.label : ((row && row.event) || '');
 }
 
+// Step canonici del funnel onboarding (built-in, come DEF_FUN_CFG è per il Default). Il segmento
+// (tutti/google/email) è un filtro separato a runtime, NON due funnel diversi: la schermata Conferma
+// email c'è sempre e per gli utenti Google risulterà ~0 (loro la saltano) — è informativo. Editabile
+// in sessione (drag&drop, aggiungi/togli step); per tenere una variante si usa "+ Salva".
+const ONBOARDING_FUNNEL_STEPS = [
+  { event: 'first_open',                          label: 'Download / primo avvio',        vsIdx: null },
+  { event: 'view_OnboardingConfirmation',         label: 'Onboarding · Conferma email',   vsIdx: 0 },
+  { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario', vsIdx: 1 },
+  { event: 'view_OnboardingName',                 label: 'Onboarding · Nome',             vsIdx: 2 },
+  { event: 'view_OnboardingAge',                  label: 'Onboarding · Età',              vsIdx: 3 },
+  { event: 'view_OnboardingGender',               label: 'Onboarding · Genere',           vsIdx: 4 },
+  { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo',        vsIdx: 5 },
+  { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo', vsIdx: 6 },
+  { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello',          vsIdx: 7 },
+  { event: 'view_OnboardingNotifications',        label: 'Onboarding · Notifiche',        vsIdx: 8 },
+  { event: 'onboarding_complete',                 label: 'Onboarding · Completato (fine)', vsIdx: 9 },
+];
+
 const LS_OV             = 'hm_overview_keys';
 const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
@@ -101,16 +119,22 @@ const DEF_OV_KEYS = [
 ];
 
 // vsIdx = indice nell'array funnelConfig (non il stepIdx). null = nessuna %
+// Allineato al funnel dello Sprint 7 (l'ultima versione rifinita): aggiunge paywall fine onboarding,
+// Home, workout detail e Trial iniziato rispetto alla vecchia default. vsIdx = posizione nell'array.
 const DEF_FUN_CFG = [
-  { stepIdx: 0,  vsIdx: null },  // Installazioni (Google Play)
-  { stepIdx: 2,  vsIdx: 0 },    // Onboarding iniziato vs First Open
-  { stepIdx: 3,  vsIdx: 1 },    // Onboarding completato vs Onboarding iniziato
-  { stepIdx: 4,  vsIdx: 2 },    // Almeno 1 workout vs Onboarding completato
-  { stepIdx: 5,  vsIdx: 3 },    // Primo workout 24h vs Almeno 1 workout
-  { stepIdx: 6,  vsIdx: 3 },    // ≥2 workout prima settimana vs Almeno 1 workout
-  { stepIdx: 7,  vsIdx: 3 },    // ≥3 workout prima settimana vs Almeno 1 workout
-  { stepIdx: 9,  vsIdx: 3 },    // 3-day streak vs Almeno 1 workout
-  { stepIdx: 10, vsIdx: 2 },    // Premium pagante vs Onboarding completato
+  { stepIdx: 0,  vsIdx: null },  // 0 Installazioni (Google Play)
+  { stepIdx: 2,  vsIdx: 0 },     // 1 Onboarding iniziato vs Installazioni
+  { stepIdx: 3,  vsIdx: 1 },     // 2 Onboarding completato vs Onboarding iniziato
+  { stepIdx: 4,  vsIdx: 2 },     // 3 Almeno 1 workout vs Onboarding completato
+  { stepIdx: 5,  vsIdx: 3 },     // 4 Primo workout 24h vs Almeno 1 workout
+  { stepIdx: 11, vsIdx: 3 },     // 5 Vede il paywall (fine onboarding) vs Almeno 1 workout
+  { stepIdx: 13, vsIdx: 5 },     // 6 Arriva in Home vs Vede il paywall
+  { stepIdx: 14, vsIdx: 5 },     // 7 Apre workout detail vs Vede il paywall
+  { stepIdx: 6,  vsIdx: 3 },     // 8 ≥2 workout prima settimana vs Almeno 1 workout
+  { stepIdx: 7,  vsIdx: 3 },     // 9 ≥3 workout prima settimana vs Almeno 1 workout
+  { stepIdx: 9,  vsIdx: 3 },     // 10 3-day streak vs Almeno 1 workout
+  { stepIdx: 18, vsIdx: 2 },     // 11 Trial iniziato vs Onboarding completato
+  { stepIdx: 10, vsIdx: 11 },    // 12 Premium pagante vs Trial iniziato
 ];
 
 // stepIdx = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views, 2=view_paywall,
@@ -290,6 +314,9 @@ let state = {
   eventFunnel: null,           // risultato RPC kpi_funnel_events: {steps:[{idx,event,source,numero}]}
   eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
   eventFunnelLoading: false, eventFunnelError: null,
+  editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
+  // confronto tra sprint per il funnel onboarding (parallelo a sprintFunnel* del catalogo)
+  sprintEventOpen: false, sprintEventSel: [], sprintEventData: {}, sprintEventLoading: false, sprintEventError: null,
   savedFunnels: [],           // funnel salvati/nominati — ora dal DB (funnel_definitions), non più localStorage
   activeFunnelPreset: null,
   funnelSaveOpen: false,
@@ -1312,7 +1339,7 @@ function updateHeaderActions() {
 function manualRefresh() {
   clearInterval(countdownTimer);
   fetchData();
-  if (state.page === 'funnel') fetchFunnel();
+  if (state.page === 'funnel') { if (state.funnelMode === 'event') fetchEventFunnel(); else fetchFunnel(); }
 }
 
 function layout() {
@@ -3413,8 +3440,11 @@ function savedFunnelBar() {
   return `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
       <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Funnel</span>
-      <button class="funnel-preset-btn" data-preset-idx="default" style="${pill(activeFunnelPreset === null)}">
+      <button class="funnel-preset-btn" data-preset-idx="default" style="${pill(state.funnelMode !== 'event' && activeFunnelPreset === null)}">
         Default
+      </button>
+      <button id="funnel-onboarding-btn" style="${pill(state.funnelMode === 'event' && activeFunnelPreset === null)}">
+        ⚡ funnel onboarding
       </button>
       ${savedFunnels.map((f, i) => `
         <div style="display:inline-flex;align-items:stretch">
@@ -3433,8 +3463,7 @@ function savedFunnelBar() {
             <button id="funnel-save-confirm" class="btn btn-primary" style="padding:4px 12px;font-size:12px">Salva</button>
             <button id="funnel-save-cancel" class="btn btn-ghost" style="padding:4px 10px;font-size:12px">×</button>
           </div>`
-        : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>
-           <button id="funnel-new-event" class="btn btn-ghost" style="padding:4px 12px;font-size:12px" title="Crea un funnel a eventi liberi (es. schermate onboarding)">⚡ Nuovo funnel eventi</button>`}
+        : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>`}
     </div>`;
 }
 
@@ -3506,28 +3535,27 @@ function pageFunnel() {
 function pageFunnelEvent() {
   const cfg = state.eventFunnelConfig || [];
 
-  const editor = `
+  // Editor collassabile (come "Modifica funnel" del Default): visibile solo se editingEventFunnel.
+  const editor = state.editingEventFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-        <div class="card-title" style="margin-bottom:0">Costruttore funnel onboarding</div>
-        <span style="font-size:11px;color:var(--muted)">Scegli le schermate in ordine; il “% vs” calcola il calo tra uno step e l'altro</span>
-      </div>
+      <div class="card-title" style="margin-bottom:16px">Costruttore funnel onboarding</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
         ${cfg.length ? cfg.map((row, i) => eventFunnelEditRow(row, i)).join('')
           : `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuno step. Aggiungi il primo evento del funnel.</div>`}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button id="event-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
-        <button id="event-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Calcola</button>
+        <button id="event-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Onboarding standard</button>
+        <button id="close-event-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
       </div>
-    </div>`;
+    </div>` : '';
 
   const body = state.eventFunnelLoading
     ? `<div class="empty" style="padding:48px"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo funnel...</div></div>`
     : state.eventFunnelError
     ? `<div style="padding:20px;color:var(--red);font-size:13px">⚠️ ${esc(state.eventFunnelError)}</div>`
     : !state.eventFunnel
-    ? `<div class="empty" style="padding:48px"><div class="empty-icon">🎯</div><div class="empty-text" style="color:var(--muted)">Aggiungi gli step e clicca Calcola.</div></div>`
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon">🎯</div><div class="empty-text" style="color:var(--muted)">Premi Calcola per calcolare il funnel.</div></div>`
     : eventFunnelViz();
 
   return `
@@ -3545,25 +3573,28 @@ function pageFunnelEvent() {
       <input type="date" id="funnel-from" class="form-input" value="${state.funnelFrom}" style="width:145px;padding:5px 10px;font-size:12px">
       <span style="color:var(--muted)">→</span>
       <input type="date" id="funnel-to" class="form-input" value="${state.funnelTo}" style="width:145px;padding:5px 10px;font-size:12px">
-      <div class="filter-sep"></div>
-      <span class="filter-label">Registrazione</span>
-      <select id="event-funnel-provider" class="form-select" style="font-size:12px;padding:5px 10px;min-width:130px" title="Filtra per metodo di registrazione. Le sessioni che non si sono mai iscritte non hanno provider → escluse quando filtri.">
-        <option value="" ${!state.eventFunnelProvider ? 'selected' : ''}>Tutti</option>
-        <option value="google" ${state.eventFunnelProvider === 'google' ? 'selected' : ''}>Google</option>
-        <option value="email" ${state.eventFunnelProvider === 'email' ? 'selected' : ''}>Email</option>
-      </select>
       <button id="event-funnel-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
+      <div class="filter-sep"></div>
+      <span class="filter-label">Segmento</span>
+      <select id="event-funnel-provider" class="form-select" style="font-size:12px;padding:5px 10px;min-width:150px"
+        title="Metodo di registrazione. Le sessioni mai iscritte non hanno provider → escluse quando scegli Google/Email.">
+        <option value="" ${!state.eventFunnelProvider ? 'selected' : ''}>Tutti gli utenti</option>
+        <option value="google" ${state.eventFunnelProvider === 'google' ? 'selected' : ''}>Solo Google</option>
+        <option value="email" ${state.eventFunnelProvider === 'email' ? 'selected' : ''}>Solo Email</option>
+      </select>
+      ${!state.editingEventFunnel ? `<button id="edit-event-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;margin-left:auto">⚙ Modifica funnel</button>` : ''}
     </div>
 
     ${editor}
 
     <div class="card">
-      <div class="card-title" style="margin-bottom:4px">Funnel a eventi</div>
+      <div class="card-title" style="margin-bottom:4px">Funnel onboarding</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-        ${state.funnelFrom} → ${state.funnelTo}${state.eventFunnelProvider ? ` · solo registrati con <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : 'Email'}</strong>` : ''} · legge user_events + anonymous_events (attribuzione via sessione) · esclusi bloccati
+        ${state.funnelFrom} → ${state.funnelTo} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · legge user_events + anonymous_events (attribuzione via sessione) · esclusi bloccati
       </div>
       ${body}
-    </div>`;
+    </div>
+    ${sprintEventFunnelSection()}`;
 }
 
 // Riga editor del funnel a eventi. row = {event, label, vsIdx}. Menu a tendina dal catalogo curato
@@ -3581,6 +3612,8 @@ function eventFunnelEditRow(row, i) {
       `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${esc(eventStepLabel(r) || ('step ' + (j + 1)))}</option>`).join('');
   return `
     <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+      <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
       <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
       <select class="form-select event-funnel-name" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
       <select class="form-select event-funnel-vs" data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
@@ -3635,6 +3668,142 @@ async function persistEventFunnelConfig() {
     .update({ steps, provider: state.eventFunnelProvider, updated_at: new Date().toISOString() })
     .eq('id', preset.id);
   if (upd.error) console.error('persist event funnel', upd.error);
+}
+
+// Riordino drag&drop degli step del funnel a eventi (come moveFunnelRow per il Default).
+function moveEventFunnelRow(from, to) {
+  if (!reorderFunnelCfg(state.eventFunnelConfig, from, to)) return;
+  persistEventFunnelConfig();
+  render();
+}
+
+// ── CONFRONTO SPRINT — FUNNEL ONBOARDING (eventi) ─────────────────────────────────────
+// Parallelo a sprintFunnelSection ma sul funnel a eventi: applica gli STESSI step + segmento a
+// ogni sprint selezionato (kpi_funnel_events per il periodo di ciascuno) e li mette a confronto.
+function sprintEventFunnelSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintEventOpen;
+  const badge = state.sprintEventSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintEventSel.length} sel.</span>` : '';
+  const headerEl = `
+    <div id="sprint-event-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+  if (!isOpen) return `<div class="card" style="margin-top:16px">${headerEl}</div>`;
+
+  const chips = state.sprints.map((s, i) => {
+    const on = state.sprintEventSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-event-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>${on ? '✓ ' : ''}${s.nome}</button>`;
+  }).join('');
+
+  const hasData = Object.keys(state.sprintEventData).length > 0;
+  const cmpBody = state.sprintEventLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintEventError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${esc(state.sprintEventError)}</div>`
+    : !hasData ? ''
+    : sprintEventFunnelTable();
+
+  return `
+    <div class="card" style="margin-top:16px">
+      ${headerEl}
+      <div style="margin-top:18px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Stesso funnel onboarding (stessi step + segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong>) applicato a ogni sprint selezionato.</div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>
+        <button id="sprint-event-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px" ${!state.sprintEventSel.length ? 'disabled' : ''}>Calcola confronto</button>
+        ${cmpBody ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${cmpBody}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+async function fetchSprintEventFunnel() {
+  if (!state.sprintEventSel.length) return;
+  const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
+  if (!steps.length) { state.sprintEventError = 'Nessuno step nel funnel'; render(); return; }
+  state.sprintEventLoading = true;
+  state.sprintEventError = null;
+  state.sprintEventData = {};
+  render();
+  try {
+    const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
+    const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
+    const results = await Promise.all(selected.map(s => {
+      const args = { inizio: s.inizio, fine: s.fine, p_steps };
+      if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider;
+      return sb.rpc('kpi_funnel_events', args).then(r => ({ id: s.id, data: r.data, error: r.error }));
+    }));
+    const map = {};
+    for (const r of results) { if (r.error) throw r.error; map[r.id] = r.data; }
+    state.sprintEventData = map;
+  } catch (e) { state.sprintEventError = e.message || 'Errore'; }
+  state.sprintEventLoading = false;
+  render();
+}
+
+// Tabella confronto: righe = step del funnel onboarding, colonne = sprint selezionati.
+function sprintEventFunnelTable() {
+  const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
+  const cfg = state.eventFunnelConfig || [];
+  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+  // numeri per sprint: mappa idx→numero
+  const numsOf = {};
+  selected.forEach(s => {
+    const steps = (state.sprintEventData[s.id] && state.sprintEventData[s.id].steps) || [];
+    const m = {}; steps.forEach(st => { m[st.idx] = Number(st.numero ?? 0); });
+    numsOf[s.id] = m;
+  });
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span><span>${esc(s.nome)}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+    </th>`).join('');
+
+  const rows = cfg.map((row, ri) => {
+    const label = eventStepLabel(row) || ('step ' + (ri + 1));
+    const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
+    const maxN = Math.max(...nums, 0);
+    const cells = selected.map((s, si) => {
+      const n = numsOf[s.id][ri] ?? 0;
+      const vsN = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < ri) ? (numsOf[s.id][row.vsIdx] ?? 0) : null;
+      const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+      const convStr = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+      const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
+      const isBest = n === maxN && maxN > 0;
+      const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
+      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${n}</span>
+        </div>
+        ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
+      </td>`;
+    }).join('');
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${esc(label)}</td>${cells}</tr>`;
+  }).join('');
+
+  return `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:10px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Step</th>${headers}
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 // Pannello "Assegna a sprint": scrive il funnel CORRENTE (state.funnelConfig) nella colonna
@@ -6259,7 +6428,7 @@ function attachEvents() {
   document.querySelectorAll('[data-nav]').forEach(el =>
     el.addEventListener('click', () => {
       state.page = el.dataset.nav;
-      if (state.page === 'funnel'     && !state.funnel        && !state.funnelLoading)    fetchFunnel();
+      if (state.page === 'funnel'     && state.funnelMode !== 'event' && !state.funnel && !state.funnelLoading) fetchFunnel();
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
@@ -6436,6 +6605,27 @@ function attachEvents() {
     fetchFunnel();
   });
 
+  // Funnel onboarding (built-in, event mode) — carica gli step canonici e calcola
+  document.getElementById('funnel-onboarding-btn')?.addEventListener('click', () => {
+    state.funnelMode = 'event';
+    state.activeFunnelPreset = null;
+    state.eventFunnelConfig = JSON.parse(JSON.stringify(ONBOARDING_FUNNEL_STEPS));
+    state.editingEventFunnel = false;
+    state.eventFunnel = null;
+    state.eventFunnelError = null;
+    fetchEventFunnel();
+  });
+  document.getElementById('edit-event-funnel')?.addEventListener('click', () => {
+    state.editingEventFunnel = true; render();
+  });
+  document.getElementById('close-event-funnel-edit')?.addEventListener('click', () => {
+    state.editingEventFunnel = false; render();
+  });
+  document.getElementById('event-funnel-reset')?.addEventListener('click', () => {
+    state.eventFunnelConfig = JSON.parse(JSON.stringify(ONBOARDING_FUNNEL_STEPS));
+    persistEventFunnelConfig(); render();
+  });
+
   // Funnel — carica costi Meta
   document.getElementById('meta-funnel-load')?.addEventListener('click', fetchMetaFunnel);
 
@@ -6497,15 +6687,6 @@ function attachEvents() {
     }));
 
   // Nuovo funnel a eventi: apre il builder vuoto in modalità evento
-  document.getElementById('funnel-new-event')?.addEventListener('click', () => {
-    state.funnelMode = 'event';
-    state.activeFunnelPreset = null;
-    state.eventFunnelConfig = [{ event: '', label: '', vsIdx: null }];
-    state.eventFunnel = null;
-    state.eventFunnelError = null;
-    render();
-  });
-
   document.querySelectorAll('.funnel-preset-del').forEach(el =>
     el.addEventListener('click', async e => {
       e.stopPropagation();
@@ -6658,6 +6839,40 @@ function attachEvents() {
       if (!Number.isNaN(from)) moveFunnelRow(from, to);
     });
   });
+
+  // Funnel onboarding — drag & drop step (stesso meccanismo del Default, classi dedicate)
+  document.querySelectorAll('.event-funnel-drag').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.row);
+      e.dataTransfer.effectAllowed = 'move';
+      el.closest('.event-funnel-row')?.style.setProperty('opacity', '0.4');
+    });
+    el.addEventListener('dragend', () => { el.closest('.event-funnel-row')?.style.setProperty('opacity', '1'); });
+  });
+  document.querySelectorAll('.event-funnel-row').forEach(rowEl => {
+    rowEl.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; rowEl.style.borderTop = '2px solid var(--purple)'; });
+    rowEl.addEventListener('dragleave', () => { rowEl.style.borderTop = ''; });
+    rowEl.addEventListener('drop', e => {
+      e.preventDefault();
+      rowEl.style.borderTop = '';
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to   = +rowEl.dataset.row;
+      if (!Number.isNaN(from)) moveEventFunnelRow(from, to);
+    });
+  });
+
+  // Funnel onboarding — confronto sprint
+  document.getElementById('sprint-event-toggle')?.addEventListener('click', () => {
+    state.sprintEventOpen = !state.sprintEventOpen; render();
+  });
+  document.querySelectorAll('.sprint-event-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const idx = state.sprintEventSel.indexOf(id);
+      if (idx === -1) state.sprintEventSel.push(id); else state.sprintEventSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-event-calc')?.addEventListener('click', fetchSprintEventFunnel);
 
   // Funnel — "Assegna a sprint": copia il funnel corrente negli sprint selezionati (DB).
   document.getElementById('funnel-assign-open')?.addEventListener('click', () => {
