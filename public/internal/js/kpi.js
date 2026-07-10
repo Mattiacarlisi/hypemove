@@ -234,7 +234,10 @@ function sanitizeAiFunnelConfig(cfg) {
 }
 
 function savePremiumFunnelConfig() {
-  localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig));
+  localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig)); // cache locale
+  sb.from('kpi_settings')                                                          // condiviso (tutti lo vedono)
+    .upsert({ key: 'premium_funnel', value: state.premiumFunnelConfig, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .then(({ error }) => { if (error) console.warn('savePremiumFunnelConfig', error); });
 }
 
 // Carica la config del funnel Premium da localStorage, migrando il vecchio default (fine unico
@@ -248,7 +251,10 @@ function loadPremiumFunnelConfig() {
 }
 
 function saveAiFunnelConfig() {
-  localStorage.setItem(LS_AI_FUN, JSON.stringify(state.aiFunnelConfig));
+  localStorage.setItem(LS_AI_FUN, JSON.stringify(state.aiFunnelConfig)); // cache locale
+  sb.from('kpi_settings')                                                // condiviso (tutti lo vedono)
+    .upsert({ key: 'ai_funnel', value: state.aiFunnelConfig, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .then(({ error }) => { if (error) console.warn('saveAiFunnelConfig', error); });
 }
 
 async function loadSettings(retry = true) {
@@ -260,6 +266,11 @@ async function loadSettings(retry = true) {
       if (row.key === 'meta_token'   && typeof row.value === 'string') {
         state.metaToken = row.value;
         localStorage.setItem(LS_META_TOKEN, row.value);
+      }
+      if (row.key === 'premium_funnel' && Array.isArray(row.value) && row.value.length) state.premiumFunnelConfig = row.value;
+      if (row.key === 'ai_funnel' && Array.isArray(row.value) && row.value.length) {
+        const clean = sanitizeAiFunnelConfig(row.value);
+        if (clean) state.aiFunnelConfig = clean;
       }
     }
     state.settingsLoadError = false;
@@ -1319,6 +1330,7 @@ function startAutoRefresh() {
   // con ciò che salva l'altro utente senza bisogno di ricaricare la pagina.
   refreshTimer = setInterval(() => {
     fetchData();
+    loadSettings();
     fetchFunnelDefinitions();
     fetchSprints();
   }, REFRESH_MS);
@@ -1352,7 +1364,9 @@ function updateHeaderActions() {
 function manualRefresh() {
   clearInterval(countdownTimer);
   fetchData();
-  // ripesca dal DB anche funnel salvati e sprint, così vedi ciò che ha salvato l'altro utente senza ricaricare
+  // ripesca dal DB tutto ciò che è condiviso (impostazioni, funnel salvati, sprint) → vedi le modifiche
+  // dell'altro utente senza ricaricare la pagina
+  loadSettings();
   fetchFunnelDefinitions();
   fetchSprints();
   if (state.page === 'funnel') { if (state.funnelMode === 'event') fetchEventFunnel(); else fetchFunnel(); }
