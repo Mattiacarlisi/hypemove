@@ -789,12 +789,19 @@ async function fetchFunnelDefinitions() {
       if (!ins.error) localStorage.removeItem(LS_SAVED_FUNNELS);
       else console.error('migrazione saved funnels', ins.error);
     }
+    // preserva il preset attivo per ID (l'indice può cambiare se un altro utente aggiunge/rimuove funnel)
+    const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
+      ? state.savedFunnels[state.activeFunnelPreset].id : null;
     const res = await sb.from('funnel_definitions').select('*').order('created_at', { ascending: true });
     if (res.error) throw res.error;
     state.savedFunnels = (res.data || []).map(r => ({
       id: r.id, name: r.nome, descrizione: r.descrizione,
       tipo: r.tipo, config: r.steps, steps: r.steps, provider: r.provider || null,
     }));
+    if (activeId) {
+      const i = state.savedFunnels.findIndex(f => f.id === activeId);
+      state.activeFunnelPreset = i === -1 ? null : i; // se il funnel attivo è stato cancellato altrove → torna a Default
+    }
   } catch (e) { console.error('fetchFunnelDefinitions', e); }
   render();
 }
@@ -1308,7 +1315,13 @@ async function fetchSprintRetention() {
 
 function startAutoRefresh() {
   clearInterval(refreshTimer);
-  refreshTimer = setInterval(fetchData, REFRESH_MS);
+  // ogni ciclo ripesca dati + funnel salvati + sprint dal DB → le tab aperte si sincronizzano
+  // con ciò che salva l'altro utente senza bisogno di ricaricare la pagina.
+  refreshTimer = setInterval(() => {
+    fetchData();
+    fetchFunnelDefinitions();
+    fetchSprints();
+  }, REFRESH_MS);
 }
 
 function startCountdown() {
@@ -1339,6 +1352,9 @@ function updateHeaderActions() {
 function manualRefresh() {
   clearInterval(countdownTimer);
   fetchData();
+  // ripesca dal DB anche funnel salvati e sprint, così vedi ciò che ha salvato l'altro utente senza ricaricare
+  fetchFunnelDefinitions();
+  fetchSprints();
   if (state.page === 'funnel') { if (state.funnelMode === 'event') fetchEventFunnel(); else fetchFunnel(); }
 }
 
