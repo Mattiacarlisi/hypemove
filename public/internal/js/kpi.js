@@ -333,7 +333,7 @@ let state = {
   funnelSaveOpen: false,
   funnelSaveName: '',
   extraCharts: null,
-  growthRange: 0, weeklyRange: 16, streakRange: 60,
+  growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
   engagementByAge: null, engagementByAgeLoading: false, ageEngFrom: null, ageEngTo: null,
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
@@ -1992,9 +1992,11 @@ function pageOverview() {
     <div style="display:grid;grid-template-columns:repeat(${colCount},1fr);gap:14px;margin-bottom:24px">
       ${keys.map(k => {
         const m = METRICS[k];
-        return stat(m.label, m.get(state.data), '', m.color);
+        return stat(m.label, m.get(state.data), '', m.color, k === 'eng.streaks' ? k : null);
       }).join('')}
     </div>
+
+    ${keys.includes('eng.streaks') && state.streakChartOpen ? streakChartCard() : ''}
 
     ${workoutSourceCard()}
 
@@ -2015,27 +2017,15 @@ function pageOverview() {
 
     ${engagementByAgeCard()}
 
-    <div class="grid-2">
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div class="card-title" style="margin-bottom:0">Workout settimanali</div>
-          <div style="display:flex;gap:4px">
-            ${[4,8,12,16].map(w => `<button class="filter-btn ${state.weeklyRange===w?'active':''}" data-weekly-range="${w}">${w}sett</button>`).join('')}
-          </div>
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Workout settimanali</div>
+        <div style="display:flex;gap:4px">
+          ${[4,8,12,16].map(w => `<button class="filter-btn ${state.weeklyRange===w?'active':''}" data-weekly-range="${w}">${w}sett</button>`).join('')}
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">workout totali per settimana</div>
-        ${state.extraCharts?.weekly_workouts?.length ? weeklyWorkoutsChart(state.extraCharts.weekly_workouts, state.weeklyRange) : chartPlaceholder()}
       </div>
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div class="card-title" style="margin-bottom:0">Streak giornaliere</div>
-          <div style="display:flex;gap:4px">
-            ${[7,14,30,60].map(r => `<button class="filter-btn ${state.streakRange===r?'active':''}" data-streak-range="${r}">${r}g</button>`).join('')}
-          </div>
-        </div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">utenti con streak attiva (stessa logica overview)</div>
-        ${state.extraCharts?.daily_streaks?.length ? dailyStreaksChart(state.extraCharts.daily_streaks, state.streakRange) : chartPlaceholder()}
-      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">workout totali per settimana</div>
+      ${state.extraCharts?.weekly_workouts?.length ? weeklyWorkoutsChart(state.extraCharts.weekly_workouts, state.weeklyRange) : chartPlaceholder()}
     </div>
 
     <div class="grid-2" style="margin-top:16px">
@@ -2045,6 +2035,20 @@ function pageOverview() {
 
     <div style="margin-top:16px">
       ${likedExercisesCard()}
+    </div>`;
+}
+
+function streakChartCard() {
+  return `
+    <div class="card" style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Streak giornaliere</div>
+        <div style="display:flex;gap:4px">
+          ${[7,14,30,60].map(r => `<button class="filter-btn ${state.streakRange===r?'active':''}" data-streak-range="${r}">${r}g</button>`).join('')}
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">utenti con streak attiva (ieri o oggi) · stessa logica della card qui sopra</div>
+      ${state.extraCharts?.daily_streaks?.length ? dailyStreaksChart(state.extraCharts.daily_streaks, state.streakRange) : chartPlaceholder()}
     </div>`;
 }
 
@@ -6116,11 +6120,13 @@ function sprintRetentionTable(selected, dataMap) {
 
 // ── COMPONENTI ────────────────────────────────────────────────────────
 
-function stat(label, value, sub, color) {
-  return `<div class="stat-card">
+function stat(label, value, sub, color, expandKey) {
+  const attrs = expandKey ? `data-stat-toggle="${expandKey}" style="cursor:pointer"` : '';
+  const expandSub = expandKey ? `<div class="stat-sub" style="color:var(--accent)">${state.streakChartOpen ? '▴ nascondi grafico' : '▾ vedi grafico'}</div>` : '';
+  return `<div class="stat-card" ${attrs}>
     <div class="stat-label">${label}</div>
     <div class="stat-value ${color}">${value ?? '—'}</div>
-    ${sub ? `<div class="stat-sub">${sub}</div>` : ''}
+    ${sub ? `<div class="stat-sub">${sub}</div>` : expandSub}
   </div>`;
 }
 
@@ -6480,6 +6486,8 @@ function attachEvents() {
     el.addEventListener('click', () => { state.weeklyRange = +el.dataset.weeklyRange; render(); }));
   document.querySelectorAll('[data-streak-range]').forEach(el =>
     el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
+  document.querySelectorAll('[data-stat-toggle]').forEach(el =>
+    el.addEventListener('click', () => { state.streakChartOpen = !state.streakChartOpen; render(); }));
   document.querySelectorAll('[data-age-eng-range]').forEach(el =>
     el.addEventListener('click', () => {
       const d = ageEngPresetDates(+el.dataset.ageEngRange);
