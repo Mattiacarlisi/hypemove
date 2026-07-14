@@ -55,7 +55,7 @@ const FUNNEL_LABELS = [
   'Trial iniziato',                      // 18 · play_purchases is_trial=true (ha iniziato la prova)
 ];
 
-// Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_events, UNION user_events+anonymous_events).
+// Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_v2, UNION user_events+anonymous_events).
 // Minimo e focalizzato sull'onboarding: le 9 schermate del wizard free (in ordine di flusso), più
 // first_open come testa/denominatore e onboarding_complete come endpoint. Nomi amichevoli già pronti;
 // l'event_name reale è mostrato tra parentesi nel menu. Le view_Onboarding* appaiono subito anche se
@@ -320,9 +320,9 @@ let state = {
   funnelConfig: JSON.parse(JSON.stringify(DEF_FUN_CFG)),
   editingOverview: false,
   editingFunnel: false,
-  funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_events)
+  funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2)
   eventFunnelConfig: [],       // [{event, source, label, vsIdx}] — step del funnel a eventi in editing
-  eventFunnel: null,           // risultato RPC kpi_funnel_events: {steps:[{idx,event,source,numero}]}
+  eventFunnel: null,           // risultato RPC kpi_funnel_v2: {steps:[{idx,event,source,numero}]}
   eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
   eventFunnelLoading: false, eventFunnelError: null,
   editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
@@ -559,7 +559,7 @@ async function fetchFunnel() {
   if (state.metaToken && state.funnel) fetchMetaFunnel();
 }
 
-// Calcola il funnel a eventi (kpi_funnel_events legge la UNION user_events + anonymous_events).
+// Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
 async function fetchEventFunnel() {
   const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
   if (!steps.length) { state.eventFunnel = null; render(); return; }
@@ -570,7 +570,7 @@ async function fetchEventFunnel() {
     const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
     const args = { inizio: state.funnelFrom, fine: state.funnelTo, p_steps };
     if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider; // 'google' | 'email'
-    const res = await sb.rpc('kpi_funnel_events', args);
+    const res = await sb.rpc('kpi_funnel_v2', args);
     if (res.error) throw res.error;
     state.eventFunnel = res.data;
   } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
@@ -3562,7 +3562,7 @@ function pageFunnel() {
     ${sprintFunnelSection()}`;
 }
 
-// ── FUNNEL A EVENTI (kpi_funnel_events, UNION user_events + anonymous_events) ──────────
+// ── FUNNEL A EVENTI (kpi_funnel_v2, UNION user_events + anonymous_events) ──────────
 // Builder libero: ogni step è un event_name qualsiasi (es. le schermate onboarding view_Onboarding*).
 // Serve a costruire funnel iper-specifici che il catalogo fisso non copre.
 
@@ -3713,7 +3713,7 @@ function moveEventFunnelRow(from, to) {
 
 // ── CONFRONTO SPRINT — FUNNEL ONBOARDING (eventi) ─────────────────────────────────────
 // Parallelo a sprintFunnelSection ma sul funnel a eventi: applica gli STESSI step + segmento a
-// ogni sprint selezionato (kpi_funnel_events per il periodo di ciascuno) e li mette a confronto.
+// ogni sprint selezionato (kpi_funnel_v2 per il periodo di ciascuno) e li mette a confronto.
 function sprintEventFunnelSection() {
   if (!state.sprints.length) return '';
   const isOpen = state.sprintEventOpen;
@@ -3772,7 +3772,7 @@ async function fetchSprintEventFunnel() {
     const results = await Promise.all(selected.map(s => {
       const args = { inizio: s.inizio, fine: s.fine, p_steps };
       if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider;
-      return sb.rpc('kpi_funnel_events', args).then(r => ({ id: s.id, data: r.data, error: r.error }));
+      return sb.rpc('kpi_funnel_v2', args).then(r => ({ id: s.id, data: r.data, error: r.error }));
     }));
     const map = {};
     for (const r of results) { if (r.error) throw r.error; map[r.id] = r.data; }
