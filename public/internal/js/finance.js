@@ -37,6 +37,19 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const FIN_SELECT = 'id,mese,data_esatta,descrizione,tipo,categoria,importo,chi,note,rule_id';
 const RIC_SELECT = 'id,descrizione,tipo,categoria,importo,chi,note,giorno,mese_inizio,prossimo_mese,stato';
 
+// ── META ADS AUTOMATICO ─────────────────────────────────────────────────────────
+// Ogni mese chiuso, la spesa REALE di Meta ADS entra da sola nel registro, letta dalla
+// stessa API usata dalla dashboard KPI. Il token vive in kpi_settings.meta_token (stesso
+// progetto Supabase). La config (attivo, mese di partenza, puntatore) vive in
+// finance_settings.meta_auto. Le voci generate hanno descrizione "Meta ADS · <mese>":
+// e' questo il marcatore che evita i doppioni (mai reinserire un mese gia' presente).
+const META_API        = 'https://graph.facebook.com/v20.0';
+const META_AD_ACCOUNT = 'act_1993609947865496';
+const META_AUTO_START  = '2026-06';           // primo mese tracciato in automatico (giugno incluso)
+const META_AUTO_CAT    = 'Marketing & ADS';
+const META_AUTO_CHI    = 'Mattia';            // chi paga la carta Meta (default, modificabile in config)
+const META_AUTO_PREFIX = 'Meta ADS · ';       // prefisso descrizione = marcatore anti-doppione
+
 // DB row (snake_case) <-> oggetto in memoria (camelCase, come prima)
 function rowToItem(r) {
   return {
@@ -104,16 +117,24 @@ function meseGiornoDate(mese, giorno) {
 
 // Carica tutti i movimenti + le categorie dal DB nello state in memoria.
 async function dbLoad() {
-  const [movRes, catRes, ricRes] = await Promise.all([
+  const [movRes, catRes, ricRes, tokRes, autoRes] = await Promise.all([
     sb.from('finance_movimenti').select(FIN_SELECT).order('mese', { ascending: true }).order('id', { ascending: true }),
     sb.from('finance_settings').select('value').eq('key', 'categorie').maybeSingle(),
     sb.from('finance_ricorrenti').select(RIC_SELECT).order('created_at', { ascending: true }),
+    sb.from('kpi_settings').select('value').eq('key', 'meta_token').maybeSingle(),
+    sb.from('finance_settings').select('value').eq('key', 'meta_auto').maybeSingle(),
   ]);
   if (movRes.error) throw movRes.error;
   if (ricRes.error) throw ricRes.error;
   state.movimenti = (movRes.data || []).map(rowToItem);
   state.ricorrenti = (ricRes.data || []).map(ruleRowToObj);
   if (catRes.data && catRes.data.value) state.categorie = catRes.data.value;
+
+  // Token Meta (jsonb string) e config auto: se falliscono la contabilita' resta usabile lo stesso.
+  state.metaToken = (!tokRes.error && tokRes.data && typeof tokRes.data.value === 'string') ? tokRes.data.value : '';
+  state.metaAuto = (!autoRes.error && autoRes.data && autoRes.data.value)
+    ? autoRes.data.value
+    : { enabled: true, meseInizio: META_AUTO_START, prossimoMese: META_AUTO_START, chi: META_AUTO_CHI };
 }
 
 // Genera i movimenti mancanti per ogni ricorrente attiva, da prossimoMese fino al mese corrente.
@@ -155,6 +176,115 @@ async function generaRicorrenti() {
     const rr = state.ricorrenti.find(x => x.id === u.id);
     if (rr) rr.prossimoMese = u.prossimoMese;
   }
+}
+
+// ── META ADS: SINCRONIZZAZIONE AUTOMATICA ────────────────────────────────────────
+// Riconosce una voce generata automaticamente (per non duplicarla).
+function isMetaAutoMov(x) {
+  return x.categoria === META_AUTO_CAT && typeof x.descrizione === 'string' && x.descrizione.startsWith(META_AUTO_PREFIX);
+}
+
+// Chiede a Meta la spesa TOTALE di un mese solare (attribuita al giorno reale, quindi
+// un test a cavallo di due mesi si divide da solo). Ritorna euro (>=0). Lancia su errore API.
+async function fetchMetaSpend(mese, token) {
+  const [y, m] = mese.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  const since = `${mese}-01`;
+  const until = `${mese}-${String(last).padStart(2, '0')}`;
+  const tr = encodeURIComponent(JSON.stringify({ since, until }));
+  const url = `${META_API}/${META_AD_ACCOUNT}/insights?fields=spend&time_range=${tr}&access_token=${token}`;
+  const res = await fetch(url).then(r => r.json());
+  if (res.error) throw new Error(res.error.message || 'Errore API Meta');
+  const d = res.data && res.data[0];
+  return d ? parseFloat(d.spend || 0) : 0;
+}
+
+async function saveMetaAutoConfig() {
+  const { error } = await sb.from('finance_settings')
+    .upsert({ key: 'meta_auto', value: state.metaAuto, updated_at: new Date().toISOString() });
+  if (error) throw error;
+}
+
+// Per ogni mese CHIUSO da META_AUTO_START in poi non ancora registrato, inserisce la spesa reale.
+// Idempotente: puntatore prossimoMese + guardia sull'esistenza. Mai il mese in corso.
+// Se l'API fallisce su un mese, si ferma li' (non avanza) e riprova alla prossima apertura.
+async function generaMetaAds() {
+  state.metaAutoStatus = null;
+  const cfg = state.metaAuto;
+  if (!cfg || cfg.enabled === false) return;
+  if (!state.metaToken) {
+    state.metaAutoStatus = { type: 'warn', msg: 'Token Meta non trovato (impostalo nella dashboard KPI): la spesa non puo\' aggiornarsi.' };
+    return;
+  }
+
+  const lastCompleted = addMese(currentMeseStr(), -1);           // ultimo mese solare chiuso
+  const start = cfg.prossimoMese || cfg.meseInizio || META_AUTO_START;
+  const nuovi = [];
+  let pointer = start;
+  let failed = null;
+
+  let m = start;
+  while (m <= lastCompleted) {
+    const giaPresente = state.movimenti.some(x => isMetaAutoMov(x) && x.mese === m);
+    if (!giaPresente) {
+      try {
+        const spend = await fetchMetaSpend(m, state.metaToken);
+        if (spend > 0) {
+          const [y, mm] = m.split('-').map(Number);
+          const last = new Date(y, mm, 0).getDate();
+          nuovi.push({
+            mese: m,
+            data_esatta: `${m}-${String(last).padStart(2, '0')}`,
+            descrizione: META_AUTO_PREFIX + meseLabelIT(m),
+            tipo: 'Spesa',
+            categoria: META_AUTO_CAT,
+            importo: -spend,
+            chi: cfg.chi || META_AUTO_CHI,
+            note: 'Aggiornato in automatico da Meta',
+            rule_id: null,
+          });
+        }
+      } catch (e) {
+        console.error('fetchMetaSpend', m, e);
+        failed = { mese: m, msg: e.message || 'errore' };
+        break;                                                    // non superare il mese fallito
+      }
+    }
+    m = addMese(m, 1);
+    pointer = m;                                                  // avanza solo dopo aver processato il mese
+  }
+
+  if (nuovi.length) {
+    const { data, error } = await sb.from('finance_movimenti').insert(nuovi).select(FIN_SELECT);
+    if (error) { console.error('insert meta', error); state.metaAutoStatus = { type: 'warn', msg: 'Errore nel salvare le spese Meta sul database.' }; return; }
+    state.movimenti = [...state.movimenti, ...data.map(rowToItem)];
+  }
+
+  if (pointer !== start) {
+    cfg.prossimoMese = pointer;
+    try { await saveMetaAutoConfig(); } catch (e) { console.error('saveMetaAutoConfig', e); }
+  }
+
+  if (failed) {
+    state.metaAutoStatus = { type: 'warn', msg: `Sincronizzazione interrotta su ${meseLabelIT(failed.mese)}: ${failed.msg}. Riprovo alla prossima apertura.` };
+  } else if (nuovi.length) {
+    state.metaAutoStatus = { type: 'ok', msg: `${nuovi.length} mes${nuovi.length === 1 ? 'e' : 'i'} Meta aggiornat${nuovi.length === 1 ? 'o' : 'i'}.` };
+  }
+}
+
+async function toggleMetaAuto() {
+  const cfg = state.metaAuto;
+  cfg.enabled = (cfg.enabled === false);                         // in pausa -> attiva, e viceversa
+  try { await saveMetaAutoConfig(); } catch (e) { console.error(e); }
+  if (cfg.enabled) { try { await generaMetaAds(); } catch (e) { console.error(e); } }  // riattivando, recupera i mesi arretrati
+  render();
+  showToast(cfg.enabled ? 'Meta ADS automatico riattivato ✓' : 'Meta ADS automatico in pausa.', 'success');
+}
+
+async function syncMetaAutoNow() {
+  showToast('Sincronizzazione Meta in corso…', 'success');
+  try { await generaMetaAds(); } catch (e) { console.error(e); }
+  render();
 }
 
 async function dbSaveCategorie() {
@@ -200,6 +330,9 @@ let state = {
   categorie: structuredClone(INITIAL_CATS),
   loading: true,                       // true finche' il primo load dal DB non e' finito
   dbError: null,                       // messaggio se la connessione al DB fallisce
+  metaToken: '',                       // token API Meta (letto da kpi_settings)
+  metaAuto: null,                      // config Meta ADS automatico { enabled, meseInizio, prossimoMese, chi }
+  metaAutoStatus: null,                // esito ultima sincronizzazione { type:'ok'|'warn', msg }
   // filtri
   periodoFilter: "tutto",
   annoFilter: "tutto",
@@ -937,6 +1070,49 @@ function renderRegistro() {
 }
 
 // ── RICORRENTI ────────────────────────────────────────────────────────────────
+// Card della spesa Meta ADS automatica: sempre presente, gestibile come una ricorrente.
+function renderMetaAutoCard() {
+  const cfg = state.metaAuto;
+  if (!cfg) return "";
+  const attiva  = cfg.enabled !== false;
+  const autoMov = state.movimenti.filter(isMetaAutoMov);
+  const nGen    = autoMov.length;
+  const mesiGen = autoMov.map(x => x.mese).sort();
+  const ultimo  = mesiGen.length ? mesiGen[mesiGen.length - 1] : null;
+  const totale  = autoMov.reduce((s, x) => s + Math.abs(x.importo), 0);
+  const lastCompleted = addMese(currentMeseStr(), -1);
+  const prossimo = cfg.prossimoMese || cfg.meseInizio || META_AUTO_START;
+  const inAttesa = prossimo > lastCompleted;                     // nessun mese chiuso da sincronizzare
+  const st = state.metaAutoStatus;
+  const stColor = st ? (st.type === 'ok' ? 'var(--mattia)' : '#fbbf24') : '';
+
+  return `
+  <div class="card" style="border:1px solid var(--purple,#a78bfa);${attiva ? "" : "opacity:.75"};margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:600">📣 Meta ADS — spesa automatica</span>
+          <span class="badge ${attiva ? "green" : "amber"}">${attiva ? "Attiva" : "In pausa"}</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted)">
+          Importo reale preso da Meta ogni mese chiuso · ${META_AUTO_CAT} · ${cfg.chi || META_AUTO_CHI}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">
+          Da ${meseLabelIT(cfg.meseInizio || META_AUTO_START)} · ${nGen} mes${nGen === 1 ? "e" : "i"} registrat${nGen === 1 ? "o" : "i"}${totale > 0 ? ` · totale ${fmtEuroPlain(totale)}` : ""}${ultimo ? ` · ultimo: ${meseLabelIT(ultimo)}` : ""}
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">
+          ${attiva ? (inAttesa ? `In attesa che ${meseLabelIT(prossimo)} si chiuda` : `Prossimo da sincronizzare: ${meseLabelIT(prossimo)}`) : "Sincronizzazione in pausa"}
+        </div>
+        ${st ? `<div style="font-size:11px;color:${stColor};margin-top:5px">${st.type === 'ok' ? '✓' : '⚠'} ${st.msg}</div>` : ""}
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0">
+        ${attiva ? `<button class="btn btn-ghost" style="font-size:12px;padding:6px 12px" data-meta-sync>↻ Sincronizza ora</button>` : ""}
+        <button class="btn ${attiva ? "btn-ghost" : "btn-primary"}" style="font-size:12px;padding:6px 12px" data-meta-toggle>${attiva ? "⏸ Pausa" : "▶ Riattiva"}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderRicorrenti() {
   const ric = state.ricorrenti.slice().sort((a, b) =>
     (a.stato === b.stato ? 0 : a.stato === "attiva" ? -1 : 1) ||
@@ -975,6 +1151,8 @@ function renderRicorrenti() {
     <div class="page-title">Spese ricorrenti</div>
     <div class="page-sub">Regole che generano un movimento ogni mese in automatico all'apertura. Metti in pausa quando sospendi, riattiva quando riprende.</div>
   </div>
+
+  ${renderMetaAutoCard()}
 
   ${ric.length === 0 ? `
     <div class="card">
@@ -1287,6 +1465,11 @@ function attachEvents() {
   document.querySelectorAll("[data-ric-elimina]").forEach(el =>
     el.addEventListener("click", () => eliminaRicorrente(parseInt(el.dataset.ricElimina))));
 
+  const metaSync = document.querySelector("[data-meta-sync]");
+  if (metaSync) metaSync.addEventListener("click", syncMetaAutoNow);
+  const metaToggle = document.querySelector("[data-meta-toggle]");
+  if (metaToggle) metaToggle.addEventListener("click", toggleMetaAuto);
+
   document.querySelectorAll("[data-delcat-spesa]").forEach(el =>
     el.addEventListener("click", () => delCat("Spesa", el.dataset.delcatSpesa)));
   document.querySelectorAll("[data-delcat-entrata]").forEach(el =>
@@ -1355,6 +1538,8 @@ async function boot() {
     await dbLoad();
     try { await generaRicorrenti(); } catch (e) { console.error("genera ricorrenti", e); }
     setState({ loading: false });
+    // Meta ADS: sincronizza in background, senza bloccare il primo render.
+    generaMetaAds().then(render).catch(e => console.error("genera meta ads", e));
   } catch (e) {
     console.error(e);
     setState({ loading: false, dbError: (e && e.message) ? e.message : "errore sconosciuto" });
