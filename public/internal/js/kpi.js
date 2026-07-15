@@ -349,6 +349,11 @@ let state = {
   sprintFunnelOpen: false, sprintFunnelSel: [], sprintFunnelData: {}, sprintFunnelLoading: false, sprintFunnelError: null,
   sprintFunnelDef: null,       // id di una funnel_definition da applicare UGUALE a tutti gli sprint nel confronto; null = Base (ogni sprint il suo funnel_config)
   sprintFunnelHiddenSteps: [], // stepIdx nascosti SOLO in visualizzazione confronto (session-only, non persistito, non tocca i funnel)
+  sprintFunnelPctStart: false, // flag: sotto ogni cella del confronto mostra ANCHE la % sulla testa del funnel (oltre alla % vs step precedente)
+  funnelPhases: [], funnelPhasesId: null, // fasi (macro-aree) del funnel — condivise dal DB (funnel_phases)
+  sprintLeakMode: 'abs',       // pannello "Dove si perdono gli utenti": 'abs' = utenti persi | 'pct' = tasso di calo
+  sprintLeakEdit: null,        // working copy delle fasi durante l'editing; null = non stiamo editando
+  sprintLeakSaving: false,
   sprintRetOpen: false, sprintRetSel: [], sprintRetData: {}, sprintRetLoading: false, sprintRetError: null,
   sprintRetCustom: false, sprintRetMin: 1, sprintRetWeeks: 6, sprintRetMinW0: 1,
   deleteConfirm: null, // { id, nome } when modal is open
@@ -826,6 +831,57 @@ async function fetchFunnelDefinitions() {
     }
   } catch (e) { console.error('fetchFunnelDefinitions', e); }
   render();
+}
+
+// Fasi (macro-aree) del funnel — condivise dal DB (funnel_phases), come i funnel salvati: le modifichi
+// tu e le vede anche Danilo. Per ora il set è UNICO (leggiamo la riga più vecchia); la tabella tiene la
+// colonna nome per poter aggiungere set alternativi in futuro senza migrare.
+// I confini sono stepIdx del catalogo FUNNEL_LABELS, NON posizioni nel funnel di un singolo sprint:
+// le fasi sono una lente a sé, applicata IDENTICA a ogni sprint — è ciò che le rende confrontabili
+// anche tra sprint con funnel_config diversi. (kpi_funnel restituisce tutti gli step del catalogo,
+// quindi il dato c'è comunque; l'unico "—" vero è quando il numero è null, es. installs non importati.)
+const DEF_FUNNEL_PHASES = [
+  { nome: 'Acquisizione', from: 0, to: 2 },  // Installazioni → Onboarding iniziato
+  { nome: 'Onboarding',   from: 2, to: 3 },  // Onboarding iniziato → completato
+  { nome: 'Attivazione',  from: 3, to: 4 },  // Onboarding completato → Almeno 1 workout
+  { nome: 'Abitudine',    from: 4, to: 9 },  // Almeno 1 workout → 3-day streak
+];
+
+async function fetchFunnelPhases() {
+  try {
+    const res = await sb.from('funnel_phases').select('id, fasi').order('created_at', { ascending: true }).limit(1);
+    if (res.error) throw res.error;
+    const row = (res.data || [])[0];
+    if (row) {
+      state.funnelPhasesId = row.id;
+      // NON sovrascrivere mentre stai editando: l'auto-refresh gira ogni 5 min e ti cancellerebbe il lavoro
+      if (!state.sprintLeakEdit) state.funnelPhases = Array.isArray(row.fasi) ? row.fasi : [];
+    }
+  } catch (e) { console.error('fetchFunnelPhases', e); }
+  render();
+}
+
+async function saveFunnelPhases(fasi) {
+  state.sprintLeakSaving = true;
+  render();
+  try {
+    const res = state.funnelPhasesId
+      ? await sb.from('funnel_phases').update({ fasi, updated_at: new Date().toISOString() }).eq('id', state.funnelPhasesId)
+      : await sb.from('funnel_phases').insert({ nome: 'Fasi del funnel', fasi });
+    if (res.error) throw res.error;
+    state.funnelPhases = fasi;
+    state.sprintLeakEdit = null;
+  } catch (e) {
+    console.error('saveFunnelPhases', e);
+    alert('Errore salvataggio fasi: ' + (e.message || e));
+  }
+  state.sprintLeakSaving = false;
+  await fetchFunnelPhases();
+}
+
+// Le fasi attive: quelle salvate sul DB, o il default finché il DB non risponde / se il set è vuoto.
+function activeFunnelPhases() {
+  return (state.funnelPhases && state.funnelPhases.length) ? state.funnelPhases : DEF_FUNNEL_PHASES;
 }
 
 async function fetchBlockedUsers() {
@@ -1353,6 +1409,7 @@ function startAutoRefresh() {
     fetchData();
     loadSettings();
     fetchFunnelDefinitions();
+    fetchFunnelPhases();
     fetchSprints();
   }, REFRESH_MS);
 }
@@ -1389,6 +1446,7 @@ function manualRefresh() {
   // dell'altro utente senza ricaricare la pagina
   loadSettings();
   fetchFunnelDefinitions();
+  fetchFunnelPhases();
   fetchSprints();
   if (state.page === 'funnel') { if (state.funnelMode === 'event') fetchEventFunnel(); else fetchFunnel(); }
 }
@@ -3211,6 +3269,7 @@ function sprintAiFunnelSection() {
         <div style="display:flex;align-items:center;gap:12px">
           <button id="sprint-ai-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
             ${!state.sprintAiFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+          ${hasData ? pctStartToggle('sprint-ai-pctstart') : ''}
           ${!hasData && !state.sprintAiFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
         </div>
         ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
@@ -3246,6 +3305,10 @@ function sprintAiFunnelTable(selected, dataMap) {
     </th>`
   ).join('');
 
+  // Testa del funnel per la "% dall'inizio": qui è semplicemente il primo step configurato — a
+  // differenza del funnel a catalogo non c'è nessun dato che arriva in ritardo, quindi niente ripiego.
+  const headStep = cfg[0] ? AI_FUNNEL_ALL_STEPS[cfg[0].stepIdx] : null;
+
   const rows = cfg.map((row, i) => {
     const step = AI_FUNNEL_ALL_STEPS[row.stepIdx];
     const nums = selected.map(s => Number((dataMap[s.id] || {})[step.event]?.total ?? -1));
@@ -3254,6 +3317,8 @@ function sprintAiFunnelTable(selected, dataMap) {
     const cells = selected.map((s, si) => {
       const eventsMap = dataMap[s.id] || {};
       const num    = Number(eventsMap[step.event]?.total ?? 0);
+      const headN  = headStep ? Number(eventsMap[headStep.event]?.total ?? 0) : 0;
+      const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
       const vsStep = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
       const vsN    = vsStep ? Number(eventsMap[vsStep.event]?.total ?? 0) : null;
       const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
@@ -3268,7 +3333,9 @@ function sprintAiFunnelTable(selected, dataMap) {
           </div>
           <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
         </div>
-        ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
+        ${pctCellLine(
+          convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : null,
+          startPct, headStep ? headStep.label : '', convPct)}
       </td>`;
     }).join('');
 
@@ -3580,7 +3647,8 @@ function pageFunnel() {
       ${body}
     ${metaFunnelSection()}
     </div>
-    ${sprintFunnelSection()}`;
+    ${sprintFunnelSection()}
+    ${sprintLeakSection()}`;
 }
 
 // ── FUNNEL A EVENTI (kpi_funnel_v2, UNION user_events + anonymous_events) ──────────
@@ -3774,6 +3842,7 @@ function sprintEventFunnelSection() {
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>
         <button id="sprint-event-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px" ${!state.sprintEventSel.length ? 'disabled' : ''}>Calcola confronto</button>
+        ${hasData ? pctStartToggle('sprint-event-pctstart') : ''}
         ${cmpBody ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${cmpBody}</div>` : ''}
       </div>
     </div>`;
@@ -3825,6 +3894,9 @@ function sprintEventFunnelTable() {
       <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
     </th>`).join('');
 
+  // Testa del funnel per la "% dall'inizio": il primo step configurato (indice 0 nella mappa numsOf).
+  const headLabel = cfg[0] ? (eventStepLabel(cfg[0]) || 'step 1') : '';
+
   const rows = cfg.map((row, ri) => {
     const label = eventStepLabel(row) || ('step ' + (ri + 1));
     const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
@@ -3835,6 +3907,8 @@ function sprintEventFunnelTable() {
       const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
       const convStr = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
+      const headN = numsOf[s.id][0] ?? 0;
+      const startPct = state.sprintFunnelPctStart && headN > 0 && ri > 0 ? (n / headN * 100) : null;
       const isBest = n === maxN && maxN > 0;
       const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
@@ -3844,7 +3918,9 @@ function sprintEventFunnelTable() {
           </div>
           <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${n}</span>
         </div>
-        ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
+        ${pctCellLine(
+          convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : null,
+          startPct, headLabel, convPct)}
       </td>`;
     }).join('');
     return `<tr style="border-bottom:1px solid var(--border)">
@@ -5077,6 +5153,7 @@ function sprintPremiumFunnelSection() {
       <div style="display:flex;align-items:center;gap:12px">
         <button id="sprint-premium-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
           ${!state.sprintPremiumFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+        ${hasData ? pctStartToggle('sprint-premium-pctstart') : ''}
         ${!hasData && !state.sprintPremiumFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
       </div>
       ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px;overflow-x:auto">${body}</div>` : ''}
@@ -5113,6 +5190,10 @@ function sprintPremiumFunnelTable(selected, dataMap) {
     </th>`
   ).join('');
 
+  // Testa del funnel per la "% dall'inizio": il primo step configurato (di norma "Paywall mostrato").
+  // La % è sul numero grande della riga (gli eventi), lo stesso metro che la cella già mostra.
+  const headStep = cfg[0] ? FUNNEL_ALL_STEPS[cfg[0].stepIdx] : null;
+
   const rows = cfg.map((row, i) => {
     const stepDef = FUNNEL_ALL_STEPS[row.stepIdx];
     const nums    = selected.map(s => Number(dataMap[s.id]?.funnel?.[stepDef.field] ?? -1));
@@ -5124,6 +5205,8 @@ function sprintPremiumFunnelTable(selected, dataMap) {
       const fn     = dataMap[s.id]?.funnel || {};
       const num    = Number(fn[stepDef.field] ?? 0);
       const users  = Number(fn[stepDef.usersField] ?? 0);
+      const headN  = headStep ? Number(fn[headStep.field] ?? 0) : 0;
+      const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
       const vsN    = vsStep ? Number(fn[vsStep.field] ?? 0) : null;
       const change = (vsN !== null && vsN > 0) ? ((num / vsN - 1) * 100) : null;
       const changeStr   = change !== null ? (change > 0 ? '+' : '') + change.toFixed(0) + '%' : '—';
@@ -5138,7 +5221,9 @@ function sprintPremiumFunnelTable(selected, dataMap) {
           <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
         </div>
         <div style="font-size:10px;color:var(--muted);text-align:right;margin-top:2px">${users} ut.</div>
-        ${change !== null ? `<div style="font-size:10px;font-weight:600;color:${changeColor};text-align:right;margin-top:1px">${changeStr}</div>` : ''}
+        ${pctCellLine(
+          change !== null ? `<span style="color:${changeColor}">${changeStr}</span>` : null,
+          startPct, headStep ? headStep.label : '')}
       </td>`;
     }).join('');
 
@@ -5771,6 +5856,7 @@ function sprintFunnelSection() {
           <button id="sprint-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
             ${!state.sprintFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
           ${sprintFunnelDefSelector()}
+          ${hasData ? pctStartToggle('sprint-funnel-pctstart') : ''}
           ${!hasData && !state.sprintFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
         </div>
         ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
@@ -5813,8 +5899,23 @@ function sprintFunnelCompareView() {
   const note = def
     ? `Confronto sul funnel <strong style="color:var(--text)">${esc(def.name)}</strong>: gli <strong style="color:var(--text)">stessi step</strong> applicati a ogni sprint (stesso metro). Il funnel base di ogni sprint non viene toccato — torni a vederlo scegliendo “Base”.`
     : `Ogni sprint usa il suo funnel (o quello di default). La cella <span style="color:#3a3a55">·</span> indica uno step non incluso nel funnel di quello sprint. I funnel si modificano nella pagina <strong style="color:var(--text)">Sprint</strong> o si assegnano da qui col pulsante “Assegna a sprint”.`;
+  // Quali sprint stanno usando una testa di ripiego (installazioni non ancora importate): vanno detti
+  // in chiaro, altrimenti la seconda % sembra confrontabile con quella degli altri e non lo è.
+  const fallbacks = selected
+    .map(s => {
+      const h = funnelHead(def ? def.config : sprintFunnelCfg(s), state.sprintFunnelData[s.id] || []);
+      return h && h.fallback ? { nome: s.nome, step: FUNNEL_LABELS[h.stepIdx] || '' } : null;
+    })
+    .filter(Boolean);
+  const pctNote = !state.sprintFunnelPctStart ? '' :
+    ` Sotto ogni numero: <strong style="color:var(--text)">prima %</strong> = vs step precedente (o quello scelto nel funnel), <strong style="color:var(--text)">seconda % in grigio</strong> = sul primo step del funnel di quello sprint.` +
+    (fallbacks.length ? `
+      <br><span style="color:var(--amber)">*</span> ${fallbacks.map(f => `<strong style="color:var(--text)">${esc(f.nome)}</strong>`).join(', ')}
+      ${fallbacks.length > 1 ? 'non hanno' : 'non ha'} ancora il dato installazioni (arriva ~7-10 giorni dopo):
+      per ora la seconda % parte da <strong style="color:var(--text)">${esc(fallbacks[0].step)}</strong> e si riallinea da sola quando il dato viene importato.
+      Finché c'è l'asterisco quella % ha un denominatore diverso dagli altri sprint — <strong style="color:var(--text)">non confrontarla 1:1</strong>.` : '');
   return legend +
-    `<div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">${note}</div>` +
+    `<div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">${note}${pctNote}</div>` +
     sprintFunnelTable(selected, state.sprintFunnelData);
 }
 
@@ -5972,6 +6073,54 @@ function sprintRetentionChart(selected, dataMap) {
     </div>`;
 }
 
+// Checkbox "% dall'inizio", condivisa da TUTTI i confronti sprint (catalogo, eventi, Premium, AI):
+// è una preferenza di visualizzazione unica — la spunti una volta e vale ovunque, perché la domanda
+// ("quanti dei primi sono ancora qui?") è la stessa in ogni funnel. L'id cambia per pannello solo
+// perché possono coesistere nella stessa pagina; il cablaggio è sulla classe.
+function pctStartToggle(id) {
+  return `<label title="Aggiunge sotto ogni numero una seconda percentuale, calcolata sul primo step del funnel invece che sullo step precedente"
+      style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none">
+      <input type="checkbox" class="sprint-pctstart" id="${id}" ${state.sprintFunnelPctStart ? 'checked' : ''}
+        style="accent-color:var(--purple);cursor:pointer;margin:0">
+      % dall'inizio
+    </label>`;
+}
+
+// La seconda riga di percentuale in una cella di confronto: la % di conversione che la cella già
+// mostrava, più (se il flag è attivo) la % sulla testa del funnel in grigio. Tenerle sulla stessa
+// riga evita di far crescere l'altezza della tabella quando accendi il flag.
+// dupOf = la % di conversione, quando è lo STESSO tipo di misura della % dall'inizio: nello step
+// subito dopo la testa le due coincidono per forza e ripeterle ("80.7% · 80.7%") è solo rumore.
+// Chi confronta misure diverse (Premium mostra una variazione +/-, non una conversione) passa null
+// e non sopprime mai: lì due numeri uguali sarebbero una coincidenza, non un doppione.
+function pctCellLine(convHtml, startPct, headLabel, dupOf = null) {
+  const dup = startPct !== null && dupOf !== null && Math.abs(dupOf - startPct) < 0.05;
+  const showStart = startPct !== null && !dup;
+  if (convHtml === null && !showStart) return '';
+  return `<div style="font-size:10px;font-weight:600;text-align:right;margin-top:2px">
+    ${convHtml !== null ? convHtml : ''}
+    ${showStart ? `<span title="${esc(`Dall'inizio del funnel (${headLabel})`)}" style="color:var(--muted);font-weight:500">${convHtml !== null ? ' · ' : ''}${startPct.toFixed(1)}%</span>` : ''}
+  </div>`;
+}
+
+// Testa del funnel per la "% dall'inizio": il primo step del funnel di QUESTO sprint che ha davvero
+// un numero. Le installazioni Google Play arrivano ~7-10 giorni dopo, quindi sugli sprint recenti lo
+// step 0 è null: senza fallback la colonna resterebbe vuota proprio sullo sprint che stai guardando.
+// Ci si aggancia allo step buono successivo (di norma "Onboarding iniziato") e ci si RIALLINEA DA SOLI
+// alle installazioni appena il dato viene importato — nessuna azione manuale.
+// fallback:true = denominatore diverso dagli altri sprint → la cella va marcata (*), altrimenti
+// confronteresti una % sulle installazioni con una % sugli onboarding e sembrerebbero la stessa cosa.
+// Il > 0 scarta anche gli step a zero (es. First Open, che non emettiamo): un denominatore 0 non serve.
+function funnelHead(cfg, data) {
+  for (let i = 0; i < cfg.length; i++) {
+    const raw = data[cfg[i].stepIdx]?.numero;
+    if (raw !== null && raw !== undefined && Number(raw) > 0) {
+      return { rowPos: i, stepIdx: cfg[i].stepIdx, num: Number(raw), fallback: i > 0 };
+    }
+  }
+  return null;
+}
+
 function sprintFunnelTable(selected, dataMap) {
   const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
 
@@ -5983,6 +6132,8 @@ function sprintFunnelTable(selected, dataMap) {
   const def   = activeSprintFunnelDef();
   const cfgOf  = {};
   selected.forEach(s => { cfgOf[s.id] = def ? def.config : sprintFunnelCfg(s); });
+  const headOf = {}; // testa del funnel per sprint (per la "% dall'inizio") — una volta, non per cella
+  selected.forEach(s => { headOf[s.id] = funnelHead(cfgOf[s.id], dataMap[s.id] || []); });
   const unionSteps = [];
   selected.forEach(s => cfgOf[s.id].forEach(r => {
     if (!unionSteps.includes(r.stepIdx)) unionSteps.push(r.stepIdx);
@@ -6040,6 +6191,11 @@ function sprintFunnelTable(selected, dataMap) {
       const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
+      // Flag "% dall'inizio": seconda percentuale, calcolata sulla testa del funnel di questo sprint
+      // invece che sullo step precedente. Sulla testa stessa (e sopra) non ha senso: sarebbe 100%.
+      const head      = headOf[s.id];
+      const startPct  = state.sprintFunnelPctStart && !noData && head && rowPos > head.rowPos
+        ? (num / head.num * 100) : null;
       const isBest    = !noData && num === maxN && maxN > 0;
       const barW      = noData ? 0 : (maxN > 0 ? Math.round(num / maxN * 100) : 0);
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
@@ -6051,7 +6207,18 @@ function sprintFunnelTable(selected, dataMap) {
             ? `<span class="funnel-step-users" data-step="${stepIdx}" data-inizio="${esc(s.inizio)}" data-fine="${esc(s.fine)}" data-pstart="${esc(sprintStartTs(s) || '')}" data-label="${esc(label)}" data-sprint="${esc(s.nome)}" title="Vedi chi sono questi utenti" style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${colors[si]};cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${num}</span>`
             : `<span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}" ${noData ? 'title="Dato non disponibile per questo periodo"' : ''}>${noData ? 'n.d.' : num}</span>`}
         </div>
-        ${convPct !== null ? `<div style="font-size:10px;font-weight:600;color:${convColor};text-align:right;margin-top:2px">${convStr}</div>` : ''}
+        ${(() => {
+          // Nello step subito dopo la testa le due % coincidono per forza → mostra solo la conversione.
+          const dup = startPct !== null && convPct !== null && Math.abs(convPct - startPct) < 0.05;
+          const showStart = startPct !== null && !dup;
+          if (convPct === null && !showStart) return '';
+          return `<div style="font-size:10px;font-weight:600;text-align:right;margin-top:2px">
+            ${convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : ''}
+            ${showStart ? `<span title="${esc(head.fallback
+                ? `Su “${FUNNEL_LABELS[head.stepIdx] || ''}”: le installazioni non sono ancora disponibili per questo sprint, quindi il denominatore è diverso dagli altri`
+                : `Dall'inizio del funnel (${FUNNEL_LABELS[head.stepIdx] || ''})`)}" style="color:var(--muted);font-weight:500">${convPct !== null ? ' · ' : ''}${startPct.toFixed(1)}%${head.fallback ? '<span style="color:var(--amber)">*</span>' : ''}</span>` : ''}
+          </div>`;
+        })()}
       </td>`;
     }).join('');
 
@@ -6113,6 +6280,182 @@ function sprintFunnelTable(selected, dataMap) {
     </tr></thead>
     <tbody>${rows}${metaRows}</tbody>
   </table>`;
+}
+
+// ── SPRINT COMPARE — DOVE SI PERDONO GLI UTENTI (fasi) ────────────────
+// Pannello separato sotto il Confronto Sprint: raggruppa il funnel in fasi (macro-aree) e mostra per
+// ogni fase quanta gente si perde, sprint per sprint. Due letture, perché "quale fase fa perdere di
+// più" ha due risposte diverse ed entrambe servono:
+//   'abs' = utenti persi  → il volume: dove c'è più gente da recuperare  (somma sugli sprint scelti)
+//   'pct' = tasso di calo → l'intensità: quanto è rotto il passaggio     (media sugli sprint scelti)
+// Tipicamente vincono fasi diverse: il tasso dice dov'è rotto, il volume dice dove conviene aggiustare.
+// Le fasi arrivano da funnel_phases (DB, condivise con Danilo) e si editano da qui.
+// I confini sono stepIdx del catalogo: la stessa lente su tutti gli sprint, anche con funnel diversi.
+// NB: il colore qui NON identifica lo sprint (quello è nell'intestazione) ma la gravità — rosso più
+// intenso = si perde di più. Un solo significato per canale visivo, altrimenti la tabella diventa caos.
+
+// Statistica di una fase per uno sprint. null se manca un confine (es. installs non importati per
+// quel periodo): meglio una cella vuota che un numero inventato.
+function leakStat(phase, sprintId) {
+  const data = state.sprintFunnelData[sprintId] || [];
+  const rawA = data[phase.from]?.numero;
+  const rawB = data[phase.to]?.numero;
+  if (rawA === null || rawA === undefined || rawB === null || rawB === undefined) return null;
+  const a = Number(rawA), b = Number(rawB);
+  if (!(a > 0)) return null;
+  return { a, b, lost: a - b, drop: (1 - b / a) * 100 };
+}
+
+// Legge le fasi dai campi del form. Serve per non ri-renderizzare a ogni tasto (perderesti il focus
+// mentre scrivi il nome): lo stato si aggiorna solo quando aggiungi/togli una fase, cambi un confine
+// o salvi.
+function readLeakEditFromDom() {
+  return Array.from(document.querySelectorAll('.leak-ph-row')).map(r => ({
+    nome: (r.querySelector('.leak-ph-name')?.value || '').trim() || 'Senza nome',
+    from: Number(r.querySelector('.leak-ph-from')?.value ?? 0),
+    to:   Number(r.querySelector('.leak-ph-to')?.value ?? 0),
+  }));
+}
+
+function sprintLeakSection() {
+  const selected = state.sprints.filter(s => state.sprintFunnelSel.includes(s.id));
+  const hasData  = Object.keys(state.sprintFunnelData).length > 0;
+  // Il pannello vive dei dati del Confronto Sprint: senza quelli non ha niente da dire.
+  if (!selected.length || !hasData || state.sprintFunnelLoading || state.sprintFunnelError) return '';
+
+  const editing = !!state.sprintLeakEdit;
+  const phases  = editing ? state.sprintLeakEdit : activeFunnelPhases();
+  const colors  = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+  const isAbs   = state.sprintLeakMode === 'abs';
+
+  const modeBtn = (mode, label, title) => `
+    <button class="leak-mode" data-mode="${mode}" title="${title}"
+      style="cursor:pointer;padding:5px 13px;font-size:12px;font-weight:600;border:none;border-radius:6px;transition:all .15s;
+        ${state.sprintLeakMode === mode ? 'background:var(--purple);color:#150e26' : 'background:transparent;color:var(--muted)'}">
+      ${label}
+    </button>`;
+
+  // Punteggio per fase → chi è "la peggiore". Somma per gli utenti persi (è un volume totale), media
+  // per il tasso (sommare percentuali di sprint diversi non vorrebbe dire niente).
+  const scores = phases.map(ph => {
+    const vals = selected.map(s => leakStat(ph, s.id)).filter(Boolean);
+    if (!vals.length) return null;
+    return isAbs
+      ? vals.reduce((t, v) => t + v.lost, 0)
+      : vals.reduce((t, v) => t + v.drop, 0) / vals.length;
+  });
+  const validScores = scores.filter(v => v !== null);
+  const worstIdx = validScores.length ? scores.indexOf(Math.max(...validScores)) : -1;
+
+  // Intensità del rosso = gravità relativa alla cella peggiore del pannello.
+  const maxCell = Math.max(0, ...phases.flatMap(ph => selected.map(s => {
+    const st = leakStat(ph, s.id);
+    return st ? (isAbs ? st.lost : st.drop) : 0;
+  })));
+
+  const stepOpts = sel => FUNNEL_LABELS
+    .map((l, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 14px;white-space:nowrap;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">
+      <span style="width:9px;height:9px;border-radius:50%;background:${colors[i]};display:inline-block;margin-right:6px;vertical-align:middle"></span>${esc(s.nome)}
+    </th>`).join('');
+
+  const rows = phases.map((ph, pi) => {
+    const isWorst = pi === worstIdx;
+    const cells = selected.map(s => {
+      const st = leakStat(ph, s.id);
+      if (!st) {
+        return `<td style="padding:6px 14px;text-align:right;color:#3a3a55;font-size:12px"
+          title="Dato non disponibile per uno dei due step di confine in questo sprint">—</td>`;
+      }
+      const val = isAbs ? st.lost : st.drop;
+      const t   = maxCell > 0 ? Math.max(0, val) / maxCell : 0;
+      const bg  = `rgba(248,113,113,${(0.05 + t * 0.28).toFixed(3)})`;
+      const col = t > 0.66 ? 'var(--red)' : t > 0.33 ? 'var(--amber)' : 'var(--muted)';
+      const main = isAbs ? `−${st.lost}` : `−${st.drop.toFixed(0)}%`;
+      const sub  = isAbs ? `${st.drop.toFixed(0)}% di ${st.a}` : `${st.lost} utenti`;
+      return `<td style="padding:4px 6px 4px 0">
+        <div style="background:${bg};border-radius:8px;padding:8px 12px;text-align:right;border:1px solid ${isWorst ? 'rgba(248,113,113,.35)' : 'transparent'}">
+          <div style="font-family:var(--mono);font-size:16px;font-weight:700;color:${col};line-height:1.15">${main}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px">${sub}</div>
+        </div>
+      </td>`;
+    }).join('');
+
+    const nameCell = editing ? `
+      <td class="leak-ph-row" style="padding:5px 14px 5px 0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input class="leak-ph-name" value="${esc(ph.nome)}" placeholder="Nome fase"
+            style="background:var(--surface2);border:1px solid #3a3a55;border-radius:6px;color:var(--text);font-size:12px;padding:5px 8px;width:120px">
+          <select class="leak-ph-from form-select" data-i="${pi}" style="font-size:11px;padding:4px 6px;max-width:150px">${stepOpts(ph.from)}</select>
+          <span style="color:var(--muted);font-size:11px">→</span>
+          <select class="leak-ph-to form-select" data-i="${pi}" style="font-size:11px;padding:4px 6px;max-width:150px">${stepOpts(ph.to)}</select>
+          <button class="leak-ph-del" data-i="${pi}" title="Elimina questa fase"
+            style="cursor:pointer;background:none;border:none;color:var(--red);font-size:13px;padding:2px 4px;line-height:1">✕</button>
+        </div>
+      </td>` : `
+      <td style="padding:6px 14px 6px 0;vertical-align:middle">
+        <div style="display:flex;align-items:center;gap:9px">
+          <span style="width:3px;height:30px;border-radius:2px;background:${isWorst ? 'var(--red)' : '#3a3a55'};flex-shrink:0"></span>
+          <span>
+            <span style="font-size:13px;font-weight:600;color:var(--text);display:block;line-height:1.25">${esc(ph.nome)}${
+              isWorst ? `<span style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--red);color:#2a0a0a;border-radius:4px;padding:2px 5px;margin-left:7px;white-space:nowrap">peggiore</span>` : ''}</span>
+            <span style="font-size:10.5px;color:var(--muted)">${esc(FUNNEL_LABELS[ph.from] || '?')} → ${esc(FUNNEL_LABELS[ph.to] || '?')}</span>
+          </span>
+        </div>
+      </td>`;
+
+    return `<tr>${nameCell}${editing ? '' : cells}</tr>`;
+  }).join('');
+
+  const editBar = editing ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button id="leak-ph-add" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--purple)">+ Aggiungi fase</button>
+      <div style="flex:1"></div>
+      <button id="leak-ph-cancel" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--muted)">Annulla</button>
+      <button id="leak-ph-save" class="btn btn-primary" style="font-size:11px;padding:5px 14px" ${state.sprintLeakSaving ? 'disabled' : ''}>
+        ${state.sprintLeakSaving ? 'Salvo...' : 'Salva fasi'}
+      </button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
+      Le fasi sono <strong style="color:var(--text)">condivise</strong>: quello che salvi qui lo vede anche Danilo.
+      Ogni fase è il calo tra due step del catalogo — puoi tagliarle come vuoi, anche sovrapposte.
+    </div>` : '';
+
+  const note = isAbs
+    ? `<strong style="color:var(--text)">Utenti persi</strong> = il volume: quante persone vere lasci per strada in quella fase. Dice <strong style="color:var(--text)">dove conviene aggiustare</strong>. Prova “Tasso di calo”: spesso la fase peggiore è un'altra.`
+    : `<strong style="color:var(--text)">Tasso di calo</strong> = l'intensità: che quota di chi entra nella fase la abbandona. Dice <strong style="color:var(--text)">dov'è rotto</strong> — ma una fase può essere rottissima e valere pochi utenti, perché ci arriva già poca gente. Incrocialo con “Utenti persi”.`;
+
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:14px;font-weight:700;color:var(--text)">Dove si perdono gli utenti</span>
+          <span style="font-size:11px;color:var(--muted)">${phases.length} fasi · ${selected.length} sprint</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${editing ? '' : `
+            <div style="display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:3px">
+              ${modeBtn('abs', 'Utenti persi', 'Il volume: quante persone perdi in quella fase')}
+              ${modeBtn('pct', 'Tasso di calo', "L'intensità: che percentuale di chi entra nella fase la abbandona")}
+            </div>
+            <button id="leak-ph-edit" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--muted)">⚙ Modifica fasi</button>`}
+        </div>
+      </div>
+
+      <div style="margin-top:16px;overflow-x:auto">
+        <table style="width:100%;border-collapse:separate;border-spacing:0;min-width:${editing ? 520 : 480}px">
+          ${editing ? '' : `<thead><tr>
+            <th style="text-align:left;padding:10px 14px 10px 0;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px;width:230px">Fase</th>
+            ${headers}
+          </tr></thead>`}
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${editBar}
+      ${editing ? '' : `<div style="font-size:11px;color:var(--muted);margin-top:16px;padding-top:14px;border-top:1px solid var(--border);line-height:1.6">${note}</div>`}
+    </div>`;
 }
 
 function sprintRetentionTable(selected, dataMap) {
@@ -7319,6 +7662,54 @@ function attachEvents() {
       render();
     }));
   document.getElementById('sprint-funnel-calc')?.addEventListener('click', fetchSprintFunnel);
+  // Flag "% dall'inizio" — una preferenza sola per tutti i confronti sprint (catalogo, eventi,
+  // Premium, AI): la spunti dove sei e vale ovunque. Solo visualizzazione: i dati ci sono già.
+  document.querySelectorAll('.sprint-pctstart').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintFunnelPctStart = el.checked;
+      render();
+    }));
+
+  // ── Pannello "Dove si perdono gli utenti" ────────────────────────────
+  document.querySelectorAll('.leak-mode').forEach(el =>
+    el.addEventListener('click', () => {
+      state.sprintLeakMode = el.dataset.mode;
+      render();
+    }));
+  document.getElementById('leak-ph-edit')?.addEventListener('click', () => {
+    state.sprintLeakEdit = JSON.parse(JSON.stringify(activeFunnelPhases()));
+    render();
+  });
+  document.getElementById('leak-ph-cancel')?.addEventListener('click', () => {
+    state.sprintLeakEdit = null;
+    render();
+  });
+  document.getElementById('leak-ph-add')?.addEventListener('click', () => {
+    // rileggi prima dal DOM, altrimenti perdi i nomi digitati e non ancora in stato
+    state.sprintLeakEdit = readLeakEditFromDom().concat({ nome: 'Nuova fase', from: 0, to: 2 });
+    render();
+  });
+  document.querySelectorAll('.leak-ph-del').forEach(el =>
+    el.addEventListener('click', () => {
+      const cur = readLeakEditFromDom();
+      cur.splice(+el.dataset.i, 1);
+      state.sprintLeakEdit = cur;
+      render();
+    }));
+  // I confini cambiano i numeri → ridisegna (rileggendo i nomi digitati). Sui campi testo NON
+  // ridisegniamo: perderesti il focus a ogni tasto — i nomi si leggono dal DOM al salvataggio.
+  document.querySelectorAll('.leak-ph-from, .leak-ph-to').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintLeakEdit = readLeakEditFromDom();
+      render();
+    }));
+  document.getElementById('leak-ph-save')?.addEventListener('click', () => {
+    const fasi = readLeakEditFromDom();
+    if (!fasi.length) { alert('Aggiungi almeno una fase.'); return; }
+    const bad = fasi.find(f => f.from === f.to);
+    if (bad) { alert(`La fase "${bad.nome}" ha lo stesso step come inizio e fine: il calo sarebbe sempre 0.`); return; }
+    saveFunnelPhases(fasi);
+  });
 
   // Meta ADS — token save
   document.getElementById('meta-token-save')?.addEventListener('click', () => {
@@ -7859,6 +8250,7 @@ document.addEventListener('keydown', e => {
   fetchWorkoutDepth();
   fetchSprints();
   fetchFunnelDefinitions();
+  fetchFunnelPhases();
   fetchBlockedUsers();
   fetchRecentlyUnblocked();
   startAutoRefresh();
