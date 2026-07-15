@@ -349,7 +349,7 @@ let state = {
   sprintFunnelOpen: false, sprintFunnelSel: [], sprintFunnelData: {}, sprintFunnelLoading: false, sprintFunnelError: null,
   sprintFunnelDef: null,       // id di una funnel_definition da applicare UGUALE a tutti gli sprint nel confronto; null = Base (ogni sprint il suo funnel_config)
   sprintFunnelHiddenSteps: [], // stepIdx nascosti SOLO in visualizzazione confronto (session-only, non persistito, non tocca i funnel)
-  sprintFunnelPctStart: false, // flag: sotto ogni cella del confronto mostra ANCHE la % sulla testa del funnel (oltre alla % vs step precedente)
+  sprintFunnelPctStart: true, // flag: sotto ogni cella del confronto mostra ANCHE la % sulla testa del funnel (oltre alla % vs step precedente) — default ON per coerenza con la colonna "vs #1" nei funnel singoli
   funnelPhases: [], funnelPhasesId: null, // fasi (macro-aree) del funnel — condivise dal DB (funnel_phases)
   sprintLeakMode: 'abs',       // pannello "Dove si perdono gli utenti": 'abs' = utenti persi | 'pct' = tasso di calo
   sprintLeakEdit: null,        // working copy delle fasi durante l'editing; null = non stiamo editando
@@ -3065,11 +3065,14 @@ function aiFunnelViz(eventsMap) {
     return { s, n: e?.total ?? 0, users: e?.unique_users ?? 0 };
   });
 
+  const headN = rows[0]?.n ?? 0;
+  const headLabel = rows[0]?.s?.label || 'step 1';
   const html = cfg.map((row, i) => {
     const { s, n, users } = rows[i];
     const vsN    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].n : null;
     const change = (vsN !== null && vsN > 0) ? ((n / vsN - 1) * 100).toFixed(0) : null;
     const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
@@ -3081,6 +3084,7 @@ function aiFunnelViz(eventsMap) {
         <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headN})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
       </div>`;
   }).join('');
 
@@ -3107,9 +3111,12 @@ function aiFeedbackChatCard(eventsMap) {
     { label: 'Risposta utente',              event: 'workout_feedback_replied',                color: '#34d399' },
   ].map(s => ({ ...s, n: getN(s.event), users: getU(s.event) }));
 
+  const headN = steps[0]?.n ?? 0;
+  const headLabel = steps[0]?.label || 'step 1';
   const boxes = steps.map((s, i) => {
     const vsN = i > 0 ? steps[i - 1].n : null;
     const conv = (vsN !== null && vsN > 0) ? (s.n / vsN * 100).toFixed(0) + '%' : null;
+    const startPct = i > 0 && headN > 0 ? (s.n / headN * 100) : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${conv !== null ? `<div style="font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap">${conv}</div>` : ''}
@@ -3120,6 +3127,7 @@ function aiFeedbackChatCard(eventsMap) {
         <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
         <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px">${s.users} utent${s.users === 1 ? 'e' : 'i'}</div>
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headN})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
       </div>`;
   }).join('');
 
@@ -3755,17 +3763,34 @@ function eventFunnelViz() {
   data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
   const nums = cfg.map((_, i) => numById[i] ?? 0);
   const maxN = Math.max(...nums, 1);
+  const headN = nums[0] || 0;
+  const headLabel = eventStepLabel(cfg[0]) || 'step 1';
 
-  return cfg.map((row, i) => {
+  const header = `
+    <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
+      <div style="width:230px;flex-shrink:0"></div>
+      <div style="flex:1"></div>
+      <div style="width:44px;text-align:right;flex-shrink:0">n</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
+    </div>`;
+
+  const rows = cfg.map((row, i) => {
     const n     = nums[i];
     const label = eventStepLabel(row) || ('step ' + (i + 1));
     const vsN   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? nums[row.vsIdx] : null;
     const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv    = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+    const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
+    const startStr = startPct !== null ? startPct.toFixed(1) + '%' : '—';
     const isLow   = convPct !== null && convPct < 20;
     const isGood  = convPct !== null && convPct >= 50;
     const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
     const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
+    const startColor = startPct === null ? 'var(--muted)'
+      : startPct < 20 ? 'var(--red)'
+      : startPct >= 50 ? 'var(--mattia)'
+      : 'var(--muted)';
     return `
       <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
         <div style="width:230px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">
@@ -3776,8 +3801,11 @@ function eventFunnelViz() {
         </div>
         <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0">${n}</div>
         <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:500;color:${startColor};flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${startStr}</div>
       </div>`;
   }).join('');
+
+  return header + rows;
 }
 
 // Persiste la config del funnel a eventi. Se è attivo un funnel salvato di tipo 'event', riscrive i suoi
@@ -4172,19 +4200,39 @@ function funnelViz() {
   const rawNums = cfg.map(r => funnel[r.stepIdx]?.numero);
   const numbers = rawNums.map(v => Number(v ?? 0));
   const maxN    = Math.max(...numbers, 1);
+  // Testa del funnel per la "% vs #1": il primo step con dato disponibile. Se il primo è n.d.
+  // (es. installs Play non ancora importati) cadiamo sul primo utile per non lasciare la colonna vuota.
+  const headIdx = rawNums.findIndex(v => v !== null && v !== undefined);
+  const headN   = headIdx >= 0 ? numbers[headIdx] : 0;
+  const headLabel = headIdx >= 0 ? (FUNNEL_LABELS[cfg[headIdx].stepIdx] || 'step 1') : 'step 1';
 
-  return cfg.map((row, i) => {
+  const header = `
+    <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
+      <div style="width:210px;flex-shrink:0"></div>
+      <div style="flex:1"></div>
+      <div style="width:44px;text-align:right;flex-shrink:0">n</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
+    </div>`;
+
+  const rows = cfg.map((row, i) => {
     const n        = numbers[i];
     const noData   = rawNums[i] === null || rawNums[i] === undefined;
     const vsN      = (row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i && !(rawNums[row.vsIdx] === null || rawNums[row.vsIdx] === undefined)) ? numbers[row.vsIdx] : null;
     const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv     = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+    const startPct = !noData && headIdx >= 0 && i > headIdx && headN > 0 ? (n / headN * 100) : null;
+    const startStr = startPct !== null ? startPct.toFixed(1) + '%' : '—';
     const label    = FUNNEL_LABELS[row.stepIdx];
     const pct      = (n / maxN) * 100;
     const isLow    = convPct !== null && convPct < 20;
     const isGood   = convPct !== null && convPct >= 50;
     const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
     const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
+    const startColor = startPct === null ? 'var(--muted)'
+      : startPct < 20 ? 'var(--red)'
+      : startPct >= 50 ? 'var(--mattia)'
+      : 'var(--muted)';
 
     return `
       <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
@@ -4194,8 +4242,11 @@ function funnelViz() {
         </div>
         <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0${noData ? ';color:var(--muted)' : ''}" ${noData ? 'title="Dato non disponibile per questo periodo (tabella google_play_installs non aggiornata)"' : ''}>${noData ? 'n.d.' : n}</div>
         <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:500;color:${startColor};flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${startStr}</div>
       </div>`;
   }).join('');
+
+  return header + rows;
 }
 
 // ── RETENTION ────────────────────────────────────────────────────────
@@ -5073,6 +5124,11 @@ function premiumFunnelViz(f) {
   // `usersPrimary` (Abbonato pagante) mostrano gli UTENTI in grande (lì gli eventi ≈ utenti).
   // Il calo % di ogni transizione usa la metrica primaria dello step corrente, applicata a
   // entrambi gli estremi (eventi↔eventi, utenti↔utenti) → niente confronti misti.
+  // Testa del funnel per la "% dall'inizio": usa la metrica primaria del PRIMO step (utenti se
+  // usersPrimary, altrimenti eventi), coerente con la scelta cell-by-cell (change % vs vsIdx).
+  const head0 = rows[0]?.s;
+  const headBig = head0 ? (head0.usersPrimary ? rows[0].users : rows[0].n) : 0;
+  const headLabel = head0?.label || 'step 1';
   const html = cfg.map((row, i) => {
     const { s, n, users } = rows[i];
     const big      = s.usersPrimary ? users : n;
@@ -5085,6 +5141,11 @@ function premiumFunnelViz(f) {
     const vsP      = hasVs ? (s.usersPrimary ? rows[row.vsIdx].users : rows[row.vsIdx].n) : null;
     const change   = (vsP !== null && vsP > 0) ? ((curP / vsP - 1) * 100).toFixed(0) : null;
     const freq     = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    // "% dall'inizio": la metrica dello step corrente sulla metrica del PRIMO step.
+    // Se il primo è usersPrimary e questo no, o viceversa, restano confrontati like-for-like: usiamo
+    // sempre la metrica primaria di questo step, e la metrica primaria del primo. Non è misto perché
+    // il paywall funnel è omogeneo (tutti eventi tranne "Abbonato pagante" che è users).
+    const startPct = i > 0 && headBig > 0 ? (curP / headBig * 100) : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
@@ -5097,6 +5158,7 @@ function premiumFunnelViz(f) {
         ${s.event ? `<div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>` : ''}
         ${subLine ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${subLine}</div>` : ''}
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headBig})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
       </div>`;
   }).join('');
 
