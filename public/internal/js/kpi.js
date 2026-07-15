@@ -3321,6 +3321,16 @@ function sprintAiFunnelTable(selected, dataMap) {
     const step = AI_FUNNEL_ALL_STEPS[row.stepIdx];
     const nums = selected.map(s => Number((dataMap[s.id] || {})[step.event]?.total ?? -1));
     const maxN = Math.max(...nums.filter(n => n >= 0), 0);
+    // isBest sulla % di conversione (vsIdx), non sul numero assoluto. Vedi commento in sprintEventFunnelTable.
+    const vsStep0 = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
+    const convPcts = selected.map(s => {
+      const eventsMap = dataMap[s.id] || {};
+      const num = Number(eventsMap[step.event]?.total ?? 0);
+      const vsN = vsStep0 ? Number(eventsMap[vsStep0.event]?.total ?? 0) : null;
+      return vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
 
     const cells = selected.map((s, si) => {
       const eventsMap = dataMap[s.id] || {};
@@ -3328,12 +3338,10 @@ function sprintAiFunnelTable(selected, dataMap) {
       const usersN = Number(eventsMap[step.event]?.unique_users ?? 0);
       const headN  = headStep ? Number(eventsMap[headStep.event]?.total ?? 0) : 0;
       const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
-      const vsStep = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
-      const vsN    = vsStep ? Number(eventsMap[vsStep.event]?.total ?? 0) : null;
-      const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+      const convPct   = convPcts[si];
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
-      const isBest    = num === maxN && maxN > 0;
+      const isBest    = maxConvPct !== null && convPct === maxConvPct;
       const barW      = maxN > 0 ? Math.round(num / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -3931,15 +3939,24 @@ function sprintEventFunnelTable() {
     const label = eventStepLabel(row) || ('step ' + (ri + 1));
     const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
     const maxN = Math.max(...nums, 0);
-    const cells = selected.map((s, si) => {
+    // Vincitore = miglior conversione (convPct), NON il numero assoluto. Al primo step (dove
+    // convPct è null per tutti perché non c'è vsIdx) nessuno vince: il top-of-funnel misura
+    // traffico, non performance. Fallback su null → nessuna cella evidenziata su quello step.
+    const convPcts = selected.map(s => {
       const n = numsOf[s.id][ri] ?? 0;
       const vsN = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < ri) ? (numsOf[s.id][row.vsIdx] ?? 0) : null;
-      const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+      return vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
+    const cells = selected.map((s, si) => {
+      const n = numsOf[s.id][ri] ?? 0;
+      const convPct = convPcts[si];
       const convStr = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
       const headN = numsOf[s.id][0] ?? 0;
       const startPct = state.sprintFunnelPctStart && headN > 0 && ri > 0 ? (n / headN * 100) : null;
-      const isBest = n === maxN && maxN > 0;
+      const isBest = maxConvPct !== null && convPct === maxConvPct;
       const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -5264,6 +5281,16 @@ function sprintPremiumFunnelTable(selected, dataMap) {
     const maxN    = Math.max(...nums.filter(n => n >= 0), 0);
     const vsRow   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? cfg[row.vsIdx] : null;
     const vsStep  = vsRow ? FUNNEL_ALL_STEPS[vsRow.stepIdx] : null;
+    // isBest sul rapporto num/vsN (miglior conversione), non sul numero assoluto. Al primo
+    // step (senza vsIdx) nessuno vince: è top-of-funnel, misura traffico non performance.
+    const ratios = selected.map(s => {
+      const fn = dataMap[s.id]?.funnel || {};
+      const num = Number(fn[stepDef.field] ?? 0);
+      const vsN = vsStep ? Number(fn[vsStep.field] ?? 0) : null;
+      return vsN !== null && vsN > 0 ? (num / vsN) : null;
+    });
+    const validRatios = ratios.filter(r => r !== null);
+    const maxRatio = validRatios.length ? Math.max(...validRatios) : null;
 
     const cells = selected.map((s, si) => {
       const fn     = dataMap[s.id]?.funnel || {};
@@ -5275,7 +5302,7 @@ function sprintPremiumFunnelTable(selected, dataMap) {
       const change = (vsN !== null && vsN > 0) ? ((num / vsN - 1) * 100) : null;
       const changeStr   = change !== null ? (change > 0 ? '+' : '') + change.toFixed(0) + '%' : '—';
       const changeColor = change === null ? '' : change < 0 ? 'var(--red)' : 'var(--mattia)';
-      const isBest = num === maxN && maxN > 0;
+      const isBest = maxRatio !== null && ratios[si] === maxRatio;
       const barW   = maxN > 0 ? Math.round(num / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -6241,6 +6268,22 @@ function sprintFunnelTable(selected, dataMap) {
       return Number((dataMap[s.id] || [])[stepIdx]?.numero ?? -1);
     });
     const maxN = Math.max(...nums.filter(n => n >= 0), 0);
+    // Vincitore = miglior conversione (num/vsN), NON numero assoluto. Al primo step (dove vsN
+    // manca per definizione) convPct=null per tutti → nessuno vince, sensato per top-of-funnel.
+    const convPcts = selected.map(s => {
+      const cfg = cfgOf[s.id];
+      const rowPos = cfg.findIndex(r => r.stepIdx === stepIdx);
+      if (rowPos === -1) return null;
+      const row = cfg[rowPos];
+      const data = dataMap[s.id] || [];
+      const rawNum = data[stepIdx]?.numero;
+      if (rawNum === null || rawNum === undefined) return null;
+      const rawVs = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < rowPos ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
+      const vsN = rawVs === null || rawVs === undefined ? null : Number(rawVs);
+      return vsN !== null && vsN > 0 ? (Number(rawNum) / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
 
     const cells = selected.map((s, si) => {
       const cfg     = cfgOf[s.id];
@@ -6254,9 +6297,7 @@ function sprintFunnelTable(selected, dataMap) {
       const rawNum = data[stepIdx]?.numero;
       const noData = rawNum === null || rawNum === undefined; // dato non disponibile (es. installs non importati)
       const num    = Number(rawNum ?? 0);
-      const rawVs  = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < rowPos ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
-      const vsN    = rawVs === null || rawVs === undefined ? null : Number(rawVs);
-      const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+      const convPct   = convPcts[si];
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
       // Flag "% dall'inizio": seconda percentuale, calcolata sulla testa del funnel di questo sprint
@@ -6264,7 +6305,7 @@ function sprintFunnelTable(selected, dataMap) {
       const head      = headOf[s.id];
       const startPct  = state.sprintFunnelPctStart && !noData && head && rowPos > head.rowPos
         ? (num / head.num * 100) : null;
-      const isBest    = !noData && num === maxN && maxN > 0;
+      const isBest    = !noData && maxConvPct !== null && convPct === maxConvPct;
       const barW      = noData ? 0 : (maxN > 0 ? Math.round(num / maxN * 100) : 0);
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
