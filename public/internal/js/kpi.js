@@ -3317,6 +3317,7 @@ function sprintAiFunnelTable(selected, dataMap) {
     const cells = selected.map((s, si) => {
       const eventsMap = dataMap[s.id] || {};
       const num    = Number(eventsMap[step.event]?.total ?? 0);
+      const usersN = Number(eventsMap[step.event]?.unique_users ?? 0);
       const headN  = headStep ? Number(eventsMap[headStep.event]?.total ?? 0) : 0;
       const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
       const vsStep = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
@@ -3333,6 +3334,7 @@ function sprintAiFunnelTable(selected, dataMap) {
           </div>
           <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
         </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">${usersN} utent${usersN === 1 ? 'e' : 'i'}</div>
         ${pctCellLine(
           convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : null,
           startPct, headStep ? headStep.label : '', convPct)}
