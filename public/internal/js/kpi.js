@@ -6158,8 +6158,12 @@ function pctStartToggle(id) {
 // Chi confronta misure diverse (Premium mostra una variazione +/-, non una conversione) passa null
 // e non sopprime mai: lì due numeri uguali sarebbero una coincidenza, non un doppione.
 function pctCellLine(convHtml, startPct, headLabel, dupOf = null) {
-  const dup = startPct !== null && dupOf !== null && Math.abs(dupOf - startPct) < 0.05;
-  const showStart = startPct !== null && !dup;
+  // Prima mostravamo la "% dall'inizio" solo se diversa dalla "vs vsIdx" (dup skip), per non
+  // ripetere lo stesso numero sul primo step successivo alla testa. Rimosso: in funnel dove
+  // vsIdx=0 per tutti gli step le due sarebbero SEMPRE dup e l'utente vedrebbe una sola %,
+  // rompendo l'uniformità col funnel singolo che mostra sempre entrambe. Il parametro dupOf
+  // resta nella firma per backward-compat delle callsite (verrà ignorato).
+  const showStart = startPct !== null;
   if (convHtml === null && !showStart) return '';
   return `<div style="font-size:10px;font-weight:600;text-align:right;margin-top:2px">
     ${convHtml !== null ? convHtml : ''}
