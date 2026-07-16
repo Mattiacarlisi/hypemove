@@ -105,6 +105,11 @@ const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
 const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
+// Ordine di visualizzazione delle chip in toolbar. Array di token: 'default' | 'onboarding' | <funnelId>.
+// Locale per-browser: i funnel salvati hanno anche order_index sul DB (condiviso), ma la posizione dei
+// due built-in (Default, onboarding) può stare solo qui. Il display segue questo ordine; token nuovi
+// (funnel appena creati) si accodano.
+const LS_FUNNEL_TOOLBAR_ORDER = 'hm_funnel_toolbar_order_v1';
 const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v3';
 const LS_AI_FUN         = 'hm_ai_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
@@ -3662,32 +3667,153 @@ function aiChatPanel() {
 
 // ── FUNNEL — custom builder ───────────────────────────────────────────
 
+// Set curato di 24 icone Lucide per le chip funnel (analytics-oriented). Ogni SVG copiato raw da
+// lucide.dev (stroke=2, size=16). Chiave = nome breve usato come identifier persistito su DB.
+// Aggiungi/rimuovi qui: il picker legge le chiavi in automatico.
+const LUCIDE_ICONS = {
+  zap:              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  target:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+  users:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  'trending-up':    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+  'mouse-pointer':  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>',
+  'shopping-cart':  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
+  activity:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  brain:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/></svg>',
+  'dollar-sign':    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  flag:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+  gift:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
+  sparkles:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>',
+  'message-circle': '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  play:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+  'check-circle':   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  filter:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+  'bar-chart':      '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>',
+  rocket:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>',
+  crown:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg>',
+  heart:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+  eye:              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  bell:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  'map-pin':        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  calendar:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+};
+
+// Palette 8 colori per le chip. Hex derivati dallo stile HypeMove dashboard: viola come var(--accent),
+// più 7 tinte per differenziare a colpo d'occhio. Chiave (nome breve) = valore persistito.
+const CHIP_COLORS = {
+  purple: '#a879ff',
+  blue:   '#5b9bff',
+  cyan:   '#3ecacd',
+  green:  '#4ade80',
+  yellow: '#facc15',
+  orange: '#fb923c',
+  pink:   '#f472b6',
+  red:    '#ef4444',
+};
+
+const DEFAULT_CHIP_ICON  = 'zap';
+const DEFAULT_CHIP_COLOR = 'purple';
+
+// Render inline dell'icona Lucide. Fallback su DEFAULT_CHIP_ICON se il nome non esiste (icona rimossa).
+function chipIconSvg(name) {
+  return LUCIDE_ICONS[name] || LUCIDE_ICONS[DEFAULT_CHIP_ICON];
+}
+function chipColorHex(name) {
+  return CHIP_COLORS[name] || CHIP_COLORS[DEFAULT_CHIP_COLOR];
+}
+
+// Ordine unificato delle chip in toolbar come array di token: 'default', 'onboarding', o id funnel.
+// Seed di default: [default, onboarding, ...saved by order_index]. Se esiste un ordine salvato in
+// localStorage lo si rispetta (filtrando token spariti), accodando i token nuovi non ancora ordinati.
+function funnelToolbarTokens() {
+  const seed = ['default', 'onboarding', ...state.savedFunnels.map(f => f.id)];
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem(LS_FUNNEL_TOOLBAR_ORDER)) || []; } catch { stored = []; }
+  const seedSet = new Set(seed);
+  const ordered = stored.filter(t => seedSet.has(t));      // token ancora esistenti, nell'ordine salvato
+  const orderedSet = new Set(ordered);
+  const appended = seed.filter(t => !orderedSet.has(t));   // token nuovi non ancora in localStorage
+  return [...ordered, ...appended];
+}
+
+// Persiste il nuovo ordine dei token in localStorage e propaga l'ordine dei soli funnel salvati sul DB
+// (order_index) così un browser fresco parte da un ordine sensato. I due built-in vivono solo qui.
+async function saveFunnelToolbarOrder(tokens) {
+  try { localStorage.setItem(LS_FUNNEL_TOOLBAR_ORDER, JSON.stringify(tokens)); } catch (e) { console.error('saveFunnelToolbarOrder LS', e); }
+  const savedIds = tokens.filter(t => t !== 'default' && t !== 'onboarding');
+  if (savedIds.length) await reorderFunnels(savedIds);
+  else render();
+}
+
 function savedFunnelBar() {
-  const { savedFunnels, activeFunnelPreset, funnelSaveOpen, funnelSaveName } = state;
-  const pill = (active) =>
-    `border-radius:20px;border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};` +
-    `background:${active ? 'var(--accent-lo)' : 'var(--surface2)'};` +
-    `color:${active ? 'var(--purple)' : 'var(--muted)'};cursor:pointer;font-size:12px;` +
-    `padding:4px 14px;font-weight:${active ? '600' : '400'};transition:all .15s;font-family:inherit`;
+  const { savedFunnels, activeFunnelPreset, funnelSaveOpen, funnelSaveName, chipDragOver } = state;
+
+  // pill di base — accent = colore custom della chip (default viola) quando attiva
+  const basePill = (active, accentHex) =>
+    `border-radius:20px;border:1px solid ${active ? accentHex : 'var(--border)'};` +
+    `background:${active ? accentHex + '22' : 'var(--surface2)'};` +
+    `color:${active ? accentHex : 'var(--muted)'};font-size:12px;` +
+    `padding:4px 12px;font-weight:${active ? '600' : '400'};transition:all .15s;font-family:inherit;` +
+    `display:inline-flex;align-items:center;gap:6px;line-height:1`;
+
+  const dropCue = (token) => chipDragOver === token ? `box-shadow:inset 3px 0 0 var(--accent);` : '';
+
+  // wrap draggabile comune a tutte le chip; data-token identifica la chip nell'ordine
+  const wrap = (token, inner) => `
+    <div class="funnel-chip-wrap" data-token="${token}" draggable="true"
+         style="display:inline-flex;align-items:stretch;${dropCue(token)}cursor:grab">${inner}</div>`;
+
+  // built-in Default
+  const defaultChip = () => wrap('default', `
+    <button class="funnel-preset-btn" data-preset-idx="default"
+            style="${basePill(state.funnelMode !== 'event' && activeFunnelPreset === null, chipColorHex('purple'))};border-radius:20px;cursor:pointer">
+      Default
+    </button>`);
+
+  // built-in funnel onboarding
+  const onboardingChip = () => wrap('onboarding', `
+    <button id="funnel-onboarding-btn"
+            style="${basePill(state.funnelMode === 'event' && activeFunnelPreset === null, chipColorHex('purple'))};border-radius:20px;cursor:pointer">
+      <span style="display:inline-flex;align-items:center">${chipIconSvg('zap')}</span>
+      <span>funnel onboarding</span>
+    </button>`);
+
+  // chip salvata custom (icona/colore/label + matita modifica + delete)
+  const savedChip = (f, i) => {
+    const active    = activeFunnelPreset === i;
+    const accentHex = chipColorHex(f.color);
+    const iconName  = f.icon || DEFAULT_CHIP_ICON;
+    const labelHtml = f.label
+      ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${accentHex}33;color:${accentHex};font-weight:500;margin-left:2px">${esc(f.label)}</span>`
+      : '';
+    const edgeBorder = active ? accentHex : 'var(--border)';
+    const edgeBg     = active ? accentHex + '22' : 'var(--surface2)';
+    return wrap(f.id, `
+      <button class="funnel-preset-btn" data-preset-idx="${i}" title="Attiva funnel"
+              style="${basePill(active, accentHex)};border-radius:20px 0 0 20px;border-right:none;cursor:pointer">
+        <span style="color:${active ? accentHex : 'var(--muted)'};display:inline-flex;align-items:center">${chipIconSvg(iconName)}</span>
+        <span>${esc(f.name)}</span>
+        ${labelHtml}
+      </button>
+      <button class="funnel-preset-edit" data-preset-idx="${i}" title="Modifica chip (nome, icona, colore)"
+              style="padding:4px 7px;border-top:1px solid ${edgeBorder};border-bottom:1px solid ${edgeBorder};border-left:none;border-right:none;background:${edgeBg};color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;font-family:inherit">
+        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </button>
+      <button class="funnel-preset-del" data-preset-idx="${i}" title="Elimina funnel"
+              style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid ${edgeBorder};border-left:none;background:${edgeBg};color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>`);
+  };
+
+  // Render nell'ordine dei token
+  const chipsHtml = funnelToolbarTokens().map(token => {
+    if (token === 'default') return defaultChip();
+    if (token === 'onboarding') return onboardingChip();
+    const i = savedFunnels.findIndex(f => f.id === token);
+    return i === -1 ? '' : savedChip(savedFunnels[i], i);
+  }).join('');
 
   return `
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <div id="funnel-chips-toolbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
       <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Funnel</span>
-      <button class="funnel-preset-btn" data-preset-idx="default" style="${pill(state.funnelMode !== 'event' && activeFunnelPreset === null)}">
-        Default
-      </button>
-      <button id="funnel-onboarding-btn" style="${pill(state.funnelMode === 'event' && activeFunnelPreset === null)}">
-        ⚡ funnel onboarding
-      </button>
-      ${savedFunnels.map((f, i) => `
-        <div style="display:inline-flex;align-items:stretch">
-          <button class="funnel-preset-btn" data-preset-idx="${i}" title="${(f.tipo || 'catalog') === 'event' ? 'Funnel a eventi' : 'Funnel da catalogo'}"
-            style="${pill(activeFunnelPreset === i)};border-radius:20px 0 0 20px;border-right:none">
-            ${(f.tipo || 'catalog') === 'event' ? '⚡ ' : ''}${esc(f.name)}
-          </button>
-          <button class="funnel-preset-del" data-preset-idx="${i}"
-            style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>
-        </div>`).join('')}
+      ${chipsHtml}
       <div style="width:1px;height:16px;background:var(--border);margin:0 4px;align-self:center"></div>
       ${funnelSaveOpen
         ? `<div style="display:flex;align-items:center;gap:6px">
@@ -3697,6 +3823,66 @@ function savedFunnelBar() {
             <button id="funnel-save-cancel" class="btn btn-ghost" style="padding:4px 10px;font-size:12px">×</button>
           </div>`
         : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>`}
+      ${state.chipReorderSaving ? `<span style="font-size:11px;color:var(--muted)">Salvo ordine…</span>` : ''}
+    </div>
+    ${state.chipEditorIdx != null ? chipEditorPanel(state.chipEditorIdx) : ''}`;
+}
+
+// Pannello editor chip — mostrato inline sotto la toolbar quando l'utente doppio-clicca una chip
+// salvata. Non è modale bloccante: chiudi con "Chiudi" o Esc. Draft locale in state.chipDraft, save
+// esplicito per non spammare la rete a ogni tasto.
+function chipEditorPanel(idx) {
+  const f = state.savedFunnels[idx];
+  if (!f) return '';
+  const d = state.chipDraft || {
+    name: f.name || '', icon: f.icon || DEFAULT_CHIP_ICON,
+    color: f.color || DEFAULT_CHIP_COLOR, label: f.label || '',
+  };
+  const accentHex = chipColorHex(d.color);
+
+  const iconGrid = Object.keys(LUCIDE_ICONS).map(name => {
+    const active = name === d.icon;
+    return `<button class="chip-icon-btn" data-icon="${name}" title="${name}"
+      style="width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid ${active ? accentHex : 'var(--border)'};background:${active ? accentHex + '22' : 'transparent'};color:${active ? accentHex : 'var(--muted)'};cursor:pointer;padding:0">${chipIconSvg(name)}</button>`;
+  }).join('');
+
+  const colorSwatches = Object.entries(CHIP_COLORS).map(([name, hex]) => {
+    const active = name === d.color;
+    return `<button class="chip-color-btn" data-color="${name}" title="${name}"
+      style="width:26px;height:26px;border-radius:50%;background:${hex};border:2px solid ${active ? '#fff' : 'transparent'};box-shadow:${active ? '0 0 0 2px ' + hex : 'none'};cursor:pointer;padding:0"></button>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px;border-color:${accentHex};box-shadow:0 0 0 1px ${accentHex}33">
+      <div class="card-title" style="margin-bottom:14px;display:flex;align-items:center;gap:8px">
+        <span style="color:${accentHex};display:inline-flex;align-items:center">${chipIconSvg(d.icon)}</span>
+        Modifica chip funnel
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Nome</label>
+          <input id="chip-editor-name" class="form-input" type="text" value="${esc(d.name)}"
+                 style="width:100%;max-width:320px;padding:6px 12px;font-size:13px" autocomplete="off">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Etichetta (opzionale)</label>
+          <input id="chip-editor-label" class="form-input" type="text" value="${esc(d.label)}"
+                 placeholder="es. attivazione, monetizzazione…"
+                 style="width:100%;max-width:320px;padding:6px 12px;font-size:13px" autocomplete="off">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Icona</label>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;max-width:420px">${iconGrid}</div>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Colore</label>
+          <div style="display:flex;flex-wrap:wrap;gap:10px">${colorSwatches}</div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--border)">
+          <button id="chip-editor-cancel" class="btn btn-ghost" style="font-size:12px;padding:6px 14px">Annulla</button>
+          <button id="chip-editor-save" class="btn btn-primary" style="font-size:12px;padding:6px 14px">Salva</button>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -7339,6 +7525,8 @@ function attachEvents() {
         if (del.error) { console.error('delete funnel', del.error); alert('Errore eliminazione funnel: ' + del.error.message); return; }
       }
       state.activeFunnelPreset = null; // gli indici cambiano dopo il refetch: si riparte da Default
+      state.chipEditorIdx = null;     // se stavo modificando questa chip, chiudi editor
+      state.chipDraft = null;
       await fetchFunnelDefinitions();
       if (wasActive) {
         state.funnelMode = 'catalog';
@@ -7346,6 +7534,134 @@ function attachEvents() {
       }
       render();
     }));
+
+  // Matita su chip salvata → apre editor chip (rename + icon + color + label). Entry-point esplicito:
+  // il dblclick non funziona perché il primo click attiva già il funnel e ri-renderizza il DOM.
+  document.querySelectorAll('.funnel-preset-edit').forEach(el =>
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const i = +el.dataset.presetIdx;
+      const f = state.savedFunnels[i];
+      if (!f) return;
+      // toggle: se sto già editando questa chip, la matita chiude
+      if (state.chipEditorIdx === i) {
+        state.chipEditorIdx = null;
+        state.chipDraft = null;
+        render();
+        return;
+      }
+      state.chipEditorIdx = i;
+      state.chipDraft = {
+        name:  f.name  || '',
+        icon:  f.icon  || DEFAULT_CHIP_ICON,
+        color: f.color || DEFAULT_CHIP_COLOR,
+        label: f.label || '',
+      };
+      render();
+    }));
+
+  // Editor chip — input testo
+  document.getElementById('chip-editor-name')?.addEventListener('input', e => {
+    if (state.chipDraft) state.chipDraft.name = e.target.value;
+  });
+  document.getElementById('chip-editor-label')?.addEventListener('input', e => {
+    if (state.chipDraft) state.chipDraft.label = e.target.value;
+  });
+  // Enter salva, Esc annulla — attivi su entrambi gli input testo
+  ['chip-editor-name', 'chip-editor-label'].forEach(id =>
+    document.getElementById(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('chip-editor-save')?.click();
+      if (e.key === 'Escape') document.getElementById('chip-editor-cancel')?.click();
+    }));
+
+  // Editor chip — picker icona
+  document.querySelectorAll('.chip-icon-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      if (!state.chipDraft) return;
+      state.chipDraft.icon = el.dataset.icon;
+      render();
+    }));
+
+  // Editor chip — picker colore
+  document.querySelectorAll('.chip-color-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      if (!state.chipDraft) return;
+      state.chipDraft.color = el.dataset.color;
+      render();
+    }));
+
+  // Editor chip — annulla
+  document.getElementById('chip-editor-cancel')?.addEventListener('click', () => {
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    render();
+  });
+
+  // Editor chip — salva
+  document.getElementById('chip-editor-save')?.addEventListener('click', async () => {
+    const i = state.chipEditorIdx;
+    const d = state.chipDraft;
+    if (i == null || !d) return;
+    const f = state.savedFunnels[i];
+    if (!f) return;
+    const name = (d.name || '').trim();
+    if (!name) { alert('Il nome della chip non può essere vuoto.'); return; }
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    render();
+    await updateFunnelChip(f.id, {
+      name,
+      icon:  d.icon  || DEFAULT_CHIP_ICON,
+      color: d.color || DEFAULT_CHIP_COLOR,
+      label: (d.label || '').trim() || null,
+    });
+    render();
+  });
+
+  // Drag & drop nativo HTML5 su TUTTE le chip (Default, onboarding, salvate) — riordino manuale.
+  // Ogni wrap ha data-token ('default' | 'onboarding' | id funnel). `dragstart` memorizza il token
+  // sorgente; `dragover` evidenzia il target (chipDragOver); `drop` ricalcola l'array di token e
+  // persiste via saveFunnelToolbarOrder (localStorage + order_index sul DB per i salvati).
+  document.querySelectorAll('.funnel-chip-wrap').forEach(w => {
+    w.addEventListener('dragstart', e => {
+      if (state.chipReorderSaving) { e.preventDefault(); return; }
+      state.chipDragFrom = w.dataset.token;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', w.dataset.token); // Firefox richiede setData
+    });
+    w.addEventListener('dragover', e => {
+      if (state.chipDragFrom == null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const over = w.dataset.token;
+      if (state.chipDragOver !== over) {
+        state.chipDragOver = over;
+        render();
+      }
+    });
+    w.addEventListener('drop', async e => {
+      e.preventDefault();
+      const from = state.chipDragFrom;
+      const to   = w.dataset.token;
+      state.chipDragFrom = null;
+      state.chipDragOver = null;
+      if (from == null || from === to) { render(); return; }
+      const tokens = funnelToolbarTokens();
+      const fromIdx = tokens.indexOf(from);
+      const toIdx   = tokens.indexOf(to);
+      if (fromIdx === -1 || toIdx === -1) { render(); return; }
+      const [moved] = tokens.splice(fromIdx, 1);
+      tokens.splice(toIdx, 0, moved);
+      await saveFunnelToolbarOrder(tokens);
+    });
+    w.addEventListener('dragend', () => {
+      if (state.chipDragFrom != null || state.chipDragOver != null) {
+        state.chipDragFrom = null;
+        state.chipDragOver = null;
+        render();
+      }
+    });
+  });
 
   document.getElementById('funnel-save-open')?.addEventListener('click', () => {
     state.funnelSaveOpen = true;

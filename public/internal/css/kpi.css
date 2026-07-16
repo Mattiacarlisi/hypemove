@@ -57,3 +57,32 @@
   font-weight: 600;
   font-size: 13px;
 }
+
+/* ── FUNNEL CHIP TOOLBAR ── */
+
+/* Wrap draggabile della chip salvata: cursore grab, feedback visivo durante drag */
+.funnel-chip-wrap {
+  transition: transform .15s, opacity .15s;
+}
+.funnel-chip-wrap:active { cursor: grabbing; }
+
+/* Chip in movimento: opaca, così è chiaro che è la sorgente */
+.funnel-chip-wrap[draggable="true"]:active { opacity: 0.6; }
+
+/* Editor chip — hover feedback sui pulsanti icona */
+.chip-icon-btn { transition: all .12s; }
+.chip-icon-btn:hover {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  transform: translateY(-1px);
+}
+
+/* Editor chip — hover feedback sugli swatch colore */
+.chip-color-btn { transition: transform .12s; }
+.chip-color-btn:hover { transform: scale(1.1); }
+
+/* Chip preset — cursor pointer esplicito (dblclick per editor) */
+.funnel-preset-btn { user-select: none; }
+.funnel-preset-btn:hover { filter: brightness(1.1); }
+.funnel-preset-del:hover { color: var(--red, #ef4444) !important; }
+.funnel-preset-edit:hover { color: var(--accent) !important; }
