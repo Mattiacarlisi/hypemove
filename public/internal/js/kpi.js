@@ -333,6 +333,11 @@ let state = {
   activeFunnelPreset: null,
   funnelSaveOpen: false,
   funnelSaveName: '',
+  chipEditorIdx: null,        // indice del funnel salvato in editing (icona/colore/nome/label) — null = editor chiuso
+  chipDraft: null,            // { name, icon, color, label } bozza durante l'editing
+  chipDragFrom: null,         // indice sorgente durante drag & drop delle chip
+  chipDragOver: null,         // indice target evidenziato durante drag
+  chipReorderSaving: false,   // flag per disabilitare drag mentre stiamo salvando l'ordine
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
   engagementByAge: null, engagementByAgeLoading: false, ageEngFrom: null, ageEngTo: null,
@@ -819,17 +824,79 @@ async function fetchFunnelDefinitions() {
     // preserva il preset attivo per ID (l'indice può cambiare se un altro utente aggiunge/rimuove funnel)
     const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
       ? state.savedFunnels[state.activeFunnelPreset].id : null;
-    const res = await sb.from('funnel_definitions').select('*').order('created_at', { ascending: true });
+    const res = await sb.from('funnel_definitions').select('*')
+      .order('order_index', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
     if (res.error) throw res.error;
     state.savedFunnels = (res.data || []).map(r => ({
       id: r.id, name: r.nome, descrizione: r.descrizione,
       tipo: r.tipo, config: r.steps, steps: r.steps, provider: r.provider || null,
+      icon: r.icon || null, color: r.color || null, label: r.label || null,
+      orderIndex: r.order_index,
     }));
     if (activeId) {
       const i = state.savedFunnels.findIndex(f => f.id === activeId);
       state.activeFunnelPreset = i === -1 ? null : i; // se il funnel attivo è stato cancellato altrove → torna a Default
     }
   } catch (e) { console.error('fetchFunnelDefinitions', e); }
+  render();
+}
+
+// Patch parziale su un funnel salvato (nome, icon, color, label). Aggiorna anche state.savedFunnels in
+// place per riflettere subito la UI senza attendere il refetch.
+async function updateFunnelChip(id, patch) {
+  try {
+    const dbPatch = {};
+    if ('name'  in patch) dbPatch.nome  = patch.name;
+    if ('icon'  in patch) dbPatch.icon  = patch.icon;
+    if ('color' in patch) dbPatch.color = patch.color;
+    if ('label' in patch) dbPatch.label = patch.label;
+    dbPatch.updated_at = new Date().toISOString();
+    const upd = await sb.from('funnel_definitions').update(dbPatch).eq('id', id);
+    if (upd.error) throw upd.error;
+    const i = state.savedFunnels.findIndex(f => f.id === id);
+    if (i !== -1) {
+      if ('name'  in patch) state.savedFunnels[i].name  = patch.name;
+      if ('icon'  in patch) state.savedFunnels[i].icon  = patch.icon;
+      if ('color' in patch) state.savedFunnels[i].color = patch.color;
+      if ('label' in patch) state.savedFunnels[i].label = patch.label;
+    }
+  } catch (e) {
+    console.error('updateFunnelChip', e);
+    alert('Errore salvataggio chip: ' + (e.message || e));
+  }
+}
+
+// Riordina i funnel salvati e persiste order_index in batch. `newOrderIds` è l'array degli id nel nuovo
+// ordine desiderato. Assegna order_index 0..N-1 in sequenza — non serve preservare gap.
+async function reorderFunnels(newOrderIds) {
+  state.chipReorderSaving = true;
+  render();
+  try {
+    // Preserva il preset attivo per ID (l'indice cambia dopo il riordino)
+    const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
+      ? state.savedFunnels[state.activeFunnelPreset].id : null;
+    const updates = newOrderIds.map((id, i) =>
+      sb.from('funnel_definitions').update({ order_index: i, updated_at: new Date().toISOString() }).eq('id', id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+    // Riordina state.savedFunnels in place seguendo newOrderIds; aggiorna anche orderIndex locale
+    const byId = new Map(state.savedFunnels.map(f => [f.id, f]));
+    state.savedFunnels = newOrderIds.map((id, i) => {
+      const f = byId.get(id);
+      return f ? { ...f, orderIndex: i } : null;
+    }).filter(Boolean);
+    if (activeId) {
+      const i = state.savedFunnels.findIndex(f => f.id === activeId);
+      state.activeFunnelPreset = i === -1 ? null : i;
+    }
+  } catch (e) {
+    console.error('reorderFunnels', e);
+    alert('Errore riordino chip: ' + (e.message || e));
+  }
+  state.chipReorderSaving = false;
   render();
 }
 
@@ -3155,6 +3222,32 @@ function pageAICoach() {
       <button id="ai-stats-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Aggiorna</button>
     </div>`;
 
+  // 0. Healthcheck persistenza transcript AI (spec bug--ai-chat-transcript-persistence-dead).
+  // Rende visibile una futura rottura silenziosa dell'insert su ai_chat_message: se arrivano
+  // ai_chat_send ma la tabella non avanza (o persist_chat_error > 0) → banner rosso in cima.
+  // Bug 2026-07-01 → 07-16 rimasto invisibile 15 giorni perché nessuno guardava ai_debug_log.
+  const transcriptHealth = (() => {
+    if (!d) return '';
+    const lastAt = d.transcript_last_msg_at ? new Date(d.transcript_last_msg_at) : null;
+    const sends24h = Number(d.chat_sends_24h || 0);
+    const persistErr24h = Number(d.persist_errors_24h || 0);
+    const now = new Date();
+    const stale = lastAt && (now.getTime() - lastAt.getTime()) > 48 * 3600 * 1000;
+    const broken = persistErr24h > 0 || (stale && sends24h > 0);
+    if (!broken) return '';
+    const lastAtStr = lastAt ? lastAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'mai';
+    return `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--red);background:rgba(220,50,50,0.06)">
+      <div style="padding:14px 16px">
+        <div style="font-weight:600;color:var(--red);margin-bottom:6px">⚠️ Persistenza transcript AI chat interrotta</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5">
+          Ultimo messaggio in <code>ai_chat_message</code>: <b>${esc(lastAtStr)}</b><br>
+          <code>ai_chat_send</code> ultime 24h: <b>${sends24h}</b> · <code>persist_chat_error</code> ultime 24h: <b>${persistErr24h}</b>
+          <br>Se send &gt; 0 e la tabella non avanza, la chain è rotta (vedi <code>_specs/ai/bug--ai-chat-transcript-persistence-dead/</code>).
+        </div>
+      </div>
+    </div>`;
+  })();
+
   // 1. KPI north-star
   let kpiCard;
   if (state.aiStatsLoading) {
@@ -3221,7 +3314,7 @@ function pageAICoach() {
     </div>
   </div>`;
 
-  return `${filterBar}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${toolsCard}${convCard}`;
+  return `${filterBar}${transcriptHealth}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${toolsCard}${convCard}`;
 }
 
 // ── AI COACH — CONFRONTO SPRINT ─────────────────────────────────────────
@@ -7283,10 +7376,16 @@ function attachEvents() {
     state.funnelSaveOpen = false;
     state.funnelSaveName = '';
     render();
-    const ins = await sb.from('funnel_definitions').insert({ nome: name, tipo: isEvent ? 'event' : 'catalog', steps, provider: isEvent ? state.eventFunnelProvider : null });
+    // nuovo funnel va in fondo alla lista: order_index = max esistente + 1
+    const maxOrder = (state.savedFunnels || []).reduce((m, f) => Math.max(m, f.orderIndex ?? -1), -1);
+    const ins = await sb.from('funnel_definitions').insert({
+      nome: name, tipo: isEvent ? 'event' : 'catalog', steps,
+      provider: isEvent ? state.eventFunnelProvider : null,
+      order_index: maxOrder + 1,
+    });
     if (ins.error) { console.error('save funnel', ins.error); alert('Errore salvataggio funnel: ' + ins.error.message); return; }
     await fetchFunnelDefinitions();
-    state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order by created_at asc)
+    state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order_index max)
     render();
   });
 
