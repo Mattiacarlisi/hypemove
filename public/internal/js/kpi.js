@@ -327,8 +327,10 @@ let state = {
   editingOverview: false,
   editingFunnel: false,
   funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2)
-  eventFunnelConfig: [],       // [{event, source, label, vsIdx}] — step del funnel a eventi in editing
+  eventFunnelConfig: [],       // [{event, source, label, vsIdx, children?:[{event,source,label}]}] — step del funnel a eventi. `children` = varianti annidate visibili espandendo il parent (es. sign_up → signup_google/signup_email); non partecipano al calcolo della % dello step successivo.
   eventFunnel: null,           // risultato RPC kpi_funnel_v2: {steps:[{idx,event,source,numero}]}
+  eventFunnelFlatMap: null,    // { parent:[flatIdx|null,...], child:[[flatIdx|null,...],...] } — mappa posizione UI ↔ posizione in p_steps del flatten (parent+children serializzati in sequenza per la RPC)
+  eventFunnelExpanded: {},     // { [uiIdx]: true } — parent con children espansi in viz/editor (session-only)
   eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
   eventFunnelLoading: false, eventFunnelError: null,
   editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
@@ -336,6 +338,7 @@ let state = {
   eventRegistry: [],           // catalogo eventi dal DB (event_registry): {event_name, screens, types, verdict, funnels_used, vol_7d, vol_30d}
   eventBrowserOpen: false,     // visibilità del modale
   eventBrowserTargetRow: null, // indice dello step di eventFunnelConfig da riempire (null = nessuno)
+  eventBrowserTargetChild: null, // se non-null, il target è la variante children[N] dello step targetRow (invece del parent stesso)
   ebSearch: '',                // query ricerca fuzzy
   ebScreen: null,              // filtro schermata attiva (null = tutte)
   ebType: null,                // filtro tipo (action/click/navigation) — null = tutti
@@ -593,16 +596,46 @@ async function fetchFunnel() {
   if (state.metaToken && state.funnel) fetchMetaFunnel();
 }
 
+// Serializza eventFunnelConfig in { flatSteps, parentMap, childMap } dove:
+//  - flatSteps = array [{event, source?}] da mandare a kpi_funnel_v2 come p_steps (parent seguiti dai loro children in sequenza)
+//  - parentMap[uiIdx] = posizione del parent in flatSteps (o null se il parent non ha event)
+//  - childMap[uiIdx][cIdx] = posizione del child in flatSteps (o null se il child non ha event)
+// La coorte del RPC (idx=0 con cohort_anchor) resta il primo evento inviato: se il primo step UI ha children, la coorte è il parent (event dei children conta contro quella).
+function flattenEventFunnelConfig(cfg) {
+  const flatSteps = [];
+  const parentMap = [];
+  const childMap = [];
+  (cfg || []).forEach((row) => {
+    const hasEv = row && row.event && row.event.trim();
+    if (!hasEv) {
+      parentMap.push(null);
+      childMap.push([]);
+      // niente children se il parent non ha evento: bypassiamo per non introdurre uno step orfano in coorte
+      return;
+    }
+    parentMap.push(flatSteps.length);
+    flatSteps.push({ event: row.event.trim(), source: (row.source || '').trim() || undefined });
+    const childList = [];
+    (row.children || []).forEach((c) => {
+      if (!c || !c.event || !c.event.trim()) { childList.push(null); return; }
+      childList.push(flatSteps.length);
+      flatSteps.push({ event: c.event.trim(), source: (c.source || '').trim() || undefined });
+    });
+    childMap.push(childList);
+  });
+  return { flatSteps, parentMap, childMap };
+}
+
 // Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
 async function fetchEventFunnel() {
-  const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
-  if (!steps.length) { state.eventFunnel = null; render(); return; }
+  const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
+  state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
+  if (!flatSteps.length) { state.eventFunnel = null; render(); return; }
   state.eventFunnelLoading = true;
   state.eventFunnelError = null;
   render();
   try {
-    const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
-    const args = { inizio: state.funnelFrom, fine: state.funnelTo, p_steps };
+    const args = { inizio: state.funnelFrom, fine: state.funnelTo, p_steps: flatSteps };
     if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider; // 'google' | 'email'
     // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
@@ -3857,13 +3890,18 @@ function eventBrowserModal() {
     </div>`;
 }
 
-// Apre il modale event browser puntando allo step targetRow di eventFunnelConfig. Preseleziona
-// l'evento già presente sullo step (se c'è) così si può anche solo cambiarlo.
-function openEventBrowser(targetRow) {
+// Apre il modale event browser puntando allo step targetRow di eventFunnelConfig. Se targetChild
+// è un numero, il target è la variante children[targetChild] dello step, non il parent stesso.
+// Preseleziona l'evento già presente sul target (se c'è) così si può anche solo cambiarlo.
+function openEventBrowser(targetRow, targetChild) {
   state.eventBrowserOpen = true;
   state.eventBrowserTargetRow = targetRow;
+  state.eventBrowserTargetChild = (typeof targetChild === 'number') ? targetChild : null;
   const row = state.eventFunnelConfig[targetRow];
-  state.ebSelected = (row && row.event) || null;
+  const target = state.eventBrowserTargetChild !== null && row && Array.isArray(row.children)
+    ? row.children[state.eventBrowserTargetChild]
+    : row;
+  state.ebSelected = (target && target.event) || null;
   state.ebSearch = ''; state.ebScreen = null; state.ebType = null;
   state.ebVolAll = false; state.ebAliveOnly = true;
   state.ebTab = 'details'; state.ebNextRows = null; state.ebNextLoading = false;
@@ -3874,20 +3912,26 @@ function openEventBrowser(targetRow) {
 function closeEventBrowser() {
   state.eventBrowserOpen = false;
   state.eventBrowserTargetRow = null;
+  state.eventBrowserTargetChild = null;
   state.ebSelected = null;
   render();
 }
 
-// Conferma la selezione: scrive event + label sullo step target e chiude.
+// Conferma la selezione: scrive event + label sullo step target (parent o child) e chiude.
 function confirmEventBrowser() {
   const i = state.eventBrowserTargetRow;
   if (i == null || !state.ebSelected) return;
   const row = state.eventFunnelConfig[i];
   if (row) {
-    row.event = state.ebSelected;
-    const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
-    row.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
-    persistEventFunnelConfig();
+    const target = state.eventBrowserTargetChild !== null && Array.isArray(row.children)
+      ? row.children[state.eventBrowserTargetChild]
+      : row;
+    if (target) {
+      target.event = state.ebSelected;
+      const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
+      target.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
+      persistEventFunnelConfig();
+    }
   }
   closeEventBrowser();
 }
@@ -4061,7 +4105,8 @@ function savedFunnelBar() {
       <span>funnel onboarding</span>
     </button>`);
 
-  // chip salvata custom (icona/colore/label + matita modifica + delete)
+  // chip salvata custom — matita rimossa: la modifica dell'aspetto (nome/etichetta/icona/colore)
+  // vive integrata nel Costruttore funnel (si apre col bottone "⚙ Modifica funnel").
   const savedChip = (f, i) => {
     const active    = activeFunnelPreset === i;
     const accentHex = chipColorHex(f.color);
@@ -4077,10 +4122,6 @@ function savedFunnelBar() {
         <span style="color:${active ? accentHex : 'var(--muted)'};display:inline-flex;align-items:center">${chipIconSvg(iconName)}</span>
         <span>${esc(f.name)}</span>
         ${labelHtml}
-      </button>
-      <button class="funnel-preset-edit" data-preset-idx="${i}" title="Modifica chip (nome, icona, colore)"
-              style="padding:4px 7px;border-top:1px solid ${edgeBorder};border-bottom:1px solid ${edgeBorder};border-left:none;border-right:none;background:${edgeBg};color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;font-family:inherit">
-        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       </button>
       <button class="funnel-preset-del" data-preset-idx="${i}" title="Elimina funnel"
               style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid ${edgeBorder};border-left:none;background:${edgeBg};color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>`);
@@ -4108,13 +4149,12 @@ function savedFunnelBar() {
           </div>`
         : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>`}
       ${state.chipReorderSaving ? `<span style="font-size:11px;color:var(--muted)">Salvo ordine…</span>` : ''}
-    </div>
-    ${state.chipEditorIdx != null ? chipEditorPanel(state.chipEditorIdx) : ''}`;
+    </div>`;
 }
 
-// Pannello editor chip — mostrato inline sotto la toolbar quando l'utente doppio-clicca una chip
-// salvata. Non è modale bloccante: chiudi con "Chiudi" o Esc. Draft locale in state.chipDraft, save
-// esplicito per non spammare la rete a ogni tasto.
+// Editor chip — versione compatta inline dentro il costruttore funnel.
+// Nome+etichetta stessa riga. Icona collassata (mostra solo quella corrente), la griglia si apre
+// in hover sotto forma di popover. Colori inline. Save/Annulla piccoli a destra.
 function chipEditorPanel(idx) {
   const f = state.savedFunnels[idx];
   if (!f) return '';
@@ -4127,44 +4167,45 @@ function chipEditorPanel(idx) {
   const iconGrid = Object.keys(LUCIDE_ICONS).map(name => {
     const active = name === d.icon;
     return `<button class="chip-icon-btn" data-icon="${name}" title="${name}"
-      style="width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid ${active ? accentHex : 'var(--border)'};background:${active ? accentHex + '22' : 'transparent'};color:${active ? accentHex : 'var(--muted)'};cursor:pointer;padding:0">${chipIconSvg(name)}</button>`;
+      style="width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid ${active ? accentHex : 'var(--border)'};background:${active ? accentHex + '22' : 'transparent'};color:${active ? accentHex : 'var(--muted)'};cursor:pointer;padding:0">${chipIconSvg(name)}</button>`;
   }).join('');
 
   const colorSwatches = Object.entries(CHIP_COLORS).map(([name, hex]) => {
     const active = name === d.color;
     return `<button class="chip-color-btn" data-color="${name}" title="${name}"
-      style="width:26px;height:26px;border-radius:50%;background:${hex};border:2px solid ${active ? '#fff' : 'transparent'};box-shadow:${active ? '0 0 0 2px ' + hex : 'none'};cursor:pointer;padding:0"></button>`;
+      style="width:20px;height:20px;border-radius:50%;background:${hex};border:2px solid ${active ? '#fff' : 'transparent'};box-shadow:${active ? '0 0 0 2px ' + hex : 'none'};cursor:pointer;padding:0"></button>`;
   }).join('');
 
   return `
-    <div class="card" style="margin-bottom:16px;border-color:${accentHex};box-shadow:0 0 0 1px ${accentHex}33">
-      <div class="card-title" style="margin-bottom:14px;display:flex;align-items:center;gap:8px">
+    <div class="chip-inline-editor" style="display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-left:3px solid ${accentHex};border-radius:8px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">
         <span style="color:${accentHex};display:inline-flex;align-items:center">${chipIconSvg(d.icon)}</span>
-        Modifica chip funnel
+        Aspetto della chip
       </div>
-      <div style="display:flex;flex-direction:column;gap:14px">
-        <div>
-          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Nome</label>
-          <input id="chip-editor-name" class="form-input" type="text" value="${esc(d.name)}"
-                 style="width:100%;max-width:320px;padding:6px 12px;font-size:13px" autocomplete="off">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:nowrap">
+        <input id="chip-editor-name" class="form-input" type="text" value="${esc(d.name)}"
+               placeholder="Nome" style="flex:1 1 55%;padding:5px 10px;font-size:12px;min-width:0" autocomplete="off">
+        <input id="chip-editor-label" class="form-input" type="text" value="${esc(d.label)}"
+               placeholder="Etichetta (opzionale)"
+               style="flex:1 1 45%;padding:5px 10px;font-size:12px;min-width:0" autocomplete="off">
+      </div>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <div class="chip-icon-picker" style="position:relative;display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Icona</span>
+          <button type="button" class="chip-icon-current"
+                  style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid ${accentHex};background:${accentHex}22;color:${accentHex};cursor:pointer;padding:0">${chipIconSvg(d.icon)}</button>
+          <div class="chip-icon-grid"
+               style="position:absolute;top:100%;left:0;margin-top:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.4);grid-template-columns:repeat(10,24px);gap:4px;z-index:30">
+            ${iconGrid}
+          </div>
         </div>
-        <div>
-          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Etichetta (opzionale)</label>
-          <input id="chip-editor-label" class="form-input" type="text" value="${esc(d.label)}"
-                 placeholder="es. attivazione, monetizzazione…"
-                 style="width:100%;max-width:320px;padding:6px 12px;font-size:13px" autocomplete="off">
+        <div style="display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Colore</span>
+          <div style="display:flex;gap:6px">${colorSwatches}</div>
         </div>
-        <div>
-          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Icona</label>
-          <div style="display:flex;flex-wrap:wrap;gap:6px;max-width:420px">${iconGrid}</div>
-        </div>
-        <div>
-          <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Colore</label>
-          <div style="display:flex;flex-wrap:wrap;gap:10px">${colorSwatches}</div>
-        </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--border)">
-          <button id="chip-editor-cancel" class="btn btn-ghost" style="font-size:12px;padding:6px 14px">Annulla</button>
-          <button id="chip-editor-save" class="btn btn-primary" style="font-size:12px;padding:6px 14px">Salva</button>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button id="chip-editor-cancel" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Annulla</button>
+          <button id="chip-editor-save" class="btn btn-primary" style="font-size:11px;padding:4px 12px">Salva chip</button>
         </div>
       </div>
     </div>`;
@@ -4172,9 +4213,12 @@ function chipEditorPanel(idx) {
 
 function pageFunnel() {
   if (state.funnelMode === 'event') return pageFunnelEvent();
+  const chipEditor = state.editingFunnel && state.chipEditorIdx != null
+    ? chipEditorPanel(state.chipEditorIdx) : '';
   const editPanel = state.editingFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
       <div class="card-title" style="margin-bottom:16px">Costruttore Funnel</div>
+      ${chipEditor}
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
         ${state.funnelConfig.map((row, i) => funnelEditRow(row, i)).join('')}
       </div>
@@ -4240,9 +4284,12 @@ function pageFunnelEvent() {
   const cfg = state.eventFunnelConfig || [];
 
   // Editor collassabile (come "Modifica funnel" del Default): visibile solo se editingEventFunnel.
+  const chipEditor = state.editingEventFunnel && state.chipEditorIdx != null
+    ? chipEditorPanel(state.chipEditorIdx) : '';
   const editor = state.editingEventFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
       <div class="card-title" style="margin-bottom:16px">Costruttore funnel onboarding</div>
+      ${chipEditor}
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
         ${cfg.length ? cfg.map((row, i) => eventFunnelEditRow(row, i)).join('')
           : `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuno step. Aggiungi il primo evento del funnel.</div>`}
@@ -4301,30 +4348,120 @@ function pageFunnelEvent() {
     ${sprintEventFunnelSection()}`;
 }
 
-// Riga editor del funnel a eventi. row = {event, label, vsIdx}. Menu a tendina dal catalogo curato
-// (nome amichevole + event_name tra parentesi); vsIdx = posizione di uno step precedente per la %.
+// Riga editor del funnel a eventi. row = {event, label, children?}. Ordine colonne: label
+// (rinominabile) → evento (picker) → preview % (regola fissa: % vs step precedente + % vs primo
+// step). Il campo `vsIdx` in row resta per retro-compatibilità coi preset salvati ma non è più
+// configurabile. Sotto la riga parent c'è la sezione "varianti" (children annidati).
 function eventFunnelEditRow(row, i) {
   const cfg = state.eventFunnelConfig || [];
-  const vsOpts = `<option value="">—</option>` +
-    cfg.slice(0, i).map((r, j) =>
-      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${esc(eventStepLabel(r) || ('step ' + (j + 1)))}</option>`).join('');
-  // Selettore evento = pulsante che apre l'event browser (non più dropdown hardcoded). Mostra il nome
-  // dell'evento scelto (con label amichevole dal catalogo se presente) o il placeholder.
+  // Preview percentuali usando i dati dell'ultima Calcola (se presenti). Se manca il calcolo o
+  // uno dei due riferimenti è 0/null, mostra "—". Le posizioni nel result sono nella scala flat
+  // (parent + children serializzati): risolviamo via eventFunnelFlatMap.
+  const data = (state.eventFunnel && state.eventFunnel.steps) || [];
+  const numById = {};
+  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
+  const hasData = !!(state.eventFunnel && data.length);
+  const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
+  const parentFlat = flatMap.parent?.[i];
+  const prevFlat = i > 0 ? flatMap.parent?.[i - 1] : null;
+  const headFlat = flatMap.parent?.[0];
+  const n     = hasData && parentFlat != null ? (numById[parentFlat] ?? 0) : null;
+  const prevN = hasData && prevFlat != null ? (numById[prevFlat] ?? 0) : null;
+  const headN = hasData && headFlat != null ? (numById[headFlat] ?? 0) : null;
+  const pctPrev = (i === 0 || prevN === null || prevN <= 0 || n === null) ? null : (n / prevN * 100);
+  const pctHead = (i === 0 || headN === null || headN <= 0 || n === null) ? null : (n / headN * 100);
+  const pctColor = pct => pct === null ? 'var(--muted)' : pct < 20 ? 'var(--red)' : pct >= 50 ? 'var(--mattia)' : 'var(--purple)';
+  const fmt = pct => pct === null ? '—' : pct.toFixed(1) + '%';
+  const previewCell = i === 0
+    ? `<div style="width:150px;flex-shrink:0;text-align:right;font-size:10px;color:var(--muted);line-height:1.4" title="Primo step: base 100%">base 100%</div>`
+    : `<div style="width:150px;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2">
+        <div style="font-size:11px;font-weight:600;color:${pctColor(pctPrev)}" title="% rispetto allo step precedente">${fmt(pctPrev)} <span style="color:var(--muted);font-weight:400;font-size:9px">vs prec</span></div>
+        <div style="font-size:11px;font-weight:500;color:${pctColor(pctHead)}" title="% rispetto al primo step del funnel">${fmt(pctHead)} <span style="color:var(--muted);font-weight:400;font-size:9px">vs #1</span></div>
+      </div>`;
+
+  // Label rinominabile a mano (fallback: catalogo o nome grezzo dell'evento).
+  const labelValue = row.label || '';
+  const labelPlaceholder = row.event ? (EVENT_CATALOG.find(e => e.event === row.event)?.label || row.event) : 'Nome step';
+
+  // Evento = picker (apre event browser). Mostra prevalentemente l'event_name tecnico.
   const picked = row.event;
-  const pickLabel = picked ? (eventStepLabel(row) || picked) : '— scegli evento —';
-  const pickSub = picked && eventStepLabel(row) !== picked ? `<span style="font-family:var(--mono);font-size:10px;color:#5a5a80;margin-left:6px">${esc(picked)}</span>` : '';
+  const pickText = picked || '— scegli evento —';
+
+  // Sezione children (varianti annidate). Se il parent ha già children è sempre visibile; se non
+  // ne ha, è visibile solo se il parent è espanso (per non appesantire la lista). L'expand qui
+  // condivide lo stesso state.eventFunnelExpanded della viz — coerente con "vedo dove sto lavorando".
+  const children = Array.isArray(row.children) ? row.children : [];
+  const hasChildren = children.length > 0;
+  const expanded = !!state.eventFunnelExpanded[i];
+  const showChildrenBlock = hasChildren || expanded;
+  const childrenHtml = children.map((c, ci) => eventFunnelEditChildRow(c, i, ci, numById, flatMap, n)).join('');
+  const childrenBlock = showChildrenBlock
+    ? `<div class="event-funnel-children" data-parent="${i}" style="padding:6px 0 6px 52px;display:flex;flex-direction:column;gap:6px;border-left:2px solid var(--border);margin-left:14px">
+         ${childrenHtml}
+         <button class="event-funnel-child-add" data-row="${i}"
+           style="align-self:flex-start;padding:4px 12px;font-size:11px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;cursor:pointer;font-family:inherit">↳ aggiungi variante</button>
+       </div>`
+    : `<div style="padding:2px 0 2px 52px">
+         <button class="event-funnel-child-add" data-row="${i}"
+           style="padding:2px 10px;font-size:10px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;cursor:pointer;font-family:inherit;opacity:.7"
+           title="Annida varianti di questo step (es. signup_google + signup_email sotto sign_up)">↳ annida varianti</button>
+       </div>`;
+
   return `
-    <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
-      <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
-        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
-      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
-      <button class="event-funnel-pick" data-row="${i}" title="Scegli evento"
-        style="flex:1;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:space-between;gap:8px">
-        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickLabel)}${pickSub}</span>
-        <span style="color:var(--muted);flex-shrink:0">▾</span>
+    <div class="event-funnel-block" data-block="${i}" style="display:flex;flex-direction:column;gap:0">
+      <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+        <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+          style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
+        <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+        <input class="form-input event-funnel-label" data-row="${i}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
+          title="Nome dello step nel funnel (rinominabile a piacere)"
+          style="flex:1;min-width:0;font-size:12px;padding:6px 10px">
+        <button class="event-funnel-pick" data-row="${i}" title="Scegli evento"
+          style="width:260px;flex-shrink:0;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
+          <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
+        </button>
+        ${previewCell}
+        <button class="event-funnel-expand-toggle" data-row="${i}" title="${expanded ? 'Nascondi sezione varianti' : 'Mostra sezione varianti'}"
+          style="padding:4px 8px;font-size:11px;line-height:1;color:${hasChildren ? 'var(--purple)' : 'var(--muted)'};background:transparent;border:1px solid var(--border);border-radius:6px;cursor:pointer;flex-shrink:0;font-family:inherit">${hasChildren ? (expanded ? '▾ ' + children.length : '▸ ' + children.length) : (expanded ? '▾' : '▸')}</button>
+        <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+      </div>
+      ${childrenBlock}
+    </div>`;
+}
+
+// Riga editor di una variante annidata (child). Preview a destra = n della variante + % sul parent.
+function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) {
+  const cFlat = flatMap.child?.[parentI]?.[ci];
+  const hasData = numById && Object.keys(numById).length > 0;
+  const cn = hasData && cFlat != null ? (numById[cFlat] ?? 0) : null;
+  const pct = (cn !== null && parentN !== null && parentN > 0) ? (cn / parentN * 100) : null;
+  const pctStr = pct !== null ? pct.toFixed(1) + '%' : '—';
+  const previewCell = hasData
+    ? `<div style="width:150px;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2">
+        <div style="font-family:var(--mono);font-size:12px;color:var(--muted)">${cn ?? '—'}</div>
+        <div style="font-size:10px;color:var(--muted)">${pctStr} <span style="font-size:9px">del parent</span></div>
+      </div>`
+    : `<div style="width:150px;flex-shrink:0"></div>`;
+  const labelValue = child.label || '';
+  const labelPlaceholder = child.event ? (EVENT_CATALOG.find(e => e.event === child.event)?.label || child.event) : 'Nome variante';
+  const picked = child.event;
+  const pickText = picked || '— scegli evento variante —';
+  return `
+    <div class="event-funnel-child-row" data-parent="${parentI}" data-child="${ci}" style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:#5a5a80;flex-shrink:0;width:20px;text-align:right">↳</span>
+      <input class="form-input event-funnel-child-label" data-parent="${parentI}" data-child="${ci}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
+        title="Nome della variante (es. Google, Email)"
+        style="flex:1;min-width:0;font-size:12px;padding:5px 10px">
+      <button class="event-funnel-pick-child" data-parent="${parentI}" data-child="${ci}" title="Scegli evento variante"
+        style="width:260px;flex-shrink:0;text-align:left;font-size:12px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
+        <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
       </button>
-      <select class="form-select event-funnel-vs" data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
-      <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+      ${previewCell}
+      <span style="width:29px;flex-shrink:0"></span>
+      <button class="btn btn-ghost event-funnel-child-remove" data-parent="${parentI}" data-child="${ci}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
     </div>`;
 }
 
@@ -4332,10 +4469,14 @@ function eventFunnelViz() {
   const cfg  = state.eventFunnelConfig || [];
   const data = (state.eventFunnel && state.eventFunnel.steps) || [];
   if (!cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato.</div>`;
-  // allinea i risultati per posizione (la RPC ritorna idx = posizione dello step inviato)
+  // allinea i risultati per posizione flat (la RPC ritorna idx = posizione nello p_steps flatten)
   const numById = {};
   data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
-  const nums = cfg.map((_, i) => numById[i] ?? 0);
+  const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
+  const nums = cfg.map((_, i) => {
+    const flat = flatMap.parent?.[i];
+    return (flat != null) ? (numById[flat] ?? 0) : 0;
+  });
   const maxN = Math.max(...nums, 1);
   const headN = nums[0] || 0;
   const headLabel = eventStepLabel(cfg[0]) || 'step 1';
@@ -4352,7 +4493,7 @@ function eventFunnelViz() {
   const rows = cfg.map((row, i) => {
     const n     = nums[i];
     const label = eventStepLabel(row) || ('step ' + (i + 1));
-    const vsN   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? nums[row.vsIdx] : null;
+    const vsN   = i > 0 ? nums[i - 1] : null;
     const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv    = convPct !== null ? convPct.toFixed(1) + '%' : '—';
     const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
@@ -4365,10 +4506,22 @@ function eventFunnelViz() {
       : startPct < 20 ? 'var(--red)'
       : startPct >= 50 ? 'var(--mattia)'
       : 'var(--muted)';
-    return `
+
+    const children = Array.isArray(row.children) ? row.children : [];
+    const hasChildren = children.length > 0;
+    const expanded = !!state.eventFunnelExpanded[i];
+    const chevron = hasChildren
+      ? `<button class="event-funnel-chevron" data-row="${i}" title="${expanded ? 'Riduci varianti' : 'Espandi varianti'}"
+           style="cursor:pointer;background:transparent;border:0;color:var(--muted);font-size:11px;line-height:1;padding:0 4px 0 0;font-family:inherit">${expanded ? '▾' : '▸'}</button>`
+      : '';
+    const countBadge = hasChildren
+      ? ` <span style="font-size:9px;color:var(--muted);font-weight:500;letter-spacing:.3px">· ${children.length} variant${children.length > 1 ? 'i' : 'e'}</span>`
+      : '';
+
+    const parentRow = `
       <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
         <div style="width:230px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">
-          ${esc(label)}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}</div>
+          ${chevron}${esc(label)}${countBadge}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}</div>
         </div>
         <div style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
           <div style="height:100%;width:${(n / maxN) * 100}%;background:${barColor};opacity:.75;border-radius:3px"></div>
@@ -4377,6 +4530,38 @@ function eventFunnelViz() {
         <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
         <div style="width:56px;text-align:right;font-size:12px;font-weight:500;color:${startColor};flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${startStr}</div>
       </div>`;
+
+    if (!hasChildren || !expanded) return parentRow;
+
+    // Righe children indentate. `vs prec` = quota della variante sul parent (n_child/n_parent);
+    // `vs #1` = n_child/headN. La barra è scalata sul parent (non su maxN) così visivamente si
+    // legge come una fetta del parent, non come uno step alla pari.
+    const childRows = children.map((c, ci) => {
+      const cFlat = flatMap.child?.[i]?.[ci];
+      const cn = (cFlat != null) ? (numById[cFlat] ?? 0) : 0;
+      const cLabel = eventStepLabel(c) || ('variante ' + (ci + 1));
+      const vsParentPct = n > 0 ? (cn / n * 100) : null;
+      const vsParentStr = vsParentPct !== null ? vsParentPct.toFixed(1) + '%' : '—';
+      const vsHeadPct = headN > 0 ? (cn / headN * 100) : null;
+      const vsHeadStr = vsHeadPct !== null ? vsHeadPct.toFixed(1) + '%' : '—';
+      const parentDenom = Math.max(n, 1);
+      const barW = (cn / parentDenom) * 100;
+      return `
+        <div style="display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px dashed var(--border);background:rgba(255,255,255,0.015)">
+          <div style="width:230px;font-size:11px;color:var(--muted);flex-shrink:0;line-height:1.35;padding-left:22px">
+            <span style="color:#5a5a80;margin-right:4px">↳</span>${esc(cLabel)}
+            <div style="font-size:10px;color:#5a5a80;font-family:var(--mono);padding-left:12px">${esc(c.event || '')}</div>
+          </div>
+          <div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden;opacity:.85">
+            <div style="height:100%;width:${barW}%;background:${barColor};opacity:.55;border-radius:3px"></div>
+          </div>
+          <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:500;font-size:13px;color:var(--muted);flex-shrink:0">${cn}</div>
+          <div style="width:56px;text-align:right;font-size:11px;font-weight:500;color:var(--muted);flex-shrink:0" title="quota della variante sul parent (${n})">${vsParentStr}</div>
+          <div style="width:56px;text-align:right;font-size:11px;font-weight:500;color:var(--muted);flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${vsHeadStr}</div>
+        </div>`;
+    }).join('');
+
+    return parentRow + childRows;
   }).join('');
 
   return header + rows;
@@ -4505,12 +4690,12 @@ function sprintEventFunnelTable() {
     const label = eventStepLabel(row) || ('step ' + (ri + 1));
     const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
     const maxN = Math.max(...nums, 0);
-    // Vincitore = miglior conversione (convPct), NON il numero assoluto. Al primo step (dove
-    // convPct è null per tutti perché non c'è vsIdx) nessuno vince: il top-of-funnel misura
-    // traffico, non performance. Fallback su null → nessuna cella evidenziata su quello step.
+    // Vincitore = miglior conversione (convPct vs step precedente), NON il numero assoluto. Al
+    // primo step (dove convPct è null per tutti) nessuno vince: il top-of-funnel misura traffico,
+    // non performance. Fallback su null → nessuna cella evidenziata su quello step.
     const convPcts = selected.map(s => {
       const n = numsOf[s.id][ri] ?? 0;
-      const vsN = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < ri) ? (numsOf[s.id][row.vsIdx] ?? 0) : null;
+      const vsN = ri > 0 ? (numsOf[s.id][ri - 1] ?? 0) : null;
       return vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     });
     const validPcts = convPcts.filter(p => p !== null);
@@ -7700,6 +7885,22 @@ function attachEvents() {
       render();
     }));
 
+  // Popola il draft chip dalla preset attualmente attivo. Serve quando l'utente apre il
+  // Costruttore funnel: il pannello "Aspetto della chip" mostra i valori correnti della chip
+  // attiva così può modificarli inline. Default/onboarding built-in → nessun draft (chipEditorIdx=null).
+  function openChipDraftForActivePreset() {
+    const i = state.activeFunnelPreset;
+    const f = i != null ? state.savedFunnels[i] : null;
+    if (!f) { state.chipEditorIdx = null; state.chipDraft = null; return; }
+    state.chipEditorIdx = i;
+    state.chipDraft = {
+      name:  f.name  || '',
+      icon:  f.icon  || DEFAULT_CHIP_ICON,
+      color: f.color || DEFAULT_CHIP_COLOR,
+      label: f.label || '',
+    };
+  }
+
   // Funnel — calcola
   document.getElementById('funnel-apply')?.addEventListener('click', () => {
     const from = document.getElementById('funnel-from')?.value;
@@ -7729,10 +7930,15 @@ function attachEvents() {
     fetchEventFunnel();
   });
   document.getElementById('edit-event-funnel')?.addEventListener('click', () => {
-    state.editingEventFunnel = true; render();
+    state.editingEventFunnel = true;
+    openChipDraftForActivePreset();
+    render();
   });
   document.getElementById('close-event-funnel-edit')?.addEventListener('click', () => {
-    state.editingEventFunnel = false; render();
+    state.editingEventFunnel = false;
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    render();
   });
   document.getElementById('event-funnel-reset')?.addEventListener('click', () => {
     state.eventFunnelConfig = JSON.parse(JSON.stringify(ONBOARDING_FUNNEL_STEPS));
@@ -7745,10 +7951,13 @@ function attachEvents() {
   // Funnel — edit mode
   document.getElementById('edit-funnel')?.addEventListener('click', () => {
     state.editingFunnel = true;
+    openChipDraftForActivePreset();
     render();
   });
   document.getElementById('close-funnel-edit')?.addEventListener('click', () => {
     state.editingFunnel = false;
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
     render();
   });
   document.getElementById('funnel-add')?.addEventListener('click', () => {
@@ -7822,31 +8031,6 @@ function attachEvents() {
       render();
     }));
 
-  // Matita su chip salvata → apre editor chip (rename + icon + color + label). Entry-point esplicito:
-  // il dblclick non funziona perché il primo click attiva già il funnel e ri-renderizza il DOM.
-  document.querySelectorAll('.funnel-preset-edit').forEach(el =>
-    el.addEventListener('click', e => {
-      e.stopPropagation();
-      const i = +el.dataset.presetIdx;
-      const f = state.savedFunnels[i];
-      if (!f) return;
-      // toggle: se sto già editando questa chip, la matita chiude
-      if (state.chipEditorIdx === i) {
-        state.chipEditorIdx = null;
-        state.chipDraft = null;
-        render();
-        return;
-      }
-      state.chipEditorIdx = i;
-      state.chipDraft = {
-        name:  f.name  || '',
-        icon:  f.icon  || DEFAULT_CHIP_ICON,
-        color: f.color || DEFAULT_CHIP_COLOR,
-        label: f.label || '',
-      };
-      render();
-    }));
-
   // Editor chip — input testo
   document.getElementById('chip-editor-name')?.addEventListener('input', e => {
     if (state.chipDraft) state.chipDraft.name = e.target.value;
@@ -7877,14 +8061,23 @@ function attachEvents() {
       render();
     }));
 
-  // Editor chip — annulla
+  // Editor chip — annulla: ripristina il draft dai valori attuali della chip senza chiudere il
+  // costruttore (che è controllato dal bottone "Chiudi" del costruttore stesso).
   document.getElementById('chip-editor-cancel')?.addEventListener('click', () => {
-    state.chipEditorIdx = null;
-    state.chipDraft = null;
+    const i = state.chipEditorIdx;
+    const f = i != null ? state.savedFunnels[i] : null;
+    if (!f) return;
+    state.chipDraft = {
+      name:  f.name  || '',
+      icon:  f.icon  || DEFAULT_CHIP_ICON,
+      color: f.color || DEFAULT_CHIP_COLOR,
+      label: f.label || '',
+    };
     render();
   });
 
-  // Editor chip — salva
+  // Editor chip — salva: aggiorna la chip ma tiene il pannello aperto (il costruttore rimane
+  // visibile finché non si preme "Chiudi" del costruttore stesso).
   document.getElementById('chip-editor-save')?.addEventListener('click', async () => {
     const i = state.chipEditorIdx;
     const d = state.chipDraft;
@@ -7893,9 +8086,6 @@ function attachEvents() {
     if (!f) return;
     const name = (d.name || '').trim();
     if (!name) { alert('Il nome della chip non può essere vuoto.'); return; }
-    state.chipEditorIdx = null;
-    state.chipDraft = null;
-    render();
     await updateFunnelChip(f.id, {
       name,
       icon:  d.icon  || DEFAULT_CHIP_ICON,
@@ -7994,8 +8184,7 @@ function attachEvents() {
 
   // ── Builder funnel a eventi ──────────────────────────────────────────
   document.getElementById('event-funnel-add')?.addEventListener('click', () => {
-    const last = state.eventFunnelConfig.length ? state.eventFunnelConfig.length - 1 : null;
-    state.eventFunnelConfig.push({ event: '', label: '', vsIdx: last });
+    state.eventFunnelConfig.push({ event: '', label: '' });
     persistEventFunnelConfig();
     render();
   });
@@ -8018,16 +8207,75 @@ function attachEvents() {
   // Selettore evento → apre l'event browser puntando allo step corrente
   document.querySelectorAll('.event-funnel-pick').forEach(el =>
     el.addEventListener('click', () => openEventBrowser(+el.dataset.row)));
-  document.querySelectorAll('.event-funnel-vs').forEach(el =>
-    el.addEventListener('change', () => { state.eventFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value; persistEventFunnelConfig(); render(); }));
+  // Label rinominabile: scrive direttamente in row.label. Vuoto → fallback catalogo/evento raw.
+  document.querySelectorAll('.event-funnel-label').forEach(el =>
+    el.addEventListener('input', () => {
+      state.eventFunnelConfig[+el.dataset.row].label = el.value;
+      persistEventFunnelConfig();
+    }));
   document.querySelectorAll('.event-funnel-remove').forEach(el =>
     el.addEventListener('click', () => {
       const i = +el.dataset.row;
       state.eventFunnelConfig.splice(i, 1);
-      state.eventFunnelConfig.forEach(r => {
-        if (r.vsIdx === i) r.vsIdx = null;
-        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      // rimappa gli indici expanded (session-only): tutto quello che stava dopo i shifta di -1
+      const oldExp = state.eventFunnelExpanded || {};
+      const newExp = {};
+      Object.keys(oldExp).forEach(k => {
+        const ki = +k;
+        if (ki < i) newExp[ki] = oldExp[k];
+        else if (ki > i) newExp[ki - 1] = oldExp[k];
       });
+      state.eventFunnelExpanded = newExp;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // Chevron in viz + toggle expand in editor: aprono/chiudono la sezione children
+  document.querySelectorAll('.event-funnel-chevron, .event-funnel-expand-toggle').forEach(el =>
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const i = +el.dataset.row;
+      if (!state.eventFunnelExpanded) state.eventFunnelExpanded = {};
+      state.eventFunnelExpanded[i] = !state.eventFunnelExpanded[i];
+      render();
+    }));
+
+  // Aggiungi variante child (crea children[] on demand). Espande automaticamente il parent.
+  document.querySelectorAll('.event-funnel-child-add').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      const row = state.eventFunnelConfig[i];
+      if (!row) return;
+      if (!Array.isArray(row.children)) row.children = [];
+      row.children.push({ event: '', label: '' });
+      if (!state.eventFunnelExpanded) state.eventFunnelExpanded = {};
+      state.eventFunnelExpanded[i] = true;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // Picker child → apre event browser puntando alla variante specifica
+  document.querySelectorAll('.event-funnel-pick-child').forEach(el =>
+    el.addEventListener('click', () => openEventBrowser(+el.dataset.parent, +el.dataset.child)));
+
+  // Label child rinominabile
+  document.querySelectorAll('.event-funnel-child-label').forEach(el =>
+    el.addEventListener('input', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
+      row.children[ci].label = el.value;
+      persistEventFunnelConfig();
+    }));
+
+  // Rimuovi child (dropp children[] se svuotato, così il parent torna "senza varianti")
+  document.querySelectorAll('.event-funnel-child-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children)) return;
+      row.children.splice(ci, 1);
+      if (!row.children.length) delete row.children;
       persistEventFunnelConfig();
       render();
     }));

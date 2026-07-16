@@ -161,3 +161,9 @@
 .eb-selprev .nm{font-family:var(--mono);color:var(--fg)}
 .eb-add{margin-left:auto;background:var(--accent);color:#14081f;font-weight:600;font-size:12.5px;border:none;border-radius:8px;padding:9px 20px;cursor:pointer;font-family:inherit}
 .eb-add:disabled{opacity:.4;cursor:not-allowed}
+
+/* ── Editor chip inline nel Costruttore funnel ── */
+/* La griglia icone è collassata di default; hover sul contenitore la mostra come popover. */
+.chip-icon-picker .chip-icon-grid{display:none}
+.chip-icon-picker:hover .chip-icon-grid,
+.chip-icon-picker:focus-within .chip-icon-grid{display:grid}
