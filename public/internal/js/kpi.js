@@ -601,6 +601,46 @@ async function fetchFunnel() {
 //  - parentMap[uiIdx] = posizione del parent in flatSteps (o null se il parent non ha event)
 //  - childMap[uiIdx][cIdx] = posizione del child in flatSteps (o null se il child non ha event)
 // La coorte del RPC (idx=0 con cohort_anchor) resta il primo evento inviato: se il primo step UI ha children, la coorte è il parent (event dei children conta contro quella).
+// Parsa un input testuale in una mappa di filtri metadata per kpi_funnel_v2.
+//   "provider=google"                     → { provider: "google" }
+//   "provider=google, source=onboarding"  → { provider: "google", source: "onboarding" }
+// Accetta virgole o `&` come separatori. Ritorna null se vuoto o malformato.
+function parseFilterInput(str) {
+  if (!str || typeof str !== 'string') return null;
+  const out = {};
+  str.split(/[,&]/).forEach(pair => {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) return;
+    const k = pair.slice(0, eq).trim();
+    const v = pair.slice(eq + 1).trim();
+    if (k && v) out[k] = v;
+  });
+  return Object.keys(out).length ? out : null;
+}
+
+// Serializza filters → stringa umana ("k=v, k2=v2"). Usato per popolare l'input in editing.
+function serializeFilters(f) {
+  if (!f || typeof f !== 'object') return '';
+  return Object.entries(f).map(([k, v]) => `${k}=${v}`).join(', ');
+}
+
+// Costruisce lo step piatto da passare a kpi_funnel_v2. Preferisce `filters` (formato moderno);
+// mantiene backward-compat con `source` (che il RPC mappa internamente a filters {source:x}).
+function buildFlatStep(row) {
+  const step = { event: row.event.trim() };
+  const inline = row.filters && typeof row.filters === 'object' ? row.filters : null;
+  if (inline) {
+    const clean = {};
+    Object.keys(inline).forEach(k => {
+      const v = inline[k];
+      if (v != null && String(v).trim() !== '') clean[k] = String(v);
+    });
+    if (Object.keys(clean).length) step.filters = clean;
+  }
+  if (!step.filters && row.source && String(row.source).trim()) step.source = String(row.source).trim();
+  return step;
+}
+
 function flattenEventFunnelConfig(cfg) {
   const flatSteps = [];
   const parentMap = [];
@@ -614,12 +654,12 @@ function flattenEventFunnelConfig(cfg) {
       return;
     }
     parentMap.push(flatSteps.length);
-    flatSteps.push({ event: row.event.trim(), source: (row.source || '').trim() || undefined });
+    flatSteps.push(buildFlatStep(row));
     const childList = [];
     (row.children || []).forEach((c) => {
       if (!c || !c.event || !c.event.trim()) { childList.push(null); return; }
       childList.push(flatSteps.length);
-      flatSteps.push({ event: c.event.trim(), source: (c.source || '').trim() || undefined });
+      flatSteps.push(buildFlatStep(c));
     });
     childMap.push(childList);
   });
@@ -627,6 +667,10 @@ function flattenEventFunnelConfig(cfg) {
 }
 
 // Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
+// Se tra gli step ci sono pseudo-eventi install_* (aggregati esterni senza identità), li estraggo
+// dai p_steps passati alla RPC (non li troverebbe mai in user_events), disabilito cohort_anchor
+// così gli altri step contano window_counts (utenti nel periodo, senza vincolo coorte) e
+// reinserisco le righe install_* nel risultato col numero aggregato calcolato client-side.
 async function fetchEventFunnel() {
   const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
   state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
@@ -635,17 +679,73 @@ async function fetchEventFunnel() {
   state.eventFunnelError = null;
   render();
   try {
-    const args = { inizio: state.funnelFrom, fine: state.funnelTo, p_steps: flatSteps };
-    if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider; // 'google' | 'email'
-    // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
-    if (selSprint) args.p_start = sprintStartTs(selSprint);
-    const res = await sb.rpc('kpi_funnel_v2', args);
-    if (res.error) throw res.error;
-    state.eventFunnel = res.data;
+    const p_start   = selSprint ? sprintStartTs(selSprint) : null;
+    state.eventFunnel = await computeEventFunnel(flatSteps, {
+      inizio:   state.funnelFrom,
+      fine:     state.funnelTo,
+      provider: state.eventFunnelProvider || null,
+      p_start,
+    });
   } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
   state.eventFunnelLoading = false;
   render();
+}
+
+// Helper condiviso tra fetchEventFunnel (funnel a eventi corrente) e fetchSprintEventFunnel
+// (confronto sprint). flatSteps = array [{event, source?}]. opts = {inizio, fine, provider, p_start}.
+// Ritorna jsonb equivalente a kpi_funnel_v2 con override install_* client-side.
+async function computeEventFunnel(flatSteps, opts) {
+  const hasInstall = flatSteps.some(s => isInstallEvent(s.event));
+
+  // Mappa idx_originale → step, e filtra fuori gli install per la RPC.
+  const rpcSteps = [];
+  const rpcToOriginal = []; // rpcIdx → originalIdx
+  flatSteps.forEach((s, i) => {
+    if (isInstallEvent(s.event)) return;
+    rpcToOriginal.push(i);
+    rpcSteps.push(s);
+  });
+
+  // Chiamata RPC (solo se ci sono step non-install da contare).
+  let rpcSteps_out = [];
+  let rpcMeta = { cohort_anchor: !hasInstall, include_emulators: false };
+  if (rpcSteps.length) {
+    const args = { inizio: opts.inizio, fine: opts.fine, p_steps: rpcSteps };
+    if (opts.provider) args.p_provider = opts.provider;
+    if (opts.p_start)  args.p_start   = opts.p_start;
+    // Se ci sono install nel funnel, disabilito cohort_anchor: la coorte sarebbe centrata su un
+    // pseudo-evento inesistente in user_events → step successivi tutti a 0. Con anchor=false ogni
+    // step conta gli utenti nel periodo (window_counts), coerente col numero aggregato install.
+    if (hasInstall) args.p_cohort_anchor = false;
+    const res = await sb.rpc('kpi_funnel_v2', args);
+    if (res.error) throw res.error;
+    rpcSteps_out = (res.data && res.data.steps) || [];
+    rpcMeta = { cohort_anchor: res.data?.cohort_anchor, include_emulators: res.data?.include_emulators };
+  }
+
+  // Calcolo numeri install per il periodo.
+  const installNames = flatSteps.filter(s => isInstallEvent(s.event)).map(s => s.event);
+  const installNums  = installNames.length
+    ? await computeInstallStepNumbers(installNames, opts.inizio, opts.fine)
+    : {};
+
+  // Ricomponi l'output nell'ordine originale di flatSteps.
+  const steps = flatSteps.map((s, i) => {
+    if (isInstallEvent(s.event)) {
+      return {
+        idx: i, events: [s.event], label: s.event,
+        filters: s.source ? { source: s.source } : {},
+        numero: installNums[s.event] ?? 0,
+      };
+    }
+    const rpcIdx  = rpcToOriginal.indexOf(i);
+    const rpcRow  = rpcSteps_out.find(r => r.idx === rpcIdx);
+    if (rpcRow) return { ...rpcRow, idx: i };
+    return { idx: i, events: [s.event], label: s.event, filters: s.source ? { source: s.source } : {}, numero: 0 };
+  });
+
+  return { ...rpcMeta, steps };
 }
 
 // Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
@@ -3716,21 +3816,85 @@ function aiChatPanel() {
 
 // Carica il catalogo eventi dal DB (event_registry, popolato da build-event-map.ts). Metadati non
 // sensibili → RLS read pubblica. Ordinato per volume 30g desc così i più rilevanti vengono prima.
+// In coda al fetch iniettiamo 2 pseudo-eventi install_* aggregati (Google Play + Meta Ads): non
+// stanno in user_events, i loro volumi sono SUM sulle tabelle esterne. Vedi syntheticInstallEvents.
 async function fetchEventRegistry() {
   try {
-    const res = await sb.from('event_registry').select('*').order('vol_30d', { ascending: false });
-    if (res.error) throw res.error;
-    state.eventRegistry = res.data || [];
+    const [regRes, installs] = await Promise.all([
+      sb.from('event_registry').select('*').order('vol_30d', { ascending: false }),
+      syntheticInstallEvents().catch(e => { console.warn('syntheticInstallEvents', e); return []; }),
+    ]);
+    if (regRes.error) throw regRes.error;
+    const all = [...installs, ...(regRes.data || [])];
+    all.sort((a, b) => (b.vol_30d || 0) - (a.vol_30d || 0));
+    state.eventRegistry = all;
   } catch (e) { console.error('fetchEventRegistry', e); }
   if (state.eventBrowserOpen) render();
 }
 
 // Colore/glifo per tipo evento (coerente col mockup).
+// `install` = pseudo-evento aggregato (Google Play / Meta Ads): non è in user_events, il numero
+// arriva da google_play_installs / meta_ads_insights_daily (vedi syntheticInstallEvents()).
 function eventTypeColor(type) {
-  return { action: 'var(--purple)', click: '#5b9bff', navigation: '#3ecacd', error: 'var(--red)' }[type] || 'var(--muted)';
+  return { action: 'var(--purple)', click: '#5b9bff', navigation: '#3ecacd', install: '#22c55e', error: 'var(--red)' }[type] || 'var(--muted)';
 }
 function eventTypeGlyph(type) {
-  return { action: '⚡', click: '◉', navigation: '→', error: '!' }[type] || '·';
+  return { action: '⚡', click: '◉', navigation: '→', install: '↓', error: '!' }[type] || '·';
+}
+
+// Nomi degli pseudo-eventi install (usati anche per riconoscerli in fetchEventFunnel/fetchSprintEventFunnel).
+const INSTALL_EVENT_NAMES = ['install_google_play', 'install_meta_ads'];
+function isInstallEvent(name) { return INSTALL_EVENT_NAMES.includes(name); }
+
+// Totali install {google_play, meta_ads} per un periodo [from, to] date-inclusive. La dashboard
+// gira con anon key ma google_play_installs / meta_ads_insights_daily sono service_role-only:
+// la RPC kpi_install_totals è SECURITY DEFINER (stesso pattern di kpi_funnel).
+async function fetchInstallTotals(from, to) {
+  const { data, error } = await sb.rpc('kpi_install_totals', { inizio: from, fine: to });
+  if (error) throw error;
+  const out = { google_play: 0, meta_ads: 0 };
+  for (const row of data || []) out[row.source] = Number(row.total || 0);
+  return out;
+}
+
+// Data ISO (YYYY-MM-DD) a N giorni fa in ora locale.
+function daysAgoIso(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Costruisce le 2 entry sintetiche install_* da iniettare in state.eventRegistry. Volumi 7g/30g
+// calcolati dalle stesse tabelle usate dal funnel Default (kpi_funnel step 0). Se la RPC fallisce
+// lasciamo volumi a 0 per non bloccare il render del modal.
+async function syntheticInstallEvents() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [t7, t30] = await Promise.all([
+    fetchInstallTotals(daysAgoIso(7),  today).catch(() => ({ google_play: 0, meta_ads: 0 })),
+    fetchInstallTotals(daysAgoIso(30), today).catch(() => ({ google_play: 0, meta_ads: 0 })),
+  ]);
+  const now = new Date().toISOString();
+  return [
+    {
+      event_name: 'install_google_play',
+      screens: ['Google Play'], types: ['install'], verdict: 'alive',
+      funnels_used: 0, vol_7d: t7.google_play, vol_30d: t30.google_play, updated_at: now,
+    },
+    {
+      event_name: 'install_meta_ads',
+      screens: ['Meta Ads'], types: ['install'], verdict: 'alive',
+      funnels_used: 0, vol_7d: t7.meta_ads, vol_30d: t30.meta_ads, updated_at: now,
+    },
+  ];
+}
+
+// Numeri install per il periodo, mappati sui nomi pseudo-evento usati nel funnel a eventi.
+async function computeInstallStepNumbers(eventNames, from, to) {
+  const totals = await fetchInstallTotals(from, to).catch(() => ({ google_play: 0, meta_ads: 0 }));
+  const out = {};
+  if (eventNames.includes('install_google_play')) out.install_google_play = totals.google_play;
+  if (eventNames.includes('install_meta_ads'))    out.install_meta_ads    = totals.meta_ads;
+  return out;
 }
 function eventPrimaryType(ev) { return (ev.types && ev.types[0]) || 'action'; }
 function eventPrimaryScreen(ev) { return (ev.screens && ev.screens[0]) || '—'; }
@@ -3871,6 +4035,7 @@ function eventBrowserModal() {
           <button class="eb-fchip ${state.ebType === 'action' ? 'on' : ''}" data-type="action"><span class="dot" style="background:var(--purple)"></span>action</button>
           <button class="eb-fchip ${state.ebType === 'click' ? 'on' : ''}" data-type="click"><span class="dot" style="background:#5b9bff"></span>click</button>
           <button class="eb-fchip ${state.ebType === 'navigation' ? 'on' : ''}" data-type="navigation"><span class="dot" style="background:#3ecacd"></span>navigation</button>
+          <button class="eb-fchip ${state.ebType === 'install' ? 'on' : ''}" data-type="install"><span class="dot" style="background:#22c55e"></span>install</button>
           <div class="eb-fsep"></div>
           <button class="eb-fchip ${!state.ebVolAll ? 'on' : ''}" id="eb-vol-hi">Volume &gt; 100/30g</button>
           <button class="eb-fchip ${state.ebVolAll ? 'on' : ''}" id="eb-vol-all">Tutti (${state.eventRegistry.filter(e=>state.ebAliveOnly?e.verdict==='alive':true).length})</button>
@@ -4417,10 +4582,14 @@ function eventFunnelEditRow(row, i) {
           title="Nome dello step nel funnel (rinominabile a piacere)"
           style="flex:1;min-width:0;font-size:12px;padding:6px 10px">
         <button class="event-funnel-pick" data-row="${i}" title="Scegli evento"
-          style="width:260px;flex-shrink:0;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+          style="width:210px;flex-shrink:0;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
           <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
         </button>
+        <input class="form-input event-funnel-filter" data-row="${i}" type="text"
+          value="${esc(serializeFilters(row.filters))}" placeholder="filtro metadata (opz.)"
+          title="Filtro AND sui metadata dell'evento, formato chiave=valore separato da virgola. Es. provider=google · source=onboarding_end"
+          style="width:150px;flex-shrink:0;font-size:11px;padding:6px 8px;font-family:var(--mono)">
         ${previewCell}
         <button class="event-funnel-expand-toggle" data-row="${i}" title="${expanded ? 'Nascondi sezione varianti' : 'Mostra sezione varianti'}"
           style="padding:4px 8px;font-size:11px;line-height:1;color:${hasChildren ? 'var(--purple)' : 'var(--muted)'};background:transparent;border:1px solid var(--border);border-radius:6px;cursor:pointer;flex-shrink:0;font-family:inherit">${hasChildren ? (expanded ? '▾ ' + children.length : '▸ ' + children.length) : (expanded ? '▾' : '▸')}</button>
@@ -4454,10 +4623,14 @@ function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) 
         title="Nome della variante (es. Google, Email)"
         style="flex:1;min-width:0;font-size:12px;padding:5px 10px">
       <button class="event-funnel-pick-child" data-parent="${parentI}" data-child="${ci}" title="Scegli evento variante"
-        style="width:260px;flex-shrink:0;text-align:left;font-size:12px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+        style="width:210px;flex-shrink:0;text-align:left;font-size:12px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
         <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
       </button>
+      <input class="form-input event-funnel-child-filter" data-parent="${parentI}" data-child="${ci}" type="text"
+        value="${esc(serializeFilters(child.filters))}" placeholder="filtro metadata (opz.)"
+        title="Filtro AND sui metadata dell'evento della variante. Es. provider=google — la variante conta solo gli eventi che matchano quel valore. NB: il RPC filtra per uguaglianza, quindi non serve per 'valore assente'."
+        style="width:150px;flex-shrink:0;font-size:11px;padding:5px 8px;font-family:var(--mono)">
       ${previewCell}
       <span style="width:29px;flex-shrink:0"></span>
       <button class="btn btn-ghost event-funnel-child-remove" data-parent="${parentI}" data-child="${ci}"
@@ -4521,7 +4694,7 @@ function eventFunnelViz() {
     const parentRow = `
       <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
         <div style="width:230px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">
-          ${chevron}${esc(label)}${countBadge}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}</div>
+          ${chevron}${esc(label)}${countBadge}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}</div>
         </div>
         <div style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
           <div style="height:100%;width:${(n / maxN) * 100}%;background:${barColor};opacity:.75;border-radius:3px"></div>
@@ -4550,7 +4723,7 @@ function eventFunnelViz() {
         <div style="display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px dashed var(--border);background:rgba(255,255,255,0.015)">
           <div style="width:230px;font-size:11px;color:var(--muted);flex-shrink:0;line-height:1.35;padding-left:22px">
             <span style="color:#5a5a80;margin-right:4px">↳</span>${esc(cLabel)}
-            <div style="font-size:10px;color:#5a5a80;font-family:var(--mono);padding-left:12px">${esc(c.event || '')}</div>
+            <div style="font-size:10px;color:#5a5a80;font-family:var(--mono);padding-left:12px">${esc(c.event || '')}${c.filters ? ' · ' + esc(serializeFilters(c.filters)) : ''}</div>
           </div>
           <div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden;opacity:.85">
             <div style="height:100%;width:${barW}%;background:${barColor};opacity:.55;border-radius:3px"></div>
@@ -4646,14 +4819,18 @@ async function fetchSprintEventFunnel() {
   state.sprintEventData = {};
   render();
   try {
-    const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
+    // Stesso schema di fetchEventFunnel: computeEventFunnel gestisce l'override install_* client-side.
+    const p_steps  = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
     const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
-    const results = await Promise.all(selected.map(s => {
-      const args = { inizio: s.inizio, fine: s.fine, p_steps };
-      if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider;
-      args.p_start = sprintStartTs(s);
-      return sb.rpc('kpi_funnel_v2', args).then(r => ({ id: s.id, data: r.data, error: r.error }));
-    }));
+    const results  = await Promise.all(selected.map(s =>
+      computeEventFunnel(p_steps, {
+        inizio:   s.inizio,
+        fine:     s.fine,
+        provider: state.eventFunnelProvider || null,
+        p_start:  sprintStartTs(s),
+      }).then(data => ({ id: s.id, data }))
+       .catch(err  => ({ id: s.id, error: err }))
+    ));
     const map = {};
     for (const r of results) { if (r.error) throw r.error; map[r.id] = r.data; }
     state.sprintEventData = map;
@@ -8265,6 +8442,30 @@ function attachEvents() {
       const row = state.eventFunnelConfig[pi];
       if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
       row.children[ci].label = el.value;
+      persistEventFunnelConfig();
+    }));
+
+  // Filtro metadata sul parent: `provider=google` → filters {provider:'google'}. change→refetch not
+  // automatico: l'utente clicca "Calcola" (evita refetch per ogni tasto).
+  document.querySelectorAll('.event-funnel-filter').forEach(el =>
+    el.addEventListener('input', () => {
+      const i = +el.dataset.row;
+      const row = state.eventFunnelConfig[i];
+      if (!row) return;
+      const parsed = parseFilterInput(el.value);
+      if (parsed) row.filters = parsed; else delete row.filters;
+      persistEventFunnelConfig();
+    }));
+
+  // Filtro metadata sul child (stessa logica del parent). Il caso classico: variante "Google" con
+  // filtro `provider=google` sullo stesso event_name del parent (es. sign_up).
+  document.querySelectorAll('.event-funnel-child-filter').forEach(el =>
+    el.addEventListener('input', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
+      const parsed = parseFilterInput(el.value);
+      if (parsed) row.children[ci].filters = parsed; else delete row.children[ci].filters;
       persistEventFunnelConfig();
     }));
 
