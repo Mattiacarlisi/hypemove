@@ -332,6 +332,19 @@ let state = {
   eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
   eventFunnelLoading: false, eventFunnelError: null,
   editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
+  // Event browser — popup di selezione evento (sostituisce il dropdown hardcoded nel builder a eventi)
+  eventRegistry: [],           // catalogo eventi dal DB (event_registry): {event_name, screens, types, verdict, funnels_used, vol_7d, vol_30d}
+  eventBrowserOpen: false,     // visibilità del modale
+  eventBrowserTargetRow: null, // indice dello step di eventFunnelConfig da riempire (null = nessuno)
+  ebSearch: '',                // query ricerca fuzzy
+  ebScreen: null,              // filtro schermata attiva (null = tutte)
+  ebType: null,                // filtro tipo (action/click/navigation) — null = tutti
+  ebVolAll: false,             // false = solo volume >100/30g, true = tutti
+  ebAliveOnly: true,           // nasconde dead/dark
+  ebSelected: null,            // event_name selezionato nel dettaglio
+  ebTab: 'details',            // 'details' | 'next'
+  ebNextLoading: false,        // query "cosa segue" in corso
+  ebNextRows: null,            // risultati "cosa segue": [{event, pct}] o null se non ancora caricato
   // confronto tra sprint per il funnel onboarding (parallelo a sprintFunnel* del catalogo)
   sprintEventOpen: false, sprintEventSel: [], sprintEventData: {}, sprintEventLoading: false, sprintEventError: null,
   savedFunnels: [],           // funnel salvati/nominati — ora dal DB (funnel_definitions), non più localStorage
@@ -1545,7 +1558,8 @@ function layout() {
     ${userActivityModal()}
     ${stepUsersModal()}
     ${premiumBucketModal()}
-    ${funnelStepUsersModal()}`;
+    ${funnelStepUsersModal()}
+    ${eventBrowserModal()}`;
 }
 
 function deleteConfirmModal() {
@@ -3665,6 +3679,276 @@ function aiChatPanel() {
     </div>`;
 }
 
+// ── EVENT BROWSER — popup selezione evento ────────────────────────────
+
+// Carica il catalogo eventi dal DB (event_registry, popolato da build-event-map.ts). Metadati non
+// sensibili → RLS read pubblica. Ordinato per volume 30g desc così i più rilevanti vengono prima.
+async function fetchEventRegistry() {
+  try {
+    const res = await sb.from('event_registry').select('*').order('vol_30d', { ascending: false });
+    if (res.error) throw res.error;
+    state.eventRegistry = res.data || [];
+  } catch (e) { console.error('fetchEventRegistry', e); }
+  if (state.eventBrowserOpen) render();
+}
+
+// Colore/glifo per tipo evento (coerente col mockup).
+function eventTypeColor(type) {
+  return { action: 'var(--purple)', click: '#5b9bff', navigation: '#3ecacd', error: 'var(--red)' }[type] || 'var(--muted)';
+}
+function eventTypeGlyph(type) {
+  return { action: '⚡', click: '◉', navigation: '→', error: '!' }[type] || '·';
+}
+function eventPrimaryType(ev) { return (ev.types && ev.types[0]) || 'action'; }
+function eventPrimaryScreen(ev) { return (ev.screens && ev.screens[0]) || '—'; }
+
+// Applica i filtri correnti (ricerca, schermata, tipo, volume, alive) al registry.
+function eventBrowserFiltered() {
+  const q = state.ebSearch.trim().toLowerCase();
+  return state.eventRegistry.filter(ev => {
+    if (state.ebAliveOnly && ev.verdict !== 'alive') return false;
+    if (!state.ebVolAll && (ev.vol_30d || 0) <= 100) return false;
+    if (state.ebType && !(ev.types || []).includes(state.ebType)) return false;
+    if (state.ebScreen && !(ev.screens || []).includes(state.ebScreen)) return false;
+    if (q && !ev.event_name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+// Query on-demand "cosa segue": per l'evento X il primo evento successivo dello stesso utente entro
+// 30 min (ultimi 14 giorni), aggregato in percentuali. Nessuna infra pre-calcolata: gira solo quando
+// apri il tab. ~1-2s. Usa la RPC event_next_transitions.
+async function fetchEventNext(eventName) {
+  state.ebNextLoading = true; state.ebNextRows = null; render();
+  try {
+    const res = await sb.rpc('event_next_transitions', { p_event: eventName, p_days: 14, p_window_min: 30 });
+    if (res.error) throw res.error;
+    state.ebNextRows = (res.data || []).map(r => ({ event: r.next_event, pct: Number(r.pct) })).slice(0, 6);
+  } catch (e) {
+    console.error('fetchEventNext', e);
+    state.ebNextRows = 'error';
+  }
+  state.ebNextLoading = false; render();
+}
+
+// Modale event browser. Renderizzato globalmente in layout(); visibile solo se eventBrowserOpen.
+function eventBrowserModal() {
+  if (!state.eventBrowserOpen) return '';
+  const filtered = eventBrowserFiltered();
+  const tgt = state.eventBrowserTargetRow;
+  const stepCtx = tgt != null ? ` · Step ${tgt + 1} del funnel` : '';
+
+  // colonna schermate: conta gli eventi (post alive/vol/type, ignorando il filtro schermata) per screen
+  const forScreens = state.eventRegistry.filter(ev => {
+    if (state.ebAliveOnly && ev.verdict !== 'alive') return false;
+    if (!state.ebVolAll && (ev.vol_30d || 0) <= 100) return false;
+    if (state.ebType && !(ev.types || []).includes(state.ebType)) return false;
+    return true;
+  });
+  const screenCounts = {};
+  forScreens.forEach(ev => { const s = eventPrimaryScreen(ev); screenCounts[s] = (screenCounts[s] || 0) + 1; });
+  const screenList = Object.keys(screenCounts).filter(s => s !== '—').sort();
+  const screensHtml = `
+    <div class="eb-sc-item ${state.ebScreen === null ? 'on' : ''}" data-screen="">
+      <span>Tutte le schermate</span><span class="n">${forScreens.length}</span>
+    </div>` +
+    screenList.map(s => `
+      <div class="eb-sc-item ${state.ebScreen === s ? 'on' : ''}" data-screen="${esc(s)}">
+        <span>${esc(s)}</span><span class="n">${screenCounts[s]}</span>
+      </div>`).join('');
+
+  const maxVol = Math.max(...filtered.map(e => e.vol_30d || 0), 1);
+  const eventsHtml = filtered.length ? filtered.map(ev => {
+    const t = eventPrimaryType(ev), col = eventTypeColor(t), sel = state.ebSelected === ev.event_name;
+    const usedIn = ev.funnels_used > 0 ? `<span>usato in ${ev.funnels_used} funnel</span>` : '';
+    return `
+      <div class="eb-ev ${sel ? 'sel' : ''}" data-event="${esc(ev.event_name)}">
+        <div class="eb-tico" style="background:${col}22;color:${col}">${eventTypeGlyph(t)}</div>
+        <div style="min-width:0">
+          <div class="eb-name">${esc(ev.event_name)}</div>
+          <div class="eb-meta"><span class="eb-badge">${esc(t)}</span>${usedIn}</div>
+        </div>
+        <div class="eb-vol">
+          <div class="num">${(ev.vol_30d || 0).toLocaleString('it-IT')}</div>
+          <div class="bar"><i style="width:${Math.round((ev.vol_30d || 0) / maxVol * 100)}%;background:${col}"></i></div>
+        </div>
+      </div>`;
+  }).join('') : `<div style="padding:30px 16px;color:var(--muted);font-size:12.5px;text-align:center">Nessun evento con questi filtri.</div>`;
+
+  const sel = state.eventRegistry.find(e => e.event_name === state.ebSelected);
+  const detailHtml = !sel ? `
+    <div style="padding:30px 16px;color:var(--muted);font-size:12px;text-align:center">Seleziona un evento per i dettagli.</div>`
+    : (() => {
+      const t = eventPrimaryType(sel), col = eventTypeColor(t);
+      const tabs = `
+        <div class="eb-d-tabs">
+          <div class="eb-d-tab ${state.ebTab === 'details' ? 'on' : ''}" data-tab="details">Dettagli</div>
+          <div class="eb-d-tab ${state.ebTab === 'next' ? 'on' : ''}" data-tab="next">Cosa segue</div>
+        </div>`;
+      if (state.ebTab === 'next') {
+        let body;
+        if (state.ebNextLoading) body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Calcolo sequenza… (~2s)</div>`;
+        else if (state.ebNextRows === 'error') body = `<div style="color:var(--red);font-size:12px;padding:8px 0">Query non disponibile (RPC event_next_transitions mancante).</div>`;
+        else if (Array.isArray(state.ebNextRows)) {
+          if (!state.ebNextRows.length) body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuna sequenza rilevata negli ultimi 14 giorni.</div>`;
+          else {
+            const top = state.ebNextRows[0];
+            body = state.ebNextRows.map(r => `
+              <div class="eb-next-row">
+                <span class="nm">${esc(r.event)}</span>
+                <div class="nbar"><i style="width:${Math.round(r.pct)}%"></i></div>
+                <span class="pct">${r.pct.toFixed(0)}%</span>
+              </div>`).join('')
+              + `<div class="eb-next-note">Su user_events, ultimi 14 giorni, stesso utente entro 30 min.</div>`
+              + `<div class="eb-next-cta">Suggerimento step successivo:<br><b data-suggest="${esc(top.event)}">+ ${esc(top.event)} (${top.pct.toFixed(0)}%)</b></div>`;
+          }
+        } else body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Apri il tab per calcolare.</div>`;
+        return `${tabs}<div class="eb-d-pad">
+          <div class="eb-d-name" style="color:${col}">${eventTypeGlyph(t)} ${esc(sel.event_name)}</div>
+          <div><div class="eb-d-sec" style="margin-bottom:6px">Dopo questo evento (entro 30 min)</div>${body}</div>
+        </div>`;
+      }
+      const funnelsRow = sel.funnels_used > 0
+        ? `<div class="eb-kv"><div class="k">Funnel che lo usano</div><div class="v">${sel.funnels_used}</div></div>` : '';
+      return `${tabs}<div class="eb-d-pad">
+        <div class="eb-d-name" style="color:${col}">${eventTypeGlyph(t)} ${esc(sel.event_name)}</div>
+        <div class="eb-d-kv">
+          <div class="eb-kv"><div class="k">Volume 7g</div><div class="v">${(sel.vol_7d||0).toLocaleString('it-IT')}</div></div>
+          <div class="eb-kv"><div class="k">Volume 30g</div><div class="v">${(sel.vol_30d||0).toLocaleString('it-IT')}</div></div>
+          <div class="eb-kv"><div class="k">Tipo</div><div class="v" style="font-size:12px;color:${col}">${esc((sel.types||[]).join(', ')||'—')}</div></div>
+          <div class="eb-kv"><div class="k">Stato</div><div class="v" style="font-size:12px">${esc(sel.verdict||'—')}</div></div>
+        </div>
+        <div><div class="eb-d-sec" style="margin-bottom:6px">Schermate</div>
+          <div style="font-family:var(--mono);font-size:11.5px;color:var(--muted)">${esc((sel.screens||[]).join(', ')||'nessuna')}</div>
+        </div>
+        ${funnelsRow}
+      </div>`;
+    })();
+
+  return `
+    <div class="eb-overlay" id="eb-overlay">
+      <div class="eb-modal">
+        <div class="eb-head">
+          <div class="eb-title">Scegli evento<span class="ctx">${stepCtx}</span></div>
+          <input id="eb-search" class="eb-search" type="text" placeholder="🔍  Cerca evento…" value="${esc(state.ebSearch)}" autocomplete="off">
+          <button class="eb-close" id="eb-close">×</button>
+        </div>
+        <div class="eb-filters">
+          <button class="eb-fchip ${!state.ebType ? 'on' : ''}" data-type="">Tutti i tipi</button>
+          <button class="eb-fchip ${state.ebType === 'action' ? 'on' : ''}" data-type="action"><span class="dot" style="background:var(--purple)"></span>action</button>
+          <button class="eb-fchip ${state.ebType === 'click' ? 'on' : ''}" data-type="click"><span class="dot" style="background:#5b9bff"></span>click</button>
+          <button class="eb-fchip ${state.ebType === 'navigation' ? 'on' : ''}" data-type="navigation"><span class="dot" style="background:#3ecacd"></span>navigation</button>
+          <div class="eb-fsep"></div>
+          <button class="eb-fchip ${!state.ebVolAll ? 'on' : ''}" id="eb-vol-hi">Volume &gt; 100/30g</button>
+          <button class="eb-fchip ${state.ebVolAll ? 'on' : ''}" id="eb-vol-all">Tutti (${state.eventRegistry.filter(e=>state.ebAliveOnly?e.verdict==='alive':true).length})</button>
+          <label class="eb-toggle" id="eb-alive"><span>solo eventi vivi</span><span class="sw ${state.ebAliveOnly ? 'on' : ''}"></span></label>
+        </div>
+        <div class="eb-body">
+          <div class="eb-screens">${screensHtml}</div>
+          <div class="eb-events">${eventsHtml}</div>
+          <div class="eb-detail">${detailHtml}</div>
+        </div>
+        <div class="eb-foot">
+          <div class="eb-selprev">${state.ebSelected ? `Selezionato: <span class="nm">${esc(state.ebSelected)}</span>` : 'Nessun evento selezionato'}</div>
+          <button class="btn btn-ghost" id="eb-cancel" style="font-size:12px;padding:8px 14px">Annulla</button>
+          <button class="eb-add" id="eb-add" ${state.ebSelected ? '' : 'disabled'}>${tgt != null ? `Aggiungi allo step ${tgt + 1}` : 'Aggiungi'}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Apre il modale event browser puntando allo step targetRow di eventFunnelConfig. Preseleziona
+// l'evento già presente sullo step (se c'è) così si può anche solo cambiarlo.
+function openEventBrowser(targetRow) {
+  state.eventBrowserOpen = true;
+  state.eventBrowserTargetRow = targetRow;
+  const row = state.eventFunnelConfig[targetRow];
+  state.ebSelected = (row && row.event) || null;
+  state.ebSearch = ''; state.ebScreen = null; state.ebType = null;
+  state.ebVolAll = false; state.ebAliveOnly = true;
+  state.ebTab = 'details'; state.ebNextRows = null; state.ebNextLoading = false;
+  render();
+  document.getElementById('eb-search')?.focus();
+}
+
+function closeEventBrowser() {
+  state.eventBrowserOpen = false;
+  state.eventBrowserTargetRow = null;
+  state.ebSelected = null;
+  render();
+}
+
+// Conferma la selezione: scrive event + label sullo step target e chiude.
+function confirmEventBrowser() {
+  const i = state.eventBrowserTargetRow;
+  if (i == null || !state.ebSelected) return;
+  const row = state.eventFunnelConfig[i];
+  if (row) {
+    row.event = state.ebSelected;
+    const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
+    row.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
+    persistEventFunnelConfig();
+  }
+  closeEventBrowser();
+}
+
+// Attacca gli handler del modale (chiamato a ogni render da attachEvents).
+function attachEventBrowserHandlers() {
+  if (!state.eventBrowserOpen) return;
+
+  // click sull'overlay (fuori dal modale) chiude
+  document.getElementById('eb-overlay')?.addEventListener('mousedown', e => {
+    if (e.target.id === 'eb-overlay') closeEventBrowser();
+  });
+  document.getElementById('eb-close')?.addEventListener('click', closeEventBrowser);
+  document.getElementById('eb-cancel')?.addEventListener('click', closeEventBrowser);
+
+  // ricerca — mantiene il focus/caret non ricreando l'input a ogni tasto: aggiorna solo la lista
+  const search = document.getElementById('eb-search');
+  if (search) {
+    search.addEventListener('input', e => { state.ebSearch = e.target.value; render(); document.getElementById('eb-search')?.focus(); });
+    search.addEventListener('keydown', e => { if (e.key === 'Escape') closeEventBrowser(); });
+  }
+
+  // filtri tipo
+  document.querySelectorAll('.eb-fchip[data-type]').forEach(el =>
+    el.addEventListener('click', () => { state.ebType = el.dataset.type || null; render(); }));
+  document.getElementById('eb-vol-hi')?.addEventListener('click', () => { state.ebVolAll = false; render(); });
+  document.getElementById('eb-vol-all')?.addEventListener('click', () => { state.ebVolAll = true; render(); });
+  document.getElementById('eb-alive')?.addEventListener('click', () => { state.ebAliveOnly = !state.ebAliveOnly; render(); });
+
+  // colonna schermate
+  document.querySelectorAll('.eb-sc-item').forEach(el =>
+    el.addEventListener('click', () => { state.ebScreen = el.dataset.screen || null; render(); }));
+
+  // selezione evento: click = seleziona; doppio click = seleziona + conferma
+  document.querySelectorAll('.eb-ev').forEach(el => {
+    el.addEventListener('click', () => {
+      state.ebSelected = el.dataset.event;
+      if (state.ebTab === 'next') { state.ebNextRows = null; }  // reset sequenza per il nuovo evento
+      render();
+    });
+    el.addEventListener('dblclick', () => { state.ebSelected = el.dataset.event; confirmEventBrowser(); });
+  });
+
+  // tab dettaglio
+  document.querySelectorAll('.eb-d-tab').forEach(el =>
+    el.addEventListener('click', () => {
+      state.ebTab = el.dataset.tab;
+      if (state.ebTab === 'next' && state.ebSelected && state.ebNextRows == null && !state.ebNextLoading) {
+        fetchEventNext(state.ebSelected);
+      } else render();
+    }));
+
+  // suggerimento "cosa segue" → seleziona quell'evento
+  document.querySelector('[data-suggest]')?.addEventListener('click', el => {
+    state.ebSelected = el.target.dataset.suggest;
+    state.ebTab = 'details'; render();
+  });
+
+  document.getElementById('eb-add')?.addEventListener('click', confirmEventBrowser);
+}
+
 // ── FUNNEL — custom builder ───────────────────────────────────────────
 
 // Set curato di 24 icone Lucide per le chip funnel (analytics-oriented). Ogni SVG copiato raw da
@@ -4021,21 +4305,24 @@ function pageFunnelEvent() {
 // (nome amichevole + event_name tra parentesi); vsIdx = posizione di uno step precedente per la %.
 function eventFunnelEditRow(row, i) {
   const cfg = state.eventFunnelConfig || [];
-  const opts = EVENT_CATALOG.slice();
-  // se lo step salvato punta a un evento non in catalogo, lo aggiungo per non perderlo
-  if (row.event && !opts.some(o => o.event === row.event)) opts.push({ event: row.event, label: row.event });
-  const stepOpts = `<option value="" ${!row.event ? 'selected' : ''}>— scegli evento —</option>` +
-    opts.map(o =>
-      `<option value="${esc(o.event)}" ${row.event === o.event ? 'selected' : ''}>${esc(o.label)}${o.label !== o.event ? ` (${esc(o.event)})` : ''}</option>`).join('');
   const vsOpts = `<option value="">—</option>` +
     cfg.slice(0, i).map((r, j) =>
       `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${esc(eventStepLabel(r) || ('step ' + (j + 1)))}</option>`).join('');
+  // Selettore evento = pulsante che apre l'event browser (non più dropdown hardcoded). Mostra il nome
+  // dell'evento scelto (con label amichevole dal catalogo se presente) o il placeholder.
+  const picked = row.event;
+  const pickLabel = picked ? (eventStepLabel(row) || picked) : '— scegli evento —';
+  const pickSub = picked && eventStepLabel(row) !== picked ? `<span style="font-family:var(--mono);font-size:10px;color:#5a5a80;margin-left:6px">${esc(picked)}</span>` : '';
   return `
     <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
       <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
         style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
       <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
-      <select class="form-select event-funnel-name" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <button class="event-funnel-pick" data-row="${i}" title="Scegli evento"
+        style="flex:1;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickLabel)}${pickSub}</span>
+        <span style="color:var(--muted);flex-shrink:0">▾</span>
+      </button>
       <select class="form-select event-funnel-vs" data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
       <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
     </div>`;
@@ -7728,15 +8015,9 @@ function attachEvents() {
     persistEventFunnelConfig(); // se un funnel evento è attivo, salva anche il provider
     fetchEventFunnel();
   });
-  document.querySelectorAll('.event-funnel-name').forEach(el =>
-    el.addEventListener('change', () => {
-      const row = state.eventFunnelConfig[+el.dataset.row];
-      row.event = el.value;
-      const c = EVENT_CATALOG.find(e => e.event === el.value);
-      row.label = c ? c.label : '';   // etichetta presa dal catalogo
-      persistEventFunnelConfig();
-      render();                        // aggiorna le opzioni "% vs" degli step successivi
-    }));
+  // Selettore evento → apre l'event browser puntando allo step corrente
+  document.querySelectorAll('.event-funnel-pick').forEach(el =>
+    el.addEventListener('click', () => openEventBrowser(+el.dataset.row)));
   document.querySelectorAll('.event-funnel-vs').forEach(el =>
     el.addEventListener('change', () => { state.eventFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value; persistEventFunnelConfig(); render(); }));
   document.querySelectorAll('.event-funnel-remove').forEach(el =>
@@ -7750,6 +8031,9 @@ function attachEvents() {
       persistEventFunnelConfig();
       render();
     }));
+
+  // ── Event browser (modale) ──────────────────────────────────────────
+  attachEventBrowserHandlers();
   document.querySelectorAll('.funnel-step-sel').forEach(el =>
     el.addEventListener('change', () => {
       state.funnelConfig[+el.dataset.row].stepIdx = +el.value;
@@ -8775,6 +9059,7 @@ document.addEventListener('keydown', e => {
   fetchSprints();
   fetchFunnelDefinitions();
   fetchFunnelPhases();
+  fetchEventRegistry();
   fetchBlockedUsers();
   fetchRecentlyUnblocked();
   startAutoRefresh();
