@@ -420,7 +420,7 @@ let state = {
   // npm run embed:ai-prompts. Vista read-only sul system prompt composto + tool
   // whitelist per contesto/schermata (SSOT = supabase/functions/ai-chat/).
   promptAI: null, promptAILoading: false, promptAIError: null,
-  promptAIKey: 'home', promptAIRaw: false,
+  promptAIRaw: false,
   // F2: override runtime dei prompt (tabella ai_prompt_overrides + edge admin-set/get-active).
   // La dashboard fa merge lato client: snapshot embedded resta baseline, override vincono.
   promptOverrides: null, promptOverridesLoading: false, promptOverridesError: null,
@@ -1430,9 +1430,6 @@ async function fetchPromptAI() {
     const data = await res.json();
     if (!data || !data.contexts) throw new Error('shape inattesa');
     state.promptAI = data;
-    // Se la chiave di default non esiste nello snapshot, seleziona la prima disponibile.
-    const keys = Object.keys(data.contexts);
-    if (keys.length > 0 && !data.contexts[state.promptAIKey]) state.promptAIKey = keys[0];
   } catch (e) {
     console.error('fetchPromptAI', e);
     state.promptAIError = e.message || String(e);
@@ -7966,28 +7963,20 @@ function pageMetaAds() {
     tokenSection + dateBar + kpiCards + campTable + sprintPanel;
 }
 
-// ── PROMPT AI (read-only inspector) ──────────────────────────────────
+// ── PROMPT AI (viewer + editor override) ─────────────────────────────
 // Legge lo snapshot statico ai-prompts-dashboard.json generato da
 // npm run embed:ai-prompts. Riflette SSOT app/supabase/functions/ai-chat/.
-// Ordine visuale delle parti (allineato a AIPage.tsx): core → examples → pt → screen → data.
+//
+// Framework v2: il Coach ha UN system prompt chat (master + 16 skills,
+// entry unico dalla Home) + UN flow server-driven per roadmap-premium
+// (auto-contenuto, non eredita il master). Niente più prompt per-schermata.
+// pt/data sono kind runtime-only (utente reale) e non compaiono nello snapshot.
 
-const PROMPT_AI_KIND_ORDER = ['core', 'examples', 'pt', 'screen', 'data'];
+const PROMPT_AI_KIND_ORDER = ['master', 'skills', 'flow'];
 const PROMPT_AI_KIND_LABEL = {
-  core:     'Core',
-  examples: 'Esempi',
-  pt:       'PT context',
-  screen:   'Contesto schermata',
-  data:     'contextData snippet',
-};
-const PROMPT_AI_CONTEXT_LABEL = {
-  'home':             'Home',
-  'workouts':         'Workouts',
-  'roadmap':          'Roadmap',
-  'exercise':         'Esercizio',
-  'profile':          'Profilo',
-  'workout-details':  'Dettaglio workout',
-  'workout-feedback': 'Feedback post-workout',
-  'roadmap-premium':  'Roadmap premium (gen)',
+  master: 'Master',
+  skills: 'Skills',
+  flow:   'Flow',
 };
 
 function promptAIRenderParameters(params) {
@@ -8052,8 +8041,8 @@ function promptAIRenderTools(tools) {
 }
 
 // I part con kind pt/data sono dinamici (PT context, contextData snippet) — non
-// sono fragment_id di sources.ts, non sono editabili. Solo core/examples/screen lo sono.
-const PROMPT_AI_EDITABLE_KINDS = new Set(['core', 'examples', 'screen']);
+// sono fragment_id di sources.ts, non sono editabili. Solo master/skills/flow lo sono.
+const PROMPT_AI_EDITABLE_KINDS = new Set(['master', 'skills', 'flow']);
 
 function promptAIRenderParts(parts) {
   if (!Array.isArray(parts) || parts.length === 0) {
@@ -8255,6 +8244,91 @@ function opsLoginModal() {
 // (snapshot data/ai-prompts-dashboard.json generato da npm run embed:ai-prompts,
 // SSOT app/supabase/functions/ai-chat/). Include "Tool più usati" nel periodo della
 // pagina, filtrato sul contesto attivo quando kpi_ai_stats espone top_tools_by_context.
+// Card CHAT COACH: master + 16 skills, prompt unico (entry solo dalla Home).
+// chatCtx = data.contexts.home (o prima chat key non-flow come fallback).
+function promptAIRenderChatCard(chatCtx, budget, d) {
+  const total = chatCtx.totalChars || 0;
+  let budgetColor = 'var(--green)';
+  if (total >= (budget.failChars || Infinity)) budgetColor = 'var(--red)';
+  else if (total >= (budget.warnChars || Infinity)) budgetColor = 'var(--amber)';
+  const partsCount = (chatCtx.parts || []).length;
+
+  const usageTools = (d && d.top_tools) || [];
+  const usagePanel = usageTools.length
+    ? `<details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ Tool più usati nel periodo</summary>
+        <div style="max-width:520px;margin-top:8px">${aiToolsBlock(usageTools)}</div>
+      </details>`
+    : '';
+
+  return `<div class="card" style="padding:16px 18px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+      <div>
+        <div style="font-size:15px;font-weight:700">Chat Coach · master + 16 skills</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">
+          Prompt unico — la chat AI si apre solo dalla Home. ${partsCount} sezioni.
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20px;font-weight:800;color:${budgetColor}">${total.toLocaleString('it-IT')}</div>
+        <div style="font-size:11px;color:var(--muted)">char totali</div>
+      </div>
+    </div>
+
+    ${promptAIRenderParts(chatCtx.parts)}
+
+    <div style="margin-top:14px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Tool whitelist (${(chatCtx.tools || []).length})</div>
+      ${promptAIRenderTools(chatCtx.tools)}
+    </div>
+
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ Nota contesto (contexts.ts)</summary>
+      <div style="font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:1.55;margin-top:8px">${esc(chatCtx.contextNote || '')}</div>
+    </details>
+
+    ${usagePanel}
+
+    <div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
+      ℹ A runtime al prompt vengono concatenati il PT context e il contextData snippet
+      dell'utente corrente — dinamici, non presenti in questo snapshot.
+    </div>
+  </div>`;
+}
+
+// Card ROADMAP PREMIUM: flow server-driven auto-contenuto (NON eredita master né
+// skills — deliberato, il flow file contiene identità/safety inline).
+function promptAIRenderFlowCard(rpCtx) {
+  if (!rpCtx) return '';
+  const total = rpCtx.totalChars || 0;
+  return `<div class="card" style="padding:16px 18px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+      <div>
+        <div style="font-size:15px;font-weight:700">Roadmap Premium · flow server-driven</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">
+          Generazione workout real-time (non chat). Auto-contenuto: non eredita master né skills.
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:20px;font-weight:800;color:var(--green)">${total.toLocaleString('it-IT')}</div>
+        <div style="font-size:11px;color:var(--muted)">char totali</div>
+      </div>
+    </div>
+
+    ${promptAIRenderParts(rpCtx.parts)}
+
+    <div style="margin-top:14px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Tool whitelist (${(rpCtx.tools || []).length})</div>
+      ${promptAIRenderTools(rpCtx.tools)}
+    </div>
+
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ Nota contesto (contexts.ts)</summary>
+      <div style="font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:1.55;margin-top:8px">${esc(rpCtx.contextNote || '')}</div>
+    </details>
+  </div>`;
+}
+
 function promptingSection(d) {
   const header = (sub) => `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin:26px 0 14px;flex-wrap:wrap">
@@ -8269,7 +8343,7 @@ function promptingSection(d) {
         </button>` : ''}
       </div>
     </div>`;
-  const subDefault = 'System prompt composto e tool whitelist per ogni contesto del Coach · SSOT <code>app/supabase/functions/ai-chat/</code>';
+  const subDefault = 'System prompt del Coach (framework v2) · SSOT <code>app/supabase/functions/ai-chat/</code>';
 
   if (state.promptAILoading) {
     return header(subDefault) + `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento snapshot prompt…</div></div>`;
@@ -8290,68 +8364,24 @@ function promptingSection(d) {
   }
 
   const data = state.promptAI;
-  const keys = Object.keys(data.contexts);
-  const activeKey = data.contexts[state.promptAIKey] ? state.promptAIKey : keys[0];
-  const ctx = data.contexts[activeKey];
-
-  // Selettore contesti (pill list). Badge rosso "⚠ anomalia manifest" su ogni contesto
-  // con manifestAnomaly=true (guidato dal JSON, non hardcoded).
-  const selector = keys.map(k => {
-    const c = data.contexts[k];
-    const label = PROMPT_AI_CONTEXT_LABEL[k] || k;
-    const badge = c.manifestAnomaly
-      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px">⚠ anomalia</span>'
-      : '';
-    const cls = k === activeKey ? 'filter-btn active' : 'filter-btn';
-    return `<button class="${cls}" data-prompt-ai-key="${esc(k)}" style="margin-right:6px;margin-bottom:6px">
-      ${esc(label)} <span style="font-size:10px;color:var(--muted);margin-left:4px">${esc(k)}</span>${badge}
-    </button>`;
-  }).join('');
-
-  // Header: version, hash, budget vs char count.
-  const total = ctx.totalChars || 0;
   const budget = data.budget || { warnChars: 0, failChars: 0 };
-  let budgetColor = 'var(--green)';
-  if (total >= budget.failChars) budgetColor = 'var(--red)';
-  else if (total >= budget.warnChars) budgetColor = 'var(--amber)';
   const hashShort = (data.promptsHash || '').slice(0, 12);
   const generatedShort = (data.generatedAt || '').slice(0, 19).replace('T', ' ');
 
-  const anomalyBanner = ctx.manifestAnomaly ? `
-    <div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:12px 16px;margin-bottom:16px">
-      <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:4px">⚠ Anomalia manifest</div>
-      <div style="font-size:12px;color:var(--text);line-height:1.5">
-        Il contesto <code>${esc(activeKey)}</code> è definito in <code>contexts.ts</code>
-        con un system prompt dedicato, ma <strong>non è wired</strong> in
-        <code>_shared/prompts/ai-chat/manifest.ts</code>.
-        La composizione risolve silenziosamente a <code>${esc(ctx.resolvedScreenId || 'screen/default')}</code>
-        invece di <code>${esc(ctx.screenId)}</code>: in produzione il prompt scritto per questa schermata
-        <strong>NON entra mai nel bundle</strong>.
-      </div>
-    </div>` : '';
+  // Chat = contesto home (entry unico). Fallback difensivo su prima chat key
+  // non-flow se lo snapshot non avesse home (snapshot vecchio/malformato).
+  const chatCtx = data.contexts.home
+    || data.contexts[Object.keys(data.contexts).find(k => !data.contexts[k].isFlow)];
+  const rpCtx = data.contexts['roadmap-premium'];
 
   const rawPanel = state.promptAIRaw
     ? `<div class="card" style="padding:12px 14px;margin-top:12px">
         <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
-          JSON grezzo · contesto <code>${esc(activeKey)}</code>
+          JSON grezzo · snapshot completo
         </div>
-        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:11px;line-height:1.45;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin:0;max-height:400px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(JSON.stringify(ctx, null, 2))}</pre>
+        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:11px;line-height:1.45;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin:0;max-height:400px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(JSON.stringify({ promptVersion: data.promptVersion, promptsHash: data.promptsHash, budget, chat: chatCtx, roadmapPremium: rpCtx }, null, 2))}</pre>
       </div>`
     : '';
-
-  // Tool più usati nel periodo della pagina (kpi_ai_stats), filtrati sul contesto attivo
-  // quando la RPC espone top_tools_by_context; fallback sull'aggregato top_tools.
-  const byCtx = (d && d.top_tools_by_context) || {};
-  const ctxTools = byCtx[activeKey] || [];
-  const usageTools = ctxTools.length ? ctxTools : ((d && d.top_tools) || []);
-  const usageScope = ctxTools.length ? `contesto <code>${esc(activeKey)}</code>` : 'tutti i contesti (aggregato)';
-  const toolsUsageCard = `<div class="card" style="padding:14px 16px;margin-bottom:16px">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Tool più usati nel periodo</div>
-      <div style="font-size:11px;color:var(--muted)">${usageScope}</div>
-    </div>
-    <div style="max-width:520px">${aiToolsBlock(usageTools)}</div>
-  </div>`;
 
   return header(subDefault) + `
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--muted)">
@@ -8363,47 +8393,14 @@ function promptingSection(d) {
 
     ${promptingOverridesBanner()}
 
-    <div class="card" style="padding:14px 16px;margin-bottom:16px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Contesto / schermata</div>
-      <div style="display:flex;flex-wrap:wrap">${selector}</div>
-    </div>
+    ${chatCtx ? promptAIRenderChatCard(chatCtx, budget, d) : '<div class="card" style="padding:20px;margin-bottom:16px;color:var(--red);font-size:13px">⚠️ Contesto chat assente dallo snapshot — rigenera con <code>npm run embed:ai-prompts</code>.</div>'}
 
-    ${toolsUsageCard}
+    ${promptAIRenderFlowCard(rpCtx)}
 
-    ${anomalyBanner}
-
-    <div class="card" style="padding:14px 16px;margin-bottom:16px">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <div>
-          <div style="font-size:16px;font-weight:700">${esc(PROMPT_AI_CONTEXT_LABEL[activeKey] || activeKey)}</div>
-          <div style="font-size:12px;color:var(--muted)">
-            contextKey <code>${esc(activeKey)}</code> · screen atteso <code>${esc(ctx.screenId || '?')}</code> · screen risolto <code>${esc(ctx.resolvedScreenId || '?')}</code>
-          </div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:20px;font-weight:800;color:${budgetColor}">${total.toLocaleString('it-IT')}</div>
-          <div style="font-size:11px;color:var(--muted)">char totali</div>
-        </div>
-      </div>
-      <div style="font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:1.55;margin-top:8px">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Nota schermata (contexts.ts)</div>
-        ${esc(ctx.contextNote || '')}
-      </div>
-    </div>
-
-    <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;align-items:flex-start">
-      <div>
-        <h2 style="font-size:14px;font-weight:700;margin:0 0 10px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">System prompt composto</h2>
-        ${promptAIRenderParts(ctx.parts)}
-      </div>
-      <div>
-        <h2 style="font-size:14px;font-weight:700;margin:0 0 10px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Tool whitelist (${(ctx.tools || []).length})</h2>
-        ${promptAIRenderTools(ctx.tools)}
-
-        <h2 style="font-size:14px;font-weight:700;margin:20px 0 10px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">File sorgente</h2>
-        <div class="card" style="padding:12px 16px">${promptAIRenderSourceFiles(ctx.sourceFiles)}</div>
-      </div>
-    </div>
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ File sorgente (${((chatCtx && chatCtx.sourceFiles) || []).length})</summary>
+      <div class="card" style="padding:12px 16px;margin-top:8px">${promptAIRenderSourceFiles(chatCtx && chatCtx.sourceFiles)}</div>
+    </details>
 
     ${rawPanel}
 
@@ -8438,12 +8435,7 @@ function attachEvents() {
       render();
     }));
 
-  // Sezione Prompting (pagina AI Coach) — selettore contesto + toggle vista raw.
-  document.querySelectorAll('[data-prompt-ai-key]').forEach(el =>
-    el.addEventListener('click', () => {
-      state.promptAIKey = el.dataset.promptAiKey;
-      render();
-    }));
+  // Sezione Prompting (pagina AI Coach) — toggle vista raw.
   document.querySelectorAll('[data-prompt-ai-raw]').forEach(el =>
     el.addEventListener('click', () => {
       state.promptAIRaw = !state.promptAIRaw;
