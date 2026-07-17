@@ -421,6 +421,16 @@ let state = {
   // whitelist per contesto/schermata (SSOT = supabase/functions/ai-chat/).
   promptAI: null, promptAILoading: false, promptAIError: null,
   promptAIKey: 'home', promptAIRaw: false,
+  // F2: override runtime dei prompt (tabella ai_prompt_overrides + edge admin-set/get-active).
+  // La dashboard fa merge lato client: snapshot embedded resta baseline, override vincono.
+  promptOverrides: null, promptOverridesLoading: false, promptOverridesError: null,
+  promptEditOpen: false, promptEditFragmentId: null, promptEditContent: '',
+  promptEditNote: '', promptEditSaving: false, promptEditError: null,
+  promptEditVersions: null, promptEditVersionsLoading: false, promptEditRestoredFromId: null,
+  // Sessione ops per l'edit (magic link Supabase Auth). Anon-only nella dashboard,
+  // ma per scrivere override serve JWT + gate PROMPT_EDIT_USER_IDS lato edge.
+  opsSession: null, opsSessionCheckedOnce: false,
+  opsEmailPending: false, opsEmailInput: '', opsAuthError: null,
 };
 
 let refreshTimer = null, countdownTimer = null, secondsLeft = 300;
@@ -1231,6 +1241,180 @@ async function fetchBehavior() {
   } catch (e) { console.error('fetchBehavior', e); }
   state.behaviorLoading = false;
   render();
+}
+
+// F2 — helpers override runtime + auth ops.
+// URL edge functions Supabase.
+const FN_URL = (name) => `${SUPABASE_URL}/functions/v1/${name}`;
+
+async function fetchActiveOverrides() {
+  state.promptOverridesLoading = true;
+  state.promptOverridesError = null;
+  try {
+    const res = await fetch(FN_URL('get-active-overrides'), {
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    state.promptOverrides = Array.isArray(data.overrides) ? data.overrides : [];
+  } catch (e) {
+    console.error('fetchActiveOverrides', e);
+    state.promptOverridesError = e.message || String(e);
+    state.promptOverrides = [];
+  }
+  state.promptOverridesLoading = false;
+  render();
+}
+
+// Storico versioni di un fragment (RLS read pubblica → sb anon diretto, no edge).
+async function fetchPromptEditVersions(fragmentId) {
+  state.promptEditVersionsLoading = true;
+  render();
+  try {
+    const { data, error } = await sb
+      .from('ai_prompt_overrides')
+      .select('id, fragment_id, content, note, author_auth_id, created_at, is_active')
+      .eq('fragment_id', fragmentId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (error) throw error;
+    state.promptEditVersions = data || [];
+  } catch (e) {
+    console.error('fetchPromptEditVersions', e);
+    state.promptEditVersions = [];
+  }
+  state.promptEditVersionsLoading = false;
+  render();
+}
+
+// Sessione ops: verifica al boot se c'è già un JWT persistito da Supabase Auth JS.
+async function refreshOpsSession() {
+  try {
+    const { data } = await sb.auth.getSession();
+    state.opsSession = data.session || null;
+  } catch (e) {
+    console.error('refreshOpsSession', e);
+    state.opsSession = null;
+  }
+  render();
+}
+
+async function opsLoginMagicLink(email) {
+  state.opsAuthError = null;
+  try {
+    const { error } = await sb.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: location.href },
+    });
+    if (error) throw error;
+    state.opsEmailPending = true;
+    render();
+  } catch (e) {
+    console.error('opsLoginMagicLink', e);
+    state.opsAuthError = e.message || String(e);
+    render();
+  }
+}
+
+async function opsLogout() {
+  try {
+    await sb.auth.signOut();
+    state.opsSession = null;
+    render();
+  } catch (e) { console.error('opsLogout', e); }
+}
+
+// Salva un override: chiama admin-set-prompt-override con JWT ops.
+async function savePromptOverride() {
+  const token = state.opsSession?.access_token;
+  if (!token) { state.promptEditError = 'Sessione ops scaduta, rifai login'; render(); return; }
+  if (!state.promptEditContent.trim()) { state.promptEditError = 'Il testo non può essere vuoto'; render(); return; }
+  if (!state.promptEditNote.trim()) { state.promptEditError = 'Un changelog è obbligatorio'; render(); return; }
+  state.promptEditSaving = true;
+  state.promptEditError = null;
+  render();
+  try {
+    const res = await fetch(FN_URL('admin-set-prompt-override'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        fragment_id: state.promptEditFragmentId,
+        content: state.promptEditContent,
+        note: state.promptEditNote,
+      }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = body.message || body.error || `HTTP ${res.status}`;
+      state.promptEditError = msg;
+      state.promptEditSaving = false;
+      render();
+      return;
+    }
+    // Successo: chiudi modale, refetcha override attivi.
+    state.promptEditOpen = false;
+    state.promptEditFragmentId = null;
+    state.promptEditContent = '';
+    state.promptEditNote = '';
+    state.promptEditVersions = null;
+    state.promptEditRestoredFromId = null;
+    state.promptEditSaving = false;
+    render();
+    await fetchActiveOverrides();
+  } catch (e) {
+    console.error('savePromptOverride', e);
+    state.promptEditError = e.message || String(e);
+    state.promptEditSaving = false;
+    render();
+  }
+}
+
+async function purgePromptCache() {
+  const token = state.opsSession?.access_token;
+  if (!token) return;
+  try {
+    await fetch(FN_URL('purge-prompt-cache'), {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
+    });
+    await fetchActiveOverrides();
+  } catch (e) { console.error('purgePromptCache', e); }
+}
+
+// Apre il modale con l'attuale content (embedded o override) pre-caricato.
+function openPromptEdit(fragmentId, currentContent) {
+  state.promptEditOpen = true;
+  state.promptEditFragmentId = fragmentId;
+  state.promptEditContent = currentContent || '';
+  state.promptEditNote = '';
+  state.promptEditError = null;
+  state.promptEditVersions = null;
+  state.promptEditRestoredFromId = null;
+  render();
+  fetchPromptEditVersions(fragmentId);
+}
+
+function closePromptEdit() {
+  state.promptEditOpen = false;
+  state.promptEditFragmentId = null;
+  state.promptEditContent = '';
+  state.promptEditNote = '';
+  state.promptEditError = null;
+  state.promptEditVersions = null;
+  state.promptEditRestoredFromId = null;
+  render();
+}
+
+// Restituisce il content da rendere per un dato fragment_id: override attivo se
+// presente, altrimenti l'embedded del snapshot statico.
+function overrideForFragment(fragmentId) {
+  const arr = state.promptOverrides;
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  return arr.find(o => o.fragment_id === fragmentId) || null;
 }
 
 // Carica lo snapshot statico dei prompt (data/ai-prompts-dashboard.json).
@@ -7866,6 +8050,10 @@ function promptAIRenderTools(tools) {
   }).join('');
 }
 
+// I part con kind pt/data sono dinamici (PT context, contextData snippet) — non
+// sono fragment_id di sources.ts, non sono editabili. Solo core/examples/screen lo sono.
+const PROMPT_AI_EDITABLE_KINDS = new Set(['core', 'examples', 'screen']);
+
 function promptAIRenderParts(parts) {
   if (!Array.isArray(parts) || parts.length === 0) {
     return '<div style="color:var(--muted);font-size:13px">Nessuna sezione composta.</div>';
@@ -7873,26 +8061,53 @@ function promptAIRenderParts(parts) {
   // Raggruppa per kind, mantenendo l'ordine originale delle parti dentro ogni gruppo.
   // Ogni PART è un <details> chiuso di default → utente vede solo i titoli, apre solo
   // le sezioni che gli interessano. Il titolo di gruppo (kind) resta come separatore.
+  // Merge override attivi (F2): se un fragment_id ha override attivo, sostituisce
+  // content ed espone badge; bottone [Modifica] visibile solo se opsSession loggata.
   const groups = {};
   for (const p of parts) {
     if (!groups[p.kind]) groups[p.kind] = [];
     groups[p.kind].push(p);
   }
   const kindOrder = PROMPT_AI_KIND_ORDER.filter(k => groups[k]);
+  const canEdit = !!state.opsSession;
   return kindOrder.map(kind => {
     const arr = groups[kind];
-    const kindChars = arr.reduce((acc, p) => acc + (p.chars || 0), 0);
-    const items = arr.map(p => `
+    // Ricalcolo char considerando override.
+    const effective = arr.map(p => {
+      const ov = overrideForFragment(p.id);
+      const content = ov ? ov.content : (p.content || '');
+      return {
+        p,
+        content,
+        chars: content.length,
+        override: ov,
+      };
+    });
+    const kindChars = effective.reduce((acc, e) => acc + e.chars, 0);
+    const items = effective.map(({ p, content, chars, override }) => {
+      const editable = PROMPT_AI_EDITABLE_KINDS.has(p.kind);
+      const overrideBadge = override
+        ? `<span style="font-size:10px;background:var(--amber);color:#000;padding:1px 6px;border-radius:4px;margin-left:6px" title="Override runtime attivo · ${esc(override.note || '')}">⚡ override</span>`
+        : '';
+      const editBtn = (editable && canEdit)
+        ? `<button data-prompt-edit-open data-prompt-edit-fragment="${esc(p.id)}" style="font-size:11px;padding:4px 10px;border:1px solid var(--border);background:var(--surface,#fff);border-radius:4px;cursor:pointer;color:var(--text)">✎ Modifica</button>`
+        : '';
+      return `
       <details style="margin-bottom:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);overflow:hidden">
         <summary style="padding:8px 12px;cursor:pointer;list-style:none;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12.5px">
-          <span style="display:inline-flex;align-items:baseline;gap:6px">
+          <span style="display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap">
             <span style="font-size:10px;color:var(--muted)">▸</span>
             <span style="font-weight:600">${esc(p.label || p.id)}</span>
+            ${overrideBadge}
           </span>
-          <span style="font-size:11px;color:var(--muted)">${(p.chars || 0).toLocaleString('it-IT')} char</span>
+          <span style="display:inline-flex;align-items:baseline;gap:8px">
+            <span style="font-size:11px;color:var(--muted)">${chars.toLocaleString('it-IT')} char</span>
+            ${editBtn}
+          </span>
         </summary>
-        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px;line-height:1.55;background:var(--surface, #fff);border-top:1px solid var(--border);padding:12px 14px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">${esc(p.content || '')}</pre>
-      </details>`).join('');
+        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px;line-height:1.55;background:var(--surface, #fff);border-top:1px solid var(--border);padding:12px 14px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">${esc(content)}</pre>
+      </details>`;
+    }).join('');
     return `<div class="card" style="padding:14px 16px;margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
         <div style="font-size:13px;font-weight:700">${esc(PROMPT_AI_KIND_LABEL[kind] || kind)} <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:6px">${arr.length} ${arr.length === 1 ? 'sezione' : 'sezioni'}</span></div>
@@ -7914,6 +8129,126 @@ function promptAIRenderSourceFiles(sourceFiles) {
   return `<ul style="list-style:none;padding:0;margin:0">${items}</ul>`;
 }
 
+// ── F2 ops: toolbar login/logout + purga + banner override attivi + modale edit
+
+function promptingOpsToolbar() {
+  const session = state.opsSession;
+  if (session && session.user) {
+    const email = session.user.email || session.user.id;
+    return `
+      <span style="font-size:11px;color:var(--muted)">👤 ${esc(email)}</span>
+      <button data-purge-cache class="btn-outline" style="font-size:12px;padding:6px 12px" title="Invalida la cache override sull'istanza corrente (best-effort)">Purga cache</button>
+      <button data-ops-logout class="btn-outline" style="font-size:12px;padding:6px 12px">Logout ops</button>`;
+  }
+  if (state.opsEmailPending) {
+    return `<span style="font-size:11px;color:var(--green)">📧 Magic link inviato — controlla la mail</span>`;
+  }
+  return `
+    <button data-ops-login-open class="btn-outline" style="font-size:12px;padding:6px 12px" title="Login ops per editare i prompt (magic link Supabase Auth)">🔑 Login ops</button>`;
+}
+
+function promptingOverridesBanner() {
+  const arr = state.promptOverrides;
+  if (!Array.isArray(arr) || arr.length === 0) return '';
+  const now = Date.now();
+  const items = arr.map(o => {
+    const daysAgo = Math.max(0, Math.floor((now - new Date(o.created_at).getTime()) / 86400000));
+    const ago = daysAgo === 0 ? 'oggi' : (daysAgo === 1 ? 'ieri' : `${daysAgo}gg fa`);
+    return `<code style="background:rgba(0,0,0,0.05);padding:1px 6px;border-radius:3px">${esc(o.fragment_id)}</code> <span style="color:var(--muted);font-size:11px">(${ago})</span>`;
+  }).join(', ');
+  return `
+    <div style="background:rgba(251,191,36,0.12);border:1px solid var(--amber);border-radius:8px;padding:10px 14px;margin-bottom:14px">
+      <div style="font-size:12px;color:var(--text);line-height:1.5">
+        <strong style="color:var(--amber)">⚡ ${arr.length} override attivi non promossi in git:</strong> ${items}
+      </div>
+    </div>`;
+}
+
+function promptEditModal() {
+  if (!state.promptEditOpen) return '';
+  const fragmentId = state.promptEditFragmentId || '';
+  const authorEmail = state.opsSession?.user?.email || state.opsSession?.user?.id || '?';
+  const versions = state.promptEditVersions;
+  const versionsHtml = state.promptEditVersionsLoading
+    ? `<div style="color:var(--muted);font-size:12px;padding:8px" class="pulse">Caricamento versioni…</div>`
+    : (Array.isArray(versions) && versions.length > 0
+      ? versions.map(v => {
+        const isActive = v.is_active;
+        const badge = isActive ? '<span style="font-size:10px;background:var(--green);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px">attiva</span>' : '';
+        return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--bg)">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px">
+            <div style="font-size:12px;color:var(--text)">${esc(v.created_at.slice(0, 19).replace('T', ' '))} · <code style="font-size:11px">${esc(v.author_auth_id.slice(0, 8))}</code>${badge}</div>
+            <button data-prompt-edit-restore data-restore-id="${esc(v.id)}" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);background:var(--surface,#fff);border-radius:4px;cursor:pointer">↩︎ Ripristina</button>
+          </div>
+          <div style="font-size:12px;color:var(--muted);font-style:italic">${esc(v.note || '')}</div>
+        </div>`;
+      }).join('')
+      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nessuna versione precedente per questo fragment.</div>`);
+  const restoredNote = state.promptEditRestoredFromId
+    ? `<div style="font-size:11px;color:var(--amber);margin-top:6px">↩︎ Testo caricato da versione precedente — rivedi e salva per attivare.</div>`
+    : '';
+  return `
+    <div class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px">
+      <div class="modal" style="background:var(--surface,#fff);border-radius:12px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:15px;font-weight:700">Modifica prompt · <code>${esc(fragmentId)}</code></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">Ops: ${esc(authorEmail)}</div>
+          </div>
+          <button data-prompt-edit-close style="font-size:18px;background:transparent;border:none;cursor:pointer;color:var(--muted);padding:4px 8px">✕</button>
+        </div>
+        <div style="padding:14px 20px;background:rgba(251,191,36,0.10);border-bottom:1px solid var(--amber)">
+          <div style="font-size:12px;color:var(--text);line-height:1.5">
+            ⚠︎ Un edit qui <strong>bypassa il benchmark HypeMove Coach (132 casi)</strong>. Verifica manualmente il contesto rilevante in chat prima di lasciare attivo l'override. La baseline resta il <code>.md</code> in git.
+          </div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:16px 20px">
+          <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
+            <div>
+              <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Contenuto</label>
+              <textarea data-prompt-edit-content style="width:100%;min-height:400px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.55;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical">${esc(state.promptEditContent || '')}</textarea>
+              ${restoredNote}
+              <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px 0">Changelog (obbligatorio)</label>
+              <input data-prompt-edit-note type="text" value="${esc(state.promptEditNote || '')}" placeholder="perché stai facendo questo edit?" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px" />
+              ${state.promptEditError ? `<div style="color:var(--red);font-size:12px;margin-top:8px">⚠️ ${esc(state.promptEditError)}</div>` : ''}
+            </div>
+            <div>
+              <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Versioni precedenti</label>
+              <div style="max-height:480px;overflow-y:auto">${versionsHtml}</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
+          <button data-prompt-edit-close class="btn-outline" style="font-size:13px;padding:8px 16px">Annulla</button>
+          <button data-prompt-edit-save ${state.promptEditSaving ? 'disabled' : ''} style="font-size:13px;padding:8px 16px;border-radius:6px;border:none;background:var(--green);color:#fff;cursor:pointer;font-weight:600">
+            ${state.promptEditSaving ? 'Salvataggio…' : '💾 Salva override'}
+          </button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function opsLoginModal() {
+  if (!state.opsEmailPending && state.opsAuthError === null && state.opsEmailInput === '' && !state._opsLoginOpen) return '';
+  if (!state._opsLoginOpen) return '';
+  return `
+    <div class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px">
+      <div style="background:var(--surface,#fff);border-radius:12px;max-width:440px;width:100%;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+          <div style="font-size:15px;font-weight:700">Login ops</div>
+          <button data-ops-login-close style="background:transparent;border:none;cursor:pointer;color:var(--muted);padding:4px 8px;font-size:16px">✕</button>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Inserisci la tua email ops. Ti mando un magic link Supabase Auth — cliccando torni qui autenticato.</div>
+        <input data-ops-email type="email" placeholder="tuo.email@example.com" value="${esc(state.opsEmailInput || '')}" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:10px" />
+        ${state.opsAuthError ? `<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠️ ${esc(state.opsAuthError)}</div>` : ''}
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button data-ops-login-close class="btn-outline" style="font-size:13px;padding:8px 14px">Annulla</button>
+          <button data-ops-login-send style="font-size:13px;padding:8px 14px;border:none;border-radius:6px;background:var(--green);color:#fff;font-weight:600;cursor:pointer">Invia magic link</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 // ── SEZIONE PROMPTING (in fondo alla pagina AI Coach) ─────────────────
 // Viewer statico del system prompt composto + tool whitelist per contesto/schermata
 // (snapshot data/ai-prompts-dashboard.json generato da npm run embed:ai-prompts,
@@ -7926,9 +8261,12 @@ function promptingSection(d) {
         <div style="font-size:16px;font-weight:700;color:var(--fg)">Prompting</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${sub}</div>
       </div>
-      ${state.promptAI ? `<button class="btn-outline" data-prompt-ai-raw style="font-size:12px;padding:6px 14px">
-        ${state.promptAIRaw ? '↩︎ Nascondi raw' : '{ } Vedi raw'}
-      </button>` : ''}
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${promptingOpsToolbar()}
+        ${state.promptAI ? `<button class="btn-outline" data-prompt-ai-raw style="font-size:12px;padding:6px 14px">
+          ${state.promptAIRaw ? '↩︎ Nascondi raw' : '{ } Vedi raw'}
+        </button>` : ''}
+      </div>
     </div>`;
   const subDefault = 'System prompt composto e tool whitelist per ogni contesto del Coach · SSOT <code>app/supabase/functions/ai-chat/</code>';
 
@@ -8022,6 +8360,8 @@ function promptingSection(d) {
       <div>Budget: <span style="color:var(--text)">warn ${(budget.warnChars || 0).toLocaleString('it-IT')} · fail ${(budget.failChars || 0).toLocaleString('it-IT')}</span></div>
     </div>
 
+    ${promptingOverridesBanner()}
+
     <div class="card" style="padding:14px 16px;margin-bottom:16px">
       <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Contesto / schermata</div>
       <div style="display:flex;flex-wrap:wrap">${selector}</div>
@@ -8064,7 +8404,10 @@ function promptingSection(d) {
       </div>
     </div>
 
-    ${rawPanel}`;
+    ${rawPanel}
+
+    ${promptEditModal()}
+    ${opsLoginModal()}`;
 }
 
 // ── EVENTS ────────────────────────────────────────────────────────────
@@ -8086,6 +8429,8 @@ function attachEvents() {
         const wantFilter = state.aiConvTab === 'feedback';
         if ((!state.aiSessions || state.aiSessionsFilter !== wantFilter) && !state.aiSessionsLoading) fetchAISessionsFull(wantFilter);
         if (!state.promptAI             && !state.promptAILoading)      fetchPromptAI();
+        if (!state.promptOverrides      && !state.promptOverridesLoading) fetchActiveOverrides();
+        if (!state.opsSessionCheckedOnce) { state.opsSessionCheckedOnce = true; refreshOpsSession(); }
       }
       if (state.page === 'behavior'   && !state.behaviorData  && !state.behaviorLoading)  fetchBehavior();
       if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
@@ -8103,6 +8448,61 @@ function attachEvents() {
       state.promptAIRaw = !state.promptAIRaw;
       render();
     }));
+
+  // F2 — edit override runtime + auth ops.
+  document.querySelectorAll('[data-prompt-edit-open]').forEach(el =>
+    el.addEventListener('click', () => {
+      const fragmentId = el.dataset.promptEditFragment;
+      // Content corrente: override se attivo, altrimenti il testo del part nello snapshot.
+      const ov = overrideForFragment(fragmentId);
+      let current = ov ? ov.content : '';
+      if (!current && state.promptAI) {
+        for (const key of Object.keys(state.promptAI.contexts)) {
+          const p = (state.promptAI.contexts[key].parts || []).find(x => x.id === fragmentId);
+          if (p) { current = p.content || ''; break; }
+        }
+      }
+      openPromptEdit(fragmentId, current);
+    }));
+  document.querySelectorAll('[data-prompt-edit-close]').forEach(el =>
+    el.addEventListener('click', () => closePromptEdit()));
+  document.querySelectorAll('[data-prompt-edit-content]').forEach(el =>
+    el.addEventListener('input', () => { state.promptEditContent = el.value; }));
+  document.querySelectorAll('[data-prompt-edit-note]').forEach(el =>
+    el.addEventListener('input', () => { state.promptEditNote = el.value; }));
+  document.querySelectorAll('[data-prompt-edit-save]').forEach(el =>
+    el.addEventListener('click', () => savePromptOverride()));
+  document.querySelectorAll('[data-prompt-edit-restore]').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.restoreId;
+      const versions = state.promptEditVersions || [];
+      const target = versions.find(v => v.id === id);
+      if (!target) return;
+      state.promptEditContent = target.content || '';
+      state.promptEditRestoredFromId = id;
+      render();
+    }));
+  document.querySelectorAll('[data-ops-login-open]').forEach(el =>
+    el.addEventListener('click', () => { state._opsLoginOpen = true; render(); }));
+  document.querySelectorAll('[data-ops-login-close]').forEach(el =>
+    el.addEventListener('click', () => {
+      state._opsLoginOpen = false;
+      state.opsEmailInput = '';
+      state.opsAuthError = null;
+      render();
+    }));
+  document.querySelectorAll('[data-ops-email]').forEach(el =>
+    el.addEventListener('input', () => { state.opsEmailInput = el.value; }));
+  document.querySelectorAll('[data-ops-login-send]').forEach(el =>
+    el.addEventListener('click', () => {
+      const email = (state.opsEmailInput || '').trim();
+      if (!email) { state.opsAuthError = 'Email richiesta'; render(); return; }
+      opsLoginMagicLink(email);
+    }));
+  document.querySelectorAll('[data-ops-logout]').forEach(el =>
+    el.addEventListener('click', () => opsLogout()));
+  document.querySelectorAll('[data-purge-cache]').forEach(el =>
+    el.addEventListener('click', () => purgePromptCache()));
 
   // Chart range filters
   document.querySelectorAll('[data-growth-range]').forEach(el =>
