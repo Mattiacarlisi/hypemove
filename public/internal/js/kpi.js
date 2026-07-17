@@ -111,7 +111,6 @@ const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
 // (funnel appena creati) si accodano.
 const LS_FUNNEL_TOOLBAR_ORDER = 'hm_funnel_toolbar_order_v1';
 const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v3';
-const LS_AI_FUN         = 'hm_ai_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
 const META_API = 'https://graph.facebook.com/v20.0';
 
@@ -184,22 +183,6 @@ function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
 }
 
-// il catalogo AI_FUNNEL_ALL_STEPS è stato rimaneggiato più volte nel tempo (step rinominati/rimossi):
-// una config salvata in passato in localStorage può contenere uno stepIdx non più valido. Senza
-// questo filtro, AI_FUNNEL_ALL_STEPS[stepIdx] è undefined e aiFunnelViz va in eccezione DENTRO il
-// render() finale di fetchAIFunnelEvents — lo stato interno si aggiorna (loading=false) ma il DOM
-// resta bloccato sullo spinner "Caricamento funnel…" perché l'innerHTML non arriva mai a essere
-// riassegnato.
-function sanitizeAiFunnelConfig(cfg) {
-  if (!Array.isArray(cfg)) return null;
-  const cleaned = cfg.filter(row => row && AI_FUNNEL_ALL_STEPS[row.stepIdx]);
-  if (!cleaned.length) return null;
-  cleaned.forEach((row, i) => {
-    if (typeof row.vsIdx !== 'number' || row.vsIdx < 0 || row.vsIdx >= i) row.vsIdx = null;
-  });
-  return cleaned;
-}
-
 function savePremiumFunnelConfig() {
   localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig)); // cache locale
   sb.from('kpi_settings')                                                          // condiviso (tutti lo vedono)
@@ -217,13 +200,6 @@ function loadPremiumFunnelConfig() {
   return saved;
 }
 
-function saveAiFunnelConfig() {
-  localStorage.setItem(LS_AI_FUN, JSON.stringify(state.aiFunnelConfig)); // cache locale
-  sb.from('kpi_settings')                                                // condiviso (tutti lo vedono)
-    .upsert({ key: 'ai_funnel', value: state.aiFunnelConfig, updated_at: new Date().toISOString() }, { onConflict: 'key' })
-    .then(({ error }) => { if (error) console.warn('saveAiFunnelConfig', error); });
-}
-
 async function loadSettings(retry = true) {
   try {
     const { data, error } = await sb.from('kpi_settings').select('key, value');
@@ -235,10 +211,6 @@ async function loadSettings(retry = true) {
         localStorage.setItem(LS_META_TOKEN, row.value);
       }
       if (row.key === 'premium_funnel' && Array.isArray(row.value) && row.value.length) state.premiumFunnelConfig = row.value;
-      if (row.key === 'ai_funnel' && Array.isArray(row.value) && row.value.length) {
-        const clean = sanitizeAiFunnelConfig(row.value);
-        if (clean) state.aiFunnelConfig = clean;
-      }
     }
     state.settingsLoadError = false;
   } catch (e) {
@@ -394,6 +366,7 @@ let state = {
   aiConvOpen: false,
   aiSessions: null,
   aiSessionsLoading: false,
+  aiSessionsFilter: null,   // filtro p_feedback con cui è stata caricata aiSessions (null = tutte)
   aiSelectedSession: null,
   aiSessionMessages: null,
   aiSessionMessagesLoading: false,
@@ -405,11 +378,9 @@ let state = {
   aiStatsUsersOpen: false,
   aiStatsFrom: new Date(Date.now()-30*864e5).toISOString().slice(0,10),
   aiStatsTo: TODAY,
-  aiFunnelEvents: null, aiFunnelEventsLoading: false, aiFunnelEventsError: null,
-  aiFunnelConfig: sanitizeAiFunnelConfig(loadLS(LS_AI_FUN, null)) || JSON.parse(JSON.stringify(DEF_AI_FUN_CFG)),
-  editingAiFunnel: false,
-  sprintAiFunnelOpen: false, sprintAiFunnelSel: [], sprintAiFunnelData: {},
-  sprintAiFunnelLoading: false, sprintAiFunnelError: null,
+  // Tab del browser conversazioni AI Coach: 'spontanee' | 'feedback' (feedback post-workout).
+  aiConvTab: 'spontanee',
+  feedbackFunnelEvents: null, feedbackFunnelLoading: false, feedbackFunnelError: null,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
   settingsLoadError: false,
   metaTokenSaveError: false,
@@ -1469,11 +1440,15 @@ async function fetchRecentAISessions() {
   } catch (e) { console.error('fetchRecentAISessions', e); }
 }
 
-async function fetchAISessionsFull() {
+// p_feedback: null = tutte (modal Overview), true/false = filtro server-side per i tab
+// Spontanee/Feedback della pagina AI Coach (filtrare client-side affamerebbe il tab Feedback,
+// perché lim è un cap secco applicato prima del filtro).
+async function fetchAISessionsFull(feedbackFilter = null) {
   state.aiSessionsLoading = true;
+  state.aiSessionsFilter  = feedbackFilter; // con quale filtro è stata caricata la lista corrente
   render();
   try {
-    const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 50 });
+    const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 50, p_feedback: feedbackFilter });
     if (error) throw error;
     state.aiSessions = data || [];
     if (!state.aiSelectedSession && state.aiSessions.length) {
@@ -1514,20 +1489,18 @@ async function fetchAIStatsUsers() {
   render();
 }
 
-async function fetchAIFunnelEvents() {
-  state.aiFunnelEventsLoading = true; state.aiFunnelEventsError = null;
+// Conta i 3 eventi del funnel feedback post-workout nel periodo della pagina AI Coach.
+// Il funnel AI Coach completo (con kpi_ai_chat_workout_events) vive nella sezione Funnel.
+async function fetchFeedbackFunnelEvents() {
+  state.feedbackFunnelLoading = true; state.feedbackFunnelError = null;
   render();
   try {
     const range = { p_from: state.aiStatsFrom || null, p_to: state.aiStatsTo || null };
-    const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
-      sb.rpc('kpi_events_by_name', { ...range, p_events: AI_FUNNEL_EVENT_NAMES }),
-      sb.rpc('kpi_ai_chat_workout_events', range),
-    ]);
+    const { data, error } = await sb.rpc('kpi_events_by_name', { ...range, p_events: FEEDBACK_FUNNEL_EVENT_NAMES });
     if (error) throw error;
-    if (chatWorkoutError) throw chatWorkoutError;
-    state.aiFunnelEvents = [...(data || []), ...(chatWorkoutData || [])];
-  } catch (e) { state.aiFunnelEventsError = e.message || 'Errore caricamento funnel AI'; }
-  state.aiFunnelEventsLoading = false;
+    state.feedbackFunnelEvents = data || [];
+  } catch (e) { state.feedbackFunnelError = e.message || 'Errore caricamento funnel feedback'; }
+  state.feedbackFunnelLoading = false;
   render();
 }
 
@@ -1617,34 +1590,6 @@ async function fetchSprintPremiumFunnel() {
     state.sprintPremiumFunnelData = map;
   } catch (e) { state.sprintPremiumFunnelError = e.message || 'Errore'; }
   state.sprintPremiumFunnelLoading = false;
-  render();
-}
-
-async function fetchSprintAiFunnel() {
-  if (!state.sprintAiFunnelSel.length) return;
-  state.sprintAiFunnelLoading = true;
-  state.sprintAiFunnelError   = null;
-  state.sprintAiFunnelData    = {};
-  render();
-  try {
-    const selected = state.sprints.filter(s => state.sprintAiFunnelSel.includes(s.id));
-    const results  = await Promise.all(selected.map(async s => {
-      const range = { p_from: sprintStartTs(s) || s.inizio, p_to: s.fine, p_end: sprintEndTs(s) };
-      const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
-        sb.rpc('kpi_events_by_name', { ...range, p_events: AI_FUNNEL_EVENT_NAMES }),
-        sb.rpc('kpi_ai_chat_workout_events', range),
-      ]);
-      if (error) throw error;
-      if (chatWorkoutError) throw chatWorkoutError;
-      const eventsMap = {};
-      [...(data || []), ...(chatWorkoutData || [])].forEach(e => { eventsMap[e.event_name] = e; });
-      return { id: s.id, eventsMap };
-    }));
-    const map = {};
-    for (const r of results) map[r.id] = r.eventsMap;
-    state.sprintAiFunnelData = map;
-  } catch (e) { state.sprintAiFunnelError = e.message || 'Errore'; }
-  state.sprintAiFunnelLoading = false;
   render();
 }
 
@@ -1867,8 +1812,6 @@ function sidebar() {
         ${nav('behavior',   '🖱️', 'Comportamento')}
         <div class="nav-section" style="margin-top:8px">Marketing</div>
         ${nav('meta-ads',   '📣', 'Meta ADS')}
-        <div class="nav-section" style="margin-top:8px">AI</div>
-        ${nav('prompt-ai',  '📜', 'Prompt AI')}
       </nav>
       <div style="padding:14px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">
         Mattia & Danilo · 50/50
@@ -1902,7 +1845,6 @@ function page() {
     case 'ai-coach':    return pageAICoach();
     case 'behavior':    return pageBehavior();
     case 'meta-ads':    return pageMetaAds();
-    case 'prompt-ai':   return pagePromptAI();
     default:            return pageOverview();
   }
 }
@@ -3267,10 +3209,11 @@ function aiStatsUsersTable() {
     </div>`;
 }
 
-// Barre dei tool più usati dall'AI Coach.
-function aiToolsBlock(d) {
-  const tools = d.top_tools || [];
-  const maxCnt = d.max_tool_cnt || 1;
+// Barre dei tool più usati dall'AI Coach. tools = [{tool, cnt}] ordinati per cnt desc
+// (aggregato top_tools o per-contesto top_tools_by_context[ctx] da kpi_ai_stats).
+function aiToolsBlock(tools) {
+  tools = tools || [];
+  const maxCnt = Math.max(...tools.map(t => Number(t.cnt) || 0), 1);
   const TOOL_NICE = {
     get_exercises: 'Cerca esercizi', get_user_profile: 'Legge profilo',
     get_user_workouts: 'Guarda allenamenti', create_workout: 'Crea workout',
@@ -3294,130 +3237,67 @@ function aiToolsBlock(d) {
       }).join('');
 }
 
-function aiFunnelEditRow(row, i) {
-  const stepOpts = AI_FUNNEL_ALL_STEPS.map((s, idx) =>
-    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${s.label}</option>`
-  ).join('');
-
-  const vsOpts = `<option value="">—</option>` +
-    state.aiFunnelConfig.slice(0, i).map((r, j) =>
-      AI_FUNNEL_ALL_STEPS[r.stepIdx]
-        ? `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${AI_FUNNEL_ALL_STEPS[r.stepIdx].label}</option>`
-        : ''
-    ).join('');
-
-  return `
-    <div style="display:flex;align-items:center;gap:8px">
-      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
-      <select class="form-select ai-funnel-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
-      <select class="form-select ai-funnel-vs-sel"   data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
-      <button class="btn btn-ghost ai-funnel-remove" data-row="${i}"
-        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
-    </div>`;
+// Healthcheck persistenza transcript AI (spec bug--ai-chat-transcript-persistence-dead, R7):
+// pill compatta nell'header della card Conversazioni, visibile SOLO quando la chain è sospetta
+// (persist_chat_error > 0 nelle 24h, oppure send > 0 con ai_chat_message ferma da >48h).
+// Sostituisce il vecchio banner a tutta pagina: stessa logica, stessi campi di kpi_ai_stats.
+function transcriptHealthPill(d) {
+  if (!d) return '';
+  const lastAt = d.transcript_last_msg_at ? new Date(d.transcript_last_msg_at) : null;
+  const sends24h = Number(d.chat_sends_24h || 0);
+  const persistErr24h = Number(d.persist_errors_24h || 0);
+  const stale = lastAt && (Date.now() - lastAt.getTime()) > 48 * 3600 * 1000;
+  const broken = persistErr24h > 0 || (stale && sends24h > 0);
+  if (!broken) return '';
+  const lastAtStr = lastAt ? lastAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'mai';
+  const tip = `Persistenza transcript AI sospetta — ultimo messaggio in ai_chat_message: ${lastAtStr} · ai_chat_send 24h: ${sends24h} · persist_chat_error 24h: ${persistErr24h}. Vedi _specs/ai/bug--ai-chat-transcript-persistence-dead/`;
+  return `<span title="${esc(tip)}" style="font-size:10px;background:rgba(220,50,50,0.12);border:1px solid var(--red);color:var(--red);padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap;cursor:help">⚠ persistenza transcript</span>`;
 }
 
-function aiFunnelEditPanel() {
-  if (!state.editingAiFunnel) return '';
-  return `
-    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
-      <div class="card-title" style="margin-bottom:16px">Costruttore funnel AI Coach</div>
-      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
-        ${state.aiFunnelConfig.map((row, i) => aiFunnelEditRow(row, i)).join('')}
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button id="ai-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
-        <button id="ai-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
-        <button id="close-ai-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
-      </div>
-    </div>`;
-}
-
-function aiFunnelViz(eventsMap) {
-  const cfg = state.aiFunnelConfig.filter(row => AI_FUNNEL_ALL_STEPS[row.stepIdx]);
-  if (!cfg.length) return `<div style="color:var(--muted);font-size:12px">Nessuno step configurato. Apri "Modifica funnel" per aggiungerne uno.</div>`;
-
-  const rows = cfg.map(row => {
-    const s = AI_FUNNEL_ALL_STEPS[row.stepIdx];
-    const e = eventsMap[s.event];
-    return { s, n: e?.total ?? 0, users: e?.unique_users ?? 0 };
-  });
-
-  const headN = rows[0]?.n ?? 0;
-  const headLabel = rows[0]?.s?.label || 'step 1';
-  const html = cfg.map((row, i) => {
-    const { s, n, users } = rows[i];
-    const vsN    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].n : null;
-    const change = (vsN !== null && vsN > 0) ? ((n / vsN - 1) * 100).toFixed(0) : null;
-    const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
-    const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
-    return `
-      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
-        ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
-        <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
-      </div>` : ''}
-      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
-        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${n}</div>
-        <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
-        <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
-        ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
-        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headN})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
-      </div>`;
-  }).join('');
-
-  return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${html}</div>`;
-}
-
-// Mini-KPI compatto (riusato per engagement chat: quota esaurita, chat chiuse).
-function aiMiniStat(label, value, sub, color) {
-  return `<div style="background:#12121e;border:1px solid #1e1e30;border-radius:12px;padding:14px 16px;flex:1;min-width:150px">
-    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${label}</div>
-    <div style="font-size:22px;font-weight:700;color:${color || 'var(--fg)'}">${Number(value).toLocaleString('it-IT')}</div>
-    ${sub ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${sub}</div>` : ''}
-  </div>`;
-}
-
-// Funnel della chat di FEEDBACK post-workout (flusso separato dalla chat principale).
-// Eventi da kpi_events_summary, già in state.aiFunnelEvents.
-function aiFeedbackChatCard(eventsMap) {
-  const getN = name => Number(eventsMap[name]?.total ?? 0);
-  const getU = name => Number(eventsMap[name]?.unique_users ?? 0);
+// Funnel compatto della chat di FEEDBACK post-workout (3 step), mostrato sopra il transcript
+// nel tab Feedback del browser conversazioni. Flusso separato dalla chat principale: dopo un
+// workout abbandonato l'app schedula una notifica "+2 min", poi mostra la chat di feedback
+// (in app o da notifica) e l'utente può rispondere. Eventi da kpi_events_by_name.
+function aiFeedbackFunnelCompact() {
+  if (state.feedbackFunnelLoading) {
+    return `<div style="padding:12px 18px;border-bottom:1px solid #1e1e30;color:var(--muted);font-size:12px" class="pulse">Caricamento funnel feedback…</div>`;
+  }
+  if (state.feedbackFunnelError) {
+    return `<div style="padding:12px 18px;border-bottom:1px solid #1e1e30;color:var(--red);font-size:12px">⚠️ ${esc(state.feedbackFunnelError)}</div>`;
+  }
+  const eventsMap = {};
+  (state.feedbackFunnelEvents || []).forEach(e => { eventsMap[e.event_name] = e; });
   const steps = [
-    { label: 'Notifica feedback schedulata', event: 'workout_feedback_notification_scheduled', color: '#fbbf24' },
-    { label: 'Feedback mostrato',            event: 'workout_feedback_shown',                  color: '#a78bfa' },
-    { label: 'Risposta utente',              event: 'workout_feedback_replied',                color: '#34d399' },
-  ].map(s => ({ ...s, n: getN(s.event), users: getU(s.event) }));
+    { label: 'Notifica schedulata', event: 'workout_feedback_notification_scheduled', color: '#fbbf24' },
+    { label: 'Feedback mostrato',   event: 'workout_feedback_shown',                  color: '#a78bfa' },
+    { label: 'Risposta utente',     event: 'workout_feedback_replied',                color: '#34d399' },
+  ].map(s => ({ ...s, n: Number(eventsMap[s.event]?.total ?? 0), users: Number(eventsMap[s.event]?.unique_users ?? 0) }));
 
-  const headN = steps[0]?.n ?? 0;
-  const headLabel = steps[0]?.label || 'step 1';
   const boxes = steps.map((s, i) => {
     const vsN = i > 0 ? steps[i - 1].n : null;
     const conv = (vsN !== null && vsN > 0) ? (s.n / vsN * 100).toFixed(0) + '%' : null;
-    const startPct = i > 0 && headN > 0 ? (s.n / headN * 100) : null;
     return `
-      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
-        ${conv !== null ? `<div style="font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap">${conv}</div>` : ''}
-        <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
+      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:36px">
+        ${conv !== null ? `<div style="font-size:9px;color:var(--muted);font-weight:700;white-space:nowrap">${conv}</div>` : ''}
+        <div style="font-size:15px;color:#2a2a3d;margin-top:-2px">→</div>
       </div>` : ''}
-      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
-        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${s.n}</div>
-        <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
-        <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">${s.users} utent${s.users === 1 ? 'e' : 'i'}</div>
-        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headN})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
+      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:8px;padding:8px 10px;text-align:center;min-width:0" title="${esc(s.event)}">
+        <div style="font-size:17px;font-weight:800;color:${s.color};line-height:1">${s.n}</div>
+        <div style="font-size:10px;color:var(--fg);margin-top:3px;font-weight:500">${s.label}</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:1px">${s.users} utent${s.users === 1 ? 'e' : 'i'}</div>
       </div>`;
   }).join('');
 
-  return `<div class="card" style="margin-bottom:16px">
-    <div class="card-title" style="margin-bottom:6px">Chat di feedback post-workout</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">Flusso separato dalla chat principale: dopo un workout abbandonato l'app schedula una notifica "+2 min", poi mostra la chat di feedback (in app o da notifica) e l'utente può rispondere. Disponibile da quando il tracciamento è stato rilasciato lato app.</div>
-    <div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${boxes}</div>
+  return `<div style="padding:12px 18px;border-bottom:1px solid #1e1e30;background:#0d0d17">
+    <div style="display:flex;align-items:center;gap:0">${boxes}</div>
   </div>`;
 }
 
 // ── PAGINA AI COACH ───────────────────────────────────────────────────
-// Pagina dedicata che raccoglie tutta l'analitica della chat AI: KPI, funnel configurabile,
-// engagement, feedback post-workout, confronto sprint, tool e browser conversazioni.
+// Struttura (spec _specs/dashboard/ai-coach-page-restructure/): KPI in cima →
+// Conversazioni con tab Spontanee/Feedback (funnel feedback compatto dentro il tab) →
+// sezione Prompting (viewer statico system prompt + tool per contesto).
+// Il funnel AI Coach configurabile e il confronto sprint vivono nella sezione Funnel.
 function pageAICoach() {
   const d = state.aiStatsData;
 
@@ -3432,32 +3312,6 @@ function pageAICoach() {
       <button id="ai-stats-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Aggiorna</button>
     </div>`;
 
-  // 0. Healthcheck persistenza transcript AI (spec bug--ai-chat-transcript-persistence-dead).
-  // Rende visibile una futura rottura silenziosa dell'insert su ai_chat_message: se arrivano
-  // ai_chat_send ma la tabella non avanza (o persist_chat_error > 0) → banner rosso in cima.
-  // Bug 2026-07-01 → 07-16 rimasto invisibile 15 giorni perché nessuno guardava ai_debug_log.
-  const transcriptHealth = (() => {
-    if (!d) return '';
-    const lastAt = d.transcript_last_msg_at ? new Date(d.transcript_last_msg_at) : null;
-    const sends24h = Number(d.chat_sends_24h || 0);
-    const persistErr24h = Number(d.persist_errors_24h || 0);
-    const now = new Date();
-    const stale = lastAt && (now.getTime() - lastAt.getTime()) > 48 * 3600 * 1000;
-    const broken = persistErr24h > 0 || (stale && sends24h > 0);
-    if (!broken) return '';
-    const lastAtStr = lastAt ? lastAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'mai';
-    return `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--red);background:rgba(220,50,50,0.06)">
-      <div style="padding:14px 16px">
-        <div style="font-weight:600;color:var(--red);margin-bottom:6px">⚠️ Persistenza transcript AI chat interrotta</div>
-        <div style="font-size:12px;color:var(--muted);line-height:1.5">
-          Ultimo messaggio in <code>ai_chat_message</code>: <b>${esc(lastAtStr)}</b><br>
-          <code>ai_chat_send</code> ultime 24h: <b>${sends24h}</b> · <code>persist_chat_error</code> ultime 24h: <b>${persistErr24h}</b>
-          <br>Se send &gt; 0 e la tabella non avanza, la chain è rotta (vedi <code>_specs/ai/bug--ai-chat-transcript-persistence-dead/</code>).
-        </div>
-      </div>
-    </div>`;
-  })();
-
   // 1. KPI north-star
   let kpiCard;
   if (state.aiStatsLoading) {
@@ -3471,207 +3325,36 @@ function pageAICoach() {
     </div>`;
   }
 
-  // 2. Funnel AI Coach + 3. engagement + 4. feedback
-  const eventsMap = {};
-  (state.aiFunnelEvents || []).forEach(e => { eventsMap[e.event_name] = e; });
-  const getN = name => Number(eventsMap[name]?.total ?? 0);
+  return `${filterBar}${kpiCard}${aiConversationsCard(d)}${promptingSection(d)}`;
+}
 
-  let funnelInner, engagementCard = '', feedbackCardHtml = '';
-  if (state.aiFunnelEventsLoading) {
-    funnelInner = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px" class="pulse">Caricamento funnel…</div>`;
-  } else if (state.aiFunnelEventsError) {
-    funnelInner = `<div style="padding:12px 0;color:var(--red);font-size:13px">⚠️ ${esc(state.aiFunnelEventsError)}</div>`;
-  } else if (!state.aiFunnelEvents) {
-    funnelInner = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">Premi Aggiorna per calcolare il funnel.</div>`;
-  } else {
-    funnelInner = `
-      ${aiFunnelEditPanel()}
-      ${aiFunnelViz(eventsMap)}
-      ${sprintAiFunnelSection()}`;
-    engagementCard = `<div class="card" style="margin-bottom:16px">
-      <div class="card-title" style="margin-bottom:14px">Engagement chat</div>
-      <div style="display:flex;flex-wrap:wrap;gap:10px">
-        ${aiMiniStat('Chat chiuse', getN('ai_chat_close'), 'chiusure della chat', '#64748b')}
-        ${aiMiniStat('Quota AI esaurita', getN('ai_chat_quota_exhausted'), 'tentativi a quota esaurita → paywall', '#fb923c')}
+// Card Conversazioni con tab Spontanee / Feedback post-workout. Nel tab Feedback compare il
+// funnel 3-step compatto sopra il transcript. Limite noto: nel raro overlap temporale
+// feedback+spontanea dello stesso utente il transcript può interlacciare i due contesti
+// (solo l'evento 'start' porta ctx in ai_debug_log, split server-side impossibile).
+function aiConversationsCard(d) {
+  const tab = state.aiConvTab;
+  const tabBtn = (key, label) => `<button class="ai-conv-tab" data-tab="${key}"
+    style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;transition:all .15s;
+      ${tab === key ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">${label}</button>`;
+
+  return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #1e1e30;flex-wrap:wrap">
+      <div class="card-title" style="margin-bottom:0">Conversazioni</div>
+      <div style="display:flex;gap:6px">
+        ${tabBtn('spontanee', 'Spontanee')}
+        ${tabBtn('feedback', 'Feedback post-workout')}
       </div>
-    </div>`;
-    feedbackCardHtml = aiFeedbackChatCard(eventsMap);
-  }
-  const funnelCard = `<div class="card" style="margin-bottom:16px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="card-title" style="margin-bottom:0">Funnel AI Coach</div>
-      ${state.aiFunnelEvents && !state.editingAiFunnel ? `<button id="edit-ai-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
-    </div>
-    ${funnelInner}
-  </div>`;
-
-  // tool
-  const toolsCard = d ? `<div class="card" style="margin-bottom:16px">
-    <div class="card-title" style="margin-bottom:14px">Tool più usati dall'AI</div>
-    <div style="max-width:520px">${aiToolsBlock(d)}</div>
-  </div>` : '';
-
-  // 7. browser conversazioni (embedded, non più modal)
-  const convCard = `<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #1e1e30">
-      <div class="card-title" style="margin-bottom:0;flex:1">Conversazioni</div>
+      ${transcriptHealthPill(d)}
       <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
-        value="${esc(state.aiSearchQuery)}" class="form-input" style="width:220px;font-size:12px;padding:5px 10px">
+        value="${esc(state.aiSearchQuery)}" class="form-input" style="width:220px;font-size:12px;padding:5px 10px;margin-left:auto">
     </div>
+    ${tab === 'feedback' ? aiFeedbackFunnelCompact() : ''}
     <div style="display:flex;height:560px;min-height:0">
       <div style="width:300px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">${aiSessionListHtml()}</div>
       <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">${aiChatPanel()}</div>
     </div>
   </div>`;
-
-  return `${filterBar}${transcriptHealth}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${toolsCard}${convCard}`;
-}
-
-// ── AI COACH — CONFRONTO SPRINT ─────────────────────────────────────────
-
-function sprintAiFunnelSection() {
-  if (!state.sprints.length) return '';
-  const isOpen = state.sprintAiFunnelOpen;
-
-  const badge = state.sprintAiFunnelSel.length
-    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintAiFunnelSel.length} sel.</span>`
-    : '';
-
-  const headerEl = `
-    <div id="sprint-ai-funnel-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
-        ${badge}
-      </div>
-      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
-    </div>`;
-
-  if (!isOpen) {
-    return `<div class="card" style="margin-top:16px;padding:14px 20px">${headerEl}</div>`;
-  }
-
-  const chips = state.sprints.map((s, i) => {
-    const on    = state.sprintAiFunnelSel.includes(s.id);
-    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
-    return `<button class="sprint-ai-funnel-chip" data-id="${s.id}"
-      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
-        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
-      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
-      ${on ? '✓ ' : ''}${s.nome}
-    </button>`;
-  }).join('');
-
-  const hasData = Object.keys(state.sprintAiFunnelData).length > 0;
-  const body = state.sprintAiFunnelLoading
-    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
-    : state.sprintAiFunnelError
-    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${state.sprintAiFunnelError}</div>`
-    : !hasData ? ''
-    : sprintAiFunnelCompareView();
-
-  return `
-    <div class="card" style="margin-top:16px">
-      ${headerEl}
-      <div style="margin-top:18px">
-        <div style="margin-bottom:14px">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px">
-          <button id="sprint-ai-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
-            ${!state.sprintAiFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
-          ${hasData ? pctStartToggle('sprint-ai-pctstart') : ''}
-          ${!hasData && !state.sprintAiFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
-        </div>
-        ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
-      </div>
-    </div>`;
-}
-
-function sprintAiFunnelCompareView() {
-  const selected = state.sprints.filter(s => state.sprintAiFunnelSel.includes(s.id));
-  if (!selected.length) return '';
-  const legend = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px">
-    ${selected.map((s, i) => `
-      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
-        <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
-        <span style="font-weight:600;color:var(--text)">${s.nome}</span>
-        <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
-      </span>`).join('')}
-  </div>`;
-  return legend + sprintAiFunnelTable(selected, state.sprintAiFunnelData);
-}
-
-function sprintAiFunnelTable(selected, dataMap) {
-  const cfg    = state.aiFunnelConfig.filter(row => AI_FUNNEL_ALL_STEPS[row.stepIdx]);
-  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
-
-  const headers = selected.map((s, i) => `
-    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
-      <div style="display:inline-flex;align-items:center;gap:6px">
-        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
-        <span>${s.nome}</span>
-      </div>
-      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
-    </th>`
-  ).join('');
-
-  // Testa del funnel per la "% dall'inizio": qui è semplicemente il primo step configurato — a
-  // differenza del funnel a catalogo non c'è nessun dato che arriva in ritardo, quindi niente ripiego.
-  const headStep = cfg[0] ? AI_FUNNEL_ALL_STEPS[cfg[0].stepIdx] : null;
-
-  const rows = cfg.map((row, i) => {
-    const step = AI_FUNNEL_ALL_STEPS[row.stepIdx];
-    const nums = selected.map(s => Number((dataMap[s.id] || {})[step.event]?.total ?? -1));
-    const maxN = Math.max(...nums.filter(n => n >= 0), 0);
-    // isBest sulla % di conversione (vsIdx), non sul numero assoluto. Vedi commento in sprintEventFunnelTable.
-    const vsStep0 = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
-    const convPcts = selected.map(s => {
-      const eventsMap = dataMap[s.id] || {};
-      const num = Number(eventsMap[step.event]?.total ?? 0);
-      const vsN = vsStep0 ? Number(eventsMap[vsStep0.event]?.total ?? 0) : null;
-      return vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
-    });
-    const validPcts = convPcts.filter(p => p !== null);
-    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
-
-    const cells = selected.map((s, si) => {
-      const eventsMap = dataMap[s.id] || {};
-      const num    = Number(eventsMap[step.event]?.total ?? 0);
-      const usersN = Number(eventsMap[step.event]?.unique_users ?? 0);
-      const headN  = headStep ? Number(eventsMap[headStep.event]?.total ?? 0) : 0;
-      const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
-      const convPct   = convPcts[si];
-      const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
-      const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
-      const isBest    = maxConvPct !== null && convPct === maxConvPct;
-      const barW      = maxN > 0 ? Math.round(num / maxN * 100) : 0;
-      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
-        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
-          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
-            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
-          </div>
-          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
-        </div>
-        <div style="font-size:10px;color:var(--muted);margin-top:1px">${usersN} utent${usersN === 1 ? 'e' : 'i'}</div>
-        ${pctCellLine(
-          convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : null,
-          startPct, headStep ? headStep.label : '', convPct)}
-      </td>`;
-    }).join('');
-
-    return `<tr style="border-bottom:1px solid var(--border)">
-      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${step.label}</td>${cells}
-    </tr>`;
-  }).join('');
-
-  return `<table style="width:100%;border-collapse:collapse">
-    <thead><tr style="border-bottom:2px solid var(--border)">
-      <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Step</th>
-      ${headers}
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
 }
 
 // Lista delle sessioni di chat AI (filtrata per ricerca). Riusata sia dal modal solo-lettura
@@ -3737,7 +3420,7 @@ function aiConversationsModal() {
           <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
             value="${esc(state.aiSearchQuery)}"
             class="form-input" style="width:200px;font-size:12px;padding:5px 10px">
-          <button id="ai-conv-goto-page" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;white-space:nowrap" title="Apri la pagina AI Coach con statistiche e funnel">📊 Statistiche e funnel →</button>
+          <button id="ai-conv-goto-page" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;white-space:nowrap" title="Apri la pagina AI Coach (statistiche, conversazioni per tab, prompting)">📊 Pagina AI Coach →</button>
           <button id="ai-conv-close" style="
             background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
             padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
@@ -8218,25 +7901,40 @@ function promptAIRenderSourceFiles(sourceFiles) {
   return `<ul style="list-style:none;padding:0;margin:0">${items}</ul>`;
 }
 
-function pagePromptAI() {
-  if (state.promptAILoading) return pageSkeleton();
-  if (state.promptAIError) {
-    return `<div class="page-header">
-        <div><div class="page-title">Prompt AI</div><div class="page-sub">Errore caricamento snapshot</div></div>
+// ── SEZIONE PROMPTING (in fondo alla pagina AI Coach) ─────────────────
+// Viewer statico del system prompt composto + tool whitelist per contesto/schermata
+// (snapshot data/ai-prompts-dashboard.json generato da npm run embed:ai-prompts,
+// SSOT app/supabase/functions/ai-chat/). Include "Tool più usati" nel periodo della
+// pagina, filtrato sul contesto attivo quando kpi_ai_stats espone top_tools_by_context.
+function promptingSection(d) {
+  const header = (sub) => `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin:26px 0 14px;flex-wrap:wrap">
+      <div>
+        <div style="font-size:16px;font-weight:700;color:var(--fg)">Prompting</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">${sub}</div>
       </div>
-      <div class="empty" style="padding:60px 20px">
-        <div class="empty-icon">⚠️</div>
-        <div class="empty-text" style="font-size:14px;color:var(--red)">${esc(state.promptAIError)}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+      ${state.promptAI ? `<button class="btn-outline" data-prompt-ai-raw style="font-size:12px;padding:6px 14px">
+        ${state.promptAIRaw ? '↩︎ Nascondi raw' : '{ } Vedi raw'}
+      </button>` : ''}
+    </div>`;
+  const subDefault = 'System prompt composto e tool whitelist per ogni contesto del Coach · SSOT <code>app/supabase/functions/ai-chat/</code>';
+
+  if (state.promptAILoading) {
+    return header(subDefault) + `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento snapshot prompt…</div></div>`;
+  }
+  if (state.promptAIError) {
+    return header('Errore caricamento snapshot') + `<div class="card" style="margin-bottom:16px">
+      <div style="padding:24px;text-align:center">
+        <div style="font-size:13px;color:var(--red);margin-bottom:6px">⚠️ ${esc(state.promptAIError)}</div>
+        <div style="font-size:12px;color:var(--muted)">
           Manca il file <code>data/ai-prompts-dashboard.json</code>?
           Rigenera con <code>npm run embed:ai-prompts</code> in <code>app/</code>.
         </div>
-      </div>`;
+      </div>
+    </div>`;
   }
   if (!state.promptAI) {
-    return `<div class="page-header"><div><div class="page-title">Prompt AI</div></div></div>
-      <div class="empty" style="padding:60px 20px"><div class="empty-icon">📜</div>
-        <div class="empty-text" style="color:var(--muted)">Snapshot non caricato.</div></div>`;
+    return header(subDefault) + `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px">Snapshot non caricato.</div></div>`;
   }
 
   const data = state.promptAI;
@@ -8289,18 +7987,21 @@ function pagePromptAI() {
       </div>`
     : '';
 
-  return `<div class="page-header">
-      <div>
-        <div class="page-title">Prompt AI</div>
-        <div class="page-sub">System prompt composto e tool whitelist per ogni contesto del Coach · SSOT <code>app/supabase/functions/ai-chat/</code></div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn-outline" data-prompt-ai-raw style="font-size:12px;padding:6px 14px">
-          ${state.promptAIRaw ? '↩︎ Nascondi raw' : '{ } Vedi raw'}
-        </button>
-      </div>
+  // Tool più usati nel periodo della pagina (kpi_ai_stats), filtrati sul contesto attivo
+  // quando la RPC espone top_tools_by_context; fallback sull'aggregato top_tools.
+  const byCtx = (d && d.top_tools_by_context) || {};
+  const ctxTools = byCtx[activeKey] || [];
+  const usageTools = ctxTools.length ? ctxTools : ((d && d.top_tools) || []);
+  const usageScope = ctxTools.length ? `contesto <code>${esc(activeKey)}</code>` : 'tutti i contesti (aggregato)';
+  const toolsUsageCard = `<div class="card" style="padding:14px 16px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Tool più usati nel periodo</div>
+      <div style="font-size:11px;color:var(--muted)">${usageScope}</div>
     </div>
+    <div style="max-width:520px">${aiToolsBlock(usageTools)}</div>
+  </div>`;
 
+  return header(subDefault) + `
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--muted)">
       <div>Versione: <code style="color:var(--text)">${esc(data.promptVersion || '?')}</code></div>
       <div>Hash: <code style="color:var(--text)">${esc(hashShort)}</code></div>
@@ -8312,6 +8013,8 @@ function pagePromptAI() {
       <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Contesto / schermata</div>
       <div style="display:flex;flex-wrap:wrap">${selector}</div>
     </div>
+
+    ${toolsUsageCard}
 
     ${anomalyBanner}
 
@@ -8363,18 +8066,20 @@ function attachEvents() {
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
       if (state.page === 'ai-coach') {
-        if (!state.aiStatsData    && !state.aiStatsLoading)        fetchAIStats();
-        if (!state.aiFunnelEvents && !state.aiFunnelEventsLoading) fetchAIFunnelEvents();
-        if (!state.aiSessions     && !state.aiSessionsLoading)     fetchAISessionsFull();
-        if (!state.sprints.length && !state.sprintsLoading)        fetchSprints();
+        if (!state.aiStatsData          && !state.aiStatsLoading)       fetchAIStats();
+        if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
+        // Refetch anche se la lista esiste ma è stata caricata con un altro filtro
+        // (es. il modal Overview carica senza filtro, la pagina è per-tab).
+        const wantFilter = state.aiConvTab === 'feedback';
+        if ((!state.aiSessions || state.aiSessionsFilter !== wantFilter) && !state.aiSessionsLoading) fetchAISessionsFull(wantFilter);
+        if (!state.promptAI             && !state.promptAILoading)      fetchPromptAI();
       }
       if (state.page === 'behavior'   && !state.behaviorData  && !state.behaviorLoading)  fetchBehavior();
       if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
-      if (state.page === 'prompt-ai'  && !state.promptAI      && !state.promptAILoading) fetchPromptAI();
       render();
     }));
 
-  // Selettore contesto tab "Prompt AI" + toggle vista raw.
+  // Sezione Prompting (pagina AI Coach) — selettore contesto + toggle vista raw.
   document.querySelectorAll('[data-prompt-ai-key]').forEach(el =>
     el.addEventListener('click', () => {
       state.promptAIKey = el.dataset.promptAiKey;
@@ -9719,14 +9424,16 @@ function attachEvents() {
     fetchAISessionsFull();
   });
 
-  // AI modal — vai alla pagina AI Coach (statistiche e funnel)
+  // AI modal — vai alla pagina AI Coach
   document.getElementById('ai-conv-goto-page')?.addEventListener('click', () => {
     state.aiConvOpen = false;
     state.page = 'ai-coach';
-    if (!state.aiStatsData    && !state.aiStatsLoading)        fetchAIStats();
-    if (!state.aiFunnelEvents && !state.aiFunnelEventsLoading) fetchAIFunnelEvents();
-    if (!state.aiSessions     && !state.aiSessionsLoading)     fetchAISessionsFull();
-    if (!state.sprints.length && !state.sprintsLoading)        fetchSprints();
+    // Il modal carica le sessioni senza filtro: sulla pagina la lista è per-tab → refetch.
+    state.aiSessions = null;
+    if (!state.aiStatsData          && !state.aiStatsLoading)        fetchAIStats();
+    if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
+    if (!state.promptAI             && !state.promptAILoading)       fetchPromptAI();
+    fetchAISessionsFull(state.aiConvTab === 'feedback');
     render();
   });
 
@@ -9765,15 +9472,29 @@ function attachEvents() {
   document.getElementById('ai-stats-from')?.addEventListener('change', e => { state.aiStatsFrom = e.target.value; });
   document.getElementById('ai-stats-to')?.addEventListener('change',   e => { state.aiStatsTo   = e.target.value; });
 
-  // AI stats — apply: ricalcola KPI e funnel insieme (sulla pagina sono sempre entrambi visibili)
+  // AI stats — apply: ricalcola KPI e funnel feedback insieme sul nuovo periodo.
   document.getElementById('ai-stats-apply')?.addEventListener('click', () => {
     state.aiStatsData = null;
     state.aiStatsUsers = null;
     state.aiStatsUsersOpen = false;
-    state.aiFunnelEvents = null;
+    state.feedbackFunnelEvents = null;
     fetchAIStats();
-    fetchAIFunnelEvents();
+    fetchFeedbackFunnelEvents();
   });
+
+  // AI Coach — tab Conversazioni (Spontanee / Feedback post-workout): reset lista e refetch
+  // con filtro server-side p_feedback.
+  document.querySelectorAll('.ai-conv-tab').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = el.dataset.tab;
+      if (state.aiConvTab === t) return;
+      state.aiConvTab         = t;
+      state.aiSessions        = null;
+      state.aiSelectedSession = null;
+      state.aiSessionMessages = null;
+      render();
+      fetchAISessionsFull(t === 'feedback');
+    }));
 
   // AI stats — utenti unici card click
   document.getElementById('ai-stats-users-toggle')?.addEventListener('click', () => {
@@ -9908,65 +9629,6 @@ function attachEvents() {
       savePremiumFunnelConfig();
       render();
     }));
-
-  // AI funnel — editor
-  document.getElementById('edit-ai-funnel')?.addEventListener('click', () => {
-    state.editingAiFunnel = true;
-    render();
-  });
-  document.getElementById('close-ai-funnel-edit')?.addEventListener('click', () => {
-    state.editingAiFunnel = false;
-    render();
-  });
-  document.getElementById('ai-funnel-add')?.addEventListener('click', () => {
-    const lastIdx = state.aiFunnelConfig.length > 0 ? state.aiFunnelConfig.length - 1 : null;
-    state.aiFunnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
-    saveAiFunnelConfig();
-    render();
-  });
-  document.getElementById('ai-funnel-reset')?.addEventListener('click', () => {
-    state.aiFunnelConfig = JSON.parse(JSON.stringify(DEF_AI_FUN_CFG));
-    saveAiFunnelConfig();
-    render();
-  });
-  document.querySelectorAll('.ai-funnel-step-sel').forEach(el =>
-    el.addEventListener('change', () => {
-      state.aiFunnelConfig[+el.dataset.row].stepIdx = +el.value;
-      saveAiFunnelConfig();
-      render();
-    }));
-  document.querySelectorAll('.ai-funnel-vs-sel').forEach(el =>
-    el.addEventListener('change', () => {
-      state.aiFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
-      saveAiFunnelConfig();
-      render();
-    }));
-  document.querySelectorAll('.ai-funnel-remove').forEach(el =>
-    el.addEventListener('click', () => {
-      const i = +el.dataset.row;
-      state.aiFunnelConfig.splice(i, 1);
-      state.aiFunnelConfig.forEach(r => {
-        if (r.vsIdx === i) r.vsIdx = null;
-        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
-      });
-      saveAiFunnelConfig();
-      render();
-    }));
-
-  // AI Coach — confronto sprint
-  document.getElementById('sprint-ai-funnel-toggle')?.addEventListener('click', () => {
-    state.sprintAiFunnelOpen = !state.sprintAiFunnelOpen;
-    render();
-  });
-  document.querySelectorAll('.sprint-ai-funnel-chip').forEach(el =>
-    el.addEventListener('click', () => {
-      const id  = el.dataset.id;
-      const idx = state.sprintAiFunnelSel.indexOf(id);
-      if (idx === -1) state.sprintAiFunnelSel.push(id);
-      else state.sprintAiFunnelSel.splice(idx, 1);
-      render();
-    }));
-  document.getElementById('sprint-ai-funnel-calc')?.addEventListener('click', fetchSprintAiFunnel);
 
   // Premium — confronto sprint
   document.getElementById('sprint-premium-funnel-toggle')?.addEventListener('click', () => {
