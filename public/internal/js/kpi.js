@@ -7844,18 +7844,25 @@ function promptAIRenderTools(tools) {
   if (!Array.isArray(tools) || tools.length === 0) {
     return '<div style="color:var(--muted);font-size:13px">Nessun tool disponibile in questo contesto.</div>';
   }
+  // Ogni tool = <details> chiuso di default. Summary con nome + short-desc.
   return tools.map(t => {
     const missingBadge = t.missing
-      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:2px 8px;border-radius:4px;margin-left:8px">non trovato in tools.ts</span>'
+      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:2px 8px;border-radius:4px;margin-left:8px">non trovato</span>'
       : '';
-    return `<div class="card" style="padding:14px 16px;margin-bottom:10px">
-      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
-        <code style="font-size:13px;font-weight:700">${esc(t.name)}</code>${missingBadge}
+    const shortDesc = (t.description || '').slice(0, 80) + ((t.description || '').length > 80 ? '…' : '');
+    return `<details class="card" style="padding:0;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+      <summary style="padding:10px 14px;cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+        <span style="font-size:10px;color:var(--muted)">▸</span>
+        <code style="font-size:13px;font-weight:700">${esc(t.name)}</code>
+        ${missingBadge}
+        <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${esc(shortDesc)}</span>
+      </summary>
+      <div style="padding:0 14px 14px 14px;border-top:1px solid var(--border)">
+        <div style="font-size:13px;color:var(--text);line-height:1.5;margin:12px 0 10px 0">${esc(t.description || '')}</div>
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Parametri</div>
+        ${promptAIRenderParameters(t.parameters)}
       </div>
-      <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px">${esc(t.description || '')}</div>
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Parametri</div>
-      ${promptAIRenderParameters(t.parameters)}
-    </div>`;
+    </details>`;
   }).join('');
 }
 
@@ -7864,6 +7871,8 @@ function promptAIRenderParts(parts) {
     return '<div style="color:var(--muted);font-size:13px">Nessuna sezione composta.</div>';
   }
   // Raggruppa per kind, mantenendo l'ordine originale delle parti dentro ogni gruppo.
+  // Ogni PART è un <details> chiuso di default → utente vede solo i titoli, apre solo
+  // le sezioni che gli interessano. Il titolo di gruppo (kind) resta come separatore.
   const groups = {};
   for (const p of parts) {
     if (!groups[p.kind]) groups[p.kind] = [];
@@ -7873,19 +7882,23 @@ function promptAIRenderParts(parts) {
   return kindOrder.map(kind => {
     const arr = groups[kind];
     const kindChars = arr.reduce((acc, p) => acc + (p.chars || 0), 0);
-    const inner = arr.map(p => `
-      <div style="margin-bottom:14px">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
-          ${esc(p.label || p.id)} · ${(p.chars || 0).toLocaleString('it-IT')} char
-        </div>
-        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px;line-height:1.55;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">${esc(p.content || '')}</pre>
-      </div>`).join('');
-    return `<div class="card" style="padding:16px 18px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
-        <div style="font-size:14px;font-weight:700">${esc(PROMPT_AI_KIND_LABEL[kind] || kind)}</div>
+    const items = arr.map(p => `
+      <details style="margin-bottom:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);overflow:hidden">
+        <summary style="padding:8px 12px;cursor:pointer;list-style:none;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12.5px">
+          <span style="display:inline-flex;align-items:baseline;gap:6px">
+            <span style="font-size:10px;color:var(--muted)">▸</span>
+            <span style="font-weight:600">${esc(p.label || p.id)}</span>
+          </span>
+          <span style="font-size:11px;color:var(--muted)">${(p.chars || 0).toLocaleString('it-IT')} char</span>
+        </summary>
+        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px;line-height:1.55;background:var(--surface, #fff);border-top:1px solid var(--border);padding:12px 14px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">${esc(p.content || '')}</pre>
+      </details>`).join('');
+    return `<div class="card" style="padding:14px 16px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:700">${esc(PROMPT_AI_KIND_LABEL[kind] || kind)} <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:6px">${arr.length} ${arr.length === 1 ? 'sezione' : 'sezioni'}</span></div>
         <div style="font-size:11px;color:var(--muted)">${kindChars.toLocaleString('it-IT')} char totali</div>
       </div>
-      ${inner}
+      ${items}
     </div>`;
   }).join('');
 }
