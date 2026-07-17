@@ -170,49 +170,11 @@ const OLD_PREMIUM_FUN_CFG_V1 = [
   { stepIdx: 4, vsIdx: 2 }, { stepIdx: 8, vsIdx: 3 },
 ];
 
-// catalogo eventi disponibili per il funnel AI Coach — ognuno è un event_name letto da kpi_events_summary
-// (gli ultimi 2 arrivano invece da kpi_ai_chat_workout_events: workout_start/complete con metadata.source='ai_chat')
-// Nota: "workout_gen_start" è stato rimosso dal catalogo — è l'evento del pre-generation job della roadmap
-// Premium (premium_generation_jobs), scorrelato dalla chat AI: non misura "la chat ha proposto un workout".
-// NB: gli indici 0-4 sono STORICI e NON vanno cambiati (le config salvate in localStorage usano
-// stepIdx per posizione). I nuovi step (proposto/abbandonato/quota/chat chiusa) sono AGGIUNTI in coda.
-// "Workout proposto" arriva da kpi_events_summary (ai_chat_workout_proposed): è il nuovo evento
-// testa-funnel rilasciato lato app — finché non è in produzione resterà a 0.
-const AI_FUNNEL_ALL_STEPS = [
-  { key: 'chat_open',    label: 'Chat aperta',       color: '#22d3ee', event: 'view_AIChat' },
-  { key: 'hub_open',     label: 'Hub AI aperto',     color: '#60a5fa', event: 'view_CoachAIHub' },
-  { key: 'msg_sent',     label: 'Messaggio inviato', color: '#a78bfa', event: 'ai_chat_send', showFreq: true },
-  { key: 'workout_started_chat',   label: 'Workout avviato (da chat)',    color: '#fbbf24', event: 'ai_chat_workout_start' },
-  { key: 'workout_completed_chat', label: 'Workout completato (da chat)', color: '#34d399', event: 'ai_chat_workout_complete' },
-  { key: 'workout_proposed_chat',  label: 'Workout proposto (da chat)',   color: '#38bdf8', event: 'ai_chat_workout_proposed' },
-  { key: 'workout_abandoned_chat', label: 'Workout abbandonato (da chat)',color: '#f43f5e', event: 'ai_chat_workout_abandon' },
-  { key: 'chat_quota',   label: 'Quota AI esaurita', color: '#fb923c', event: 'ai_chat_quota_exhausted' },
-  { key: 'chat_closed',  label: 'Chat chiusa',       color: '#64748b', event: 'ai_chat_close' },
-];
-
-// stepIdx = indice nel catalogo AI_FUNNEL_ALL_STEPS qui sopra; vsIdx = posizione (in questo array)
-// dello step con cui calcolare la % di conversione. Flusso fissato: chat → messaggio → proposto →
-// avviato → abbandonato → completato → quota → hub. Nota: "abbandonato" può scattare più volte per
-// lo stesso workout (salvataggio parziale, zero esercizi, app in background).
-const DEF_AI_FUN_CFG = [
-  { stepIdx: 0, vsIdx: null }, // 0 Chat aperta
-  { stepIdx: 2, vsIdx: 0 },    // 1 Messaggio inviato vs Chat aperta
-  { stepIdx: 5, vsIdx: 1 },    // 2 Workout proposto vs Messaggio inviato
-  { stepIdx: 3, vsIdx: 2 },    // 3 Workout avviato vs Workout proposto
-  { stepIdx: 6, vsIdx: 2 },    // 4 Workout abbandonato vs Workout proposto
-  { stepIdx: 4, vsIdx: 4 },    // 5 Workout completato vs Workout abbandonato
-  { stepIdx: 7, vsIdx: 5 },    // 6 Quota AI esaurita vs Workout completato
-  { stepIdx: 1, vsIdx: 6 },    // 7 Hub AI aperto vs Quota AI esaurita
-];
-
-// Nomi esatti degli eventi che servono al funnel AI + alla card feedback. Vengono passati a
-// kpi_events_by_name (conteggio per nome SENZA il LIMIT 50 di kpi_events_summary, che tagliava
-// fuori gli eventi rari come ai_chat_workout_proposed/quota/feedback facendoli leggere 0).
-// I nomi 'ai_chat_workout_start/complete/abandon' non esistono come evento grezzo (sono derivati
-// da kpi_ai_chat_workout_events con prefisso): inclusi qui restano innocui (0 righe), li riempie
-// l'altra RPC. Aggiungere uno step al catalogo lo include automaticamente.
-const AI_FUNNEL_EVENT_NAMES = [
-  ...AI_FUNNEL_ALL_STEPS.map(s => s.event),
+// Eventi del funnel feedback post-workout (unico funnel rimasto nella pagina AI Coach, in
+// versione compatta dentro il tab Feedback delle Conversazioni). Passati a kpi_events_by_name
+// (conteggio per nome SENZA il LIMIT 50 di kpi_events_summary, che tagliava fuori gli eventi rari).
+// Il funnel AI Coach configurabile e il confronto sprint vivono nella sezione Funnel (pageFunnelEvent).
+const FEEDBACK_FUNNEL_EVENT_NAMES = [
   'workout_feedback_notification_scheduled',
   'workout_feedback_shown',
   'workout_feedback_replied',
@@ -483,6 +445,11 @@ let state = {
   likedShowAll: false,
   likedGender: 'all',     // 'all' | 'male' | 'female'
   likedAge: 'all',        // 'all' | '18-24' | '25-34' | '35-44' | '45-54' | '55-'
+  // Tab "Prompt AI": snapshot statico (ai-prompts-dashboard.json) generato da
+  // npm run embed:ai-prompts. Vista read-only sul system prompt composto + tool
+  // whitelist per contesto/schermata (SSOT = supabase/functions/ai-chat/).
+  promptAI: null, promptAILoading: false, promptAIError: null,
+  promptAIKey: 'home', promptAIRaw: false,
 };
 
 let refreshTimer = null, countdownTimer = null, secondsLeft = 300;
@@ -1295,6 +1262,30 @@ async function fetchBehavior() {
   render();
 }
 
+// Carica lo snapshot statico dei prompt (data/ai-prompts-dashboard.json).
+// Generato al build da scripts/embed-ai-chat-prompts.ts: se il file è assente
+// o malformato mostro l'errore in-page invece di crashare la dashboard.
+async function fetchPromptAI() {
+  state.promptAILoading = true;
+  state.promptAIError = null;
+  render();
+  try {
+    const res = await fetch('data/ai-prompts-dashboard.json', { cache: 'no-cache' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data || !data.contexts) throw new Error('shape inattesa');
+    state.promptAI = data;
+    // Se la chiave di default non esiste nello snapshot, seleziona la prima disponibile.
+    const keys = Object.keys(data.contexts);
+    if (keys.length > 0 && !data.contexts[state.promptAIKey]) state.promptAIKey = keys[0];
+  } catch (e) {
+    console.error('fetchPromptAI', e);
+    state.promptAIError = e.message || String(e);
+  }
+  state.promptAILoading = false;
+  render();
+}
+
 function metaDateParams() {
   if (state.metaUseCustom && state.metaCustomFrom && state.metaCustomTo) {
     return 'time_range=' + encodeURIComponent(JSON.stringify({ since: state.metaCustomFrom, until: state.metaCustomTo }));
@@ -1876,6 +1867,8 @@ function sidebar() {
         ${nav('behavior',   '🖱️', 'Comportamento')}
         <div class="nav-section" style="margin-top:8px">Marketing</div>
         ${nav('meta-ads',   '📣', 'Meta ADS')}
+        <div class="nav-section" style="margin-top:8px">AI</div>
+        ${nav('prompt-ai',  '📜', 'Prompt AI')}
       </nav>
       <div style="padding:14px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">
         Mattia & Danilo · 50/50
@@ -1909,6 +1902,7 @@ function page() {
     case 'ai-coach':    return pageAICoach();
     case 'behavior':    return pageBehavior();
     case 'meta-ads':    return pageMetaAds();
+    case 'prompt-ai':   return pagePromptAI();
     default:            return pageOverview();
   }
 }
@@ -8104,6 +8098,259 @@ function pageMetaAds() {
     tokenSection + dateBar + kpiCards + campTable + sprintPanel;
 }
 
+// ── PROMPT AI (read-only inspector) ──────────────────────────────────
+// Legge lo snapshot statico ai-prompts-dashboard.json generato da
+// npm run embed:ai-prompts. Riflette SSOT app/supabase/functions/ai-chat/.
+// Ordine visuale delle parti (allineato a AIPage.tsx): core → examples → pt → screen → data.
+
+const PROMPT_AI_KIND_ORDER = ['core', 'examples', 'pt', 'screen', 'data'];
+const PROMPT_AI_KIND_LABEL = {
+  core:     'Core',
+  examples: 'Esempi',
+  pt:       'PT context',
+  screen:   'Contesto schermata',
+  data:     'contextData snippet',
+};
+const PROMPT_AI_CONTEXT_LABEL = {
+  'home':             'Home',
+  'workouts':         'Workouts',
+  'roadmap':          'Roadmap',
+  'exercise':         'Esercizio',
+  'profile':          'Profilo',
+  'workout-details':  'Dettaglio workout',
+  'workout-feedback': 'Feedback post-workout',
+  'roadmap-premium':  'Roadmap premium (gen)',
+};
+
+function promptAIRenderParameters(params) {
+  // Rende leggibile un JSON Schema (formato OpenAI tools). Priorità testo: elenco parametri
+  // con `nome: type — description`, required in grassetto, enum inline. Fallback su JSON raw
+  // solo se lo schema non è nel formato atteso.
+  if (!params || typeof params !== 'object') {
+    return '<div style="font-size:12px;color:var(--muted)">Nessun parametro dichiarato.</div>';
+  }
+  const props = params.properties || {};
+  const keys = Object.keys(props);
+  if (keys.length === 0) {
+    return '<div style="font-size:12px;color:var(--muted)">Nessun parametro (tool sempre disponibile senza args).</div>';
+  }
+  const required = new Set(Array.isArray(params.required) ? params.required : []);
+  const rows = keys.map(k => {
+    const p = props[k] || {};
+    const isReq = required.has(k);
+    const type = p.type || (Array.isArray(p.enum) ? 'enum' : '?');
+    const enumHtml = Array.isArray(p.enum)
+      ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">valori: ${esc(p.enum.join(' | '))}</div>`
+      : '';
+    const itemsHtml = p.items && p.items.type
+      ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">items: ${esc(p.items.type)}</div>`
+      : '';
+    const desc = p.description ? `<div style="font-size:12px;color:var(--text);margin-top:4px;line-height:1.45">${esc(p.description)}</div>` : '';
+    const reqBadge = isReq
+      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px">required</span>'
+      : '<span style="font-size:10px;color:var(--muted);margin-left:6px">opzionale</span>';
+    return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--bg)">
+      <div><code style="font-size:12px;font-weight:600">${esc(k)}</code> <span style="font-size:11px;color:var(--muted)">: ${esc(type)}</span>${reqBadge}</div>
+      ${desc}${enumHtml}${itemsHtml}
+    </div>`;
+  }).join('');
+  return rows;
+}
+
+function promptAIRenderTools(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return '<div style="color:var(--muted);font-size:13px">Nessun tool disponibile in questo contesto.</div>';
+  }
+  return tools.map(t => {
+    const missingBadge = t.missing
+      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:2px 8px;border-radius:4px;margin-left:8px">non trovato in tools.ts</span>'
+      : '';
+    return `<div class="card" style="padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+        <code style="font-size:13px;font-weight:700">${esc(t.name)}</code>${missingBadge}
+      </div>
+      <div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:10px">${esc(t.description || '')}</div>
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Parametri</div>
+      ${promptAIRenderParameters(t.parameters)}
+    </div>`;
+  }).join('');
+}
+
+function promptAIRenderParts(parts) {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return '<div style="color:var(--muted);font-size:13px">Nessuna sezione composta.</div>';
+  }
+  // Raggruppa per kind, mantenendo l'ordine originale delle parti dentro ogni gruppo.
+  const groups = {};
+  for (const p of parts) {
+    if (!groups[p.kind]) groups[p.kind] = [];
+    groups[p.kind].push(p);
+  }
+  const kindOrder = PROMPT_AI_KIND_ORDER.filter(k => groups[k]);
+  return kindOrder.map(kind => {
+    const arr = groups[kind];
+    const kindChars = arr.reduce((acc, p) => acc + (p.chars || 0), 0);
+    const inner = arr.map(p => `
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          ${esc(p.label || p.id)} · ${(p.chars || 0).toLocaleString('it-IT')} char
+        </div>
+        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px;line-height:1.55;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">${esc(p.content || '')}</pre>
+      </div>`).join('');
+    return `<div class="card" style="padding:16px 18px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+        <div style="font-size:14px;font-weight:700">${esc(PROMPT_AI_KIND_LABEL[kind] || kind)}</div>
+        <div style="font-size:11px;color:var(--muted)">${kindChars.toLocaleString('it-IT')} char totali</div>
+      </div>
+      ${inner}
+    </div>`;
+  }).join('');
+}
+
+function promptAIRenderSourceFiles(sourceFiles) {
+  if (!Array.isArray(sourceFiles) || sourceFiles.length === 0) {
+    return '<div style="color:var(--muted);font-size:13px">Nessun file sorgente.</div>';
+  }
+  const items = sourceFiles.map(s => `<li style="margin-bottom:4px">
+    <code style="font-size:12px">${esc(s.rel)}</code>
+    <span style="font-size:11px;color:var(--muted);margin-left:8px">${esc(s.id)}</span>
+  </li>`).join('');
+  return `<ul style="list-style:none;padding:0;margin:0">${items}</ul>`;
+}
+
+function pagePromptAI() {
+  if (state.promptAILoading) return pageSkeleton();
+  if (state.promptAIError) {
+    return `<div class="page-header">
+        <div><div class="page-title">Prompt AI</div><div class="page-sub">Errore caricamento snapshot</div></div>
+      </div>
+      <div class="empty" style="padding:60px 20px">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-text" style="font-size:14px;color:var(--red)">${esc(state.promptAIError)}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:8px">
+          Manca il file <code>data/ai-prompts-dashboard.json</code>?
+          Rigenera con <code>npm run embed:ai-prompts</code> in <code>app/</code>.
+        </div>
+      </div>`;
+  }
+  if (!state.promptAI) {
+    return `<div class="page-header"><div><div class="page-title">Prompt AI</div></div></div>
+      <div class="empty" style="padding:60px 20px"><div class="empty-icon">📜</div>
+        <div class="empty-text" style="color:var(--muted)">Snapshot non caricato.</div></div>`;
+  }
+
+  const data = state.promptAI;
+  const keys = Object.keys(data.contexts);
+  const activeKey = data.contexts[state.promptAIKey] ? state.promptAIKey : keys[0];
+  const ctx = data.contexts[activeKey];
+
+  // Selettore contesti (pill list). Badge rosso "⚠ anomalia manifest" su ogni contesto
+  // con manifestAnomaly=true (guidato dal JSON, non hardcoded).
+  const selector = keys.map(k => {
+    const c = data.contexts[k];
+    const label = PROMPT_AI_CONTEXT_LABEL[k] || k;
+    const badge = c.manifestAnomaly
+      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px">⚠ anomalia</span>'
+      : '';
+    const cls = k === activeKey ? 'filter-btn active' : 'filter-btn';
+    return `<button class="${cls}" data-prompt-ai-key="${esc(k)}" style="margin-right:6px;margin-bottom:6px">
+      ${esc(label)} <span style="font-size:10px;color:var(--muted);margin-left:4px">${esc(k)}</span>${badge}
+    </button>`;
+  }).join('');
+
+  // Header: version, hash, budget vs char count.
+  const total = ctx.totalChars || 0;
+  const budget = data.budget || { warnChars: 0, failChars: 0 };
+  let budgetColor = 'var(--green)';
+  if (total >= budget.failChars) budgetColor = 'var(--red)';
+  else if (total >= budget.warnChars) budgetColor = 'var(--amber)';
+  const hashShort = (data.promptsHash || '').slice(0, 12);
+  const generatedShort = (data.generatedAt || '').slice(0, 19).replace('T', ' ');
+
+  const anomalyBanner = ctx.manifestAnomaly ? `
+    <div style="background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:8px;padding:12px 16px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;color:var(--red);margin-bottom:4px">⚠ Anomalia manifest</div>
+      <div style="font-size:12px;color:var(--text);line-height:1.5">
+        Il contesto <code>${esc(activeKey)}</code> è definito in <code>contexts.ts</code>
+        con un system prompt dedicato, ma <strong>non è wired</strong> in
+        <code>_shared/prompts/ai-chat/manifest.ts</code>.
+        La composizione risolve silenziosamente a <code>${esc(ctx.resolvedScreenId || 'screen/default')}</code>
+        invece di <code>${esc(ctx.screenId)}</code>: in produzione il prompt scritto per questa schermata
+        <strong>NON entra mai nel bundle</strong>.
+      </div>
+    </div>` : '';
+
+  const rawPanel = state.promptAIRaw
+    ? `<div class="card" style="padding:12px 14px;margin-top:12px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+          JSON grezzo · contesto <code>${esc(activeKey)}</code>
+        </div>
+        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:11px;line-height:1.45;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin:0;max-height:400px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(JSON.stringify(ctx, null, 2))}</pre>
+      </div>`
+    : '';
+
+  return `<div class="page-header">
+      <div>
+        <div class="page-title">Prompt AI</div>
+        <div class="page-sub">System prompt composto e tool whitelist per ogni contesto del Coach · SSOT <code>app/supabase/functions/ai-chat/</code></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn-outline" data-prompt-ai-raw style="font-size:12px;padding:6px 14px">
+          ${state.promptAIRaw ? '↩︎ Nascondi raw' : '{ } Vedi raw'}
+        </button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--muted)">
+      <div>Versione: <code style="color:var(--text)">${esc(data.promptVersion || '?')}</code></div>
+      <div>Hash: <code style="color:var(--text)">${esc(hashShort)}</code></div>
+      <div>Generato: <span style="color:var(--text)">${esc(generatedShort)}</span></div>
+      <div>Budget: <span style="color:var(--text)">warn ${(budget.warnChars || 0).toLocaleString('it-IT')} · fail ${(budget.failChars || 0).toLocaleString('it-IT')}</span></div>
+    </div>
+
+    <div class="card" style="padding:14px 16px;margin-bottom:16px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">Contesto / schermata</div>
+      <div style="display:flex;flex-wrap:wrap">${selector}</div>
+    </div>
+
+    ${anomalyBanner}
+
+    <div class="card" style="padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+        <div>
+          <div style="font-size:16px;font-weight:700">${esc(PROMPT_AI_CONTEXT_LABEL[activeKey] || activeKey)}</div>
+          <div style="font-size:12px;color:var(--muted)">
+            contextKey <code>${esc(activeKey)}</code> · screen atteso <code>${esc(ctx.screenId || '?')}</code> · screen risolto <code>${esc(ctx.resolvedScreenId || '?')}</code>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:20px;font-weight:800;color:${budgetColor}">${total.toLocaleString('it-IT')}</div>
+          <div style="font-size:11px;color:var(--muted)">char totali</div>
+        </div>
+      </div>
+      <div style="font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:1.55;margin-top:8px">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Nota schermata (contexts.ts)</div>
+        ${esc(ctx.contextNote || '')}
+      </div>
+    </div>
+
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:16px;align-items:flex-start">
+      <div>
+        <h2 style="font-size:14px;font-weight:700;margin:0 0 10px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">System prompt composto</h2>
+        ${promptAIRenderParts(ctx.parts)}
+      </div>
+      <div>
+        <h2 style="font-size:14px;font-weight:700;margin:0 0 10px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Tool whitelist (${(ctx.tools || []).length})</h2>
+        ${promptAIRenderTools(ctx.tools)}
+
+        <h2 style="font-size:14px;font-weight:700;margin:20px 0 10px 0;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">File sorgente</h2>
+        <div class="card" style="padding:12px 16px">${promptAIRenderSourceFiles(ctx.sourceFiles)}</div>
+      </div>
+    </div>
+
+    ${rawPanel}`;
+}
+
 // ── EVENTS ────────────────────────────────────────────────────────────
 
 function attachEvents() {
@@ -8123,6 +8370,19 @@ function attachEvents() {
       }
       if (state.page === 'behavior'   && !state.behaviorData  && !state.behaviorLoading)  fetchBehavior();
       if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
+      if (state.page === 'prompt-ai'  && !state.promptAI      && !state.promptAILoading) fetchPromptAI();
+      render();
+    }));
+
+  // Selettore contesto tab "Prompt AI" + toggle vista raw.
+  document.querySelectorAll('[data-prompt-ai-key]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.promptAIKey = el.dataset.promptAiKey;
+      render();
+    }));
+  document.querySelectorAll('[data-prompt-ai-raw]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.promptAIRaw = !state.promptAIRaw;
       render();
     }));
 
