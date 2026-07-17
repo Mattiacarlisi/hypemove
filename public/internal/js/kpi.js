@@ -105,6 +105,11 @@ const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
 const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
+// Ordine di visualizzazione delle chip in toolbar. Array di token: 'default' | 'onboarding' | <funnelId>.
+// Locale per-browser: i funnel salvati hanno anche order_index sul DB (condiviso), ma la posizione dei
+// due built-in (Default, onboarding) può stare solo qui. Il display segue questo ordine; token nuovi
+// (funnel appena creati) si accodano.
+const LS_FUNNEL_TOOLBAR_ORDER = 'hm_funnel_toolbar_order_v1';
 const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v3';
 const LS_AI_FUN         = 'hm_ai_funnel_cfg_v1';
 const META_AD_ACCOUNT = 'act_1993609947865496';
@@ -322,17 +327,38 @@ let state = {
   editingOverview: false,
   editingFunnel: false,
   funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2)
-  eventFunnelConfig: [],       // [{event, source, label, vsIdx}] — step del funnel a eventi in editing
+  eventFunnelConfig: [],       // [{event, source, label, vsIdx, children?:[{event,source,label}]}] — step del funnel a eventi. `children` = varianti annidate visibili espandendo il parent (es. sign_up → signup_google/signup_email); non partecipano al calcolo della % dello step successivo.
   eventFunnel: null,           // risultato RPC kpi_funnel_v2: {steps:[{idx,event,source,numero}]}
+  eventFunnelFlatMap: null,    // { parent:[flatIdx|null,...], child:[[flatIdx|null,...],...] } — mappa posizione UI ↔ posizione in p_steps del flatten (parent+children serializzati in sequenza per la RPC)
+  eventFunnelExpanded: {},     // { [uiIdx]: true } — parent con children espansi in viz/editor (session-only)
   eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
   eventFunnelLoading: false, eventFunnelError: null,
   editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
+  // Event browser — popup di selezione evento (sostituisce il dropdown hardcoded nel builder a eventi)
+  eventRegistry: [],           // catalogo eventi dal DB (event_registry): {event_name, screens, types, verdict, funnels_used, vol_7d, vol_30d}
+  eventBrowserOpen: false,     // visibilità del modale
+  eventBrowserTargetRow: null, // indice dello step di eventFunnelConfig da riempire (null = nessuno)
+  eventBrowserTargetChild: null, // se non-null, il target è la variante children[N] dello step targetRow (invece del parent stesso)
+  ebSearch: '',                // query ricerca fuzzy
+  ebScreen: null,              // filtro schermata attiva (null = tutte)
+  ebType: null,                // filtro tipo (action/click/navigation) — null = tutti
+  ebVolAll: false,             // false = solo volume >100/30g, true = tutti
+  ebAliveOnly: true,           // nasconde dead/dark
+  ebSelected: null,            // event_name selezionato nel dettaglio
+  ebTab: 'details',            // 'details' | 'next'
+  ebNextLoading: false,        // query "cosa segue" in corso
+  ebNextRows: null,            // risultati "cosa segue": [{event, pct}] o null se non ancora caricato
   // confronto tra sprint per il funnel onboarding (parallelo a sprintFunnel* del catalogo)
   sprintEventOpen: false, sprintEventSel: [], sprintEventData: {}, sprintEventLoading: false, sprintEventError: null,
   savedFunnels: [],           // funnel salvati/nominati — ora dal DB (funnel_definitions), non più localStorage
   activeFunnelPreset: null,
   funnelSaveOpen: false,
   funnelSaveName: '',
+  chipEditorIdx: null,        // indice del funnel salvato in editing (icona/colore/nome/label) — null = editor chiuso
+  chipDraft: null,            // { name, icon, color, label } bozza durante l'editing
+  chipDragFrom: null,         // indice sorgente durante drag & drop delle chip
+  chipDragOver: null,         // indice target evidenziato durante drag
+  chipReorderSaving: false,   // flag per disabilitare drag mentre stiamo salvando l'ordine
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
   engagementByAge: null, engagementByAgeLoading: false, ageEngFrom: null, ageEngTo: null,
@@ -349,7 +375,7 @@ let state = {
   sprintFunnelOpen: false, sprintFunnelSel: [], sprintFunnelData: {}, sprintFunnelLoading: false, sprintFunnelError: null,
   sprintFunnelDef: null,       // id di una funnel_definition da applicare UGUALE a tutti gli sprint nel confronto; null = Base (ogni sprint il suo funnel_config)
   sprintFunnelHiddenSteps: [], // stepIdx nascosti SOLO in visualizzazione confronto (session-only, non persistito, non tocca i funnel)
-  sprintFunnelPctStart: false, // flag: sotto ogni cella del confronto mostra ANCHE la % sulla testa del funnel (oltre alla % vs step precedente)
+  sprintFunnelPctStart: true, // flag: sotto ogni cella del confronto mostra ANCHE la % sulla testa del funnel (oltre alla % vs step precedente) — default ON per coerenza con la colonna "vs #1" nei funnel singoli
   funnelPhases: [], funnelPhasesId: null, // fasi (macro-aree) del funnel — condivise dal DB (funnel_phases)
   sprintLeakMode: 'abs',       // pannello "Dove si perdono gli utenti": 'abs' = utenti persi | 'pct' = tasso di calo
   sprintLeakEdit: null,        // working copy delle fasi durante l'editing; null = non stiamo editando
@@ -572,26 +598,159 @@ async function fetchFunnel() {
   if (state.metaToken && state.funnel) fetchMetaFunnel();
 }
 
+// Serializza eventFunnelConfig in { flatSteps, parentMap, childMap } dove:
+//  - flatSteps = array [{event, source?}] da mandare a kpi_funnel_v2 come p_steps (parent seguiti dai loro children in sequenza)
+//  - parentMap[uiIdx] = posizione del parent in flatSteps (o null se il parent non ha event)
+//  - childMap[uiIdx][cIdx] = posizione del child in flatSteps (o null se il child non ha event)
+// La coorte del RPC (idx=0 con cohort_anchor) resta il primo evento inviato: se il primo step UI ha children, la coorte è il parent (event dei children conta contro quella).
+// Parsa un input testuale in una mappa di filtri metadata per kpi_funnel_v2.
+//   "provider=google"                     → { provider: "google" }
+//   "provider=google, source=onboarding"  → { provider: "google", source: "onboarding" }
+// Accetta virgole o `&` come separatori. Ritorna null se vuoto o malformato.
+function parseFilterInput(str) {
+  if (!str || typeof str !== 'string') return null;
+  const out = {};
+  str.split(/[,&]/).forEach(pair => {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) return;
+    const k = pair.slice(0, eq).trim();
+    const v = pair.slice(eq + 1).trim();
+    if (k && v) out[k] = v;
+  });
+  return Object.keys(out).length ? out : null;
+}
+
+// Serializza filters → stringa umana ("k=v, k2=v2"). Usato per popolare l'input in editing.
+function serializeFilters(f) {
+  if (!f || typeof f !== 'object') return '';
+  return Object.entries(f).map(([k, v]) => `${k}=${v}`).join(', ');
+}
+
+// Costruisce lo step piatto da passare a kpi_funnel_v2. Preferisce `filters` (formato moderno);
+// mantiene backward-compat con `source` (che il RPC mappa internamente a filters {source:x}).
+function buildFlatStep(row) {
+  const step = { event: row.event.trim() };
+  const inline = row.filters && typeof row.filters === 'object' ? row.filters : null;
+  if (inline) {
+    const clean = {};
+    Object.keys(inline).forEach(k => {
+      const v = inline[k];
+      if (v != null && String(v).trim() !== '') clean[k] = String(v);
+    });
+    if (Object.keys(clean).length) step.filters = clean;
+  }
+  if (!step.filters && row.source && String(row.source).trim()) step.source = String(row.source).trim();
+  return step;
+}
+
+function flattenEventFunnelConfig(cfg) {
+  const flatSteps = [];
+  const parentMap = [];
+  const childMap = [];
+  (cfg || []).forEach((row) => {
+    const hasEv = row && row.event && row.event.trim();
+    if (!hasEv) {
+      parentMap.push(null);
+      childMap.push([]);
+      // niente children se il parent non ha evento: bypassiamo per non introdurre uno step orfano in coorte
+      return;
+    }
+    parentMap.push(flatSteps.length);
+    flatSteps.push(buildFlatStep(row));
+    const childList = [];
+    (row.children || []).forEach((c) => {
+      if (!c || !c.event || !c.event.trim()) { childList.push(null); return; }
+      childList.push(flatSteps.length);
+      flatSteps.push(buildFlatStep(c));
+    });
+    childMap.push(childList);
+  });
+  return { flatSteps, parentMap, childMap };
+}
+
 // Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
+// Se tra gli step ci sono pseudo-eventi install_* (aggregati esterni senza identità), li estraggo
+// dai p_steps passati alla RPC (non li troverebbe mai in user_events), disabilito cohort_anchor
+// così gli altri step contano window_counts (utenti nel periodo, senza vincolo coorte) e
+// reinserisco le righe install_* nel risultato col numero aggregato calcolato client-side.
 async function fetchEventFunnel() {
-  const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
-  if (!steps.length) { state.eventFunnel = null; render(); return; }
+  const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
+  state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
+  if (!flatSteps.length) { state.eventFunnel = null; render(); return; }
   state.eventFunnelLoading = true;
   state.eventFunnelError = null;
   render();
   try {
-    const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
-    const args = { inizio: state.funnelFrom, fine: state.funnelTo, p_steps };
-    if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider; // 'google' | 'email'
-    // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
-    if (selSprint) { args.p_start = sprintStartTs(selSprint); args.p_end = sprintEndTs(selSprint); }
-    const res = await sb.rpc('kpi_funnel_v2', args);
-    if (res.error) throw res.error;
-    state.eventFunnel = res.data;
+    const p_start   = selSprint ? sprintStartTs(selSprint) : null;
+    const p_end     = selSprint ? sprintEndTs(selSprint) : null;
+    state.eventFunnel = await computeEventFunnel(flatSteps, {
+      inizio:   state.funnelFrom,
+      fine:     state.funnelTo,
+      provider: state.eventFunnelProvider || null,
+      p_start,
+      p_end,
+    });
   } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
   state.eventFunnelLoading = false;
   render();
+}
+
+// Helper condiviso tra fetchEventFunnel (funnel a eventi corrente) e fetchSprintEventFunnel
+// (confronto sprint). flatSteps = array [{event, source?}]. opts = {inizio, fine, provider, p_start}.
+// Ritorna jsonb equivalente a kpi_funnel_v2 con override install_* client-side.
+async function computeEventFunnel(flatSteps, opts) {
+  const hasInstall = flatSteps.some(s => isInstallEvent(s.event));
+
+  // Mappa idx_originale → step, e filtra fuori gli install per la RPC.
+  const rpcSteps = [];
+  const rpcToOriginal = []; // rpcIdx → originalIdx
+  flatSteps.forEach((s, i) => {
+    if (isInstallEvent(s.event)) return;
+    rpcToOriginal.push(i);
+    rpcSteps.push(s);
+  });
+
+  // Chiamata RPC (solo se ci sono step non-install da contare).
+  let rpcSteps_out = [];
+  let rpcMeta = { cohort_anchor: !hasInstall, include_emulators: false };
+  if (rpcSteps.length) {
+    const args = { inizio: opts.inizio, fine: opts.fine, p_steps: rpcSteps };
+    if (opts.provider) args.p_provider = opts.provider;
+    if (opts.p_start)  args.p_start   = opts.p_start;
+    if (opts.p_end)    args.p_end     = opts.p_end;
+    // Se ci sono install nel funnel, disabilito cohort_anchor: la coorte sarebbe centrata su un
+    // pseudo-evento inesistente in user_events → step successivi tutti a 0. Con anchor=false ogni
+    // step conta gli utenti nel periodo (window_counts), coerente col numero aggregato install.
+    if (hasInstall) args.p_cohort_anchor = false;
+    const res = await sb.rpc('kpi_funnel_v2', args);
+    if (res.error) throw res.error;
+    rpcSteps_out = (res.data && res.data.steps) || [];
+    rpcMeta = { cohort_anchor: res.data?.cohort_anchor, include_emulators: res.data?.include_emulators };
+  }
+
+  // Calcolo numeri install per il periodo.
+  const installNames = flatSteps.filter(s => isInstallEvent(s.event)).map(s => s.event);
+  const installNums  = installNames.length
+    ? await computeInstallStepNumbers(installNames, opts.inizio, opts.fine)
+    : {};
+
+  // Ricomponi l'output nell'ordine originale di flatSteps.
+  const steps = flatSteps.map((s, i) => {
+    if (isInstallEvent(s.event)) {
+      return {
+        idx: i, events: [s.event], label: s.event,
+        filters: s.source ? { source: s.source } : {},
+        numero: installNums[s.event] ?? 0,
+      };
+    }
+    const rpcIdx  = rpcToOriginal.indexOf(i);
+    const rpcRow  = rpcSteps_out.find(r => r.idx === rpcIdx);
+    if (rpcRow) return { ...rpcRow, idx: i };
+    return { idx: i, events: [s.event], label: s.event, filters: s.source ? { source: s.source } : {}, numero: 0 };
+  });
+
+  return { ...rpcMeta, steps };
 }
 
 // Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
@@ -826,17 +985,79 @@ async function fetchFunnelDefinitions() {
     // preserva il preset attivo per ID (l'indice può cambiare se un altro utente aggiunge/rimuove funnel)
     const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
       ? state.savedFunnels[state.activeFunnelPreset].id : null;
-    const res = await sb.from('funnel_definitions').select('*').order('created_at', { ascending: true });
+    const res = await sb.from('funnel_definitions').select('*')
+      .order('order_index', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
     if (res.error) throw res.error;
     state.savedFunnels = (res.data || []).map(r => ({
       id: r.id, name: r.nome, descrizione: r.descrizione,
       tipo: r.tipo, config: r.steps, steps: r.steps, provider: r.provider || null,
+      icon: r.icon || null, color: r.color || null, label: r.label || null,
+      orderIndex: r.order_index,
     }));
     if (activeId) {
       const i = state.savedFunnels.findIndex(f => f.id === activeId);
       state.activeFunnelPreset = i === -1 ? null : i; // se il funnel attivo è stato cancellato altrove → torna a Default
     }
   } catch (e) { console.error('fetchFunnelDefinitions', e); }
+  render();
+}
+
+// Patch parziale su un funnel salvato (nome, icon, color, label). Aggiorna anche state.savedFunnels in
+// place per riflettere subito la UI senza attendere il refetch.
+async function updateFunnelChip(id, patch) {
+  try {
+    const dbPatch = {};
+    if ('name'  in patch) dbPatch.nome  = patch.name;
+    if ('icon'  in patch) dbPatch.icon  = patch.icon;
+    if ('color' in patch) dbPatch.color = patch.color;
+    if ('label' in patch) dbPatch.label = patch.label;
+    dbPatch.updated_at = new Date().toISOString();
+    const upd = await sb.from('funnel_definitions').update(dbPatch).eq('id', id);
+    if (upd.error) throw upd.error;
+    const i = state.savedFunnels.findIndex(f => f.id === id);
+    if (i !== -1) {
+      if ('name'  in patch) state.savedFunnels[i].name  = patch.name;
+      if ('icon'  in patch) state.savedFunnels[i].icon  = patch.icon;
+      if ('color' in patch) state.savedFunnels[i].color = patch.color;
+      if ('label' in patch) state.savedFunnels[i].label = patch.label;
+    }
+  } catch (e) {
+    console.error('updateFunnelChip', e);
+    alert('Errore salvataggio chip: ' + (e.message || e));
+  }
+}
+
+// Riordina i funnel salvati e persiste order_index in batch. `newOrderIds` è l'array degli id nel nuovo
+// ordine desiderato. Assegna order_index 0..N-1 in sequenza — non serve preservare gap.
+async function reorderFunnels(newOrderIds) {
+  state.chipReorderSaving = true;
+  render();
+  try {
+    // Preserva il preset attivo per ID (l'indice cambia dopo il riordino)
+    const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
+      ? state.savedFunnels[state.activeFunnelPreset].id : null;
+    const updates = newOrderIds.map((id, i) =>
+      sb.from('funnel_definitions').update({ order_index: i, updated_at: new Date().toISOString() }).eq('id', id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+    // Riordina state.savedFunnels in place seguendo newOrderIds; aggiorna anche orderIndex locale
+    const byId = new Map(state.savedFunnels.map(f => [f.id, f]));
+    state.savedFunnels = newOrderIds.map((id, i) => {
+      const f = byId.get(id);
+      return f ? { ...f, orderIndex: i } : null;
+    }).filter(Boolean);
+    if (activeId) {
+      const i = state.savedFunnels.findIndex(f => f.id === activeId);
+      state.activeFunnelPreset = i === -1 ? null : i;
+    }
+  } catch (e) {
+    console.error('reorderFunnels', e);
+    alert('Errore riordino chip: ' + (e.message || e));
+  }
+  state.chipReorderSaving = false;
   render();
 }
 
@@ -1490,7 +1711,8 @@ function layout() {
     ${userActivityModal()}
     ${stepUsersModal()}
     ${premiumBucketModal()}
-    ${funnelStepUsersModal()}`;
+    ${funnelStepUsersModal()}
+    ${eventBrowserModal()}`;
 }
 
 function deleteConfirmModal() {
@@ -3082,11 +3304,14 @@ function aiFunnelViz(eventsMap) {
     return { s, n: e?.total ?? 0, users: e?.unique_users ?? 0 };
   });
 
+  const headN = rows[0]?.n ?? 0;
+  const headLabel = rows[0]?.s?.label || 'step 1';
   const html = cfg.map((row, i) => {
     const { s, n, users } = rows[i];
     const vsN    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? rows[row.vsIdx].n : null;
     const change = (vsN !== null && vsN > 0) ? ((n / vsN - 1) * 100).toFixed(0) : null;
     const freq   = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
@@ -3098,6 +3323,7 @@ function aiFunnelViz(eventsMap) {
         <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px">${users} utent${users === 1 ? 'e' : 'i'}</div>
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headN})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
       </div>`;
   }).join('');
 
@@ -3124,9 +3350,12 @@ function aiFeedbackChatCard(eventsMap) {
     { label: 'Risposta utente',              event: 'workout_feedback_replied',                color: '#34d399' },
   ].map(s => ({ ...s, n: getN(s.event), users: getU(s.event) }));
 
+  const headN = steps[0]?.n ?? 0;
+  const headLabel = steps[0]?.label || 'step 1';
   const boxes = steps.map((s, i) => {
     const vsN = i > 0 ? steps[i - 1].n : null;
     const conv = (vsN !== null && vsN > 0) ? (s.n / vsN * 100).toFixed(0) + '%' : null;
+    const startPct = i > 0 && headN > 0 ? (s.n / headN * 100) : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${conv !== null ? `<div style="font-size:10px;color:var(--muted);font-weight:700;white-space:nowrap">${conv}</div>` : ''}
@@ -3137,6 +3366,7 @@ function aiFeedbackChatCard(eventsMap) {
         <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
         <div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px">${s.users} utent${s.users === 1 ? 'e' : 'i'}</div>
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headN})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
       </div>`;
   }).join('');
 
@@ -3163,6 +3393,32 @@ function pageAICoach() {
         style="width:145px;padding:5px 10px;font-size:12px">
       <button id="ai-stats-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Aggiorna</button>
     </div>`;
+
+  // 0. Healthcheck persistenza transcript AI (spec bug--ai-chat-transcript-persistence-dead).
+  // Rende visibile una futura rottura silenziosa dell'insert su ai_chat_message: se arrivano
+  // ai_chat_send ma la tabella non avanza (o persist_chat_error > 0) → banner rosso in cima.
+  // Bug 2026-07-01 → 07-16 rimasto invisibile 15 giorni perché nessuno guardava ai_debug_log.
+  const transcriptHealth = (() => {
+    if (!d) return '';
+    const lastAt = d.transcript_last_msg_at ? new Date(d.transcript_last_msg_at) : null;
+    const sends24h = Number(d.chat_sends_24h || 0);
+    const persistErr24h = Number(d.persist_errors_24h || 0);
+    const now = new Date();
+    const stale = lastAt && (now.getTime() - lastAt.getTime()) > 48 * 3600 * 1000;
+    const broken = persistErr24h > 0 || (stale && sends24h > 0);
+    if (!broken) return '';
+    const lastAtStr = lastAt ? lastAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'mai';
+    return `<div class="card" style="margin-bottom:16px;border-left:4px solid var(--red);background:rgba(220,50,50,0.06)">
+      <div style="padding:14px 16px">
+        <div style="font-weight:600;color:var(--red);margin-bottom:6px">⚠️ Persistenza transcript AI chat interrotta</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5">
+          Ultimo messaggio in <code>ai_chat_message</code>: <b>${esc(lastAtStr)}</b><br>
+          <code>ai_chat_send</code> ultime 24h: <b>${sends24h}</b> · <code>persist_chat_error</code> ultime 24h: <b>${persistErr24h}</b>
+          <br>Se send &gt; 0 e la tabella non avanza, la chain è rotta (vedi <code>_specs/ai/bug--ai-chat-transcript-persistence-dead/</code>).
+        </div>
+      </div>
+    </div>`;
+  })();
 
   // 1. KPI north-star
   let kpiCard;
@@ -3230,7 +3486,7 @@ function pageAICoach() {
     </div>
   </div>`;
 
-  return `${filterBar}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${toolsCard}${convCard}`;
+  return `${filterBar}${transcriptHealth}${kpiCard}${funnelCard}${engagementCard}${feedbackCardHtml}${toolsCard}${convCard}`;
 }
 
 // ── AI COACH — CONFRONTO SPRINT ─────────────────────────────────────────
@@ -3330,6 +3586,16 @@ function sprintAiFunnelTable(selected, dataMap) {
     const step = AI_FUNNEL_ALL_STEPS[row.stepIdx];
     const nums = selected.map(s => Number((dataMap[s.id] || {})[step.event]?.total ?? -1));
     const maxN = Math.max(...nums.filter(n => n >= 0), 0);
+    // isBest sulla % di conversione (vsIdx), non sul numero assoluto. Vedi commento in sprintEventFunnelTable.
+    const vsStep0 = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
+    const convPcts = selected.map(s => {
+      const eventsMap = dataMap[s.id] || {};
+      const num = Number(eventsMap[step.event]?.total ?? 0);
+      const vsN = vsStep0 ? Number(eventsMap[vsStep0.event]?.total ?? 0) : null;
+      return vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
 
     const cells = selected.map((s, si) => {
       const eventsMap = dataMap[s.id] || {};
@@ -3337,12 +3603,10 @@ function sprintAiFunnelTable(selected, dataMap) {
       const usersN = Number(eventsMap[step.event]?.unique_users ?? 0);
       const headN  = headStep ? Number(eventsMap[headStep.event]?.total ?? 0) : 0;
       const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
-      const vsStep = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i ? AI_FUNNEL_ALL_STEPS[cfg[row.vsIdx].stepIdx] : null;
-      const vsN    = vsStep ? Number(eventsMap[vsStep.event]?.total ?? 0) : null;
-      const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+      const convPct   = convPcts[si];
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
-      const isBest    = num === maxN && maxN > 0;
+      const isBest    = maxConvPct !== null && convPct === maxConvPct;
       const barW      = maxN > 0 ? Math.round(num / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -3568,34 +3832,498 @@ function aiChatPanel() {
     </div>`;
 }
 
-// ── FUNNEL — custom builder ───────────────────────────────────────────
+// ── EVENT BROWSER — popup selezione evento ────────────────────────────
 
-function savedFunnelBar() {
-  const { savedFunnels, activeFunnelPreset, funnelSaveOpen, funnelSaveName } = state;
-  const pill = (active) =>
-    `border-radius:20px;border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};` +
-    `background:${active ? 'var(--accent-lo)' : 'var(--surface2)'};` +
-    `color:${active ? 'var(--purple)' : 'var(--muted)'};cursor:pointer;font-size:12px;` +
-    `padding:4px 14px;font-weight:${active ? '600' : '400'};transition:all .15s;font-family:inherit`;
+// Carica il catalogo eventi dal DB (event_registry, popolato da build-event-map.ts). Metadati non
+// sensibili → RLS read pubblica. Ordinato per volume 30g desc così i più rilevanti vengono prima.
+// In coda al fetch iniettiamo 2 pseudo-eventi install_* aggregati (Google Play + Meta Ads): non
+// stanno in user_events, i loro volumi sono SUM sulle tabelle esterne. Vedi syntheticInstallEvents.
+async function fetchEventRegistry() {
+  try {
+    const [regRes, installs] = await Promise.all([
+      sb.from('event_registry').select('*').order('vol_30d', { ascending: false }),
+      syntheticInstallEvents().catch(e => { console.warn('syntheticInstallEvents', e); return []; }),
+    ]);
+    if (regRes.error) throw regRes.error;
+    const all = [...installs, ...(regRes.data || [])];
+    all.sort((a, b) => (b.vol_30d || 0) - (a.vol_30d || 0));
+    state.eventRegistry = all;
+  } catch (e) { console.error('fetchEventRegistry', e); }
+  if (state.eventBrowserOpen) render();
+}
+
+// Colore/glifo per tipo evento (coerente col mockup).
+// `install` = pseudo-evento aggregato (Google Play / Meta Ads): non è in user_events, il numero
+// arriva da google_play_installs / meta_ads_insights_daily (vedi syntheticInstallEvents()).
+function eventTypeColor(type) {
+  return { action: 'var(--purple)', click: '#5b9bff', navigation: '#3ecacd', install: '#22c55e', error: 'var(--red)' }[type] || 'var(--muted)';
+}
+function eventTypeGlyph(type) {
+  return { action: '⚡', click: '◉', navigation: '→', install: '↓', error: '!' }[type] || '·';
+}
+
+// Nomi degli pseudo-eventi install (usati anche per riconoscerli in fetchEventFunnel/fetchSprintEventFunnel).
+const INSTALL_EVENT_NAMES = ['install_google_play', 'install_meta_ads'];
+function isInstallEvent(name) { return INSTALL_EVENT_NAMES.includes(name); }
+
+// Totali install {google_play, meta_ads} per un periodo [from, to] date-inclusive. La dashboard
+// gira con anon key ma google_play_installs / meta_ads_insights_daily sono service_role-only:
+// la RPC kpi_install_totals è SECURITY DEFINER (stesso pattern di kpi_funnel).
+async function fetchInstallTotals(from, to) {
+  const { data, error } = await sb.rpc('kpi_install_totals', { inizio: from, fine: to });
+  if (error) throw error;
+  const out = { google_play: 0, meta_ads: 0 };
+  for (const row of data || []) out[row.source] = Number(row.total || 0);
+  return out;
+}
+
+// Data ISO (YYYY-MM-DD) a N giorni fa in ora locale.
+function daysAgoIso(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Costruisce le 2 entry sintetiche install_* da iniettare in state.eventRegistry. Volumi 7g/30g
+// calcolati dalle stesse tabelle usate dal funnel Default (kpi_funnel step 0). Se la RPC fallisce
+// lasciamo volumi a 0 per non bloccare il render del modal.
+async function syntheticInstallEvents() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [t7, t30] = await Promise.all([
+    fetchInstallTotals(daysAgoIso(7),  today).catch(() => ({ google_play: 0, meta_ads: 0 })),
+    fetchInstallTotals(daysAgoIso(30), today).catch(() => ({ google_play: 0, meta_ads: 0 })),
+  ]);
+  const now = new Date().toISOString();
+  return [
+    {
+      event_name: 'install_google_play',
+      screens: ['Google Play'], types: ['install'], verdict: 'alive',
+      funnels_used: 0, vol_7d: t7.google_play, vol_30d: t30.google_play, updated_at: now,
+    },
+    {
+      event_name: 'install_meta_ads',
+      screens: ['Meta Ads'], types: ['install'], verdict: 'alive',
+      funnels_used: 0, vol_7d: t7.meta_ads, vol_30d: t30.meta_ads, updated_at: now,
+    },
+  ];
+}
+
+// Numeri install per il periodo, mappati sui nomi pseudo-evento usati nel funnel a eventi.
+async function computeInstallStepNumbers(eventNames, from, to) {
+  const totals = await fetchInstallTotals(from, to).catch(() => ({ google_play: 0, meta_ads: 0 }));
+  const out = {};
+  if (eventNames.includes('install_google_play')) out.install_google_play = totals.google_play;
+  if (eventNames.includes('install_meta_ads'))    out.install_meta_ads    = totals.meta_ads;
+  return out;
+}
+function eventPrimaryType(ev) { return (ev.types && ev.types[0]) || 'action'; }
+function eventPrimaryScreen(ev) { return (ev.screens && ev.screens[0]) || '—'; }
+
+// Applica i filtri correnti (ricerca, schermata, tipo, volume, alive) al registry.
+function eventBrowserFiltered() {
+  const q = state.ebSearch.trim().toLowerCase();
+  return state.eventRegistry.filter(ev => {
+    if (state.ebAliveOnly && ev.verdict !== 'alive') return false;
+    if (!state.ebVolAll && (ev.vol_30d || 0) <= 100) return false;
+    if (state.ebType && !(ev.types || []).includes(state.ebType)) return false;
+    if (state.ebScreen && !(ev.screens || []).includes(state.ebScreen)) return false;
+    if (q && !ev.event_name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+// Query on-demand "cosa segue": per l'evento X il primo evento successivo dello stesso utente entro
+// 30 min (ultimi 14 giorni), aggregato in percentuali. Nessuna infra pre-calcolata: gira solo quando
+// apri il tab. ~1-2s. Usa la RPC event_next_transitions.
+async function fetchEventNext(eventName) {
+  state.ebNextLoading = true; state.ebNextRows = null; render();
+  try {
+    const res = await sb.rpc('event_next_transitions', { p_event: eventName, p_days: 14, p_window_min: 30 });
+    if (res.error) throw res.error;
+    state.ebNextRows = (res.data || []).map(r => ({ event: r.next_event, pct: Number(r.pct) })).slice(0, 6);
+  } catch (e) {
+    console.error('fetchEventNext', e);
+    state.ebNextRows = 'error';
+  }
+  state.ebNextLoading = false; render();
+}
+
+// Modale event browser. Renderizzato globalmente in layout(); visibile solo se eventBrowserOpen.
+function eventBrowserModal() {
+  if (!state.eventBrowserOpen) return '';
+  const filtered = eventBrowserFiltered();
+  const tgt = state.eventBrowserTargetRow;
+  const stepCtx = tgt != null ? ` · Step ${tgt + 1} del funnel` : '';
+
+  // colonna schermate: conta gli eventi (post alive/vol/type, ignorando il filtro schermata) per screen
+  const forScreens = state.eventRegistry.filter(ev => {
+    if (state.ebAliveOnly && ev.verdict !== 'alive') return false;
+    if (!state.ebVolAll && (ev.vol_30d || 0) <= 100) return false;
+    if (state.ebType && !(ev.types || []).includes(state.ebType)) return false;
+    return true;
+  });
+  const screenCounts = {};
+  forScreens.forEach(ev => { const s = eventPrimaryScreen(ev); screenCounts[s] = (screenCounts[s] || 0) + 1; });
+  const screenList = Object.keys(screenCounts).filter(s => s !== '—').sort();
+  const screensHtml = `
+    <div class="eb-sc-item ${state.ebScreen === null ? 'on' : ''}" data-screen="">
+      <span>Tutte le schermate</span><span class="n">${forScreens.length}</span>
+    </div>` +
+    screenList.map(s => `
+      <div class="eb-sc-item ${state.ebScreen === s ? 'on' : ''}" data-screen="${esc(s)}">
+        <span>${esc(s)}</span><span class="n">${screenCounts[s]}</span>
+      </div>`).join('');
+
+  const maxVol = Math.max(...filtered.map(e => e.vol_30d || 0), 1);
+  const eventsHtml = filtered.length ? filtered.map(ev => {
+    const t = eventPrimaryType(ev), col = eventTypeColor(t), sel = state.ebSelected === ev.event_name;
+    const usedIn = ev.funnels_used > 0 ? `<span>usato in ${ev.funnels_used} funnel</span>` : '';
+    return `
+      <div class="eb-ev ${sel ? 'sel' : ''}" data-event="${esc(ev.event_name)}">
+        <div class="eb-tico" style="background:${col}22;color:${col}">${eventTypeGlyph(t)}</div>
+        <div style="min-width:0">
+          <div class="eb-name">${esc(ev.event_name)}</div>
+          <div class="eb-meta"><span class="eb-badge">${esc(t)}</span>${usedIn}</div>
+        </div>
+        <div class="eb-vol">
+          <div class="num">${(ev.vol_30d || 0).toLocaleString('it-IT')}</div>
+          <div class="bar"><i style="width:${Math.round((ev.vol_30d || 0) / maxVol * 100)}%;background:${col}"></i></div>
+        </div>
+      </div>`;
+  }).join('') : `<div style="padding:30px 16px;color:var(--muted);font-size:12.5px;text-align:center">Nessun evento con questi filtri.</div>`;
+
+  const sel = state.eventRegistry.find(e => e.event_name === state.ebSelected);
+  const detailHtml = !sel ? `
+    <div style="padding:30px 16px;color:var(--muted);font-size:12px;text-align:center">Seleziona un evento per i dettagli.</div>`
+    : (() => {
+      const t = eventPrimaryType(sel), col = eventTypeColor(t);
+      const tabs = `
+        <div class="eb-d-tabs">
+          <div class="eb-d-tab ${state.ebTab === 'details' ? 'on' : ''}" data-tab="details">Dettagli</div>
+          <div class="eb-d-tab ${state.ebTab === 'next' ? 'on' : ''}" data-tab="next">Cosa segue</div>
+        </div>`;
+      if (state.ebTab === 'next') {
+        let body;
+        if (state.ebNextLoading) body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Calcolo sequenza… (~2s)</div>`;
+        else if (state.ebNextRows === 'error') body = `<div style="color:var(--red);font-size:12px;padding:8px 0">Query non disponibile (RPC event_next_transitions mancante).</div>`;
+        else if (Array.isArray(state.ebNextRows)) {
+          if (!state.ebNextRows.length) body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuna sequenza rilevata negli ultimi 14 giorni.</div>`;
+          else {
+            const top = state.ebNextRows[0];
+            body = state.ebNextRows.map(r => `
+              <div class="eb-next-row">
+                <span class="nm">${esc(r.event)}</span>
+                <div class="nbar"><i style="width:${Math.round(r.pct)}%"></i></div>
+                <span class="pct">${r.pct.toFixed(0)}%</span>
+              </div>`).join('')
+              + `<div class="eb-next-note">Su user_events, ultimi 14 giorni, stesso utente entro 30 min.</div>`
+              + `<div class="eb-next-cta">Suggerimento step successivo:<br><b data-suggest="${esc(top.event)}">+ ${esc(top.event)} (${top.pct.toFixed(0)}%)</b></div>`;
+          }
+        } else body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Apri il tab per calcolare.</div>`;
+        return `${tabs}<div class="eb-d-pad">
+          <div class="eb-d-name" style="color:${col}">${eventTypeGlyph(t)} ${esc(sel.event_name)}</div>
+          <div><div class="eb-d-sec" style="margin-bottom:6px">Dopo questo evento (entro 30 min)</div>${body}</div>
+        </div>`;
+      }
+      const funnelsRow = sel.funnels_used > 0
+        ? `<div class="eb-kv"><div class="k">Funnel che lo usano</div><div class="v">${sel.funnels_used}</div></div>` : '';
+      return `${tabs}<div class="eb-d-pad">
+        <div class="eb-d-name" style="color:${col}">${eventTypeGlyph(t)} ${esc(sel.event_name)}</div>
+        <div class="eb-d-kv">
+          <div class="eb-kv"><div class="k">Volume 7g</div><div class="v">${(sel.vol_7d||0).toLocaleString('it-IT')}</div></div>
+          <div class="eb-kv"><div class="k">Volume 30g</div><div class="v">${(sel.vol_30d||0).toLocaleString('it-IT')}</div></div>
+          <div class="eb-kv"><div class="k">Tipo</div><div class="v" style="font-size:12px;color:${col}">${esc((sel.types||[]).join(', ')||'—')}</div></div>
+          <div class="eb-kv"><div class="k">Stato</div><div class="v" style="font-size:12px">${esc(sel.verdict||'—')}</div></div>
+        </div>
+        <div><div class="eb-d-sec" style="margin-bottom:6px">Schermate</div>
+          <div style="font-family:var(--mono);font-size:11.5px;color:var(--muted)">${esc((sel.screens||[]).join(', ')||'nessuna')}</div>
+        </div>
+        ${funnelsRow}
+      </div>`;
+    })();
 
   return `
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+    <div class="eb-overlay" id="eb-overlay">
+      <div class="eb-modal">
+        <div class="eb-head">
+          <div class="eb-title">Scegli evento<span class="ctx">${stepCtx}</span></div>
+          <input id="eb-search" class="eb-search" type="text" placeholder="🔍  Cerca evento…" value="${esc(state.ebSearch)}" autocomplete="off">
+          <button class="eb-close" id="eb-close">×</button>
+        </div>
+        <div class="eb-filters">
+          <button class="eb-fchip ${!state.ebType ? 'on' : ''}" data-type="">Tutti i tipi</button>
+          <button class="eb-fchip ${state.ebType === 'action' ? 'on' : ''}" data-type="action"><span class="dot" style="background:var(--purple)"></span>action</button>
+          <button class="eb-fchip ${state.ebType === 'click' ? 'on' : ''}" data-type="click"><span class="dot" style="background:#5b9bff"></span>click</button>
+          <button class="eb-fchip ${state.ebType === 'navigation' ? 'on' : ''}" data-type="navigation"><span class="dot" style="background:#3ecacd"></span>navigation</button>
+          <button class="eb-fchip ${state.ebType === 'install' ? 'on' : ''}" data-type="install"><span class="dot" style="background:#22c55e"></span>install</button>
+          <div class="eb-fsep"></div>
+          <button class="eb-fchip ${!state.ebVolAll ? 'on' : ''}" id="eb-vol-hi">Volume &gt; 100/30g</button>
+          <button class="eb-fchip ${state.ebVolAll ? 'on' : ''}" id="eb-vol-all">Tutti (${state.eventRegistry.filter(e=>state.ebAliveOnly?e.verdict==='alive':true).length})</button>
+          <label class="eb-toggle" id="eb-alive"><span>solo eventi vivi</span><span class="sw ${state.ebAliveOnly ? 'on' : ''}"></span></label>
+        </div>
+        <div class="eb-body">
+          <div class="eb-screens">${screensHtml}</div>
+          <div class="eb-events">${eventsHtml}</div>
+          <div class="eb-detail">${detailHtml}</div>
+        </div>
+        <div class="eb-foot">
+          <div class="eb-selprev">${state.ebSelected ? `Selezionato: <span class="nm">${esc(state.ebSelected)}</span>` : 'Nessun evento selezionato'}</div>
+          <button class="btn btn-ghost" id="eb-cancel" style="font-size:12px;padding:8px 14px">Annulla</button>
+          <button class="eb-add" id="eb-add" ${state.ebSelected ? '' : 'disabled'}>${tgt != null ? `Aggiungi allo step ${tgt + 1}` : 'Aggiungi'}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Apre il modale event browser puntando allo step targetRow di eventFunnelConfig. Se targetChild
+// è un numero, il target è la variante children[targetChild] dello step, non il parent stesso.
+// Preseleziona l'evento già presente sul target (se c'è) così si può anche solo cambiarlo.
+function openEventBrowser(targetRow, targetChild) {
+  state.eventBrowserOpen = true;
+  state.eventBrowserTargetRow = targetRow;
+  state.eventBrowserTargetChild = (typeof targetChild === 'number') ? targetChild : null;
+  const row = state.eventFunnelConfig[targetRow];
+  const target = state.eventBrowserTargetChild !== null && row && Array.isArray(row.children)
+    ? row.children[state.eventBrowserTargetChild]
+    : row;
+  state.ebSelected = (target && target.event) || null;
+  state.ebSearch = ''; state.ebScreen = null; state.ebType = null;
+  state.ebVolAll = false; state.ebAliveOnly = true;
+  state.ebTab = 'details'; state.ebNextRows = null; state.ebNextLoading = false;
+  render();
+  document.getElementById('eb-search')?.focus();
+}
+
+function closeEventBrowser() {
+  state.eventBrowserOpen = false;
+  state.eventBrowserTargetRow = null;
+  state.eventBrowserTargetChild = null;
+  state.ebSelected = null;
+  render();
+}
+
+// Conferma la selezione: scrive event + label sullo step target (parent o child) e chiude.
+function confirmEventBrowser() {
+  const i = state.eventBrowserTargetRow;
+  if (i == null || !state.ebSelected) return;
+  const row = state.eventFunnelConfig[i];
+  if (row) {
+    const target = state.eventBrowserTargetChild !== null && Array.isArray(row.children)
+      ? row.children[state.eventBrowserTargetChild]
+      : row;
+    if (target) {
+      target.event = state.ebSelected;
+      const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
+      target.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
+      persistEventFunnelConfig();
+    }
+  }
+  closeEventBrowser();
+}
+
+// Attacca gli handler del modale (chiamato a ogni render da attachEvents).
+function attachEventBrowserHandlers() {
+  if (!state.eventBrowserOpen) return;
+
+  // click sull'overlay (fuori dal modale) chiude
+  document.getElementById('eb-overlay')?.addEventListener('mousedown', e => {
+    if (e.target.id === 'eb-overlay') closeEventBrowser();
+  });
+  document.getElementById('eb-close')?.addEventListener('click', closeEventBrowser);
+  document.getElementById('eb-cancel')?.addEventListener('click', closeEventBrowser);
+
+  // ricerca — mantiene il focus/caret non ricreando l'input a ogni tasto: aggiorna solo la lista
+  const search = document.getElementById('eb-search');
+  if (search) {
+    search.addEventListener('input', e => { state.ebSearch = e.target.value; render(); document.getElementById('eb-search')?.focus(); });
+    search.addEventListener('keydown', e => { if (e.key === 'Escape') closeEventBrowser(); });
+  }
+
+  // filtri tipo
+  document.querySelectorAll('.eb-fchip[data-type]').forEach(el =>
+    el.addEventListener('click', () => { state.ebType = el.dataset.type || null; render(); }));
+  document.getElementById('eb-vol-hi')?.addEventListener('click', () => { state.ebVolAll = false; render(); });
+  document.getElementById('eb-vol-all')?.addEventListener('click', () => { state.ebVolAll = true; render(); });
+  document.getElementById('eb-alive')?.addEventListener('click', () => { state.ebAliveOnly = !state.ebAliveOnly; render(); });
+
+  // colonna schermate
+  document.querySelectorAll('.eb-sc-item').forEach(el =>
+    el.addEventListener('click', () => { state.ebScreen = el.dataset.screen || null; render(); }));
+
+  // selezione evento: click = seleziona; doppio click = seleziona + conferma
+  document.querySelectorAll('.eb-ev').forEach(el => {
+    el.addEventListener('click', () => {
+      state.ebSelected = el.dataset.event;
+      if (state.ebTab === 'next') { state.ebNextRows = null; }  // reset sequenza per il nuovo evento
+      render();
+    });
+    el.addEventListener('dblclick', () => { state.ebSelected = el.dataset.event; confirmEventBrowser(); });
+  });
+
+  // tab dettaglio
+  document.querySelectorAll('.eb-d-tab').forEach(el =>
+    el.addEventListener('click', () => {
+      state.ebTab = el.dataset.tab;
+      if (state.ebTab === 'next' && state.ebSelected && state.ebNextRows == null && !state.ebNextLoading) {
+        fetchEventNext(state.ebSelected);
+      } else render();
+    }));
+
+  // suggerimento "cosa segue" → seleziona quell'evento
+  document.querySelector('[data-suggest]')?.addEventListener('click', el => {
+    state.ebSelected = el.target.dataset.suggest;
+    state.ebTab = 'details'; render();
+  });
+
+  document.getElementById('eb-add')?.addEventListener('click', confirmEventBrowser);
+}
+
+// ── FUNNEL — custom builder ───────────────────────────────────────────
+
+// Set curato di 24 icone Lucide per le chip funnel (analytics-oriented). Ogni SVG copiato raw da
+// lucide.dev (stroke=2, size=16). Chiave = nome breve usato come identifier persistito su DB.
+// Aggiungi/rimuovi qui: il picker legge le chiavi in automatico.
+const LUCIDE_ICONS = {
+  zap:              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  target:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+  users:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  'trending-up':    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+  'mouse-pointer':  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>',
+  'shopping-cart':  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
+  activity:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  brain:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/></svg>',
+  'dollar-sign':    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  flag:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+  gift:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
+  sparkles:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>',
+  'message-circle': '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  play:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+  'check-circle':   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  filter:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+  'bar-chart':      '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>',
+  rocket:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>',
+  crown:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg>',
+  heart:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+  eye:              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  bell:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  'map-pin':        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  calendar:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+};
+
+// Palette 8 colori per le chip. Hex derivati dallo stile HypeMove dashboard: viola come var(--accent),
+// più 7 tinte per differenziare a colpo d'occhio. Chiave (nome breve) = valore persistito.
+const CHIP_COLORS = {
+  purple: '#a879ff',
+  blue:   '#5b9bff',
+  cyan:   '#3ecacd',
+  green:  '#4ade80',
+  yellow: '#facc15',
+  orange: '#fb923c',
+  pink:   '#f472b6',
+  red:    '#ef4444',
+};
+
+const DEFAULT_CHIP_ICON  = 'zap';
+const DEFAULT_CHIP_COLOR = 'purple';
+
+// Render inline dell'icona Lucide. Fallback su DEFAULT_CHIP_ICON se il nome non esiste (icona rimossa).
+function chipIconSvg(name) {
+  return LUCIDE_ICONS[name] || LUCIDE_ICONS[DEFAULT_CHIP_ICON];
+}
+function chipColorHex(name) {
+  return CHIP_COLORS[name] || CHIP_COLORS[DEFAULT_CHIP_COLOR];
+}
+
+// Ordine unificato delle chip in toolbar come array di token: 'default', 'onboarding', o id funnel.
+// Seed di default: [default, onboarding, ...saved by order_index]. Se esiste un ordine salvato in
+// localStorage lo si rispetta (filtrando token spariti), accodando i token nuovi non ancora ordinati.
+function funnelToolbarTokens() {
+  const seed = ['default', 'onboarding', ...state.savedFunnels.map(f => f.id)];
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem(LS_FUNNEL_TOOLBAR_ORDER)) || []; } catch { stored = []; }
+  const seedSet = new Set(seed);
+  const ordered = stored.filter(t => seedSet.has(t));      // token ancora esistenti, nell'ordine salvato
+  const orderedSet = new Set(ordered);
+  const appended = seed.filter(t => !orderedSet.has(t));   // token nuovi non ancora in localStorage
+  return [...ordered, ...appended];
+}
+
+// Persiste il nuovo ordine dei token in localStorage e propaga l'ordine dei soli funnel salvati sul DB
+// (order_index) così un browser fresco parte da un ordine sensato. I due built-in vivono solo qui.
+async function saveFunnelToolbarOrder(tokens) {
+  try { localStorage.setItem(LS_FUNNEL_TOOLBAR_ORDER, JSON.stringify(tokens)); } catch (e) { console.error('saveFunnelToolbarOrder LS', e); }
+  const savedIds = tokens.filter(t => t !== 'default' && t !== 'onboarding');
+  if (savedIds.length) await reorderFunnels(savedIds);
+  else render();
+}
+
+function savedFunnelBar() {
+  const { savedFunnels, activeFunnelPreset, funnelSaveOpen, funnelSaveName, chipDragOver } = state;
+
+  // pill di base — accent = colore custom della chip (default viola) quando attiva
+  const basePill = (active, accentHex) =>
+    `border-radius:20px;border:1px solid ${active ? accentHex : 'var(--border)'};` +
+    `background:${active ? accentHex + '22' : 'var(--surface2)'};` +
+    `color:${active ? accentHex : 'var(--muted)'};font-size:12px;` +
+    `padding:4px 12px;font-weight:${active ? '600' : '400'};transition:all .15s;font-family:inherit;` +
+    `display:inline-flex;align-items:center;gap:6px;line-height:1`;
+
+  const dropCue = (token) => chipDragOver === token ? `box-shadow:inset 3px 0 0 var(--accent);` : '';
+
+  // wrap draggabile comune a tutte le chip; data-token identifica la chip nell'ordine
+  const wrap = (token, inner) => `
+    <div class="funnel-chip-wrap" data-token="${token}" draggable="true"
+         style="display:inline-flex;align-items:stretch;${dropCue(token)}cursor:grab">${inner}</div>`;
+
+  // built-in Default
+  const defaultChip = () => wrap('default', `
+    <button class="funnel-preset-btn" data-preset-idx="default"
+            style="${basePill(state.funnelMode !== 'event' && activeFunnelPreset === null, chipColorHex('purple'))};border-radius:20px;cursor:pointer">
+      Default
+    </button>`);
+
+  // built-in funnel onboarding
+  const onboardingChip = () => wrap('onboarding', `
+    <button id="funnel-onboarding-btn"
+            style="${basePill(state.funnelMode === 'event' && activeFunnelPreset === null, chipColorHex('purple'))};border-radius:20px;cursor:pointer">
+      <span style="display:inline-flex;align-items:center">${chipIconSvg('zap')}</span>
+      <span>funnel onboarding</span>
+    </button>`);
+
+  // chip salvata custom — matita rimossa: la modifica dell'aspetto (nome/etichetta/icona/colore)
+  // vive integrata nel Costruttore funnel (si apre col bottone "⚙ Modifica funnel").
+  const savedChip = (f, i) => {
+    const active    = activeFunnelPreset === i;
+    const accentHex = chipColorHex(f.color);
+    const iconName  = f.icon || DEFAULT_CHIP_ICON;
+    const labelHtml = f.label
+      ? `<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${accentHex}33;color:${accentHex};font-weight:500;margin-left:2px">${esc(f.label)}</span>`
+      : '';
+    const edgeBorder = active ? accentHex : 'var(--border)';
+    const edgeBg     = active ? accentHex + '22' : 'var(--surface2)';
+    return wrap(f.id, `
+      <button class="funnel-preset-btn" data-preset-idx="${i}" title="Attiva funnel"
+              style="${basePill(active, accentHex)};border-radius:20px 0 0 20px;border-right:none;cursor:pointer">
+        <span style="color:${active ? accentHex : 'var(--muted)'};display:inline-flex;align-items:center">${chipIconSvg(iconName)}</span>
+        <span>${esc(f.name)}</span>
+        ${labelHtml}
+      </button>
+      <button class="funnel-preset-del" data-preset-idx="${i}" title="Elimina funnel"
+              style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid ${edgeBorder};border-left:none;background:${edgeBg};color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>`);
+  };
+
+  // Render nell'ordine dei token
+  const chipsHtml = funnelToolbarTokens().map(token => {
+    if (token === 'default') return defaultChip();
+    if (token === 'onboarding') return onboardingChip();
+    const i = savedFunnels.findIndex(f => f.id === token);
+    return i === -1 ? '' : savedChip(savedFunnels[i], i);
+  }).join('');
+
+  return `
+    <div id="funnel-chips-toolbar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
       <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Funnel</span>
-      <button class="funnel-preset-btn" data-preset-idx="default" style="${pill(state.funnelMode !== 'event' && activeFunnelPreset === null)}">
-        Default
-      </button>
-      <button id="funnel-onboarding-btn" style="${pill(state.funnelMode === 'event' && activeFunnelPreset === null)}">
-        ⚡ funnel onboarding
-      </button>
-      ${savedFunnels.map((f, i) => `
-        <div style="display:inline-flex;align-items:stretch">
-          <button class="funnel-preset-btn" data-preset-idx="${i}" title="${(f.tipo || 'catalog') === 'event' ? 'Funnel a eventi' : 'Funnel da catalogo'}"
-            style="${pill(activeFunnelPreset === i)};border-radius:20px 0 0 20px;border-right:none">
-            ${(f.tipo || 'catalog') === 'event' ? '⚡ ' : ''}${esc(f.name)}
-          </button>
-          <button class="funnel-preset-del" data-preset-idx="${i}"
-            style="padding:4px 8px;border-radius:0 20px 20px 0;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-size:13px;line-height:1;font-family:inherit">×</button>
-        </div>`).join('')}
+      ${chipsHtml}
       <div style="width:1px;height:16px;background:var(--border);margin:0 4px;align-self:center"></div>
       ${funnelSaveOpen
         ? `<div style="display:flex;align-items:center;gap:6px">
@@ -3605,14 +4333,77 @@ function savedFunnelBar() {
             <button id="funnel-save-cancel" class="btn btn-ghost" style="padding:4px 10px;font-size:12px">×</button>
           </div>`
         : `<button id="funnel-save-open" class="btn btn-ghost" style="padding:4px 12px;font-size:12px">+ Salva</button>`}
+      ${state.chipReorderSaving ? `<span style="font-size:11px;color:var(--muted)">Salvo ordine…</span>` : ''}
+    </div>`;
+}
+
+// Editor chip — versione compatta inline dentro il costruttore funnel.
+// Nome+etichetta stessa riga. Icona collassata (mostra solo quella corrente), la griglia si apre
+// in hover sotto forma di popover. Colori inline. Save/Annulla piccoli a destra.
+function chipEditorPanel(idx) {
+  const f = state.savedFunnels[idx];
+  if (!f) return '';
+  const d = state.chipDraft || {
+    name: f.name || '', icon: f.icon || DEFAULT_CHIP_ICON,
+    color: f.color || DEFAULT_CHIP_COLOR, label: f.label || '',
+  };
+  const accentHex = chipColorHex(d.color);
+
+  const iconGrid = Object.keys(LUCIDE_ICONS).map(name => {
+    const active = name === d.icon;
+    return `<button class="chip-icon-btn" data-icon="${name}" title="${name}"
+      style="width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid ${active ? accentHex : 'var(--border)'};background:${active ? accentHex + '22' : 'transparent'};color:${active ? accentHex : 'var(--muted)'};cursor:pointer;padding:0">${chipIconSvg(name)}</button>`;
+  }).join('');
+
+  const colorSwatches = Object.entries(CHIP_COLORS).map(([name, hex]) => {
+    const active = name === d.color;
+    return `<button class="chip-color-btn" data-color="${name}" title="${name}"
+      style="width:20px;height:20px;border-radius:50%;background:${hex};border:2px solid ${active ? '#fff' : 'transparent'};box-shadow:${active ? '0 0 0 2px ' + hex : 'none'};cursor:pointer;padding:0"></button>`;
+  }).join('');
+
+  return `
+    <div class="chip-inline-editor" style="display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-left:3px solid ${accentHex};border-radius:8px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">
+        <span style="color:${accentHex};display:inline-flex;align-items:center">${chipIconSvg(d.icon)}</span>
+        Aspetto della chip
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:nowrap">
+        <input id="chip-editor-name" class="form-input" type="text" value="${esc(d.name)}"
+               placeholder="Nome" style="flex:1 1 55%;padding:5px 10px;font-size:12px;min-width:0" autocomplete="off">
+        <input id="chip-editor-label" class="form-input" type="text" value="${esc(d.label)}"
+               placeholder="Etichetta (opzionale)"
+               style="flex:1 1 45%;padding:5px 10px;font-size:12px;min-width:0" autocomplete="off">
+      </div>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <div class="chip-icon-picker" style="position:relative;display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Icona</span>
+          <button type="button" class="chip-icon-current"
+                  style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid ${accentHex};background:${accentHex}22;color:${accentHex};cursor:pointer;padding:0">${chipIconSvg(d.icon)}</button>
+          <div class="chip-icon-grid"
+               style="position:absolute;top:100%;left:0;margin-top:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.4);grid-template-columns:repeat(10,24px);gap:4px;z-index:30">
+            ${iconGrid}
+          </div>
+        </div>
+        <div style="display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Colore</span>
+          <div style="display:flex;gap:6px">${colorSwatches}</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button id="chip-editor-cancel" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Annulla</button>
+          <button id="chip-editor-save" class="btn btn-primary" style="font-size:11px;padding:4px 12px">Salva chip</button>
+        </div>
+      </div>
     </div>`;
 }
 
 function pageFunnel() {
   if (state.funnelMode === 'event') return pageFunnelEvent();
+  const chipEditor = state.editingFunnel && state.chipEditorIdx != null
+    ? chipEditorPanel(state.chipEditorIdx) : '';
   const editPanel = state.editingFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
       <div class="card-title" style="margin-bottom:16px">Costruttore Funnel</div>
+      ${chipEditor}
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
         ${state.funnelConfig.map((row, i) => funnelEditRow(row, i)).join('')}
       </div>
@@ -3667,7 +4458,8 @@ function pageFunnel() {
     ${metaFunnelSection()}
     </div>
     ${sprintFunnelSection()}
-    ${sprintLeakSection()}`;
+    ${sprintLeakSection()}
+    ${funnelParamsSection()}`;
 }
 
 // ── FUNNEL A EVENTI (kpi_funnel_v2, UNION user_events + anonymous_events) ──────────
@@ -3678,9 +4470,12 @@ function pageFunnelEvent() {
   const cfg = state.eventFunnelConfig || [];
 
   // Editor collassabile (come "Modifica funnel" del Default): visibile solo se editingEventFunnel.
+  const chipEditor = state.editingEventFunnel && state.chipEditorIdx != null
+    ? chipEditorPanel(state.chipEditorIdx) : '';
   const editor = state.editingEventFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
       <div class="card-title" style="margin-bottom:16px">Costruttore funnel onboarding</div>
+      ${chipEditor}
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
         ${cfg.length ? cfg.map((row, i) => eventFunnelEditRow(row, i)).join('')
           : `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuno step. Aggiungi il primo evento del funnel.</div>`}
@@ -3736,30 +4531,132 @@ function pageFunnelEvent() {
       </div>
       ${body}
     </div>
-    ${sprintEventFunnelSection()}`;
+    ${sprintEventFunnelSection()}
+    ${funnelParamsSection()}`;
 }
 
-// Riga editor del funnel a eventi. row = {event, label, vsIdx}. Menu a tendina dal catalogo curato
-// (nome amichevole + event_name tra parentesi); vsIdx = posizione di uno step precedente per la %.
+// Riga editor del funnel a eventi. row = {event, label, children?}. Ordine colonne: label
+// (rinominabile) → evento (picker) → preview % (regola fissa: % vs step precedente + % vs primo
+// step). Il campo `vsIdx` in row resta per retro-compatibilità coi preset salvati ma non è più
+// configurabile. Sotto la riga parent c'è la sezione "varianti" (children annidati).
 function eventFunnelEditRow(row, i) {
   const cfg = state.eventFunnelConfig || [];
-  const opts = EVENT_CATALOG.slice();
-  // se lo step salvato punta a un evento non in catalogo, lo aggiungo per non perderlo
-  if (row.event && !opts.some(o => o.event === row.event)) opts.push({ event: row.event, label: row.event });
-  const stepOpts = `<option value="" ${!row.event ? 'selected' : ''}>— scegli evento —</option>` +
-    opts.map(o =>
-      `<option value="${esc(o.event)}" ${row.event === o.event ? 'selected' : ''}>${esc(o.label)}${o.label !== o.event ? ` (${esc(o.event)})` : ''}</option>`).join('');
-  const vsOpts = `<option value="">—</option>` +
-    cfg.slice(0, i).map((r, j) =>
-      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${esc(eventStepLabel(r) || ('step ' + (j + 1)))}</option>`).join('');
+  // Preview percentuali usando i dati dell'ultima Calcola (se presenti). Se manca il calcolo o
+  // uno dei due riferimenti è 0/null, mostra "—". Le posizioni nel result sono nella scala flat
+  // (parent + children serializzati): risolviamo via eventFunnelFlatMap.
+  const data = (state.eventFunnel && state.eventFunnel.steps) || [];
+  const numById = {};
+  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
+  const hasData = !!(state.eventFunnel && data.length);
+  const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
+  const parentFlat = flatMap.parent?.[i];
+  const prevFlat = i > 0 ? flatMap.parent?.[i - 1] : null;
+  const headFlat = flatMap.parent?.[0];
+  const n     = hasData && parentFlat != null ? (numById[parentFlat] ?? 0) : null;
+  const prevN = hasData && prevFlat != null ? (numById[prevFlat] ?? 0) : null;
+  const headN = hasData && headFlat != null ? (numById[headFlat] ?? 0) : null;
+  const pctPrev = (i === 0 || prevN === null || prevN <= 0 || n === null) ? null : (n / prevN * 100);
+  const pctHead = (i === 0 || headN === null || headN <= 0 || n === null) ? null : (n / headN * 100);
+  const pctColor = pct => pct === null ? 'var(--muted)' : pct < 20 ? 'var(--red)' : pct >= 50 ? 'var(--mattia)' : 'var(--purple)';
+  const fmt = pct => pct === null ? '—' : pct.toFixed(1) + '%';
+  const previewCell = i === 0
+    ? `<div style="width:150px;flex-shrink:0;text-align:right;font-size:10px;color:var(--muted);line-height:1.4" title="Primo step: base 100%">base 100%</div>`
+    : `<div style="width:150px;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2">
+        <div style="font-size:11px;font-weight:600;color:${pctColor(pctPrev)}" title="% rispetto allo step precedente">${fmt(pctPrev)} <span style="color:var(--muted);font-weight:400;font-size:9px">vs prec</span></div>
+        <div style="font-size:11px;font-weight:500;color:${pctColor(pctHead)}" title="% rispetto al primo step del funnel">${fmt(pctHead)} <span style="color:var(--muted);font-weight:400;font-size:9px">vs #1</span></div>
+      </div>`;
+
+  // Label rinominabile a mano (fallback: catalogo o nome grezzo dell'evento).
+  const labelValue = row.label || '';
+  const labelPlaceholder = row.event ? (EVENT_CATALOG.find(e => e.event === row.event)?.label || row.event) : 'Nome step';
+
+  // Evento = picker (apre event browser). Mostra prevalentemente l'event_name tecnico.
+  const picked = row.event;
+  const pickText = picked || '— scegli evento —';
+
+  // Sezione children (varianti annidate). Se il parent ha già children è sempre visibile; se non
+  // ne ha, è visibile solo se il parent è espanso (per non appesantire la lista). L'expand qui
+  // condivide lo stesso state.eventFunnelExpanded della viz — coerente con "vedo dove sto lavorando".
+  const children = Array.isArray(row.children) ? row.children : [];
+  const hasChildren = children.length > 0;
+  const expanded = !!state.eventFunnelExpanded[i];
+  const showChildrenBlock = hasChildren || expanded;
+  const childrenHtml = children.map((c, ci) => eventFunnelEditChildRow(c, i, ci, numById, flatMap, n)).join('');
+  const childrenBlock = showChildrenBlock
+    ? `<div class="event-funnel-children" data-parent="${i}" style="padding:6px 0 6px 52px;display:flex;flex-direction:column;gap:6px;border-left:2px solid var(--border);margin-left:14px">
+         ${childrenHtml}
+         <button class="event-funnel-child-add" data-row="${i}"
+           style="align-self:flex-start;padding:4px 12px;font-size:11px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;cursor:pointer;font-family:inherit">↳ aggiungi variante</button>
+       </div>`
+    : `<div style="padding:2px 0 2px 52px">
+         <button class="event-funnel-child-add" data-row="${i}"
+           style="padding:2px 10px;font-size:10px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;cursor:pointer;font-family:inherit;opacity:.7"
+           title="Annida varianti di questo step (es. signup_google + signup_email sotto sign_up)">↳ annida varianti</button>
+       </div>`;
+
   return `
-    <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
-      <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
-        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
-      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
-      <select class="form-select event-funnel-name" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
-      <select class="form-select event-funnel-vs" data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
-      <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    <div class="event-funnel-block" data-block="${i}" style="display:flex;flex-direction:column;gap:0">
+      <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+        <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+          style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
+        <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+        <input class="form-input event-funnel-label" data-row="${i}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
+          title="Nome dello step nel funnel (rinominabile a piacere)"
+          style="flex:1;min-width:0;font-size:12px;padding:6px 10px">
+        <button class="event-funnel-pick" data-row="${i}" title="Scegli evento"
+          style="width:210px;flex-shrink:0;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
+          <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
+        </button>
+        <input class="form-input event-funnel-filter" data-row="${i}" type="text"
+          value="${esc(serializeFilters(row.filters))}" placeholder="filtro metadata (opz.)"
+          title="Filtro AND sui metadata dell'evento, formato chiave=valore separato da virgola. Es. provider=google · source=onboarding_end"
+          style="width:150px;flex-shrink:0;font-size:11px;padding:6px 8px;font-family:var(--mono)">
+        ${previewCell}
+        <button class="event-funnel-expand-toggle" data-row="${i}" title="${expanded ? 'Nascondi sezione varianti' : 'Mostra sezione varianti'}"
+          style="padding:4px 8px;font-size:11px;line-height:1;color:${hasChildren ? 'var(--purple)' : 'var(--muted)'};background:transparent;border:1px solid var(--border);border-radius:6px;cursor:pointer;flex-shrink:0;font-family:inherit">${hasChildren ? (expanded ? '▾ ' + children.length : '▸ ' + children.length) : (expanded ? '▾' : '▸')}</button>
+        <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+      </div>
+      ${childrenBlock}
+    </div>`;
+}
+
+// Riga editor di una variante annidata (child). Preview a destra = n della variante + % sul parent.
+function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) {
+  const cFlat = flatMap.child?.[parentI]?.[ci];
+  const hasData = numById && Object.keys(numById).length > 0;
+  const cn = hasData && cFlat != null ? (numById[cFlat] ?? 0) : null;
+  const pct = (cn !== null && parentN !== null && parentN > 0) ? (cn / parentN * 100) : null;
+  const pctStr = pct !== null ? pct.toFixed(1) + '%' : '—';
+  const previewCell = hasData
+    ? `<div style="width:150px;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2">
+        <div style="font-family:var(--mono);font-size:12px;color:var(--muted)">${cn ?? '—'}</div>
+        <div style="font-size:10px;color:var(--muted)">${pctStr} <span style="font-size:9px">del parent</span></div>
+      </div>`
+    : `<div style="width:150px;flex-shrink:0"></div>`;
+  const labelValue = child.label || '';
+  const labelPlaceholder = child.event ? (EVENT_CATALOG.find(e => e.event === child.event)?.label || child.event) : 'Nome variante';
+  const picked = child.event;
+  const pickText = picked || '— scegli evento variante —';
+  return `
+    <div class="event-funnel-child-row" data-parent="${parentI}" data-child="${ci}" style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:#5a5a80;flex-shrink:0;width:20px;text-align:right">↳</span>
+      <input class="form-input event-funnel-child-label" data-parent="${parentI}" data-child="${ci}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
+        title="Nome della variante (es. Google, Email)"
+        style="flex:1;min-width:0;font-size:12px;padding:5px 10px">
+      <button class="event-funnel-pick-child" data-parent="${parentI}" data-child="${ci}" title="Scegli evento variante"
+        style="width:210px;flex-shrink:0;text-align:left;font-size:12px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
+        <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
+      </button>
+      <input class="form-input event-funnel-child-filter" data-parent="${parentI}" data-child="${ci}" type="text"
+        value="${esc(serializeFilters(child.filters))}" placeholder="filtro metadata (opz.)"
+        title="Filtro AND sui metadata dell'evento della variante. Es. provider=google — la variante conta solo gli eventi che matchano quel valore. NB: il RPC filtra per uguaglianza, quindi non serve per 'valore assente'."
+        style="width:150px;flex-shrink:0;font-size:11px;padding:5px 8px;font-family:var(--mono)">
+      ${previewCell}
+      <span style="width:29px;flex-shrink:0"></span>
+      <button class="btn btn-ghost event-funnel-child-remove" data-parent="${parentI}" data-child="${ci}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
     </div>`;
 }
 
@@ -3767,34 +4664,102 @@ function eventFunnelViz() {
   const cfg  = state.eventFunnelConfig || [];
   const data = (state.eventFunnel && state.eventFunnel.steps) || [];
   if (!cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato.</div>`;
-  // allinea i risultati per posizione (la RPC ritorna idx = posizione dello step inviato)
+  // allinea i risultati per posizione flat (la RPC ritorna idx = posizione nello p_steps flatten)
   const numById = {};
   data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
-  const nums = cfg.map((_, i) => numById[i] ?? 0);
+  const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
+  const nums = cfg.map((_, i) => {
+    const flat = flatMap.parent?.[i];
+    return (flat != null) ? (numById[flat] ?? 0) : 0;
+  });
   const maxN = Math.max(...nums, 1);
+  const headN = nums[0] || 0;
+  const headLabel = eventStepLabel(cfg[0]) || 'step 1';
 
-  return cfg.map((row, i) => {
+  const header = `
+    <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
+      <div style="width:230px;flex-shrink:0"></div>
+      <div style="flex:1"></div>
+      <div style="width:44px;text-align:right;flex-shrink:0">n</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
+    </div>`;
+
+  const rows = cfg.map((row, i) => {
     const n     = nums[i];
     const label = eventStepLabel(row) || ('step ' + (i + 1));
-    const vsN   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? nums[row.vsIdx] : null;
+    const vsN   = i > 0 ? nums[i - 1] : null;
     const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv    = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+    const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
+    const startStr = startPct !== null ? startPct.toFixed(1) + '%' : '—';
     const isLow   = convPct !== null && convPct < 20;
     const isGood  = convPct !== null && convPct >= 50;
     const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
     const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
-    return `
+    const startColor = startPct === null ? 'var(--muted)'
+      : startPct < 20 ? 'var(--red)'
+      : startPct >= 50 ? 'var(--mattia)'
+      : 'var(--muted)';
+
+    const children = Array.isArray(row.children) ? row.children : [];
+    const hasChildren = children.length > 0;
+    const expanded = !!state.eventFunnelExpanded[i];
+    const chevron = hasChildren
+      ? `<button class="event-funnel-chevron" data-row="${i}" title="${expanded ? 'Riduci varianti' : 'Espandi varianti'}"
+           style="cursor:pointer;background:transparent;border:0;color:var(--muted);font-size:11px;line-height:1;padding:0 4px 0 0;font-family:inherit">${expanded ? '▾' : '▸'}</button>`
+      : '';
+    const countBadge = hasChildren
+      ? ` <span style="font-size:9px;color:var(--muted);font-weight:500;letter-spacing:.3px">· ${children.length} variant${children.length > 1 ? 'i' : 'e'}</span>`
+      : '';
+
+    const parentRow = `
       <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
         <div style="width:230px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">
-          ${esc(label)}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}</div>
+          ${chevron}${esc(label)}${countBadge}<div style="font-size:10px;color:#5a5a80;font-family:var(--mono)">${esc(row.event || '')}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}</div>
         </div>
         <div style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
           <div style="height:100%;width:${(n / maxN) * 100}%;background:${barColor};opacity:.75;border-radius:3px"></div>
         </div>
         <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0">${n}</div>
         <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:500;color:${startColor};flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${startStr}</div>
       </div>`;
+
+    if (!hasChildren || !expanded) return parentRow;
+
+    // Righe children indentate. `vs prec` = quota della variante sul parent (n_child/n_parent);
+    // `vs #1` = n_child/headN. La barra è scalata sul parent (non su maxN) così visivamente si
+    // legge come una fetta del parent, non come uno step alla pari.
+    const childRows = children.map((c, ci) => {
+      const cFlat = flatMap.child?.[i]?.[ci];
+      const cn = (cFlat != null) ? (numById[cFlat] ?? 0) : 0;
+      const cLabel = eventStepLabel(c) || ('variante ' + (ci + 1));
+      const vsParentPct = n > 0 ? (cn / n * 100) : null;
+      const vsParentStr = vsParentPct !== null ? vsParentPct.toFixed(1) + '%' : '—';
+      const vsHeadPct = headN > 0 ? (cn / headN * 100) : null;
+      const vsHeadStr = vsHeadPct !== null ? vsHeadPct.toFixed(1) + '%' : '—';
+      const parentDenom = Math.max(n, 1);
+      const barW = (cn / parentDenom) * 100;
+      return `
+        <div style="display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px dashed var(--border);background:rgba(255,255,255,0.015)">
+          <div style="width:230px;font-size:11px;color:var(--muted);flex-shrink:0;line-height:1.35;padding-left:22px">
+            <span style="color:#5a5a80;margin-right:4px">↳</span>${esc(cLabel)}
+            <div style="font-size:10px;color:#5a5a80;font-family:var(--mono);padding-left:12px">${esc(c.event || '')}${c.filters ? ' · ' + esc(serializeFilters(c.filters)) : ''}</div>
+          </div>
+          <div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden;opacity:.85">
+            <div style="height:100%;width:${barW}%;background:${barColor};opacity:.55;border-radius:3px"></div>
+          </div>
+          <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:500;font-size:13px;color:var(--muted);flex-shrink:0">${cn}</div>
+          <div style="width:56px;text-align:right;font-size:11px;font-weight:500;color:var(--muted);flex-shrink:0" title="quota della variante sul parent (${n})">${vsParentStr}</div>
+          <div style="width:56px;text-align:right;font-size:11px;font-weight:500;color:var(--muted);flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${vsHeadStr}</div>
+        </div>`;
+    }).join('');
+
+    return parentRow + childRows;
   }).join('');
+
+  return header + rows;
 }
 
 // Persiste la config del funnel a eventi. Se è attivo un funnel salvato di tipo 'event', riscrive i suoi
@@ -3867,6 +4832,127 @@ function sprintEventFunnelSection() {
     </div>`;
 }
 
+// ── SEZIONE PARAMETRI DEL FUNNEL ─────────────────────────────────────────────
+// Elenco leggibile di tutte le regole applicate dalle RPC che alimentano la pagina Funnel.
+// Reagisce a state.funnelMode: 'catalog' → evidenzia le righe v1 (kpi_funnel),
+// 'event' → evidenzia le righe v2 (kpi_funnel_v2). Le righe non applicabili
+// alla modalità corrente vengono attenuate ma restano visibili per confronto.
+//
+// ⚠️ HARDCODED — TENERE SINCRONIZZATO A MANO CON:
+//   app/supabase/functions/rpc/kpi_funnel.sql        (v1 — funnel Default, catalogo fisso)
+//   app/supabase/functions/rpc/kpi_funnel_v2.sql     (v2 — funnel a eventi)
+//   app/supabase/migrations/20260715120000_kpi_excluded_users_view.sql   (vista esclusioni)
+//   app/supabase/migrations/20260716143000_kpi_funnel_v2_signup_cohort.sql (coorte v2)
+// NB: le definizioni RPC LIVE hanno p_start/p_end su entrambe (COALESCE sulle
+// finestre coorte); gli snapshot repo possono essere più vecchi. Fonte di
+// verità = DB live, non lo snapshot repo.
+// applies: 'v1' (solo Default), 'v2' (solo a eventi), 'both' (entrambe).
+const FUNNEL_PARAMS_RULES = [
+  // Esclusioni utenti
+  { cat: 'Esclusioni utenti', regola: 'Utenti bloccati',
+    valore: 'Esclusi sempre (blocked_users con removed_at IS NULL). v1: CTE locale sulla tabella. v2: vista kpi_excluded_users, reason=blocked.',
+    applies: 'both' },
+  { cat: 'Esclusioni utenti', regola: 'Account test (users.is_test = TRUE)',
+    valore: 'Esclusi in v2 via kpi_excluded_users (reason=test); include gli utenti E2E @hypemove.test. Il funnel Default NON li esclude — scelta deliberata documentata nella migration 20260715120000.',
+    applies: 'v2' },
+  { cat: 'Esclusioni utenti', regola: 'Emulatori (device_info.isVirtual)',
+    valore: 'Esclusi via kpi_excluded_users (reason=emulator): utenti passati da una anonymous_sessions con device_info->>isVirtual = true. Le sessioni anonime mai linkate sono filtrate direttamente su device_info. Reincludibili con p_include_emulators, che la dashboard non passa mai (default false).',
+    applies: 'v2' },
+  { cat: 'Esclusioni utenti', regola: 'Abbonamenti di utenti interni',
+    valore: 'Esclude i purchase_token mai appartenuti a un utente in blocked_users (tok_internal) e i product_id = "DEBUG" dai conteggi Premium/Trial. Applicata dentro la RPC v1 sui soli step Premium/Trial.',
+    applies: 'v1' },
+
+  // Coorte e finestre temporali
+  { cat: 'Coorte e finestre', regola: 'Definizione della coorte',
+    valore: 'v1: coorte = auth.identities create nella finestra per gli step 2-3 e users.created_at nella finestra per gli step 4+. v2: àncora rigida per data d\'iscrizione — users.created_at nella finestra, UNION sessioni anonime (anonymous_sessions.created_at nella finestra, solo user_id NULL, identità anon:<session_id>). Chi si iscrive fuori finestra NON entra anche se emette eventi dentro; chi si iscrive dentro finestra resta contato per sempre.',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Finestra sugli eventi degli step',
+    valore: 'v1: gli step evento 11-17 contano gli eventi della coorte senza vincolo temporale sul quando sono emessi. v2: idem, gli eventi degli iscritti in coorte contano senza finestra (limite pratico di scansione: da inizio − 30 giorni a fine + 1 giorno + 90 giorni).',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Parametro p_start (orario partenza sprint)',
+    valore: 'Se lo sprint selezionato ha inizio_ora, il client passa p_start (ISO, sprintStartTs — kpi.js:1511). La RPC fa COALESCE(p_start, inizio) su tutte le finestre coorte. In v1 NON tocca lo step 0 installazioni, che resta su date BETWEEN inizio AND fine.',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Parametro p_end',
+    valore: 'Esiste sulle due RPC live (COALESCE(p_end, fine + 1 giorno)) ma la dashboard non lo passa mai — quindi oggi ininfluente.',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Parametro p_cohort_anchor',
+    valore: 'Vestigiale dal 2026-07-16: sia true che false applicano la signup-cohort. Il client lo mette ancora a false quando il funnel contiene step install_* (kpi.js:720) — ininfluente lato server.',
+    applies: 'v2' },
+
+  // Sorgenti dati e attribuzione identità
+  { cat: 'Sorgenti e identità', regola: 'Tabelle sorgente',
+    valore: 'v1: google_play_installs, auth.identities, public.users, workout_sessions, play_purchases, user_events (solo 7 event_name fissi). v2: public.users, anonymous_sessions e UNION user_events + anonymous_events.',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Mapping ID utente',
+    valore: 'user_events.user_id = public.users.id (NON auth.uid). v1 mappa auth.identities → public.users via email. v2 attribuisce gli anonymous_events a public.users via email della sessione (LEFT JOIN LATERAL … WHERE u.email = s.email LIMIT 1), altrimenti identità anonima anon:<session_id>.',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Deduplicazione conteggi',
+    valore: 'Sempre COUNT(DISTINCT identità) per step. v1 usa user_id; v2 usa identity = user id oppure anon:<session_id>. Nessun LIMIT/OFFSET nelle due RPC.',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Filtri metadata per-step',
+    valore: 'v1: filtro fisso metadata->>source = "onboarding_end" sui soli step paywall (11-12). v2: campo "filters": {chiave: valore} → AND su metadata->>chiave = valore (retrocompat "source":"x"); step multi-evento con OR via "events": [...].',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Segmento provider (p_provider)',
+    valore: 'Filtra coorte ed eventi sugli utenti con auth.identities.provider = google/email; le sessioni anonime mai iscritte sono escluse quando il segmento è impostato.',
+    applies: 'v2' },
+
+  // Regole specifiche v1 (catalogo fisso)
+  { cat: 'Regole solo Default (v1)', regola: 'Step 0 / First Open',
+    valore: 'Somma install_events / first_open_events da google_play_installs con date BETWEEN inizio AND fine (inclusi). Se nessuna riga → NULL (mostrato come "—").',
+    applies: 'v1' },
+  { cat: 'Regole solo Default (v1)', regola: 'Premium pagante (step 10)',
+    valore: 'Dedup per purchase_token: proprietario canonico = user_id dell\'ultima riga del token (DISTINCT ON … ORDER BY created_at DESC). Pagante = expires_at > now() AND status <> "revoked" AND payment_state = 1 (default: 2 se trial, 1 altrimenti). Trial iniziato (step 18) = token con bool_or(is_trial).',
+    applies: 'v1' },
+  { cat: 'Regole solo Default (v1)', regola: 'Finestre workout',
+    valore: '"≥1 workout" = sessioni con DATE(started_at) ≥ DATE(users.created_at). "Entro 24h" = primo finished_at entro 24 ore da users.created_at. "≥2/3/5 prima settimana" = finished_at::date tra il giorno del primo workout e +6. "3-day streak" = 3 giorni calendario consecutivi con workout finiti, senza limite di finestra.',
+    applies: 'v1' },
+
+  // Override client-side
+  { cat: 'Override client-side', regola: 'Pseudo-eventi install_google_play / install_meta_ads',
+    valore: 'Non esistono in user_events: computeEventFunnel (kpi.js:697) li rimuove da p_steps, prende i totali dalla RPC kpi_install_totals per il periodo (fonti google_play_installs / meta_ads_insights_daily), poi reinserisce le righe nel risultato con l\'idx originale. In presenza di questi step il client mette p_cohort_anchor=false (oggi ininfluente lato server).',
+    applies: 'v2' },
+];
+
+function funnelParamsSection() {
+  const active = state.funnelMode === 'event' ? 'v2' : 'v1';
+  const activeLabel = active === 'v2' ? 'a eventi (kpi_funnel_v2)' : 'Default (kpi_funnel)';
+  const badge = a => {
+    if (a === 'both') return `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:var(--accent-lo);color:var(--purple);font-weight:600;white-space:nowrap">entrambi</span>`;
+    if (a === 'v2')   return `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#22d3ee22;color:#22d3ee;font-weight:600;white-space:nowrap">a eventi</span>`;
+    return              `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#a78bfa22;color:var(--purple);font-weight:600;white-space:nowrap">Default</span>`;
+  };
+  // Raggruppa le regole per categoria mantenendo l'ordine di FUNNEL_PARAMS_RULES.
+  const groups = [];
+  const idxByCat = new Map();
+  FUNNEL_PARAMS_RULES.forEach(r => {
+    if (!idxByCat.has(r.cat)) { idxByCat.set(r.cat, groups.length); groups.push({ cat: r.cat, rows: [] }); }
+    groups[idxByCat.get(r.cat)].rows.push(r);
+  });
+  const html = groups.map(g => {
+    const header = `<tr><td colspan="3" style="padding:14px 0 6px 0;font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600">${esc(g.cat)}</td></tr>`;
+    const body = g.rows.map(r => {
+      const on = r.applies === 'both' || r.applies === active;
+      return `<tr style="${on ? '' : 'opacity:.38'}">
+        <td style="padding:6px 12px 6px 0;font-size:12px;color:var(--text);vertical-align:top;white-space:nowrap;font-weight:500">${esc(r.regola)}</td>
+        <td style="padding:6px 12px 6px 0;font-size:12px;color:var(--muted);line-height:1.55;vertical-align:top">${esc(r.valore)}</td>
+        <td style="padding:6px 0;text-align:right;vertical-align:top">${badge(r.applies)}</td>
+      </tr>`;
+    }).join('');
+    return header + body;
+  }).join('');
+  return `
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="margin-bottom:4px">Parametri</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+        Regole applicate dal funnel attualmente attivo — <strong style="color:var(--text)">${activeLabel}</strong>.
+        Le righe attenuate valgono solo per l'altra modalità. Valori hardcoded: se cambiano <code style="font-size:10px">kpi_funnel</code> / <code style="font-size:10px">kpi_funnel_v2</code> va aggiornata a mano <code style="font-size:10px">FUNNEL_PARAMS_RULES</code> in kpi.js.
+      </div>
+      <div class="table-wrap"><table class="data-table" style="width:100%;border-collapse:collapse">
+        <tbody>${html}</tbody>
+      </table></div>
+    </div>`;
+}
+
 async function fetchSprintEventFunnel() {
   if (!state.sprintEventSel.length) return;
   const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
@@ -3876,15 +4962,19 @@ async function fetchSprintEventFunnel() {
   state.sprintEventData = {};
   render();
   try {
-    const p_steps = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
+    // Stesso schema di fetchEventFunnel: computeEventFunnel gestisce l'override install_* client-side.
+    const p_steps  = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
     const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
-    const results = await Promise.all(selected.map(s => {
-      const args = { inizio: s.inizio, fine: s.fine, p_steps };
-      if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider;
-      args.p_start = sprintStartTs(s);
-      args.p_end = sprintEndTs(s);
-      return sb.rpc('kpi_funnel_v2', args).then(r => ({ id: s.id, data: r.data, error: r.error }));
-    }));
+    const results  = await Promise.all(selected.map(s =>
+      computeEventFunnel(p_steps, {
+        inizio:   s.inizio,
+        fine:     s.fine,
+        provider: state.eventFunnelProvider || null,
+        p_start:  sprintStartTs(s),
+        p_end:    sprintEndTs(s),
+      }).then(data => ({ id: s.id, data }))
+       .catch(err  => ({ id: s.id, error: err }))
+    ));
     const map = {};
     for (const r of results) { if (r.error) throw r.error; map[r.id] = r.data; }
     state.sprintEventData = map;
@@ -3921,15 +5011,24 @@ function sprintEventFunnelTable() {
     const label = eventStepLabel(row) || ('step ' + (ri + 1));
     const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
     const maxN = Math.max(...nums, 0);
+    // Vincitore = miglior conversione (convPct vs step precedente), NON il numero assoluto. Al
+    // primo step (dove convPct è null per tutti) nessuno vince: il top-of-funnel misura traffico,
+    // non performance. Fallback su null → nessuna cella evidenziata su quello step.
+    const convPcts = selected.map(s => {
+      const n = numsOf[s.id][ri] ?? 0;
+      const vsN = ri > 0 ? (numsOf[s.id][ri - 1] ?? 0) : null;
+      return vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
     const cells = selected.map((s, si) => {
       const n = numsOf[s.id][ri] ?? 0;
-      const vsN = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < ri) ? (numsOf[s.id][row.vsIdx] ?? 0) : null;
-      const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+      const convPct = convPcts[si];
       const convStr = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
       const headN = numsOf[s.id][0] ?? 0;
       const startPct = state.sprintFunnelPctStart && headN > 0 && ri > 0 ? (n / headN * 100) : null;
-      const isBest = n === maxN && maxN > 0;
+      const isBest = maxConvPct !== null && convPct === maxConvPct;
       const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -4190,19 +5289,39 @@ function funnelViz() {
   const rawNums = cfg.map(r => funnel[r.stepIdx]?.numero);
   const numbers = rawNums.map(v => Number(v ?? 0));
   const maxN    = Math.max(...numbers, 1);
+  // Testa del funnel per la "% vs #1": il primo step con dato disponibile. Se il primo è n.d.
+  // (es. installs Play non ancora importati) cadiamo sul primo utile per non lasciare la colonna vuota.
+  const headIdx = rawNums.findIndex(v => v !== null && v !== undefined);
+  const headN   = headIdx >= 0 ? numbers[headIdx] : 0;
+  const headLabel = headIdx >= 0 ? (FUNNEL_LABELS[cfg[headIdx].stepIdx] || 'step 1') : 'step 1';
 
-  return cfg.map((row, i) => {
+  const header = `
+    <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
+      <div style="width:210px;flex-shrink:0"></div>
+      <div style="flex:1"></div>
+      <div style="width:44px;text-align:right;flex-shrink:0">n</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
+    </div>`;
+
+  const rows = cfg.map((row, i) => {
     const n        = numbers[i];
     const noData   = rawNums[i] === null || rawNums[i] === undefined;
     const vsN      = (row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i && !(rawNums[row.vsIdx] === null || rawNums[row.vsIdx] === undefined)) ? numbers[row.vsIdx] : null;
     const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv     = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+    const startPct = !noData && headIdx >= 0 && i > headIdx && headN > 0 ? (n / headN * 100) : null;
+    const startStr = startPct !== null ? startPct.toFixed(1) + '%' : '—';
     const label    = FUNNEL_LABELS[row.stepIdx];
     const pct      = (n / maxN) * 100;
     const isLow    = convPct !== null && convPct < 20;
     const isGood   = convPct !== null && convPct >= 50;
     const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
     const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
+    const startColor = startPct === null ? 'var(--muted)'
+      : startPct < 20 ? 'var(--red)'
+      : startPct >= 50 ? 'var(--mattia)'
+      : 'var(--muted)';
 
     return `
       <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
@@ -4212,8 +5331,11 @@ function funnelViz() {
         </div>
         <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0${noData ? ';color:var(--muted)' : ''}" ${noData ? 'title="Dato non disponibile per questo periodo (tabella google_play_installs non aggiornata)"' : ''}>${noData ? 'n.d.' : n}</div>
         <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:500;color:${startColor};flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${startStr}</div>
       </div>`;
   }).join('');
+
+  return header + rows;
 }
 
 // ── RETENTION ────────────────────────────────────────────────────────
@@ -5091,6 +6213,11 @@ function premiumFunnelViz(f) {
   // `usersPrimary` (Abbonato pagante) mostrano gli UTENTI in grande (lì gli eventi ≈ utenti).
   // Il calo % di ogni transizione usa la metrica primaria dello step corrente, applicata a
   // entrambi gli estremi (eventi↔eventi, utenti↔utenti) → niente confronti misti.
+  // Testa del funnel per la "% dall'inizio": usa la metrica primaria del PRIMO step (utenti se
+  // usersPrimary, altrimenti eventi), coerente con la scelta cell-by-cell (change % vs vsIdx).
+  const head0 = rows[0]?.s;
+  const headBig = head0 ? (head0.usersPrimary ? rows[0].users : rows[0].n) : 0;
+  const headLabel = head0?.label || 'step 1';
   const html = cfg.map((row, i) => {
     const { s, n, users } = rows[i];
     const big      = s.usersPrimary ? users : n;
@@ -5103,6 +6230,11 @@ function premiumFunnelViz(f) {
     const vsP      = hasVs ? (s.usersPrimary ? rows[row.vsIdx].users : rows[row.vsIdx].n) : null;
     const change   = (vsP !== null && vsP > 0) ? ((curP / vsP - 1) * 100).toFixed(0) : null;
     const freq     = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    // "% dall'inizio": la metrica dello step corrente sulla metrica del PRIMO step.
+    // Se il primo è usersPrimary e questo no, o viceversa, restano confrontati like-for-like: usiamo
+    // sempre la metrica primaria di questo step, e la metrica primaria del primo. Non è misto perché
+    // il paywall funnel è omogeneo (tutti eventi tranne "Abbonato pagante" che è users).
+    const startPct = i > 0 && headBig > 0 ? (curP / headBig * 100) : null;
     return `
       ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
         ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
@@ -5115,6 +6247,7 @@ function premiumFunnelViz(f) {
         ${s.event ? `<div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>` : ''}
         ${subLine ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${subLine}</div>` : ''}
         ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headBig})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
       </div>`;
   }).join('');
 
@@ -5220,6 +6353,16 @@ function sprintPremiumFunnelTable(selected, dataMap) {
     const maxN    = Math.max(...nums.filter(n => n >= 0), 0);
     const vsRow   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? cfg[row.vsIdx] : null;
     const vsStep  = vsRow ? FUNNEL_ALL_STEPS[vsRow.stepIdx] : null;
+    // isBest sul rapporto num/vsN (miglior conversione), non sul numero assoluto. Al primo
+    // step (senza vsIdx) nessuno vince: è top-of-funnel, misura traffico non performance.
+    const ratios = selected.map(s => {
+      const fn = dataMap[s.id]?.funnel || {};
+      const num = Number(fn[stepDef.field] ?? 0);
+      const vsN = vsStep ? Number(fn[vsStep.field] ?? 0) : null;
+      return vsN !== null && vsN > 0 ? (num / vsN) : null;
+    });
+    const validRatios = ratios.filter(r => r !== null);
+    const maxRatio = validRatios.length ? Math.max(...validRatios) : null;
 
     const cells = selected.map((s, si) => {
       const fn     = dataMap[s.id]?.funnel || {};
@@ -5231,7 +6374,7 @@ function sprintPremiumFunnelTable(selected, dataMap) {
       const change = (vsN !== null && vsN > 0) ? ((num / vsN - 1) * 100) : null;
       const changeStr   = change !== null ? (change > 0 ? '+' : '') + change.toFixed(0) + '%' : '—';
       const changeColor = change === null ? '' : change < 0 ? 'var(--red)' : 'var(--mattia)';
-      const isBest = num === maxN && maxN > 0;
+      const isBest = maxRatio !== null && ratios[si] === maxRatio;
       const barW   = maxN > 0 ? Math.round(num / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -6132,8 +7275,12 @@ function pctStartToggle(id) {
 // Chi confronta misure diverse (Premium mostra una variazione +/-, non una conversione) passa null
 // e non sopprime mai: lì due numeri uguali sarebbero una coincidenza, non un doppione.
 function pctCellLine(convHtml, startPct, headLabel, dupOf = null) {
-  const dup = startPct !== null && dupOf !== null && Math.abs(dupOf - startPct) < 0.05;
-  const showStart = startPct !== null && !dup;
+  // Prima mostravamo la "% dall'inizio" solo se diversa dalla "vs vsIdx" (dup skip), per non
+  // ripetere lo stesso numero sul primo step successivo alla testa. Rimosso: in funnel dove
+  // vsIdx=0 per tutti gli step le due sarebbero SEMPRE dup e l'utente vedrebbe una sola %,
+  // rompendo l'uniformità col funnel singolo che mostra sempre entrambe. Il parametro dupOf
+  // resta nella firma per backward-compat delle callsite (verrà ignorato).
+  const showStart = startPct !== null;
   if (convHtml === null && !showStart) return '';
   return `<div style="font-size:10px;font-weight:600;text-align:right;margin-top:2px">
     ${convHtml !== null ? convHtml : ''}
@@ -6211,6 +7358,22 @@ function sprintFunnelTable(selected, dataMap) {
       return Number((dataMap[s.id] || [])[stepIdx]?.numero ?? -1);
     });
     const maxN = Math.max(...nums.filter(n => n >= 0), 0);
+    // Vincitore = miglior conversione (num/vsN), NON numero assoluto. Al primo step (dove vsN
+    // manca per definizione) convPct=null per tutti → nessuno vince, sensato per top-of-funnel.
+    const convPcts = selected.map(s => {
+      const cfg = cfgOf[s.id];
+      const rowPos = cfg.findIndex(r => r.stepIdx === stepIdx);
+      if (rowPos === -1) return null;
+      const row = cfg[rowPos];
+      const data = dataMap[s.id] || [];
+      const rawNum = data[stepIdx]?.numero;
+      if (rawNum === null || rawNum === undefined) return null;
+      const rawVs = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < rowPos ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
+      const vsN = rawVs === null || rawVs === undefined ? null : Number(rawVs);
+      return vsN !== null && vsN > 0 ? (Number(rawNum) / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
 
     const cells = selected.map((s, si) => {
       const cfg     = cfgOf[s.id];
@@ -6224,9 +7387,7 @@ function sprintFunnelTable(selected, dataMap) {
       const rawNum = data[stepIdx]?.numero;
       const noData = rawNum === null || rawNum === undefined; // dato non disponibile (es. installs non importati)
       const num    = Number(rawNum ?? 0);
-      const rawVs  = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < rowPos ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
-      const vsN    = rawVs === null || rawVs === undefined ? null : Number(rawVs);
-      const convPct   = vsN !== null && vsN > 0 ? (num / vsN * 100) : null;
+      const convPct   = convPcts[si];
       const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
       // Flag "% dall'inizio": seconda percentuale, calcolata sulla testa del funnel di questo sprint
@@ -6234,7 +7395,7 @@ function sprintFunnelTable(selected, dataMap) {
       const head      = headOf[s.id];
       const startPct  = state.sprintFunnelPctStart && !noData && head && rowPos > head.rowPos
         ? (num / head.num * 100) : null;
-      const isBest    = !noData && num === maxN && maxN > 0;
+      const isBest    = !noData && maxConvPct !== null && convPct === maxConvPct;
       const barW      = noData ? 0 : (maxN > 0 ? Math.round(num / maxN * 100) : 0);
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
@@ -7063,6 +8224,22 @@ function attachEvents() {
       render();
     }));
 
+  // Popola il draft chip dalla preset attualmente attivo. Serve quando l'utente apre il
+  // Costruttore funnel: il pannello "Aspetto della chip" mostra i valori correnti della chip
+  // attiva così può modificarli inline. Default/onboarding built-in → nessun draft (chipEditorIdx=null).
+  function openChipDraftForActivePreset() {
+    const i = state.activeFunnelPreset;
+    const f = i != null ? state.savedFunnels[i] : null;
+    if (!f) { state.chipEditorIdx = null; state.chipDraft = null; return; }
+    state.chipEditorIdx = i;
+    state.chipDraft = {
+      name:  f.name  || '',
+      icon:  f.icon  || DEFAULT_CHIP_ICON,
+      color: f.color || DEFAULT_CHIP_COLOR,
+      label: f.label || '',
+    };
+  }
+
   // Funnel — calcola
   document.getElementById('funnel-apply')?.addEventListener('click', () => {
     const from = document.getElementById('funnel-from')?.value;
@@ -7092,10 +8269,15 @@ function attachEvents() {
     fetchEventFunnel();
   });
   document.getElementById('edit-event-funnel')?.addEventListener('click', () => {
-    state.editingEventFunnel = true; render();
+    state.editingEventFunnel = true;
+    openChipDraftForActivePreset();
+    render();
   });
   document.getElementById('close-event-funnel-edit')?.addEventListener('click', () => {
-    state.editingEventFunnel = false; render();
+    state.editingEventFunnel = false;
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    render();
   });
   document.getElementById('event-funnel-reset')?.addEventListener('click', () => {
     state.eventFunnelConfig = JSON.parse(JSON.stringify(ONBOARDING_FUNNEL_STEPS));
@@ -7108,10 +8290,13 @@ function attachEvents() {
   // Funnel — edit mode
   document.getElementById('edit-funnel')?.addEventListener('click', () => {
     state.editingFunnel = true;
+    openChipDraftForActivePreset();
     render();
   });
   document.getElementById('close-funnel-edit')?.addEventListener('click', () => {
     state.editingFunnel = false;
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
     render();
   });
   document.getElementById('funnel-add')?.addEventListener('click', () => {
@@ -7175,6 +8360,8 @@ function attachEvents() {
         if (del.error) { console.error('delete funnel', del.error); alert('Errore eliminazione funnel: ' + del.error.message); return; }
       }
       state.activeFunnelPreset = null; // gli indici cambiano dopo il refetch: si riparte da Default
+      state.chipEditorIdx = null;     // se stavo modificando questa chip, chiudi editor
+      state.chipDraft = null;
       await fetchFunnelDefinitions();
       if (wasActive) {
         state.funnelMode = 'catalog';
@@ -7182,6 +8369,115 @@ function attachEvents() {
       }
       render();
     }));
+
+  // Editor chip — input testo
+  document.getElementById('chip-editor-name')?.addEventListener('input', e => {
+    if (state.chipDraft) state.chipDraft.name = e.target.value;
+  });
+  document.getElementById('chip-editor-label')?.addEventListener('input', e => {
+    if (state.chipDraft) state.chipDraft.label = e.target.value;
+  });
+  // Enter salva, Esc annulla — attivi su entrambi gli input testo
+  ['chip-editor-name', 'chip-editor-label'].forEach(id =>
+    document.getElementById(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('chip-editor-save')?.click();
+      if (e.key === 'Escape') document.getElementById('chip-editor-cancel')?.click();
+    }));
+
+  // Editor chip — picker icona
+  document.querySelectorAll('.chip-icon-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      if (!state.chipDraft) return;
+      state.chipDraft.icon = el.dataset.icon;
+      render();
+    }));
+
+  // Editor chip — picker colore
+  document.querySelectorAll('.chip-color-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      if (!state.chipDraft) return;
+      state.chipDraft.color = el.dataset.color;
+      render();
+    }));
+
+  // Editor chip — annulla: ripristina il draft dai valori attuali della chip senza chiudere il
+  // costruttore (che è controllato dal bottone "Chiudi" del costruttore stesso).
+  document.getElementById('chip-editor-cancel')?.addEventListener('click', () => {
+    const i = state.chipEditorIdx;
+    const f = i != null ? state.savedFunnels[i] : null;
+    if (!f) return;
+    state.chipDraft = {
+      name:  f.name  || '',
+      icon:  f.icon  || DEFAULT_CHIP_ICON,
+      color: f.color || DEFAULT_CHIP_COLOR,
+      label: f.label || '',
+    };
+    render();
+  });
+
+  // Editor chip — salva: aggiorna la chip ma tiene il pannello aperto (il costruttore rimane
+  // visibile finché non si preme "Chiudi" del costruttore stesso).
+  document.getElementById('chip-editor-save')?.addEventListener('click', async () => {
+    const i = state.chipEditorIdx;
+    const d = state.chipDraft;
+    if (i == null || !d) return;
+    const f = state.savedFunnels[i];
+    if (!f) return;
+    const name = (d.name || '').trim();
+    if (!name) { alert('Il nome della chip non può essere vuoto.'); return; }
+    await updateFunnelChip(f.id, {
+      name,
+      icon:  d.icon  || DEFAULT_CHIP_ICON,
+      color: d.color || DEFAULT_CHIP_COLOR,
+      label: (d.label || '').trim() || null,
+    });
+    render();
+  });
+
+  // Drag & drop nativo HTML5 su TUTTE le chip (Default, onboarding, salvate) — riordino manuale.
+  // Ogni wrap ha data-token ('default' | 'onboarding' | id funnel). `dragstart` memorizza il token
+  // sorgente; `dragover` evidenzia il target (chipDragOver); `drop` ricalcola l'array di token e
+  // persiste via saveFunnelToolbarOrder (localStorage + order_index sul DB per i salvati).
+  document.querySelectorAll('.funnel-chip-wrap').forEach(w => {
+    w.addEventListener('dragstart', e => {
+      if (state.chipReorderSaving) { e.preventDefault(); return; }
+      state.chipDragFrom = w.dataset.token;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', w.dataset.token); // Firefox richiede setData
+    });
+    w.addEventListener('dragover', e => {
+      if (state.chipDragFrom == null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const over = w.dataset.token;
+      if (state.chipDragOver !== over) {
+        state.chipDragOver = over;
+        render();
+      }
+    });
+    w.addEventListener('drop', async e => {
+      e.preventDefault();
+      const from = state.chipDragFrom;
+      const to   = w.dataset.token;
+      state.chipDragFrom = null;
+      state.chipDragOver = null;
+      if (from == null || from === to) { render(); return; }
+      const tokens = funnelToolbarTokens();
+      const fromIdx = tokens.indexOf(from);
+      const toIdx   = tokens.indexOf(to);
+      if (fromIdx === -1 || toIdx === -1) { render(); return; }
+      const [moved] = tokens.splice(fromIdx, 1);
+      tokens.splice(toIdx, 0, moved);
+      await saveFunnelToolbarOrder(tokens);
+    });
+    w.addEventListener('dragend', () => {
+      if (state.chipDragFrom != null || state.chipDragOver != null) {
+        state.chipDragFrom = null;
+        state.chipDragOver = null;
+        render();
+      }
+    });
+  });
 
   document.getElementById('funnel-save-open')?.addEventListener('click', () => {
     state.funnelSaveOpen = true;
@@ -7212,17 +8508,22 @@ function attachEvents() {
     state.funnelSaveOpen = false;
     state.funnelSaveName = '';
     render();
-    const ins = await sb.from('funnel_definitions').insert({ nome: name, tipo: isEvent ? 'event' : 'catalog', steps, provider: isEvent ? state.eventFunnelProvider : null });
+    // nuovo funnel va in fondo alla lista: order_index = max esistente + 1
+    const maxOrder = (state.savedFunnels || []).reduce((m, f) => Math.max(m, f.orderIndex ?? -1), -1);
+    const ins = await sb.from('funnel_definitions').insert({
+      nome: name, tipo: isEvent ? 'event' : 'catalog', steps,
+      provider: isEvent ? state.eventFunnelProvider : null,
+      order_index: maxOrder + 1,
+    });
     if (ins.error) { console.error('save funnel', ins.error); alert('Errore salvataggio funnel: ' + ins.error.message); return; }
     await fetchFunnelDefinitions();
-    state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order by created_at asc)
+    state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order_index max)
     render();
   });
 
   // ── Builder funnel a eventi ──────────────────────────────────────────
   document.getElementById('event-funnel-add')?.addEventListener('click', () => {
-    const last = state.eventFunnelConfig.length ? state.eventFunnelConfig.length - 1 : null;
-    state.eventFunnelConfig.push({ event: '', label: '', vsIdx: last });
+    state.eventFunnelConfig.push({ event: '', label: '' });
     persistEventFunnelConfig();
     render();
   });
@@ -7242,28 +8543,108 @@ function attachEvents() {
     persistEventFunnelConfig(); // se un funnel evento è attivo, salva anche il provider
     fetchEventFunnel();
   });
-  document.querySelectorAll('.event-funnel-name').forEach(el =>
-    el.addEventListener('change', () => {
-      const row = state.eventFunnelConfig[+el.dataset.row];
-      row.event = el.value;
-      const c = EVENT_CATALOG.find(e => e.event === el.value);
-      row.label = c ? c.label : '';   // etichetta presa dal catalogo
+  // Selettore evento → apre l'event browser puntando allo step corrente
+  document.querySelectorAll('.event-funnel-pick').forEach(el =>
+    el.addEventListener('click', () => openEventBrowser(+el.dataset.row)));
+  // Label rinominabile: scrive direttamente in row.label. Vuoto → fallback catalogo/evento raw.
+  document.querySelectorAll('.event-funnel-label').forEach(el =>
+    el.addEventListener('input', () => {
+      state.eventFunnelConfig[+el.dataset.row].label = el.value;
       persistEventFunnelConfig();
-      render();                        // aggiorna le opzioni "% vs" degli step successivi
     }));
-  document.querySelectorAll('.event-funnel-vs').forEach(el =>
-    el.addEventListener('change', () => { state.eventFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value; persistEventFunnelConfig(); render(); }));
   document.querySelectorAll('.event-funnel-remove').forEach(el =>
     el.addEventListener('click', () => {
       const i = +el.dataset.row;
       state.eventFunnelConfig.splice(i, 1);
-      state.eventFunnelConfig.forEach(r => {
-        if (r.vsIdx === i) r.vsIdx = null;
-        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      // rimappa gli indici expanded (session-only): tutto quello che stava dopo i shifta di -1
+      const oldExp = state.eventFunnelExpanded || {};
+      const newExp = {};
+      Object.keys(oldExp).forEach(k => {
+        const ki = +k;
+        if (ki < i) newExp[ki] = oldExp[k];
+        else if (ki > i) newExp[ki - 1] = oldExp[k];
       });
+      state.eventFunnelExpanded = newExp;
       persistEventFunnelConfig();
       render();
     }));
+
+  // Chevron in viz + toggle expand in editor: aprono/chiudono la sezione children
+  document.querySelectorAll('.event-funnel-chevron, .event-funnel-expand-toggle').forEach(el =>
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const i = +el.dataset.row;
+      if (!state.eventFunnelExpanded) state.eventFunnelExpanded = {};
+      state.eventFunnelExpanded[i] = !state.eventFunnelExpanded[i];
+      render();
+    }));
+
+  // Aggiungi variante child (crea children[] on demand). Espande automaticamente il parent.
+  document.querySelectorAll('.event-funnel-child-add').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      const row = state.eventFunnelConfig[i];
+      if (!row) return;
+      if (!Array.isArray(row.children)) row.children = [];
+      row.children.push({ event: '', label: '' });
+      if (!state.eventFunnelExpanded) state.eventFunnelExpanded = {};
+      state.eventFunnelExpanded[i] = true;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // Picker child → apre event browser puntando alla variante specifica
+  document.querySelectorAll('.event-funnel-pick-child').forEach(el =>
+    el.addEventListener('click', () => openEventBrowser(+el.dataset.parent, +el.dataset.child)));
+
+  // Label child rinominabile
+  document.querySelectorAll('.event-funnel-child-label').forEach(el =>
+    el.addEventListener('input', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
+      row.children[ci].label = el.value;
+      persistEventFunnelConfig();
+    }));
+
+  // Filtro metadata sul parent: `provider=google` → filters {provider:'google'}. change→refetch not
+  // automatico: l'utente clicca "Calcola" (evita refetch per ogni tasto).
+  document.querySelectorAll('.event-funnel-filter').forEach(el =>
+    el.addEventListener('input', () => {
+      const i = +el.dataset.row;
+      const row = state.eventFunnelConfig[i];
+      if (!row) return;
+      const parsed = parseFilterInput(el.value);
+      if (parsed) row.filters = parsed; else delete row.filters;
+      persistEventFunnelConfig();
+    }));
+
+  // Filtro metadata sul child (stessa logica del parent). Il caso classico: variante "Google" con
+  // filtro `provider=google` sullo stesso event_name del parent (es. sign_up).
+  document.querySelectorAll('.event-funnel-child-filter').forEach(el =>
+    el.addEventListener('input', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
+      const parsed = parseFilterInput(el.value);
+      if (parsed) row.children[ci].filters = parsed; else delete row.children[ci].filters;
+      persistEventFunnelConfig();
+    }));
+
+  // Rimuovi child (dropp children[] se svuotato, così il parent torna "senza varianti")
+  document.querySelectorAll('.event-funnel-child-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children)) return;
+      row.children.splice(ci, 1);
+      if (!row.children.length) delete row.children;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // ── Event browser (modale) ──────────────────────────────────────────
+  attachEventBrowserHandlers();
   document.querySelectorAll('.funnel-step-sel').forEach(el =>
     el.addEventListener('change', () => {
       state.funnelConfig[+el.dataset.row].stepIdx = +el.value;
@@ -8301,6 +9682,7 @@ document.addEventListener('keydown', e => {
   fetchSprints();
   fetchFunnelDefinitions();
   fetchFunnelPhases();
+  fetchEventRegistry();
   fetchBlockedUsers();
   fetchRecentlyUnblocked();
   startAutoRefresh();
