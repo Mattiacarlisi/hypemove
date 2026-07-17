@@ -331,6 +331,10 @@ let state = {
   funnelIncludeEmulators: false, // override v2: reinclude gli emulatori (p_include_emulators)
   funnelIncludeTest: false,      // override v2: reinclude gli account test (p_include_test)
   funnelIncludeBlocked: false,   // override v2: reinclude gli utenti bloccati (p_include_blocked)
+  funnelCohortBase: null,        // coorte dell'ultimo calcolo SENZA override — baseline per il delta
+  excludedUsers: null,           // lista nominale esclusi (RPC kpi_excluded_users_list)
+  excludedLoading: false, excludedError: null,
+  excludedFilter: null,          // filtro motivo nella lista: null | 'blocked' | 'test' | 'emulator'
   eventFunnelConfig: [],       // [{event, source, label, vsIdx, children?:[{event,source,label}]}] — step del funnel a eventi. `children` = varianti annidate visibili espandendo il parent (es. sign_up → signup_google/signup_email); non partecipano al calcolo della % dello step successivo.
   eventFunnel: null,           // risultato RPC kpi_funnel_v2: {steps:[{idx,event,source,numero}]}
   eventFunnelFlatMap: null,    // { parent:[flatIdx|null,...], child:[[flatIdx|null,...],...] } — mappa posizione UI ↔ posizione in p_steps del flatten (parent+children serializzati in sequenza per la RPC)
@@ -698,8 +702,29 @@ async function fetchEventFunnel() {
       includeTest:      state.funnelIncludeTest,
       includeBlocked:   state.funnelIncludeBlocked,
     });
+    // Baseline per il delta coorte della card Parametri: la fotografo solo quando
+    // nessun override è attivo, così il confronto è sempre "vs esclusioni standard".
+    if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked) {
+      state.funnelCohortBase = state.eventFunnel?.cohort_size ?? null;
+    }
   } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
   state.eventFunnelLoading = false;
+  render();
+}
+
+// Lista nominale degli utenti esclusi dalle metriche (card Parametri).
+// Caricata pigramente all'apertura della card, poi tenuta in cache nello state.
+async function fetchExcludedUsers() {
+  if (state.excludedUsers || state.excludedLoading) return;
+  state.excludedLoading = true;
+  state.excludedError = null;
+  render();
+  try {
+    const res = await sb.rpc('kpi_excluded_users_list');
+    if (res.error) throw res.error;
+    state.excludedUsers = res.data || [];
+  } catch (e) { state.excludedError = e.message || 'Errore sconosciuto'; }
+  state.excludedLoading = false;
   render();
 }
 
@@ -4852,84 +4877,18 @@ function sprintEventFunnelSection() {
 }
 
 // ── CARD PARAMETRI DEL FUNNEL ────────────────────────────────────────────────
-// Card collassabile in fondo alla pagina Funnel, due blocchi:
-//   1. Override modificabili (solo funnel a eventi / kpi_funnel_v2): reinclude
-//      on-demand emulatori, account test e bloccati. Il click ricalcola SUBITO
-//      il funnel (p_include_emulators / p_include_test / p_include_blocked).
-//   2. Regole fisse di riferimento, in forma compatta, con badge di
-//      applicabilità (Default = kpi_funnel v1, a eventi = kpi_funnel_v2).
-//
-// ⚠️ REGOLE HARDCODED — TENERE SINCRONIZZATO A MANO CON:
-//   app/supabase/functions/rpc/kpi_funnel.sql        (v1 — funnel Default)
-//   app/supabase/functions/rpc/kpi_funnel_v2.sql     (v2 — funnel a eventi)
-//   app/supabase/migrations/20260715120000_kpi_excluded_users_view.sql
-//   app/supabase/migrations/20260717100000_kpi_funnel_v2_include_toggles.sql
-// I conteggi esclusi e la coorte invece sono dati REALI: arrivano da
-// excluded_counts / cohort_size nella risposta di kpi_funnel_v2.
-// applies: 'v1' | 'v2' | 'both'.
-const FUNNEL_PARAMS_RULES = [
-  { cat: 'Coorte', regola: 'Chi entra nel funnel',
-    valore: 'v2: àncora per data d\'iscrizione — fuori finestra non entri mai, dentro resti contato per sempre. v1: utenti/identità creati nella finestra.',
-    applies: 'both' },
-  { cat: 'Coorte', regola: 'Eventi degli step',
-    valore: 'Contati senza vincolo di finestra (v2 scansiona da −30gg a +90gg attorno al periodo).',
-    applies: 'both' },
-  { cat: 'Coorte', regola: 'Orario di partenza (p_start)',
-    valore: 'Se lo sprint ha un orario di inizio, la coorte parte da lì invece che da mezzanotte. In v1 lo step 0 installazioni resta per data.',
-    applies: 'both' },
-  { cat: 'Coorte', regola: 'p_cohort_anchor',
-    valore: 'Vestigiale dal 16/7: la coorte per iscrizione si applica sempre.',
-    applies: 'v2' },
-
-  { cat: 'Esclusioni', regola: 'Utenti bloccati',
-    valore: 'Lista "Account esclusi" (blocked_users). v1 li esclude sempre; v2 di default, reincludibili con l\'override qui sopra.',
-    applies: 'both' },
-  { cat: 'Esclusioni', regola: 'Account test',
-    valore: 'users.is_test (inclusi E2E @hypemove.test). Esclusi solo in v2 — il Default NON li esclude.',
-    applies: 'v2' },
-  { cat: 'Esclusioni', regola: 'Emulatori',
-    valore: 'Sessioni con device_info.isVirtual = true. Esclusi solo in v2 — il Default NON li esclude.',
-    applies: 'v2' },
-  { cat: 'Esclusioni', regola: 'Abbonamenti interni',
-    valore: 'v1 toglie dai conteggi Premium/Trial i token di utenti bloccati e i product DEBUG.',
-    applies: 'v1' },
-
-  { cat: 'Sorgenti', regola: 'Tabelle lette',
-    valore: 'v1: tabelle fisse (installs, users, workout, purchases + 7 eventi). v2: UNION user_events + anonymous_events.',
-    applies: 'both' },
-  { cat: 'Sorgenti', regola: 'Identità',
-    valore: 'user_events.user_id = public.users.id (non auth uid). Eventi anonimi attribuiti all\'utente via email della sessione.',
-    applies: 'both' },
-  { cat: 'Sorgenti', regola: 'Deduplica',
-    valore: 'Ogni step conta identità DISTINTE: nessun doppio conteggio per eventi ripetuti.',
-    applies: 'both' },
-  { cat: 'Sorgenti', regola: 'Filtri metadata',
-    valore: 'v2: configurabili per step ("filters" + step multi-evento OR). v1: fisso source=onboarding_end sui soli step paywall.',
-    applies: 'both' },
-  { cat: 'Sorgenti', regola: 'Segmento provider',
-    valore: 'Google/Email filtra coorte ed eventi; le sessioni anonime mai iscritte escono dal conteggio.',
-    applies: 'v2' },
-
-  { cat: 'Solo Default (v1)', regola: 'Step 0 / First Open',
-    valore: 'Somma da google_play_installs per data (inclusi gli estremi); senza righe mostra "—".',
-    applies: 'v1' },
-  { cat: 'Solo Default (v1)', regola: 'Premium pagante',
-    valore: 'Dedup per purchase_token; pagante = abbonamento attivo, non revocato, payment_state = 1.',
-    applies: 'v1' },
-  { cat: 'Solo Default (v1)', regola: 'Finestre workout',
-    valore: '"Entro 24h" dall\'iscrizione, "≥2/3/5" nella prima settimana dal primo workout, streak = 3 giorni consecutivi.',
-    applies: 'v1' },
-
-  { cat: 'Client-side', regola: 'Step install_*',
-    valore: 'install_google_play / install_meta_ads non sono eventi: i totali arrivano da kpi_install_totals e vengono reinseriti in posizione dal client.',
-    applies: 'v2' },
-];
-
+// Card collassabile in fondo alla pagina Funnel. Mostra SOLO dati reali del
+// funnel a eventi (kpi_funnel_v2), niente documentazione statica:
+//   1. Toggle di inclusione (emulatori / account test / bloccati) → ricalcolo
+//      immediato del funnel via p_include_emulators / p_include_test /
+//      p_include_blocked. Accanto a ognuno il delta reale sulla coorte.
+//   2. Lista nominale degli esclusi (RPC kpi_excluded_users_list): email, motivo,
+//      iscrizione, eventi emessi, workout. Filtrabile per motivo.
+//   3. Parametri correnti della chiamata RPC (periodo, p_start/p_end, segmento).
 function funnelParamsSection() {
-  const active = state.funnelMode === 'event' ? 'v2' : 'v1';
   const nOverride = [state.funnelIncludeEmulators, state.funnelIncludeTest, state.funnelIncludeBlocked].filter(Boolean).length;
   const hdrBadge = nOverride
-    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${nOverride} override</span>` : '';
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${nOverride} override attivi</span>` : '';
   const headerEl = `
     <div id="funnel-params-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
       <div style="display:flex;align-items:center;gap:10px">
@@ -4939,62 +4898,111 @@ function funnelParamsSection() {
     </div>`;
   if (!state.funnelParamsOpen) return `<div class="card" style="margin-top:16px">${headerEl}</div>`;
 
-  // ── Blocco 1: override modificabili (solo v2) + dati reali dall'ultima risposta RPC.
-  const counts = (state.eventFunnel && state.eventFunnel.excluded_counts) || null;
-  const nOf = r => counts && counts[r] != null ? counts[r] : '–';
+  if (state.funnelMode !== 'event') {
+    return `
+      <div class="card" style="margin-top:16px">
+        ${headerEl}
+        <div style="margin-top:18px;font-size:12px;color:var(--muted);line-height:1.5">
+          I parametri sono modificabili solo sul <strong style="color:var(--text)">funnel a eventi</strong>. Il Default (kpi_funnel) ha step e filtri cablati nella RPC.
+        </div>
+      </div>`;
+  }
+
+  const fn = state.eventFunnel;
+  // Conteggi per motivo: derivati dalla lista nominale (c'è anche prima di "Calcola");
+  // fallback su excluded_counts della risposta RPC.
+  const counts = (fn && fn.excluded_counts) || {};
+  const nOf = r => state.excludedUsers
+    ? state.excludedUsers.filter(u => (u.reason || '').split(',').includes(r)).length
+    : (counts[r] != null ? counts[r] : '–');
+
+  // Delta reale sulla coorte: differenza fra il calcolo corrente e la baseline
+  // salvata al primo calcolo senza override (state.funnelCohortBase).
+  const cohortNow = fn && fn.cohort_size != null ? fn.cohort_size : null;
+  const base = state.funnelCohortBase;
+  const deltaStr = (cohortNow != null && base != null && cohortNow !== base)
+    ? `<span style="color:${cohortNow > base ? 'var(--mattia)' : 'var(--red)'};font-weight:600">${cohortNow > base ? '+' : ''}${cohortNow - base}</span>` : '';
+
   const toggles = [
-    { key: 'emulators', on: state.funnelIncludeEmulators, label: 'Includi emulatori',    n: nOf('emulator'), hint: 'Sessioni con device_info.isVirtual = true' },
-    { key: 'test',      on: state.funnelIncludeTest,      label: 'Includi account test', n: nOf('test'),     hint: 'users.is_test, inclusi E2E @hypemove.test' },
-    { key: 'blocked',   on: state.funnelIncludeBlocked,   label: 'Includi bloccati',     n: nOf('blocked'),  hint: 'Lista "Account esclusi" (blocked_users)' },
+    { key: 'emulators', on: state.funnelIncludeEmulators, label: 'Emulatori',    n: nOf('emulator') },
+    { key: 'test',      on: state.funnelIncludeTest,      label: 'Account test', n: nOf('test') },
+    { key: 'blocked',   on: state.funnelIncludeBlocked,   label: 'Bloccati',     n: nOf('blocked') },
   ];
   const chips = toggles.map(t => `
-    <button class="funnel-param-chip" data-param="${t.key}" title="${esc(t.hint)}"
+    <button class="funnel-param-chip" data-param="${t.key}"
       style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
         ${t.on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
-      ${t.on ? '✓ ' : ''}${t.label} <span style="opacity:.6;font-weight:400">(${t.n})</span></button>`).join('');
-  const cohortLine = state.eventFunnel && state.eventFunnel.cohort_size != null
-    ? `<div style="font-size:11px;color:var(--muted);margin-top:10px">Coorte ultimo calcolo: <strong style="color:var(--text)">${state.eventFunnel.cohort_size}</strong> identità (iscritti + sessioni anonime nel periodo).</div>` : '';
-  const editBlock = active === 'v2' ? `
-    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Override esclusioni — ricalcolo immediato</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
-    ${cohortLine}` : `
-    <div style="font-size:12px;color:var(--muted);line-height:1.5">Gli override sulle esclusioni valgono solo per il <strong style="color:var(--text)">funnel a eventi</strong> (kpi_funnel_v2). Il Default (kpi_funnel) non è parametrizzabile.</div>`;
+      ${t.on ? '✓ inclusi' : 'esclusi'} · ${t.label} <span style="opacity:.6;font-weight:400">${t.n}</span></button>`).join('');
 
-  // ── Blocco 2: regole fisse, compatte, con badge di applicabilità.
-  const badge = a => {
-    if (a === 'both') return `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:var(--accent-lo);color:var(--purple);font-weight:600;white-space:nowrap">entrambi</span>`;
-    if (a === 'v2')   return `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#22d3ee22;color:#22d3ee;font-weight:600;white-space:nowrap">a eventi</span>`;
-    return              `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#a78bfa22;color:var(--purple);font-weight:600;white-space:nowrap">Default</span>`;
-  };
-  const groups = [];
-  const idxByCat = new Map();
-  FUNNEL_PARAMS_RULES.forEach(r => {
-    if (!idxByCat.has(r.cat)) { idxByCat.set(r.cat, groups.length); groups.push({ cat: r.cat, rows: [] }); }
-    groups[idxByCat.get(r.cat)].rows.push(r);
-  });
-  const rulesHtml = groups.map(g => {
-    const header = `<tr><td colspan="3" style="padding:16px 0 6px 0;font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600">${esc(g.cat)}</td></tr>`;
-    const body = g.rows.map(r => {
-      const on = r.applies === 'both' || r.applies === active;
-      return `<tr style="${on ? '' : 'opacity:.35'}">
-        <td style="padding:5px 14px 5px 0;font-size:12px;color:var(--text);vertical-align:top;white-space:nowrap;font-weight:500">${esc(r.regola)}</td>
-        <td style="padding:5px 14px 5px 0;font-size:12px;color:var(--muted);line-height:1.5;vertical-align:top">${esc(r.valore)}</td>
-        <td style="padding:5px 0;text-align:right;vertical-align:top">${badge(r.applies)}</td>
-      </tr>`;
-    }).join('');
-    return header + body;
+  // Riga di stato: coorte corrente + parametri effettivi della chiamata RPC.
+  const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+  const pStart = selSprint ? sprintStartTs(selSprint) : null;
+  const pEnd   = selSprint && typeof sprintEndTs === 'function' ? sprintEndTs(selSprint) : null;
+  const seg = state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti';
+  const stat = (label, val) => `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px">${val}</div></div>`;
+  const statusRow = `
+    <div style="display:flex;flex-wrap:wrap;gap:26px;margin-bottom:16px">
+      ${stat('Coorte', cohortNow != null ? `${cohortNow} ${deltaStr}` : '—')}
+      ${stat('Periodo', `${state.funnelFrom} → ${state.funnelTo}`)}
+      ${stat('Segmento', seg)}
+      ${stat('Orario', pStart ? new Date(pStart).toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) + (pEnd ? ' → ' + new Date(pEnd).toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '') : 'giorni interi')}
+    </div>`;
+
+  // ── Lista nominale degli esclusi.
+  const rows = state.excludedUsers || [];
+  const filt = state.excludedFilter;
+  const shown = filt ? rows.filter(r => (r.reason || '').split(',').includes(filt)) : rows;
+  const reasonBadge = reason => (reason || '').split(',').map(r => {
+    const c = r === 'blocked' ? '#f87171' : r === 'test' ? '#fbbf24' : '#22d3ee';
+    const l = r === 'blocked' ? 'bloccato' : r === 'test' ? 'test' : 'emulatore';
+    return `<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${c}22;color:${c};font-weight:600;margin-left:4px;white-space:nowrap">${l}</span>`;
   }).join('');
+  const filtChips = [null, 'blocked', 'test', 'emulator'].map(f => {
+    const lab = f === null ? `Tutti ${rows.length}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Test ${nOf('test')}` : `Emulatori ${nOf('emulator')}`;
+    const on = filt === f;
+    return `<button class="excl-filter" data-filter="${f || ''}"
+      style="cursor:pointer;padding:3px 11px;font-size:11px;font-weight:600;border-radius:20px;border:1px solid;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:transparent;border-color:#3a3a55;color:var(--muted)'}">${lab}</button>`;
+  }).join('');
+  const listBody = state.excludedLoading
+    ? `<div style="padding:20px 0;color:var(--muted);font-size:12px">Carico la lista…</div>`
+    : state.excludedError
+    ? `<div style="padding:12px 0;color:var(--red);font-size:12px">⚠️ ${esc(state.excludedError)}</div>`
+    : !rows.length
+    ? `<div style="padding:12px 0;color:var(--muted);font-size:12px">Nessun utente escluso.</div>`
+    : `<div class="table-wrap" style="max-height:340px;overflow-y:auto"><table class="data-table" style="width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;font-size:10px">Utente</th>
+          <th style="text-align:left;font-size:10px">Motivo</th>
+          <th style="text-align:right;font-size:10px">Iscritto</th>
+          <th style="text-align:right;font-size:10px">Eventi</th>
+          <th style="text-align:right;font-size:10px">Workout</th>
+        </tr></thead>
+        <tbody>${shown.map(r => `
+          <tr>
+            <td style="padding:5px 12px 5px 0;font-size:12px;color:var(--text);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              ${esc(r.name || '—')} <span style="color:var(--muted);font-size:11px">${esc(r.email || '')}</span>
+            </td>
+            <td style="padding:5px 12px 5px 0;white-space:nowrap">${reasonBadge(r.reason)}</td>
+            <td style="padding:5px 0;text-align:right;font-size:11px;color:var(--muted);white-space:nowrap">${r.created_at ? r.created_at.slice(0, 10) : '—'}</td>
+            <td style="padding:5px 0 5px 12px;text-align:right;font-size:12px;color:var(--text)">${r.events_count ?? 0}</td>
+            <td style="padding:5px 0 5px 12px;text-align:right;font-size:12px;color:var(--text)">${r.workouts_count ?? 0}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>`;
 
   return `
     <div class="card" style="margin-top:16px">
       ${headerEl}
       <div style="margin-top:18px">
-        ${editBlock}
-        <div style="border-top:1px solid var(--border);margin-top:18px;padding-top:4px">
-          <div class="table-wrap"><table class="data-table" style="width:100%;border-collapse:collapse">
-            <tbody>${rulesHtml}</tbody>
-          </table></div>
-          <div style="font-size:10px;color:var(--muted);margin-top:12px">Regole di riferimento hardcoded — se cambiano le RPC va aggiornata FUNNEL_PARAMS_RULES in kpi.js. Le righe attenuate valgono solo per l'altra modalità.</div>
+        ${statusRow}
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Chi conta nel funnel — click per ricalcolare</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+        <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:16px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-right:4px">Chi è escluso</span>
+            ${filtChips}
+          </div>
+          ${listBody}
         </div>
       </div>
     </div>`;
@@ -8783,8 +8791,15 @@ function attachEvents() {
 
   // Card Parametri — apri/chiudi + override esclusioni v2 (ricalcolo immediato del funnel)
   document.getElementById('funnel-params-toggle')?.addEventListener('click', () => {
-    state.funnelParamsOpen = !state.funnelParamsOpen; render();
+    state.funnelParamsOpen = !state.funnelParamsOpen;
+    if (state.funnelParamsOpen) fetchExcludedUsers(); // lazy: la lista serve solo a card aperta
+    render();
   });
+  document.querySelectorAll('.excl-filter').forEach(el =>
+    el.addEventListener('click', () => {
+      state.excludedFilter = el.dataset.filter || null;
+      render();
+    }));
   document.querySelectorAll('.funnel-param-chip').forEach(el =>
     el.addEventListener('click', () => {
       const k = el.dataset.param;
