@@ -338,7 +338,7 @@ let state = {
   engagementByAge: null, engagementByAgeLoading: false, ageEngFrom: null, ageEngTo: null,
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
-  sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '' },
+  sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' },
   sprintFunnelEditId: null,   // id dello sprint di cui stiamo editando il funnel (pagina Sprint)
   sprintFunnelEdit: null,     // working copy dell'array config in editing
   sprintFunnelSaving: false,
@@ -545,6 +545,7 @@ async function fetchRetention() {
       max_weeks:    state.retWeeks,
       min_w0:       state.retMinW0,
       p_start:      selSprint ? sprintStartTs(selSprint) : null,
+      p_end:        selSprint ? sprintEndTs(selSprint) : null,
     });
     if (res.error) throw res.error;
     state.retention = res.data;
@@ -561,7 +562,8 @@ async function fetchFunnel() {
     // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
     const p_start = selSprint ? sprintStartTs(selSprint) : null;
-    const res = await sb.rpc('kpi_funnel', { inizio: state.funnelFrom, fine: state.funnelTo, p_start });
+    const p_end = selSprint ? sprintEndTs(selSprint) : null;
+    const res = await sb.rpc('kpi_funnel', { inizio: state.funnelFrom, fine: state.funnelTo, p_start, p_end });
     if (res.error) throw res.error;
     state.funnel = res.data;
   } catch (e) { state.funnelError = e.message || 'Errore sconosciuto'; }
@@ -583,7 +585,7 @@ async function fetchEventFunnel() {
     if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider; // 'google' | 'email'
     // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
-    if (selSprint) args.p_start = sprintStartTs(selSprint);
+    if (selSprint) { args.p_start = sprintStartTs(selSprint); args.p_end = sprintEndTs(selSprint); }
     const res = await sb.rpc('kpi_funnel_v2', args);
     if (res.error) throw res.error;
     state.eventFunnel = res.data;
@@ -594,14 +596,14 @@ async function fetchEventFunnel() {
 
 // Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
 // per uno specifico periodo (in confronto sprint = il periodo di quello sprint).
-async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome, p_start = null) {
+async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome, p_start = null, p_end = null) {
   state.funnelStepUsersModal = { stepIdx, label, sprintNome, inizio, fine };
   state.funnelStepUsersData = null;
   state.funnelStepUsersError = null;
   state.funnelStepUsersLoading = true;
   render();
   try {
-    const res = await sb.rpc('kpi_funnel_step_users', { p_step: stepIdx, inizio, fine, p_start });
+    const res = await sb.rpc('kpi_funnel_step_users', { p_step: stepIdx, inizio, fine, p_start, p_end });
     if (res.error) throw res.error;
     state.funnelStepUsersData = res.data || [];
   } catch (e) { state.funnelStepUsersError = e.message || 'Errore sconosciuto'; }
@@ -743,6 +745,7 @@ async function fetchPremium() {
       fine:   state.premiumTo,
       p_gender: state.premiumGender,
       p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
     });
     if (error) throw error;
     state.premiumData = data;
@@ -758,12 +761,16 @@ async function fetchStepUsers(variant, step, label) {
   state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
   render();
   try {
+    // stesso sprint (quindi stesso p_start/p_end) della pagina Premium, per coerenza dei conteggi
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
     const { data, error } = await sb.rpc('kpi_premium_step_users', {
       p_variant: variant,
       p_step:    step,
       inizio:    state.premiumFrom,
       fine:      state.premiumTo,
       p_gender:  state.premiumGender,
+      p_start:   selSprint ? sprintStartTs(selSprint) : null,
+      p_end:     selSprint ? sprintEndTs(selSprint) : null,
     });
     if (error) throw error;
     state.stepUsersData = data;
@@ -1297,6 +1304,16 @@ function sprintStartTs(s) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// Orario di fine opzionale di uno sprint → timestamp ISO (esclusivo) da passare come p_end alle RPC.
+// s.fine_ora è un 'HH:MM[:SS]' in ora locale: lo combino con la data di fine nel fuso del browser.
+// Se non impostato ritorna null → le RPC contano fino a fine giornata, comportamento storico.
+function sprintEndTs(s) {
+  if (!s || !s.fine_ora) return null;
+  const t = String(s.fine_ora).slice(0, 5);
+  const d = new Date(`${s.fine}T${t}`);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 async function fetchSprintFunnel() {
   if (!state.sprintFunnelSel.length) return;
   state.sprintFunnelLoading = true;
@@ -1306,7 +1323,7 @@ async function fetchSprintFunnel() {
   try {
     const selected = state.sprints.filter(s => state.sprintFunnelSel.includes(s.id));
     const results  = await Promise.all(selected.map(s =>
-      sb.rpc('kpi_funnel', { inizio: s.inizio, fine: s.fine, p_start: sprintStartTs(s) })
+      sb.rpc('kpi_funnel', { inizio: s.inizio, fine: s.fine, p_start: sprintStartTs(s), p_end: sprintEndTs(s) })
         .then(r => ({ id: s.id, data: r.data, error: r.error }))
     ));
     const map = {};
@@ -1333,7 +1350,7 @@ async function fetchSprintPremiumFunnel() {
   try {
     const selected = state.sprints.filter(s => state.sprintPremiumFunnelSel.includes(s.id));
     const results  = await Promise.all(selected.map(s =>
-      sb.rpc('kpi_premium', { inizio: s.inizio, fine: s.fine, p_gender: state.premiumGender, p_start: sprintStartTs(s) })
+      sb.rpc('kpi_premium', { inizio: s.inizio, fine: s.fine, p_gender: state.premiumGender, p_start: sprintStartTs(s), p_end: sprintEndTs(s) })
         .then(r => ({ id: s.id, data: r.data, error: r.error }))
     ));
     const map = {};
@@ -1356,7 +1373,7 @@ async function fetchSprintAiFunnel() {
   try {
     const selected = state.sprints.filter(s => state.sprintAiFunnelSel.includes(s.id));
     const results  = await Promise.all(selected.map(async s => {
-      const range = { p_from: sprintStartTs(s) || s.inizio, p_to: s.fine };
+      const range = { p_from: sprintStartTs(s) || s.inizio, p_to: s.fine, p_end: sprintEndTs(s) };
       const [{ data, error }, { data: chatWorkoutData, error: chatWorkoutError }] = await Promise.all([
         sb.rpc('kpi_events_by_name', { ...range, p_events: AI_FUNNEL_EVENT_NAMES }),
         sb.rpc('kpi_ai_chat_workout_events', range),
@@ -1387,7 +1404,7 @@ async function fetchSprintRetention() {
     const weeks    = state.sprintRetCustom ? state.sprintRetWeeks : state.retWeeks;
     const minW0    = state.sprintRetCustom ? state.sprintRetMinW0 : state.retMinW0;
     const results  = await Promise.all(selected.map(s =>
-      sb.rpc('kpi_retention', { inizio: s.inizio, fine: s.fine, min_workouts: min, max_weeks: weeks, min_w0: minW0, p_start: sprintStartTs(s) })
+      sb.rpc('kpi_retention', { inizio: s.inizio, fine: s.fine, min_workouts: min, max_weeks: weeks, min_w0: minW0, p_start: sprintStartTs(s), p_end: sprintEndTs(s) })
         .then(r => ({ id: s.id, data: r.data, error: r.error }))
     ));
     const map = {};
@@ -3865,6 +3882,7 @@ async function fetchSprintEventFunnel() {
       const args = { inizio: s.inizio, fine: s.fine, p_steps };
       if (state.eventFunnelProvider) args.p_provider = state.eventFunnelProvider;
       args.p_start = sprintStartTs(s);
+      args.p_end = sprintEndTs(s);
       return sb.rpc('kpi_funnel_v2', args).then(r => ({ id: s.id, data: r.data, error: r.error }));
     }));
     const map = {};
@@ -4227,7 +4245,7 @@ function pageRetention() {
       <span class="filter-label">Sprint</span>
       <select id="ret-sprint-sel" class="form-select" style="font-size:12px;padding:5px 10px;width:150px">
         <option value="" ${!state.retSprintId ? 'selected' : ''}>— Periodo libero —</option>
-        ${state.sprints.map(s => `<option value="${s.id}" ${state.retSprintId === s.id ? 'selected' : ''}>${s.nome}${s.inizio_ora ? ' ⏱' : ''}</option>`).join('')}
+        ${state.sprints.map(s => `<option value="${s.id}" ${state.retSprintId === s.id ? 'selected' : ''}>${s.nome}${(s.inizio_ora || s.fine_ora) ? ' ⏱' : ''}</option>`).join('')}
       </select>
       <div class="filter-sep"></div>` : ''}
       <span class="filter-label">Iscrizione</span>
@@ -4584,7 +4602,7 @@ function pagePremium() {
         <span class="filter-label">Sprint</span>
         <select id="premium-sprint-sel" class="form-input" style="width:150px;padding:5px 10px;font-size:12px">
           <option value="" ${!state.premiumSprintId ? 'selected' : ''}>— Periodo libero —</option>
-          ${state.sprints.map(s => `<option value="${s.id}" ${state.premiumSprintId === s.id ? 'selected' : ''}>${s.nome}${s.inizio_ora ? ' ⏱' : ''}</option>`).join('')}
+          ${state.sprints.map(s => `<option value="${s.id}" ${state.premiumSprintId === s.id ? 'selected' : ''}>${s.nome}${(s.inizio_ora || s.fine_ora) ? ' ⏱' : ''}</option>`).join('')}
         </select>` : ''}
         <span class="filter-label">Periodo</span>
         <input type="date" id="premium-from" class="form-input" value="${state.premiumFrom}"
@@ -5678,6 +5696,18 @@ function pageSprint() {
              <span style="font-size:10px;color:var(--muted);margin-left:8px">Opzionale — senza, conta il giorno intero.</span>`}
       </div>
       <div style="margin-bottom:14px">
+        ${state.sprintForm.fine_ora
+          ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Orario di fine (ora locale)</div>
+             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+               <input id="sprint-form-fine-ora" type="time" class="form-input" value="${state.sprintForm.fine_ora}"
+                 style="font-size:12px;padding:6px 10px">
+               <button id="sprint-form-fine-ora-clear" class="btn btn-ghost" style="font-size:11px;padding:5px 10px">Rimuovi orario</button>
+               <span style="font-size:10px;color:var(--muted)">Lo sprint conta solo fino a questo orario.</span>
+             </div>`
+          : `<button id="sprint-form-fine-ora-add" class="btn btn-ghost" style="font-size:11px;padding:5px 12px">+ Aggiungi orario di fine</button>
+             <span style="font-size:10px;color:var(--muted);margin-left:8px">Opzionale — senza, conta fino a fine giornata.</span>`}
+      </div>
+      <div style="margin-bottom:14px">
         <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Note</div>
         <textarea id="sprint-form-note" class="form-input"
           placeholder="Obiettivi, contesto, cosa abbiamo testato…"
@@ -5700,6 +5730,12 @@ function pageSprint() {
         ${sprints.map((s, i) => {
           const days  = Math.round((new Date(s.fine) - new Date(s.inizio)) / 86400000) + 1;
           const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+          const io = s.inizio_ora ? String(s.inizio_ora).slice(0,5) : '';
+          const fo = s.fine_ora   ? String(s.fine_ora).slice(0,5)   : '';
+          const oraLabel = io && fo ? ` · ⏱ dalle ${io} alle ${fo}`
+                         : io       ? ` · ⏱ dalle ${io}`
+                         : fo       ? ` · ⏱ fino alle ${fo}`
+                         : '';
           return `
             <div style="padding:16px 0;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
               <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -5707,7 +5743,7 @@ function pageSprint() {
                   <div style="width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0;margin-top:3px"></div>
                   <div>
                     <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:3px">${s.nome}</div>
-                    <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${s.inizio} → ${s.fine} · ${days} giorni${s.inizio_ora ? ` · ⏱ dalle ${String(s.inizio_ora).slice(0,5)}` : ''}</div>
+                    <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${s.inizio} → ${s.fine} · ${days} giorni${oraLabel}</div>
                   </div>
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0">
@@ -6206,7 +6242,7 @@ function sprintFunnelTable(selected, dataMap) {
             <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
           </div>
           ${(stepIdx === 10 || stepIdx === 18) && !noData && num > 0
-            ? `<span class="funnel-step-users" data-step="${stepIdx}" data-inizio="${esc(s.inizio)}" data-fine="${esc(s.fine)}" data-pstart="${esc(sprintStartTs(s) || '')}" data-label="${esc(label)}" data-sprint="${esc(s.nome)}" title="Vedi chi sono questi utenti" style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${colors[si]};cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${num}</span>`
+            ? `<span class="funnel-step-users" data-step="${stepIdx}" data-inizio="${esc(s.inizio)}" data-fine="${esc(s.fine)}" data-pstart="${esc(sprintStartTs(s) || '')}" data-pend="${esc(sprintEndTs(s) || '')}" data-label="${esc(label)}" data-sprint="${esc(s.nome)}" title="Vedi chi sono questi utenti" style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${colors[si]};cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${num}</span>`
             : `<span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}" ${noData ? 'title="Dato non disponibile per questo periodo"' : ''}>${noData ? 'n.d.' : num}</span>`}
         </div>
         ${(() => {
@@ -7370,7 +7406,7 @@ function attachEvents() {
   document.getElementById('sprint-new')?.addEventListener('click', () => {
     state.sprintFormOpen  = true;
     state.sprintEditingId = null;
-    state.sprintForm      = { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '' };
+    state.sprintForm      = { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' };
     render();
   });
   document.getElementById('sprint-form-cancel')?.addEventListener('click', () => {
@@ -7384,15 +7420,16 @@ function attachEvents() {
     const fine   = document.getElementById('sprint-form-fine')?.value;
     const note   = document.getElementById('sprint-form-note')?.value?.trim() || null;
     const inizioOra = document.getElementById('sprint-form-inizio-ora')?.value || null;
+    const fineOra = document.getElementById('sprint-form-fine-ora')?.value || null;
     if (!nome || !inizio || !fine) return;
-    state.sprintForm = { nome, inizio, fine, note: note || '', inizio_ora: inizioOra || '' };
+    state.sprintForm = { nome, inizio, fine, note: note || '', inizio_ora: inizioOra || '', fine_ora: fineOra || '' };
     const res = state.sprintEditingId
-      ? await sb.from('sprints').update({ nome, inizio, fine, note, inizio_ora: inizioOra }).eq('id', state.sprintEditingId)
-      : await sb.from('sprints').insert({ nome, inizio, fine, note, inizio_ora: inizioOra });
+      ? await sb.from('sprints').update({ nome, inizio, fine, note, inizio_ora: inizioOra, fine_ora: fineOra }).eq('id', state.sprintEditingId)
+      : await sb.from('sprints').insert({ nome, inizio, fine, note, inizio_ora: inizioOra, fine_ora: fineOra });
     if (res.error) { console.error(res.error); return; }
     state.sprintFormOpen  = false;
     state.sprintEditingId = null;
-    state.sprintForm      = { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '' };
+    state.sprintForm      = { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' };
     await fetchSprints();
   });
   // Orario di partenza: aggiungi/rimuovi. Prima snapshotto i campi dal DOM (il render li rigenera
@@ -7405,6 +7442,7 @@ function attachEvents() {
       fine:       g('sprint-form-fine')?.value        ?? state.sprintForm.fine,
       note:       g('sprint-form-note')?.value        ?? state.sprintForm.note,
       inizio_ora: g('sprint-form-inizio-ora')?.value  ?? state.sprintForm.inizio_ora,
+      fine_ora:   g('sprint-form-fine-ora')?.value    ?? state.sprintForm.fine_ora,
     };
   };
   document.getElementById('sprint-form-ora-add')?.addEventListener('click', () => {
@@ -7417,13 +7455,23 @@ function attachEvents() {
     state.sprintForm.inizio_ora = '';
     render();
   });
+  document.getElementById('sprint-form-fine-ora-add')?.addEventListener('click', () => {
+    snapshotSprintForm();
+    state.sprintForm.fine_ora = '18:00';
+    render();
+  });
+  document.getElementById('sprint-form-fine-ora-clear')?.addEventListener('click', () => {
+    snapshotSprintForm();
+    state.sprintForm.fine_ora = '';
+    render();
+  });
   document.querySelectorAll('.sprint-edit').forEach(el =>
     el.addEventListener('click', () => {
       const s = state.sprints.find(sp => sp.id === el.dataset.id);
       if (!s) return;
       state.sprintFormOpen  = true;
       state.sprintEditingId = s.id;
-      state.sprintForm      = { nome: s.nome, inizio: s.inizio, fine: s.fine, note: s.note || '', inizio_ora: s.inizio_ora ? String(s.inizio_ora).slice(0,5) : '' };
+      state.sprintForm      = { nome: s.nome, inizio: s.inizio, fine: s.fine, note: s.note || '', inizio_ora: s.inizio_ora ? String(s.inizio_ora).slice(0,5) : '', fine_ora: s.fine_ora ? String(s.fine_ora).slice(0,5) : '' };
       render();
     }));
   document.querySelectorAll('.sprint-delete').forEach(el =>
@@ -8062,7 +8110,7 @@ function attachEvents() {
   // Click su una cella cliccabile del funnel (Premium pagante / Trial iniziato) → lista utenti di quel periodo/sprint.
   document.querySelectorAll('.funnel-step-users').forEach(el =>
     el.addEventListener('click', () => {
-      fetchFunnelStepUsers(+el.dataset.step, el.dataset.inizio, el.dataset.fine, el.dataset.label, el.dataset.sprint, el.dataset.pstart || null);
+      fetchFunnelStepUsers(+el.dataset.step, el.dataset.inizio, el.dataset.fine, el.dataset.label, el.dataset.sprint, el.dataset.pstart || null, el.dataset.pend || null);
     }));
   document.getElementById('funnel-step-users-close')?.addEventListener('click', () => {
     state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render();
