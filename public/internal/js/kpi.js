@@ -4438,7 +4438,8 @@ function pageFunnel() {
     ${metaFunnelSection()}
     </div>
     ${sprintFunnelSection()}
-    ${sprintLeakSection()}`;
+    ${sprintLeakSection()}
+    ${funnelParamsSection()}`;
 }
 
 // ── FUNNEL A EVENTI (kpi_funnel_v2, UNION user_events + anonymous_events) ──────────
@@ -4510,7 +4511,8 @@ function pageFunnelEvent() {
       </div>
       ${body}
     </div>
-    ${sprintEventFunnelSection()}`;
+    ${sprintEventFunnelSection()}
+    ${funnelParamsSection()}`;
 }
 
 // Riga editor del funnel a eventi. row = {event, label, children?}. Ordine colonne: label
@@ -4807,6 +4809,127 @@ function sprintEventFunnelSection() {
         ${hasData ? pctStartToggle('sprint-event-pctstart') : ''}
         ${cmpBody ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${cmpBody}</div>` : ''}
       </div>
+    </div>`;
+}
+
+// ── SEZIONE PARAMETRI DEL FUNNEL ─────────────────────────────────────────────
+// Elenco leggibile di tutte le regole applicate dalle RPC che alimentano la pagina Funnel.
+// Reagisce a state.funnelMode: 'catalog' → evidenzia le righe v1 (kpi_funnel),
+// 'event' → evidenzia le righe v2 (kpi_funnel_v2). Le righe non applicabili
+// alla modalità corrente vengono attenuate ma restano visibili per confronto.
+//
+// ⚠️ HARDCODED — TENERE SINCRONIZZATO A MANO CON:
+//   app/supabase/functions/rpc/kpi_funnel.sql        (v1 — funnel Default, catalogo fisso)
+//   app/supabase/functions/rpc/kpi_funnel_v2.sql     (v2 — funnel a eventi)
+//   app/supabase/migrations/20260715120000_kpi_excluded_users_view.sql   (vista esclusioni)
+//   app/supabase/migrations/20260716143000_kpi_funnel_v2_signup_cohort.sql (coorte v2)
+// NB: le definizioni RPC LIVE hanno p_start/p_end su entrambe (COALESCE sulle
+// finestre coorte); gli snapshot repo possono essere più vecchi. Fonte di
+// verità = DB live, non lo snapshot repo.
+// applies: 'v1' (solo Default), 'v2' (solo a eventi), 'both' (entrambe).
+const FUNNEL_PARAMS_RULES = [
+  // Esclusioni utenti
+  { cat: 'Esclusioni utenti', regola: 'Utenti bloccati',
+    valore: 'Esclusi sempre (blocked_users con removed_at IS NULL). v1: CTE locale sulla tabella. v2: vista kpi_excluded_users, reason=blocked.',
+    applies: 'both' },
+  { cat: 'Esclusioni utenti', regola: 'Account test (users.is_test = TRUE)',
+    valore: 'Esclusi in v2 via kpi_excluded_users (reason=test); include gli utenti E2E @hypemove.test. Il funnel Default NON li esclude — scelta deliberata documentata nella migration 20260715120000.',
+    applies: 'v2' },
+  { cat: 'Esclusioni utenti', regola: 'Emulatori (device_info.isVirtual)',
+    valore: 'Esclusi via kpi_excluded_users (reason=emulator): utenti passati da una anonymous_sessions con device_info->>isVirtual = true. Le sessioni anonime mai linkate sono filtrate direttamente su device_info. Reincludibili con p_include_emulators, che la dashboard non passa mai (default false).',
+    applies: 'v2' },
+  { cat: 'Esclusioni utenti', regola: 'Abbonamenti di utenti interni',
+    valore: 'Esclude i purchase_token mai appartenuti a un utente in blocked_users (tok_internal) e i product_id = "DEBUG" dai conteggi Premium/Trial. Applicata dentro la RPC v1 sui soli step Premium/Trial.',
+    applies: 'v1' },
+
+  // Coorte e finestre temporali
+  { cat: 'Coorte e finestre', regola: 'Definizione della coorte',
+    valore: 'v1: coorte = auth.identities create nella finestra per gli step 2-3 e users.created_at nella finestra per gli step 4+. v2: àncora rigida per data d\'iscrizione — users.created_at nella finestra, UNION sessioni anonime (anonymous_sessions.created_at nella finestra, solo user_id NULL, identità anon:<session_id>). Chi si iscrive fuori finestra NON entra anche se emette eventi dentro; chi si iscrive dentro finestra resta contato per sempre.',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Finestra sugli eventi degli step',
+    valore: 'v1: gli step evento 11-17 contano gli eventi della coorte senza vincolo temporale sul quando sono emessi. v2: idem, gli eventi degli iscritti in coorte contano senza finestra (limite pratico di scansione: da inizio − 30 giorni a fine + 1 giorno + 90 giorni).',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Parametro p_start (orario partenza sprint)',
+    valore: 'Se lo sprint selezionato ha inizio_ora, il client passa p_start (ISO, sprintStartTs — kpi.js:1511). La RPC fa COALESCE(p_start, inizio) su tutte le finestre coorte. In v1 NON tocca lo step 0 installazioni, che resta su date BETWEEN inizio AND fine.',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Parametro p_end',
+    valore: 'Esiste sulle due RPC live (COALESCE(p_end, fine + 1 giorno)) ma la dashboard non lo passa mai — quindi oggi ininfluente.',
+    applies: 'both' },
+  { cat: 'Coorte e finestre', regola: 'Parametro p_cohort_anchor',
+    valore: 'Vestigiale dal 2026-07-16: sia true che false applicano la signup-cohort. Il client lo mette ancora a false quando il funnel contiene step install_* (kpi.js:720) — ininfluente lato server.',
+    applies: 'v2' },
+
+  // Sorgenti dati e attribuzione identità
+  { cat: 'Sorgenti e identità', regola: 'Tabelle sorgente',
+    valore: 'v1: google_play_installs, auth.identities, public.users, workout_sessions, play_purchases, user_events (solo 7 event_name fissi). v2: public.users, anonymous_sessions e UNION user_events + anonymous_events.',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Mapping ID utente',
+    valore: 'user_events.user_id = public.users.id (NON auth.uid). v1 mappa auth.identities → public.users via email. v2 attribuisce gli anonymous_events a public.users via email della sessione (LEFT JOIN LATERAL … WHERE u.email = s.email LIMIT 1), altrimenti identità anonima anon:<session_id>.',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Deduplicazione conteggi',
+    valore: 'Sempre COUNT(DISTINCT identità) per step. v1 usa user_id; v2 usa identity = user id oppure anon:<session_id>. Nessun LIMIT/OFFSET nelle due RPC.',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Filtri metadata per-step',
+    valore: 'v1: filtro fisso metadata->>source = "onboarding_end" sui soli step paywall (11-12). v2: campo "filters": {chiave: valore} → AND su metadata->>chiave = valore (retrocompat "source":"x"); step multi-evento con OR via "events": [...].',
+    applies: 'both' },
+  { cat: 'Sorgenti e identità', regola: 'Segmento provider (p_provider)',
+    valore: 'Filtra coorte ed eventi sugli utenti con auth.identities.provider = google/email; le sessioni anonime mai iscritte sono escluse quando il segmento è impostato.',
+    applies: 'v2' },
+
+  // Regole specifiche v1 (catalogo fisso)
+  { cat: 'Regole solo Default (v1)', regola: 'Step 0 / First Open',
+    valore: 'Somma install_events / first_open_events da google_play_installs con date BETWEEN inizio AND fine (inclusi). Se nessuna riga → NULL (mostrato come "—").',
+    applies: 'v1' },
+  { cat: 'Regole solo Default (v1)', regola: 'Premium pagante (step 10)',
+    valore: 'Dedup per purchase_token: proprietario canonico = user_id dell\'ultima riga del token (DISTINCT ON … ORDER BY created_at DESC). Pagante = expires_at > now() AND status <> "revoked" AND payment_state = 1 (default: 2 se trial, 1 altrimenti). Trial iniziato (step 18) = token con bool_or(is_trial).',
+    applies: 'v1' },
+  { cat: 'Regole solo Default (v1)', regola: 'Finestre workout',
+    valore: '"≥1 workout" = sessioni con DATE(started_at) ≥ DATE(users.created_at). "Entro 24h" = primo finished_at entro 24 ore da users.created_at. "≥2/3/5 prima settimana" = finished_at::date tra il giorno del primo workout e +6. "3-day streak" = 3 giorni calendario consecutivi con workout finiti, senza limite di finestra.',
+    applies: 'v1' },
+
+  // Override client-side
+  { cat: 'Override client-side', regola: 'Pseudo-eventi install_google_play / install_meta_ads',
+    valore: 'Non esistono in user_events: computeEventFunnel (kpi.js:697) li rimuove da p_steps, prende i totali dalla RPC kpi_install_totals per il periodo (fonti google_play_installs / meta_ads_insights_daily), poi reinserisce le righe nel risultato con l\'idx originale. In presenza di questi step il client mette p_cohort_anchor=false (oggi ininfluente lato server).',
+    applies: 'v2' },
+];
+
+function funnelParamsSection() {
+  const active = state.funnelMode === 'event' ? 'v2' : 'v1';
+  const activeLabel = active === 'v2' ? 'a eventi (kpi_funnel_v2)' : 'Default (kpi_funnel)';
+  const badge = a => {
+    if (a === 'both') return `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:var(--accent-lo);color:var(--purple);font-weight:600;white-space:nowrap">entrambi</span>`;
+    if (a === 'v2')   return `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#22d3ee22;color:#22d3ee;font-weight:600;white-space:nowrap">a eventi</span>`;
+    return              `<span style="font-size:10px;padding:2px 8px;border-radius:8px;background:#a78bfa22;color:var(--purple);font-weight:600;white-space:nowrap">Default</span>`;
+  };
+  // Raggruppa le regole per categoria mantenendo l'ordine di FUNNEL_PARAMS_RULES.
+  const groups = [];
+  const idxByCat = new Map();
+  FUNNEL_PARAMS_RULES.forEach(r => {
+    if (!idxByCat.has(r.cat)) { idxByCat.set(r.cat, groups.length); groups.push({ cat: r.cat, rows: [] }); }
+    groups[idxByCat.get(r.cat)].rows.push(r);
+  });
+  const html = groups.map(g => {
+    const header = `<tr><td colspan="3" style="padding:14px 0 6px 0;font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:600">${esc(g.cat)}</td></tr>`;
+    const body = g.rows.map(r => {
+      const on = r.applies === 'both' || r.applies === active;
+      return `<tr style="${on ? '' : 'opacity:.38'}">
+        <td style="padding:6px 12px 6px 0;font-size:12px;color:var(--text);vertical-align:top;white-space:nowrap;font-weight:500">${esc(r.regola)}</td>
+        <td style="padding:6px 12px 6px 0;font-size:12px;color:var(--muted);line-height:1.55;vertical-align:top">${esc(r.valore)}</td>
+        <td style="padding:6px 0;text-align:right;vertical-align:top">${badge(r.applies)}</td>
+      </tr>`;
+    }).join('');
+    return header + body;
+  }).join('');
+  return `
+    <div class="card" style="margin-top:16px">
+      <div class="card-title" style="margin-bottom:4px">Parametri</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+        Regole applicate dal funnel attualmente attivo — <strong style="color:var(--text)">${activeLabel}</strong>.
+        Le righe attenuate valgono solo per l'altra modalità. Valori hardcoded: se cambiano <code style="font-size:10px">kpi_funnel</code> / <code style="font-size:10px">kpi_funnel_v2</code> va aggiornata a mano <code style="font-size:10px">FUNNEL_PARAMS_RULES</code> in kpi.js.
+      </div>
+      <div class="table-wrap"><table class="data-table" style="width:100%;border-collapse:collapse">
+        <tbody>${html}</tbody>
+      </table></div>
     </div>`;
 }
 
