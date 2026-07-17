@@ -5740,6 +5740,7 @@ const CREATIVE_LABELS = {
   progress_video:    'Video progressi',
   video_ad:          'Video annuncio',
   coach_call:        'Coach call',
+  coach_call_v2:     'Coach call v2',
   change_goal_premium: 'Cambio obiettivo',
   onboarding_results_chart: 'Fine onboarding · Risultati',
 };
