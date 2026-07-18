@@ -274,6 +274,7 @@ let state = {
   eventFunnelFlatMap: null,    // { parent:[flatIdx|null,...], child:[[flatIdx|null,...],...] } — mappa posizione UI ↔ posizione in p_steps del flatten (parent+children serializzati in sequenza per la RPC)
   eventFunnelExpanded: {},     // { [uiIdx]: true } — parent con children espansi in viz/editor (session-only)
   eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
+  eventFunnelSource: 'all',    // filtro sorgente install della coorte: 'all' · 'meta' · 'organic' (p_source kpi_funnel_v2; referrer disponibile dall'11/07/2026)
   eventFunnelLoading: false, eventFunnelError: null,
   editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
   // Event browser — popup di selezione evento (sostituisce il dropdown hardcoded nel builder a eventi)
@@ -625,10 +626,8 @@ function flattenEventFunnelConfig(cfg) {
 }
 
 // Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
-// Se tra gli step ci sono pseudo-eventi install_* (aggregati esterni senza identità), li estraggo
-// dai p_steps passati alla RPC (non li troverebbe mai in user_events), disabilito cohort_anchor
-// così gli altri step contano window_counts (utenti nel periodo, senza vincolo coorte) e
-// reinserisco le righe install_* nel risultato col numero aggregato calcolato client-side.
+// Cascata temporale: coorte = step 0 configurato, ogni step successivo è il subset che ha
+// proseguito in sequenza. Pseudo-eventi install_* esclusi dalla cascata (righe contesto).
 async function fetchEventFunnel() {
   const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
   state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
@@ -644,6 +643,7 @@ async function fetchEventFunnel() {
       inizio:   state.funnelFrom,
       fine:     state.funnelTo,
       provider: state.eventFunnelProvider || null,
+      source:   state.eventFunnelSource || 'all',
       p_start,
       p_end,
       includeEmulators: state.funnelIncludeEmulators,
@@ -678,11 +678,12 @@ async function fetchExcludedUsers() {
 
 // Helper condiviso tra fetchEventFunnel (funnel a eventi corrente) e fetchSprintEventFunnel
 // (confronto sprint). flatSteps = array [{event, source?}]. opts = {inizio, fine, provider,
-// p_start, p_end, includeEmulators?, includeTest?, includeBlocked?}.
-// Ritorna jsonb equivalente a kpi_funnel_v2 con override install_* client-side.
+// p_start, p_end, source?, includeEmulators?, includeTest?, includeBlocked?}.
+// La RPC kpi_funnel_v2 applica la cascata temporale: coorte = step 0 configurato, step N =
+// subset che ha proseguito in sequenza (monotono decrescente). Gli pseudo-step install_*
+// (aggregati esterni senza identità) NON entrano nella cascata: vengono esclusi dai p_steps
+// e ritornati come righe { context: true } + oggetto installContext per i chip di contesto.
 async function computeEventFunnel(flatSteps, opts) {
-  const hasInstall = flatSteps.some(s => isInstallEvent(s.event));
-
   // Mappa idx_originale → step, e filtra fuori gli install per la RPC.
   const rpcSteps = [];
   const rpcToOriginal = []; // rpcIdx → originalIdx
@@ -694,7 +695,7 @@ async function computeEventFunnel(flatSteps, opts) {
 
   // Chiamata RPC (solo se ci sono step non-install da contare).
   let rpcSteps_out = [];
-  let rpcMeta = { cohort_anchor: !hasInstall, include_emulators: false, excluded_counts: null, cohort_size: null };
+  let rpcMeta = { cohort_anchor: true, source: opts.source || 'all', include_emulators: false, excluded_counts: null, cohort_size: null };
   if (rpcSteps.length) {
     const args = { inizio: opts.inizio, fine: opts.fine, p_steps: rpcSteps };
     if (opts.provider) args.p_provider = opts.provider;
@@ -704,15 +705,14 @@ async function computeEventFunnel(flatSteps, opts) {
     if (opts.includeEmulators) args.p_include_emulators = true;
     if (opts.includeTest)      args.p_include_test      = true;
     if (opts.includeBlocked)   args.p_include_blocked   = true;
-    // Se ci sono install nel funnel, disabilito cohort_anchor: la coorte sarebbe centrata su un
-    // pseudo-evento inesistente in user_events → step successivi tutti a 0. Con anchor=false ogni
-    // step conta gli utenti nel periodo (window_counts), coerente col numero aggregato install.
-    if (hasInstall) args.p_cohort_anchor = false;
+    // Filtro sorgente coorte (install_referrer di sessione, dati dall'11/07/2026).
+    if (opts.source && opts.source !== 'all') args.p_source = opts.source;
     const res = await sb.rpc('kpi_funnel_v2', args);
     if (res.error) throw res.error;
     rpcSteps_out = (res.data && res.data.steps) || [];
     rpcMeta = {
       cohort_anchor:     res.data?.cohort_anchor,
+      source:            res.data?.source || opts.source || 'all',
       include_emulators: res.data?.include_emulators,
       include_test:      res.data?.include_test,
       include_blocked:   res.data?.include_blocked,
@@ -721,19 +721,19 @@ async function computeEventFunnel(flatSteps, opts) {
     };
   }
 
-  // Calcolo numeri install per il periodo.
-  const installNames = flatSteps.filter(s => isInstallEvent(s.event)).map(s => s.event);
-  const installNums  = installNames.length
-    ? await computeInstallStepNumbers(installNames, opts.inizio, opts.fine)
-    : {};
+  // Contesto install (aggregati Play/Meta per il periodo) — sempre calcolato, alimenta i chip
+  // sopra il funnel. Le eventuali righe install del config restano nel result come context rows
+  // per mantenere allineati gli indici flat, ma non partecipano alla cascata né ai rate.
+  const installContext = await fetchInstallTotals(opts.inizio, opts.fine)
+    .catch(() => ({ google_play: 0, meta_ads: 0 }));
 
   // Ricomponi l'output nell'ordine originale di flatSteps.
   const steps = flatSteps.map((s, i) => {
     if (isInstallEvent(s.event)) {
       return {
-        idx: i, events: [s.event], label: s.event,
+        idx: i, events: [s.event], label: s.event, context: true,
         filters: s.source ? { source: s.source } : {},
-        numero: installNums[s.event] ?? 0,
+        numero: s.event === 'install_google_play' ? (installContext.google_play ?? 0) : (installContext.meta_ads ?? 0),
       };
     }
     const rpcIdx  = rpcToOriginal.indexOf(i);
@@ -742,7 +742,7 @@ async function computeEventFunnel(flatSteps, opts) {
     return { idx: i, events: [s.event], label: s.event, filters: s.source ? { source: s.source } : {}, numero: 0 };
   });
 
-  return { ...rpcMeta, steps };
+  return { ...rpcMeta, steps, installContext };
 }
 
 // Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
@@ -4421,6 +4421,14 @@ function pageFunnelEvent() {
         <option value="google" ${state.eventFunnelProvider === 'google' ? 'selected' : ''}>Solo Google</option>
         <option value="email" ${state.eventFunnelProvider === 'email' ? 'selected' : ''}>Solo Email</option>
       </select>
+      <div class="filter-sep"></div>
+      <span class="filter-label">Sorgente</span>
+      <select id="event-funnel-source" class="form-select" style="font-size:12px;padding:5px 10px;min-width:120px"
+        title="Sorgente di installazione della coorte (install_referrer di sessione). Dati disponibili dall'11/07/2026.">
+        <option value="all" ${state.eventFunnelSource === 'all' || !state.eventFunnelSource ? 'selected' : ''}>Tutte</option>
+        <option value="meta" ${state.eventFunnelSource === 'meta' ? 'selected' : ''}>Meta (FB+IG)</option>
+        <option value="organic" ${state.eventFunnelSource === 'organic' ? 'selected' : ''}>Organic</option>
+      </select>
       ${!state.editingEventFunnel ? `<button id="edit-event-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;margin-left:auto">⚙ Modifica funnel</button>` : ''}
     </div>
 
@@ -4429,7 +4437,7 @@ function pageFunnelEvent() {
     <div class="card">
       <div class="card-title" style="margin-bottom:4px">Funnel onboarding</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-        ${state.funnelFrom} → ${state.funnelTo} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · legge user_events + anonymous_events (attribuzione via sessione) · esclusi bloccati
+        ${state.funnelFrom} → ${state.funnelTo} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · sorgente <strong style="color:var(--text)">${state.eventFunnelSource === 'meta' ? 'Meta' : state.eventFunnelSource === 'organic' ? 'Organic' : 'tutte'}</strong> · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
       </div>
       ${body}
     </div>
@@ -4562,6 +4570,34 @@ function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) 
     </div>`;
 }
 
+// Cutoff attribuzione sorgente: anonymous_sessions.install_referrer è popolato dalla build
+// di questa data. Prima, il filtro sorgente meta/organic non ha dati (coorte vuota/parziale).
+const ATTRIBUTION_CUTOFF = '2026-07-11';
+
+// Chip di contesto install (aggregati Play/Meta) + badge attribuzione. Condivisi tra il funnel
+// corrente e il confronto sprint. `from` = inizio finestra per il check cutoff.
+function installContextChips(installContext, from) {
+  if (!installContext) return '';
+  const chip = (label, n) => `
+    <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;font-size:11px;color:var(--muted)">
+      ${esc(label)} <span style="font-family:var(--mono);font-weight:600;color:var(--text)">${Number(n ?? 0)}</span>
+    </span>`;
+  const preCutoff = from && from < ATTRIBUTION_CUTOFF;
+  const sourceOn  = state.eventFunnelSource && state.eventFunnelSource !== 'all';
+  const badge = preCutoff
+    ? `<span style="font-size:10px;padding:3px 8px;border-radius:10px;border:1px solid ${sourceOn ? 'var(--amber)' : 'var(--border)'};color:${sourceOn ? 'var(--amber)' : 'var(--muted)'}"
+         title="install_referrer è raccolto dalla build dell'11/07/2026: prima di quella data il filtro sorgente non ha dati">
+         ⚠ attribuzione non disponibile prima dell'11/07/2026</span>`
+    : '';
+  return `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${chip('Install Google Play', installContext.google_play)}
+      ${chip('Install Meta Ads', installContext.meta_ads)}
+      <span style="font-size:10px;color:var(--muted)">aggregati esterni senza identità — contesto, fuori dalla cascata</span>
+      ${badge}
+    </div>`;
+}
+
 function eventFunnelViz() {
   const cfg  = state.eventFunnelConfig || [];
   const data = (state.eventFunnel && state.eventFunnel.steps) || [];
@@ -4574,30 +4610,41 @@ function eventFunnelViz() {
     const flat = flatMap.parent?.[i];
     return (flat != null) ? (numById[flat] ?? 0) : 0;
   });
-  const maxN = Math.max(...nums, 1);
-  const headN = nums[0] || 0;
-  const headLabel = eventStepLabel(cfg[0]) || 'step 1';
+  // Step install = contesto (chip sopra), esclusi dalla cascata e dai rate. La catena
+  // vs prec / vs #1 corre solo sugli step reali: realPrev[i] = indice del precedente step
+  // reale, headIdx = primo step reale del funnel.
+  const isCtx = cfg.map(row => isInstallEvent(row.event));
+  const realIdxs = cfg.map((_, i) => i).filter(i => !isCtx[i]);
+  const headIdx = realIdxs.length ? realIdxs[0] : null;
+  const realPrev = {};
+  realIdxs.forEach((idx, k) => { realPrev[idx] = k > 0 ? realIdxs[k - 1] : null; });
+  const maxN = Math.max(...realIdxs.map(i => nums[i]), 1);
+  const headN = headIdx !== null ? nums[headIdx] : 0;
+  const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : 'step 1';
+
+  const chips = installContextChips(state.eventFunnel?.installContext, state.funnelFrom);
 
   const header = `
     <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
       <div style="width:230px;flex-shrink:0"></div>
       <div style="flex:1"></div>
       <div style="width:44px;text-align:right;flex-shrink:0">n</div>
-      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
-      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step reale precedente">vs prec</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step reale del funnel (${esc(headLabel)})">vs #1</div>
     </div>`;
 
   const rows = cfg.map((row, i) => {
+    if (isCtx[i]) return ''; // pseudo-step install: mostrato nei chip di contesto, non in cascata
     const n     = nums[i];
     const label = eventStepLabel(row) || ('step ' + (i + 1));
-    const vsN   = i > 0 ? nums[i - 1] : null;
+    const vsN   = realPrev[i] !== null ? nums[realPrev[i]] : null;
     const convPct = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const conv    = convPct !== null ? convPct.toFixed(1) + '%' : '—';
-    const startPct = i > 0 && headN > 0 ? (n / headN * 100) : null;
+    const startPct = i !== headIdx && headN > 0 ? (n / headN * 100) : null;
     const startStr = startPct !== null ? startPct.toFixed(1) + '%' : '—';
     const isLow   = convPct !== null && convPct < 20;
     const isGood  = convPct !== null && convPct >= 50;
-    const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
+    const barColor  = i === headIdx ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
     const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
     const startColor = startPct === null ? 'var(--muted)'
       : startPct < 20 ? 'var(--red)'
@@ -4661,7 +4708,7 @@ function eventFunnelViz() {
     return parentRow + childRows;
   }).join('');
 
-  return header + rows;
+  return chips + header + rows;
 }
 
 // Persiste la config del funnel a eventi. Se è attivo un funnel salvato di tipo 'event', riscrive i suoi
@@ -4883,6 +4930,7 @@ async function fetchSprintEventFunnel() {
         inizio:   s.inizio,
         fine:     s.fine,
         provider: state.eventFunnelProvider || null,
+        source:   state.eventFunnelSource || 'all',
         p_start:  sprintStartTs(s),
         p_end:    sprintEndTs(s),
         includeEmulators: state.funnelIncludeEmulators,
@@ -4900,9 +4948,13 @@ async function fetchSprintEventFunnel() {
 }
 
 // Tabella confronto: righe = step del funnel onboarding, colonne = sprint selezionati.
+// Gli pseudo-step install sono righe di contesto (solo numero aggregato, niente %); la catena
+// conv corre solo sugli step reali, in cascata temporale come nel funnel principale.
 function sprintEventFunnelTable() {
   const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
-  const cfg = state.eventFunnelConfig || [];
+  // Stessa lista filtrata usata da fetchSprintEventFunnel per p_steps: gli idx del result
+  // sono posizioni in QUESTA lista (le righe config senza evento non vengono inviate).
+  const cfg = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
   const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
   // numeri per sprint: mappa idx→numero
   const numsOf = {};
@@ -4920,19 +4972,44 @@ function sprintEventFunnelTable() {
       <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
     </th>`).join('');
 
-  // Testa del funnel per la "% dall'inizio": il primo step configurato (indice 0 nella mappa numsOf).
-  const headLabel = cfg[0] ? (eventStepLabel(cfg[0]) || 'step 1') : '';
+  // Catena reale: install esclusi da conv% e da "% dall'inizio".
+  const isCtx = cfg.map(row => isInstallEvent(row.event));
+  const realIdxs = cfg.map((_, i) => i).filter(i => !isCtx[i]);
+  const headIdx = realIdxs.length ? realIdxs[0] : null;
+  const realPrev = {};
+  realIdxs.forEach((idx, k) => { realPrev[idx] = k > 0 ? realIdxs[k - 1] : null; });
+  const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : '';
 
   const rows = cfg.map((row, ri) => {
     const label = eventStepLabel(row) || ('step ' + (ri + 1));
     const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
     const maxN = Math.max(...nums, 0);
-    // Vincitore = miglior conversione (convPct vs step precedente), NON il numero assoluto. Al
-    // primo step (dove convPct è null per tutti) nessuno vince: il top-of-funnel misura traffico,
-    // non performance. Fallback su null → nessuna cella evidenziata su quello step.
+
+    if (isCtx[ri]) {
+      // Riga contesto install: solo numero aggregato, nessuna conversione.
+      const cells = selected.map((s, si) => {
+        const n = numsOf[s.id][ri] ?? 0;
+        const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
+        return `<td style="padding:6px 16px;text-align:right;opacity:.75">
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+            <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+              <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px;opacity:.5"></div>
+            </div>
+            <span style="font-family:var(--mono);font-size:15px;font-weight:500;min-width:30px;color:var(--muted)">${n}</span>
+          </div>
+          <div style="font-size:9px;color:var(--muted);margin-top:1px">aggregato · contesto</div>
+        </td>`;
+      }).join('');
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="font-size:12px;color:var(--muted);padding:7px 16px">${esc(label)} <span style="font-size:9px;color:#5a5a80">· fuori cascata</span></td>${cells}</tr>`;
+    }
+
+    // Vincitore = miglior conversione (convPct vs step reale precedente), NON il numero assoluto.
+    // Al primo step reale (convPct null per tutti) nessuno vince: il top-of-funnel misura
+    // traffico, non performance. Fallback su null → nessuna cella evidenziata su quello step.
     const convPcts = selected.map(s => {
       const n = numsOf[s.id][ri] ?? 0;
-      const vsN = ri > 0 ? (numsOf[s.id][ri - 1] ?? 0) : null;
+      const vsN = realPrev[ri] !== null ? (numsOf[s.id][realPrev[ri]] ?? 0) : null;
       return vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     });
     const validPcts = convPcts.filter(p => p !== null);
@@ -4942,8 +5019,8 @@ function sprintEventFunnelTable() {
       const convPct = convPcts[si];
       const convStr = convPct !== null ? convPct.toFixed(1) + '%' : '—';
       const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
-      const headN = numsOf[s.id][0] ?? 0;
-      const startPct = state.sprintFunnelPctStart && headN > 0 && ri > 0 ? (n / headN * 100) : null;
+      const headN = headIdx !== null ? (numsOf[s.id][headIdx] ?? 0) : 0;
+      const startPct = state.sprintFunnelPctStart && headN > 0 && ri !== headIdx ? (n / headN * 100) : null;
       const isBest = maxConvPct !== null && convPct === maxConvPct;
       const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
       return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
@@ -7836,7 +7913,8 @@ function dailyStreaksChart(rawData, range) {
 function pageMetaAds() {
   const fmt2  = n => n != null ? parseFloat(n).toFixed(2) : '—';
   const fmtN  = n => n != null ? parseInt(n).toLocaleString('it-IT') : '—';
-  const fmtPct = n => n != null ? (parseFloat(n) * 100).toFixed(2) + '%' : '—';
+  // Meta ritorna ctr già come percentuale (2.41 = 2.41%). Non moltiplicare per 100.
+  const fmtPct = n => n != null ? parseFloat(n).toFixed(2) + '%' : '—';
   const getInstalls = d => {
     const act = d && d.actions && d.actions.find(a => ['mobile_app_install','app_install','omni_app_install'].includes(a.action_type));
     return act ? parseInt(act.value) : null;
@@ -8970,6 +9048,10 @@ function attachEvents() {
   document.getElementById('event-funnel-provider')?.addEventListener('change', el => {
     state.eventFunnelProvider = el.target.value || null;
     persistEventFunnelConfig(); // se un funnel evento è attivo, salva anche il provider
+    fetchEventFunnel();
+  });
+  document.getElementById('event-funnel-source')?.addEventListener('change', el => {
+    state.eventFunnelSource = el.target.value || 'all';
     fetchEventFunnel();
   });
   // Selettore evento → apre l'event browser puntando allo step corrente
