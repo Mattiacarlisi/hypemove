@@ -612,13 +612,16 @@ function flattenEventFunnelConfig(cfg) {
       // niente children se il parent non ha evento: bypassiamo per non introdurre uno step orfano in coorte
       return;
     }
-    parentMap.push(flatSteps.length);
+    const parentFlatIdx = flatSteps.length;
+    parentMap.push(parentFlatIdx);
     flatSteps.push(buildFlatStep(row));
     const childList = [];
     (row.children || []).forEach((c) => {
       if (!c || !c.event || !c.event.trim()) { childList.push(null); return; }
       childList.push(flatSteps.length);
-      flatSteps.push(buildFlatStep(c));
+      // variant_of = indice flat del parent: marca lo step come variante, così la RPC lo tiene
+      // FUORI dalla catena della cascata e lo conta come subset del parent raggiunto.
+      flatSteps.push({ ...buildFlatStep(c), variant_of: parentFlatIdx });
     });
     childMap.push(childList);
   });
@@ -690,7 +693,15 @@ async function computeEventFunnel(flatSteps, opts) {
   flatSteps.forEach((s, i) => {
     if (isInstallEvent(s.event)) return;
     rpcToOriginal.push(i);
-    rpcSteps.push(s);
+    rpcSteps.push({ ...s }); // copia difensiva: sotto rimappiamo variant_of senza toccare flatSteps
+  });
+  // variant_of arriva in spazio-flat (indice del parent in flatSteps). La RPC ragiona in
+  // spazio-p_steps (post-filtro install), quindi lo rimappo all'indice del parent in rpcSteps.
+  // Se il parent è stato filtrato (es. install), la variante decade a step normale.
+  rpcSteps.forEach((s) => {
+    if (s.variant_of == null) return;
+    const rpcParent = rpcToOriginal.indexOf(s.variant_of);
+    if (rpcParent >= 0) s.variant_of = rpcParent; else delete s.variant_of;
   });
 
   // Chiamata RPC (solo se ci sono step non-install da contare).
