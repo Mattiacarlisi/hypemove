@@ -1735,6 +1735,41 @@ function sprintEndTs(s) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// Etichetta della finestra effettivamente calcolata per un pannello che riceve
+// p_start/p_end da uno sprint. Sprint con orario ritagliato → include HH:MM
+// esplicito + '(Europe/Rome)' e flag `tightened: true` per segnalare che il
+// periodo calcolato è più stretto dei giorni pieni. Sprint senza ritaglio o
+// periodo libero → solo date, `tightened: false`, comportamento visivo invariato.
+function sprintWindowText(selSprint, from, to) {
+  const hStart = selSprint && selSprint.inizio_ora ? String(selSprint.inizio_ora).slice(0, 5) : null;
+  const hEnd   = selSprint && selSprint.fine_ora   ? String(selSprint.fine_ora).slice(0, 5)   : null;
+  const tightened = !!(hStart || hEnd);
+  if (!tightened) return { text: `${from} → ${to}`, tightened: false };
+  const startTxt = hStart ? `${from} ${hStart}` : `${from} 00:00`;
+  const endTxt   = hEnd   ? `${to} ${hEnd}`    : `${to} 24:00`;
+  return { text: `${startTxt} → ${endTxt} (Europe/Rome)`, tightened: true };
+}
+
+// Suffisso compatto per la legenda del confronto sprint: aggiunge le ore quando
+// lo sprint ne ha (uno o entrambi gli estremi), stringa vuota altrimenti. Usa
+// lo stesso vocabolario visivo ('⏱ dalle … alle …') della pagina Sprint.
+function sprintHourSuffix(s) {
+  if (!s) return '';
+  const io = s.inizio_ora ? String(s.inizio_ora).slice(0, 5) : '';
+  const fo = s.fine_ora   ? String(s.fine_ora).slice(0, 5)   : '';
+  if (io && fo) return ` · ⏱ ${io}→${fo}`;
+  if (io)      return ` · ⏱ dalle ${io}`;
+  if (fo)      return ` · ⏱ fino alle ${fo}`;
+  return '';
+}
+
+// Badge "finestra ritagliata" — segnala visivamente che il periodo calcolato è
+// più stretto dei giorni pieni indicati dal periodo. Da mostrare solo quando
+// sprintWindowText(...).tightened === true.
+function windowTightenedBadge() {
+  return `<span style="display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,0.12);color:var(--amber);border:1px solid rgba(245,158,11,0.35);font-weight:600;margin-left:6px;vertical-align:middle" title="Lo sprint ritaglia le ore: la finestra calcolata è più stretta dei giorni pieni indicati dal periodo">✂ finestra ritagliata</span>`;
+}
+
 async function fetchSprintFunnel() {
   if (!state.sprintFunnelSel.length) return;
   state.sprintFunnelLoading = true;
@@ -4364,9 +4399,13 @@ function pageFunnel() {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
         <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-        ${state.funnelFrom} → ${state.funnelTo} · esclusi account interni (Napo, Dan, Carlito…)
-      </div>
+      ${(() => {
+        const sel = state.sprints.find(s => s.id === state.funnelSprintId);
+        const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
+        return `<div style="font-size:11px;color:var(--muted);margin-bottom:20px">
+          ${win.text}${win.tightened ? windowTightenedBadge() : ''} · esclusi account interni (Napo, Dan, Carlito…)
+        </div>`;
+      })()}
       ${body}
     ${metaFunnelSection()}
     </div>
@@ -4447,9 +4486,13 @@ function pageFunnelEvent() {
 
     <div class="card">
       <div class="card-title" style="margin-bottom:4px">Funnel onboarding</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-        ${state.funnelFrom} → ${state.funnelTo} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · sorgente <strong style="color:var(--text)">${state.eventFunnelSource === 'meta' ? 'Meta' : state.eventFunnelSource === 'organic' ? 'Organic' : 'tutte'}</strong> · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
-      </div>
+      ${(() => {
+        const sel = state.sprints.find(s => s.id === state.funnelSprintId);
+        const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
+        return `<div style="font-size:11px;color:var(--muted);margin-bottom:20px">
+          ${win.text}${win.tightened ? windowTightenedBadge() : ''} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · sorgente <strong style="color:var(--text)">${state.eventFunnelSource === 'meta' ? 'Meta' : state.eventFunnelSource === 'organic' ? 'Organic' : 'tutte'}</strong> · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
+        </div>`;
+      })()}
       ${body}
     </div>
     ${sprintEventFunnelSection()}
@@ -4586,8 +4629,12 @@ function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) 
 const ATTRIBUTION_CUTOFF = '2026-07-11';
 
 // Chip di contesto install (aggregati Play/Meta) + badge attribuzione. Condivisi tra il funnel
-// corrente e il confronto sprint. `from` = inizio finestra per il check cutoff.
-function installContextChips(installContext, from) {
+// corrente e il confronto sprint. `from`/`to` = finestra visibile del pannello (usata per il
+// check cutoff e per dichiarare la finestra effettiva dei chip). `selSprint` = sprint attivo
+// se presente: quando ritaglia orari, i chip usano comunque i GIORNI PIENI (kpi_install_totals
+// accetta solo date), quindi qui va dichiarato esplicitamente per non lasciare l'incoerenza
+// silenziosa rispetto alla cascata sotto.
+function installContextChips(installContext, from, to, selSprint) {
   if (!installContext) return '';
   const chip = (label, n) => `
     <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;font-size:11px;color:var(--muted)">
@@ -4600,11 +4647,18 @@ function installContextChips(installContext, from) {
          title="install_referrer è raccolto dalla build dell'11/07/2026: prima di quella data il filtro sorgente non ha dati">
          ⚠ attribuzione non disponibile prima dell'11/07/2026</span>`
     : '';
+  const sprintHasHours = !!(selSprint && (selSprint.inizio_ora || selSprint.fine_ora));
+  const windowNote = sprintHasHours && from && to
+    ? `<span style="font-size:10px;padding:3px 8px;border-radius:10px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);color:var(--amber)"
+         title="I chip Install usano kpi_install_totals(inizio, fine) che accetta solo date: qui sommano i giorni pieni ${from} → ${to}, mentre la cascata sotto usa la finestra ritagliata dallo sprint">
+         giorni pieni ${from} → ${to} · finestra diversa dalla cascata</span>`
+    : '';
   return `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       ${chip('Install Google Play', installContext.google_play)}
       ${chip('Install Meta Ads', installContext.meta_ads)}
       <span style="font-size:10px;color:var(--muted)">aggregati esterni senza identità — contesto, fuori dalla cascata</span>
+      ${windowNote}
       ${badge}
     </div>`;
 }
@@ -4633,7 +4687,12 @@ function eventFunnelViz() {
   const headN = headIdx !== null ? nums[headIdx] : 0;
   const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : 'step 1';
 
-  const chips = installContextChips(state.eventFunnel?.installContext, state.funnelFrom);
+  const chips = installContextChips(
+    state.eventFunnel?.installContext,
+    state.funnelFrom,
+    state.funnelTo,
+    state.sprints.find(s => s.id === state.funnelSprintId)
+  );
 
   const header = `
     <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
@@ -4850,18 +4909,19 @@ function funnelParamsSection() {
         ${t.on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
       ${t.on ? '✓ inclusi' : 'esclusi'} · ${t.label} <span style="opacity:.6;font-weight:400">${t.n}</span></button>`).join('');
 
-  // Riga di stato: coorte corrente + parametri effettivi della chiamata RPC.
+  // Riga di stato: coorte corrente + parametri effettivi della chiamata RPC. Il campo
+  // Periodo mostra già gli orari + '(Europe/Rome)' quando lo sprint ritaglia le ore, così
+  // resta un unico posto dove leggere la finestra reale su cui la RPC ha girato.
   const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
-  const pStart = selSprint ? sprintStartTs(selSprint) : null;
-  const pEnd   = selSprint && typeof sprintEndTs === 'function' ? sprintEndTs(selSprint) : null;
+  const win = sprintWindowText(selSprint, state.funnelFrom, state.funnelTo);
   const seg = state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti';
   const stat = (label, val) => `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px">${val}</div></div>`;
+  const periodVal = `${win.text}${win.tightened ? windowTightenedBadge() : ''}`;
   const statusRow = `
     <div style="display:flex;flex-wrap:wrap;gap:26px;margin-bottom:16px">
       ${stat('Coorte', cohortNow != null ? `${cohortNow} ${deltaStr}` : '—')}
-      ${stat('Periodo', `${state.funnelFrom} → ${state.funnelTo}`)}
+      ${stat('Periodo', periodVal)}
       ${stat('Segmento', seg)}
-      ${stat('Orario', pStart ? new Date(pStart).toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) + (pEnd ? ' → ' + new Date(pEnd).toLocaleString('it-IT', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '') : 'giorni interi')}
     </div>`;
 
   // ── Lista nominale degli esclusi.
@@ -4980,7 +5040,7 @@ function sprintEventFunnelTable() {
       <div style="display:inline-flex;align-items:center;gap:6px">
         <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span><span>${esc(s.nome)}</span>
       </div>
-      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
     </th>`).join('');
 
   // Catena reale: install esclusi da conv% e da "% dall'inizio".
@@ -5402,10 +5462,13 @@ function retentionBody() {
   const cohortSize   = rows[0]?.eligible ?? 0;
   const eligibleDesc = `≥${state.retMinW0} workout in W0`;
 
+  const retSel = state.sprints.find(s => s.id === state.retSprintId);
+  const retWin = sprintWindowText(retSel, state.retFrom, state.retTo);
+
   return `
     <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.8">
       <strong style="color:var(--text)">${cohortSize} utenti</strong> ·
-      iscritti tra ${state.retFrom} e ${state.retTo} ·
+      iscritti in ${retWin.text}${retWin.tightened ? windowTightenedBadge() : ''} ·
       eligible: ${eligibleDesc} ·
       retained: ≥${state.retMin} workout/sett. ·
       esclusi account interni
@@ -5746,9 +5809,13 @@ function pagePremium() {
         <button class="btn btn-ghost" id="premium-refresh" style="font-size:11px;padding:6px 12px">↻</button>
       </div>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:16px">
-      ${state.premiumFrom} → ${state.premiumTo} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
-    </div>
+    ${(() => {
+      const sel = state.sprints.find(s => s.id === state.premiumSprintId);
+      const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
+      return `<div style="font-size:11px;color:var(--muted);margin-bottom:16px">
+        ${win.text}${win.tightened ? windowTightenedBadge() : ''} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
+      </div>`;
+    })()}
 
     <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
@@ -5997,9 +6064,13 @@ function stepUsersModal() {
             <div style="font-size:15px;font-weight:700;color:var(--fg)">
               ${esc(label)} <span style="color:var(--muted);font-weight:400">·</span> step <span style="color:#a78bfa">${esc(step)}</span>
             </div>
-            <div style="font-size:11px;color:var(--muted);margin-top:3px">
-              utenti che hanno raggiunto questo step${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${state.premiumFrom} → ${state.premiumTo}
-            </div>
+            ${(() => {
+              const sel = state.sprints.find(s => s.id === state.premiumSprintId);
+              const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
+              return `<div style="font-size:11px;color:var(--muted);margin-top:3px">
+                utenti che hanno raggiunto questo step${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${win.text}${win.tightened ? windowTightenedBadge() : ''}
+              </div>`;
+            })()}
           </div>
           <button id="step-users-close" style="
             background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
@@ -6326,7 +6397,7 @@ function sprintPremiumFunnelCompareView() {
       <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
         <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
         <span style="font-weight:600;color:var(--text)">${s.nome}</span>
-        <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</span>
       </span>`).join('')}
   </div>`;
   return legend + sprintPremiumFunnelTable(selected, state.sprintPremiumFunnelData);
@@ -6344,7 +6415,7 @@ function sprintPremiumFunnelTable(selected, dataMap) {
         <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
         <span>${s.nome}</span>
       </div>
-      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
     </th>`
   ).join('');
 
@@ -7078,7 +7149,7 @@ function sprintFunnelCompareView() {
       <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
         <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
         <span style="font-weight:600;color:var(--text)">${s.nome}</span>
-        <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</span>
       </span>`).join('')}
   </div>`;
   const def = activeSprintFunnelDef();
@@ -7205,7 +7276,7 @@ function sprintRetCompareView() {
       <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
         <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
         <span style="font-weight:600;color:var(--text)">${s.nome}</span>
-        <span style="color:var(--muted)">${s.inizio} → ${s.fine}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</span>
       </span>`).join('')}
   </div>`;
   return legend + sprintRetentionChart(selected, state.sprintRetData) + '<div style="margin-top:16px">' + sprintRetentionTable(selected, state.sprintRetData) + '</div>';
@@ -7350,7 +7421,7 @@ function sprintFunnelTable(selected, dataMap) {
         <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
         <span>${s.nome}</span>
       </div>
-      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
     </th>`
   ).join('');
 
@@ -7674,7 +7745,7 @@ function sprintRetentionTable(selected, dataMap) {
         <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
         <span>${s.nome}</span>
       </div>
-      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}</div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
     </th>`
   ).join('');
 
