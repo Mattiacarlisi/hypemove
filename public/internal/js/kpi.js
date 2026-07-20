@@ -1763,13 +1763,6 @@ function sprintHourSuffix(s) {
   return '';
 }
 
-// Badge "finestra ritagliata" — segnala visivamente che il periodo calcolato è
-// più stretto dei giorni pieni indicati dal periodo. Da mostrare solo quando
-// sprintWindowText(...).tightened === true.
-function windowTightenedBadge() {
-  return `<span style="display:inline-block;font-size:10px;padding:2px 8px;border-radius:10px;background:rgba(245,158,11,0.12);color:var(--amber);border:1px solid rgba(245,158,11,0.35);font-weight:600;margin-left:6px;vertical-align:middle" title="Lo sprint ritaglia le ore: la finestra calcolata è più stretta dei giorni pieni indicati dal periodo">✂ finestra ritagliata</span>`;
-}
-
 async function fetchSprintFunnel() {
   if (!state.sprintFunnelSel.length) return;
   state.sprintFunnelLoading = true;
@@ -4403,7 +4396,7 @@ function pageFunnel() {
         const sel = state.sprints.find(s => s.id === state.funnelSprintId);
         const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
         return `<div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-          ${win.text}${win.tightened ? windowTightenedBadge() : ''} · esclusi account interni (Napo, Dan, Carlito…)
+          ${win.text} · esclusi account interni (Napo, Dan, Carlito…)
         </div>`;
       })()}
       ${body}
@@ -4490,7 +4483,7 @@ function pageFunnelEvent() {
         const sel = state.sprints.find(s => s.id === state.funnelSprintId);
         const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
         return `<div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-          ${win.text}${win.tightened ? windowTightenedBadge() : ''} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · sorgente <strong style="color:var(--text)">${state.eventFunnelSource === 'meta' ? 'Meta' : state.eventFunnelSource === 'organic' ? 'Organic' : 'tutte'}</strong> · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
+          ${win.text} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · sorgente <strong style="color:var(--text)">${state.eventFunnelSource === 'meta' ? 'Meta' : state.eventFunnelSource === 'organic' ? 'Organic' : 'tutte'}</strong> · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
         </div>`;
       })()}
       ${body}
@@ -4629,12 +4622,8 @@ function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) 
 const ATTRIBUTION_CUTOFF = '2026-07-11';
 
 // Chip di contesto install (aggregati Play/Meta) + badge attribuzione. Condivisi tra il funnel
-// corrente e il confronto sprint. `from`/`to` = finestra visibile del pannello (usata per il
-// check cutoff e per dichiarare la finestra effettiva dei chip). `selSprint` = sprint attivo
-// se presente: quando ritaglia orari, i chip usano comunque i GIORNI PIENI (kpi_install_totals
-// accetta solo date), quindi qui va dichiarato esplicitamente per non lasciare l'incoerenza
-// silenziosa rispetto alla cascata sotto.
-function installContextChips(installContext, from, to, selSprint) {
+// corrente e il confronto sprint. `from` = inizio finestra per il check cutoff.
+function installContextChips(installContext, from) {
   if (!installContext) return '';
   const chip = (label, n) => `
     <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--border);border-radius:14px;font-size:11px;color:var(--muted)">
@@ -4647,18 +4636,11 @@ function installContextChips(installContext, from, to, selSprint) {
          title="install_referrer è raccolto dalla build dell'11/07/2026: prima di quella data il filtro sorgente non ha dati">
          ⚠ attribuzione non disponibile prima dell'11/07/2026</span>`
     : '';
-  const sprintHasHours = !!(selSprint && (selSprint.inizio_ora || selSprint.fine_ora));
-  const windowNote = sprintHasHours && from && to
-    ? `<span style="font-size:10px;padding:3px 8px;border-radius:10px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);color:var(--amber)"
-         title="I chip Install usano kpi_install_totals(inizio, fine) che accetta solo date: qui sommano i giorni pieni ${from} → ${to}, mentre la cascata sotto usa la finestra ritagliata dallo sprint">
-         giorni pieni ${from} → ${to} · finestra diversa dalla cascata</span>`
-    : '';
   return `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       ${chip('Install Google Play', installContext.google_play)}
       ${chip('Install Meta Ads', installContext.meta_ads)}
       <span style="font-size:10px;color:var(--muted)">aggregati esterni senza identità — contesto, fuori dalla cascata</span>
-      ${windowNote}
       ${badge}
     </div>`;
 }
@@ -4687,12 +4669,7 @@ function eventFunnelViz() {
   const headN = headIdx !== null ? nums[headIdx] : 0;
   const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : 'step 1';
 
-  const chips = installContextChips(
-    state.eventFunnel?.installContext,
-    state.funnelFrom,
-    state.funnelTo,
-    state.sprints.find(s => s.id === state.funnelSprintId)
-  );
+  const chips = installContextChips(state.eventFunnel?.installContext, state.funnelFrom);
 
   const header = `
     <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
@@ -4916,7 +4893,7 @@ function funnelParamsSection() {
   const win = sprintWindowText(selSprint, state.funnelFrom, state.funnelTo);
   const seg = state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti';
   const stat = (label, val) => `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px">${val}</div></div>`;
-  const periodVal = `${win.text}${win.tightened ? windowTightenedBadge() : ''}`;
+  const periodVal = win.text;
   const statusRow = `
     <div style="display:flex;flex-wrap:wrap;gap:26px;margin-bottom:16px">
       ${stat('Coorte', cohortNow != null ? `${cohortNow} ${deltaStr}` : '—')}
@@ -5468,7 +5445,7 @@ function retentionBody() {
   return `
     <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.8">
       <strong style="color:var(--text)">${cohortSize} utenti</strong> ·
-      iscritti in ${retWin.text}${retWin.tightened ? windowTightenedBadge() : ''} ·
+      iscritti in ${retWin.text} ·
       eligible: ${eligibleDesc} ·
       retained: ≥${state.retMin} workout/sett. ·
       esclusi account interni
@@ -5813,7 +5790,7 @@ function pagePremium() {
       const sel = state.sprints.find(s => s.id === state.premiumSprintId);
       const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
       return `<div style="font-size:11px;color:var(--muted);margin-bottom:16px">
-        ${win.text}${win.tightened ? windowTightenedBadge() : ''} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
+        ${win.text} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
       </div>`;
     })()}
 
@@ -6068,7 +6045,7 @@ function stepUsersModal() {
               const sel = state.sprints.find(s => s.id === state.premiumSprintId);
               const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
               return `<div style="font-size:11px;color:var(--muted);margin-top:3px">
-                utenti che hanno raggiunto questo step${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${win.text}${win.tightened ? windowTightenedBadge() : ''}
+                utenti che hanno raggiunto questo step${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${win.text}
               </div>`;
             })()}
           </div>
