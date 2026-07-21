@@ -1735,6 +1735,28 @@ function sprintEndTs(s) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+// Preset periodo del funnel a eventi: oggi, settimana corrente (lunedì→oggi),
+// mese corrente (giorno 1→oggi). Calcolato a click-time così una tab aperta da
+// giorni resta comunque coerente con la data reale, non con quella di load.
+function eventFunnelPresetRange(kind) {
+  const now = new Date();
+  const iso = d => d.toISOString().slice(0, 10);
+  const to = iso(now);
+  if (kind === 'today') return { from: to, to };
+  if (kind === 'week') {
+    // lunedì della settimana corrente (getDay: 0=domenica, 1=lunedì, …)
+    const dow = now.getDay();
+    const daysSinceMonday = (dow + 6) % 7;
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday);
+    return { from: iso(monday), to };
+  }
+  if (kind === 'month') {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: iso(first), to };
+  }
+  return { from: to, to };
+}
+
 // Etichetta della finestra effettivamente calcolata per un pannello che riceve
 // p_start/p_end da uno sprint. Sprint con orario ritagliato → include HH:MM
 // esplicito + '(Europe/Rome)' e flag `tightened: true` per segnalare che il
@@ -4457,21 +4479,17 @@ function pageFunnelEvent() {
       <input type="date" id="funnel-to" class="form-input" value="${state.funnelTo}" style="width:145px;padding:5px 10px;font-size:12px">
       <button id="event-funnel-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
       <div class="filter-sep"></div>
-      <span class="filter-label">Segmento</span>
-      <select id="event-funnel-provider" class="form-select" style="font-size:12px;padding:5px 10px;min-width:150px"
-        title="Metodo di registrazione. Le sessioni mai iscritte non hanno provider → escluse quando scegli Google/Email.">
-        <option value="" ${!state.eventFunnelProvider ? 'selected' : ''}>Tutti gli utenti</option>
-        <option value="google" ${state.eventFunnelProvider === 'google' ? 'selected' : ''}>Solo Google</option>
-        <option value="email" ${state.eventFunnelProvider === 'email' ? 'selected' : ''}>Solo Email</option>
-      </select>
-      <div class="filter-sep"></div>
-      <span class="filter-label">Sorgente</span>
-      <select id="event-funnel-source" class="form-select" style="font-size:12px;padding:5px 10px;min-width:120px"
-        title="Sorgente di installazione della coorte (install_referrer di sessione). Dati disponibili dall'11/07/2026.">
-        <option value="all" ${state.eventFunnelSource === 'all' || !state.eventFunnelSource ? 'selected' : ''}>Tutte</option>
-        <option value="meta" ${state.eventFunnelSource === 'meta' ? 'selected' : ''}>Meta (FB+IG)</option>
-        <option value="organic" ${state.eventFunnelSource === 'organic' ? 'selected' : ''}>Organic</option>
-      </select>
+      <span class="filter-label">Preset</span>
+      ${(() => {
+        const { from: dToday, to: tToday } = eventFunnelPresetRange('today');
+        const { from: dWeek,  to: tWeek  } = eventFunnelPresetRange('week');
+        const { from: dMonth, to: tMonth } = eventFunnelPresetRange('month');
+        const active = (from, to) => state.funnelFrom === from && state.funnelTo === to;
+        const btn = (id, label, on) => `<button id="${id}" class="btn ${on ? 'btn-primary' : 'btn-ghost'}" style="padding:5px 12px;font-size:12px">${label}</button>`;
+        return btn('event-funnel-preset-today',  'Oggi',      active(dToday, tToday))
+             + btn('event-funnel-preset-week',   'Settimana', active(dWeek,  tWeek))
+             + btn('event-funnel-preset-month',  'Mese',      active(dMonth, tMonth));
+      })()}
       ${!state.editingEventFunnel ? `<button id="edit-event-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;margin-left:auto">⚙ Modifica funnel</button>` : ''}
     </div>
 
@@ -4483,7 +4501,7 @@ function pageFunnelEvent() {
         const sel = state.sprints.find(s => s.id === state.funnelSprintId);
         const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
         return `<div style="font-size:11px;color:var(--muted);margin-bottom:20px">
-          ${win.text} · segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong> · sorgente <strong style="color:var(--text)">${state.eventFunnelSource === 'meta' ? 'Meta' : state.eventFunnelSource === 'organic' ? 'Organic' : 'tutte'}</strong> · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
+          ${win.text} · cascata temporale (coorte = step 1, ogni step prosegue dal precedente) · esclusi bloccati
         </div>`;
       })()}
       ${body}
@@ -4818,7 +4836,7 @@ function sprintEventFunnelSection() {
     <div class="card" style="margin-top:16px">
       ${headerEl}
       <div style="margin-top:18px">
-        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Stesso funnel onboarding (stessi step + segmento <strong style="color:var(--text)">${state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti'}</strong>) applicato a ogni sprint selezionato.</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Stesso funnel onboarding applicato a ogni sprint selezionato.</div>
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>
         <button id="sprint-event-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px" ${!state.sprintEventSel.length ? 'disabled' : ''}>Calcola confronto</button>
@@ -4891,14 +4909,12 @@ function funnelParamsSection() {
   // resta un unico posto dove leggere la finestra reale su cui la RPC ha girato.
   const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
   const win = sprintWindowText(selSprint, state.funnelFrom, state.funnelTo);
-  const seg = state.eventFunnelProvider === 'google' ? 'Google' : state.eventFunnelProvider === 'email' ? 'Email' : 'tutti';
   const stat = (label, val) => `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px">${val}</div></div>`;
   const periodVal = win.text;
   const statusRow = `
     <div style="display:flex;flex-wrap:wrap;gap:26px;margin-bottom:16px">
       ${stat('Coorte', cohortNow != null ? `${cohortNow} ${deltaStr}` : '—')}
       ${stat('Periodo', periodVal)}
-      ${stat('Segmento', seg)}
     </div>`;
 
   // ── Lista nominale degli esclusi.
@@ -9104,15 +9120,16 @@ function attachEvents() {
   };
   document.getElementById('event-funnel-calc')?.addEventListener('click', eventCalc);
   document.getElementById('event-funnel-apply')?.addEventListener('click', eventCalc);
-  document.getElementById('event-funnel-provider')?.addEventListener('change', el => {
-    state.eventFunnelProvider = el.target.value || null;
-    persistEventFunnelConfig(); // se un funnel evento è attivo, salva anche il provider
+  const applyEventFunnelPreset = (kind) => {
+    const { from, to } = eventFunnelPresetRange(kind);
+    state.funnelFrom = from;
+    state.funnelTo   = to;
+    state.funnelSprintId = ''; // il preset è sempre "periodo libero"
     fetchEventFunnel();
-  });
-  document.getElementById('event-funnel-source')?.addEventListener('change', el => {
-    state.eventFunnelSource = el.target.value || 'all';
-    fetchEventFunnel();
-  });
+  };
+  document.getElementById('event-funnel-preset-today')?.addEventListener('click', () => applyEventFunnelPreset('today'));
+  document.getElementById('event-funnel-preset-week')?.addEventListener('click',  () => applyEventFunnelPreset('week'));
+  document.getElementById('event-funnel-preset-month')?.addEventListener('click', () => applyEventFunnelPreset('month'));
   // Selettore evento → apre l'event browser puntando allo step corrente
   document.querySelectorAll('.event-funnel-pick').forEach(el =>
     el.addEventListener('click', () => openEventBrowser(+el.dataset.row)));
