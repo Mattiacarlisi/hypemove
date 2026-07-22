@@ -83,8 +83,6 @@
 
 /* Chip preset — cursor pointer esplicito (dblclick per editor) */
 .funnel-preset-btn { user-select: none; }
-.funnel-preset-btn:hover { filter: brightness(1.1); }
-.funnel-preset-del:hover { color: var(--red, #ef4444) !important; }
 .funnel-preset-edit:hover { color: var(--accent) !important; }
 .event-funnel-pick:hover { border-color: var(--accent) !important; }
 
@@ -167,3 +165,198 @@
 .chip-icon-picker .chip-icon-grid{display:none}
 .chip-icon-picker:hover .chip-icon-grid,
 .chip-icon-picker:focus-within .chip-icon-grid{display:grid}
+
+/* ═══════════ REDESIGN SEZIONE FUNNEL (top area + card) ═══════════ */
+
+/* Header pagina — meta refresh quieta, non compete col titolo */
+.refresh-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #4a4a68; }
+.btn-refresh {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 11.5px; padding: 5px 12px;
+  background: transparent; border: 1px solid var(--border); border-radius: 7px;
+  color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s;
+}
+.btn-refresh:hover { color: var(--text); border-color: var(--border2, #333345); }
+.btn-refresh:disabled { opacity: .5; cursor: default; }
+
+/* Tab dei funnel — navigazione primaria con underline colorata (--tab-c dalla chip) */
+.funnel-tabs {
+  display: flex; align-items: center; gap: 2px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.funnel-chip-wrap { display: inline-flex; align-items: stretch; cursor: grab; }
+.funnel-chip-wrap:active { cursor: grabbing; }
+.tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  padding: 9px 13px 11px; background: none; border: 0; cursor: pointer;
+  color: var(--muted); position: relative; transition: color .15s;
+  white-space: nowrap; line-height: 1.2;
+}
+.tab:hover { color: var(--text); }
+.tab::after {
+  content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px;
+  height: 2px; border-radius: 2px 2px 0 0; background: transparent; transition: background .15s;
+}
+.tab.on { color: var(--tab-c, var(--purple)); font-weight: 600; }
+.tab.on::after { background: var(--tab-c, var(--purple)); }
+.tab-ic { display: inline-flex; align-items: center; }
+.tab-label { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 500; }
+.tabs-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 0 0 6px 12px; flex-shrink: 0; }
+.tab-action {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: inherit; font-size: 11.5px; padding: 5px 11px;
+  background: transparent; border: 1px solid var(--border); border-radius: 7px;
+  color: var(--muted); cursor: pointer; transition: color .15s, border-color .15s;
+  white-space: nowrap;
+}
+.tab-action:hover { color: var(--text); border-color: var(--border2, #333345); }
+
+/* Striscia periodo — un solo contenitore attaccato sotto le tab, una sola azione (Calcola) */
+.period-strip {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--border);
+  border-top: 0; border-radius: 0 0 var(--radius) var(--radius);
+  padding: 10px 14px; margin-bottom: 20px;
+}
+.strip-div { width: 1px; align-self: stretch; background: var(--border); }
+.strip-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--border2, #333345); border-radius: 7px; overflow: hidden; }
+.seg button {
+  font-family: inherit; font-size: 12px; font-weight: 500; padding: 5px 14px;
+  background: transparent; border: 0; cursor: pointer; color: var(--muted);
+  transition: background .15s, color .15s;
+}
+.seg button:hover { color: var(--text); }
+.seg button.on { background: var(--accent); color: #fff; }
+.sprint-sel {
+  font-family: inherit; font-size: 12px; padding: 5px 10px;
+  background: var(--surface2); color: var(--muted); border: 1px solid var(--border2, #333345);
+  border-radius: 7px; cursor: pointer; min-width: 150px;
+}
+.sprint-sel.on { color: var(--text); border-color: var(--purple); }
+.dates { display: inline-flex; align-items: center; gap: 7px; }
+.dates input {
+  font-family: var(--mono); font-size: 11.5px; padding: 5px 9px;
+  background: var(--surface2); color: var(--muted); border: 1px solid var(--border2, #333345);
+  border-radius: 7px; color-scheme: dark; width: 130px;
+}
+.dates.on input { color: var(--text); border-color: var(--purple); }
+.dates .arr { color: #4a4a68; font-size: 12px; }
+.btn-calc {
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  padding: 6px 20px; background: var(--accent); color: #fff; border: 0;
+  border-radius: 7px; cursor: pointer; transition: background .15s;
+}
+.btn-calc:hover { background: #8b5cf6; }
+
+/* Card funnel — header con toggle Coorte/Volumi */
+.fun-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.fun-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+.mode-toggle { display: inline-flex; border: 1px solid var(--border2, #333345); border-radius: 7px; overflow: hidden; flex-shrink: 0; }
+.mode-toggle button {
+  font-family: inherit; font-size: 12px; font-weight: 500; padding: 6px 16px;
+  background: transparent; color: var(--muted); border: 0; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.mode-toggle button:hover { color: var(--text); }
+.mode-toggle button:focus-visible { outline: 2px solid var(--purple); outline-offset: -2px; }
+.fun-card[data-mode="cohort"] .mode-toggle button.on { background: var(--accent); color: #fff; }
+.fun-card[data-mode="absolute"] .mode-toggle button.on { background: var(--blue, #2563eb); color: #fff; }
+
+/* Sintesi — numeri veri con label sopra, valore mono grande */
+.stat-row { display: flex; gap: 40px; margin: 16px 0 20px; flex-wrap: wrap; }
+.stat { display: flex; flex-direction: column; gap: 1px; }
+.stat .lbl { font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); }
+.stat .val { font-family: var(--mono); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat .val small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 5px; font-family: 'Inter', sans-serif; }
+.stat .val.bad { color: var(--red); }
+.fun-insight { font-size: 12px; color: var(--muted); margin: 14px 0 18px; }
+
+/* Tabella funnel */
+.fun-table { display: flex; flex-direction: column; }
+.fun-cols {
+  display: flex; align-items: center; gap: 16px; padding-bottom: 7px;
+  font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px;
+  border-bottom: 1px solid var(--border);
+}
+.col-label { width: 200px; flex-shrink: 0; }
+.col-bar   { flex: 1; }
+.col-n     { width: 52px; text-align: right; flex-shrink: 0; }
+.col-prev  { width: 62px; text-align: right; flex-shrink: 0; }
+.col-head  { width: 62px; text-align: right; flex-shrink: 0; }
+.fun-card[data-mode="absolute"] .col-prev { display: none; }
+
+.fun-row {
+  display: flex; align-items: center; gap: 16px; padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.fun-row:last-child { border-bottom: 0; }
+.fun-row .col-label { font-size: 12.5px; color: var(--text); line-height: 1.35; }
+.fun-row .evt, .child-row .evt {
+  display: block; font-family: var(--mono); font-size: 10px; color: #4a4a68;
+  opacity: 0; transition: opacity .15s; height: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.fun-row:hover .evt, .child-row:hover .evt { opacity: 1; }
+.variants-tag { font-size: 10px; color: var(--muted); font-weight: 400; }
+.chev { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 10px; padding: 0 5px 0 0; font-family: inherit; }
+
+/* Barra: track pieno = 100% · ghost tratteggiato = livello step precedente (il drop) · fill = step */
+.track { position: relative; height: 24px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+.ghost {
+  position: absolute; inset: 0 auto 0 0; border-radius: 4px;
+  background: repeating-linear-gradient(-55deg, transparent 0 5px, #2e2e44 5px 7px);
+}
+.ghost.worst { background: repeating-linear-gradient(-55deg, transparent 0 5px, rgba(248,113,113,.38) 5px 7px); }
+.fill {
+  position: absolute; inset: 0 auto 0 0; border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), var(--purple));
+  transition: width .35s ease;
+}
+.fun-card[data-mode="absolute"] .fill { background: linear-gradient(90deg, var(--blue, #2563eb), var(--danilo, #60a5fa)); }
+
+.n-val { font-family: var(--mono); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; }
+.pct { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.pct.head-pct { font-weight: 500; color: var(--muted); }
+.pct.worst-pct { color: var(--red); }
+.pct.dash { color: var(--muted); font-weight: 400; }
+
+/* Varianti annidate — fetta del parent, stessa scala */
+.child-row {
+  display: flex; align-items: center; gap: 16px; padding: 5px 0;
+  border-bottom: 1px dashed var(--border); background: rgba(255,255,255,.012);
+}
+.child-row .col-label { font-size: 11.5px; color: var(--muted); padding-left: 26px; }
+.child-row .col-label .arr { color: #4a4a68; margin-right: 5px; }
+.child-track { position: relative; height: 12px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+.child-fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--purple); opacity: .5; }
+.fun-card[data-mode="absolute"] .child-fill { background: var(--danilo, #60a5fa); }
+.child-row .n-val { font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.child-row .pct { font-size: 11px; font-weight: 500; color: var(--muted); }
+
+/* Contesto install — footer fuori dalla cascata */
+.fun-context {
+  display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--muted);
+}
+.fun-context b { font-family: var(--mono); font-weight: 600; color: var(--text); margin-left: 4px; }
+.fun-context .note { font-size: 10px; color: #4a4a68; }
+
+/* Stato vuoto / loading della card funnel */
+.fun-empty { text-align: center; padding: 40px 0 44px; }
+.fun-empty-ring {
+  width: 34px; height: 34px; margin: 0 auto 14px; border-radius: 50%;
+  border: 2px solid var(--border2, #333345); border-top-color: var(--purple); opacity: .7;
+}
+.fun-empty-text { font-size: 12.5px; color: var(--muted); }
+.fun-empty-text b { color: var(--text); font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+@media (max-width: 900px) {
+  .col-label { width: 130px; }
+  .col-prev, .col-head { width: 48px; }
+  .stat-row { gap: 24px; }
+}
