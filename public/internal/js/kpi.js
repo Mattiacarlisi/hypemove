@@ -4106,10 +4106,16 @@ function attachEventBrowserHandlers() {
   document.getElementById('eb-close')?.addEventListener('click', closeEventBrowser);
   document.getElementById('eb-cancel')?.addEventListener('click', closeEventBrowser);
 
-  // ricerca — mantiene il focus/caret non ricreando l'input a ogni tasto: aggiorna solo la lista
+  // ricerca — render ricrea l'input; preserva caret così i caratteri non compaiono al contrario
   const search = document.getElementById('eb-search');
   if (search) {
-    search.addEventListener('input', e => { state.ebSearch = e.target.value; render(); document.getElementById('eb-search')?.focus(); });
+    search.addEventListener('input', e => {
+      const caret = e.target.selectionStart;
+      state.ebSearch = e.target.value;
+      render();
+      const s = document.getElementById('eb-search');
+      if (s) { s.focus(); try { s.setSelectionRange(caret, caret); } catch (_) {} }
+    });
     search.addEventListener('keydown', e => { if (e.key === 'Escape') closeEventBrowser(); });
   }
 
