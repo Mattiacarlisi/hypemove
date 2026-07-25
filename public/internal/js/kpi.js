@@ -258,6 +258,18 @@ let state = {
   retSprintId: '',             // sprint scelto nel selettore periodo della pagina Retention ('' = periodo libero)
   retWeeks: 6, retMinW0: 1,
   retLoading: false, retError: null,
+
+  // ── Retention · vista giornaliera (survival) ──────────────────────
+  // Stato SEPARATO da quello weekly (ret*) e da quello del funnel (funnel*): il toggle
+  // fra le due viste non deve mai alterare i filtri dell'altra. Ogni campo qui inizia
+  // per retD — se un handler nuovo scrive un campo che non inizia per retD, è un bug.
+  retView: 'week',             // 'week' | 'day'
+  retDFrom: MONTH_START, retDTo: TODAY,
+  retDSprintSel: [],           // id sprint selezionati nel menu (confronto multi-curva)
+  retDSprints: null,           // righe da kpi_retention_daily_cohort_sizes (coorte + primi avvii)
+  retDData: {},                // { [sprintId | 'free']: payload kpi_retention_daily }
+  retDDropdown: false,         // menu sprint aperto
+  retDLoading: false, retDError: null,
   overviewKeys: loadLS(LS_OV, DEF_OV_KEYS),
   funnelConfig: JSON.parse(JSON.stringify(DEF_FUN_CFG)),
   editingOverview: false,
@@ -540,6 +552,50 @@ async function fetchRetention() {
     state.retention = res.data;
   } catch (e) { state.retError = e.message || 'Errore sconosciuto'; }
   state.retLoading = false;
+  render();
+}
+
+// Righe del menu sprint della vista giornaliera: coorte, primi avvii e ultimo giorno
+// osservabile per ogni sprint, in UNA chiamata sola (con 100+ sprint, una per sprint
+// significherebbe 100 esecuzioni della RPC pesante alla sola apertura del menu).
+async function fetchRetentionDailySprints() {
+  if (state.retDSprints) return;
+  try {
+    const res = await sb.rpc('kpi_retention_daily_cohort_sizes', { p_sprint_ids: null });
+    if (res.error) throw res.error;
+    state.retDSprints = res.data || [];
+  } catch (e) { state.retDError = e.message || 'Errore sconosciuto'; }
+}
+
+// Una chiamata per sprint selezionato (le curve vanno sovrapposte), oppure una sola
+// sul periodo libero quando non c'è nessuno sprint selezionato.
+async function fetchRetentionDaily() {
+  state.retDLoading = true;
+  state.retDError = null;
+  render();
+  try {
+    await fetchRetentionDailySprints();
+    const sel = state.retDSprintSel;
+    const jobs = sel.length
+      ? sel.map(id => {
+          const s = (state.retDSprints || []).find(x => x.sprint_id === id);
+          return { key: id, inizio: s && s.inizio, fine: s && s.fine };
+        }).filter(j => j.inizio && j.fine)
+      : [{ key: 'free', inizio: state.retDFrom, fine: state.retDTo }];
+
+    const out = {};
+    for (const j of jobs) {
+      const res = await sb.rpc('kpi_retention_daily', {
+        p_start:  j.inizio,
+        p_end:    j.fine,
+        p_anchor: 'signup',
+      });
+      if (res.error) throw res.error;
+      out[j.key] = res.data;
+    }
+    state.retDData = out;
+  } catch (e) { state.retDError = e.message || 'Errore sconosciuto'; }
+  state.retDLoading = false;
   render();
 }
 
@@ -5466,7 +5522,22 @@ function funnelViz() {
 
 // ── RETENTION ────────────────────────────────────────────────────────
 
+// La pagina Retention ospita DUE viste che rispondono a due domande diverse:
+//  · Per settimana → "chi continua ad allenarsi" (coorte = primo workout, invariata)
+//  · Per giorno    → "quando far scadere la prova" (coorte = signup, curva di sopravvivenza)
+// Il toggle cambia solo state.retView: non tocca mai i filtri dell'altra vista.
 function pageRetention() {
+  const tab = (id, label, on) =>
+    `<button id="${id}" class="filter-btn ${on ? 'active' : ''}" style="padding:6px 14px;font-size:12px">${label}</button>`;
+  return `
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      ${tab('ret-view-week', 'Per settimana', state.retView !== 'day')}
+      ${tab('ret-view-day',  'Per giorno',    state.retView === 'day')}
+    </div>
+    ${state.retView === 'day' ? pageRetentionDaily() : pageRetentionWeekly()}`;
+}
+
+function pageRetentionWeekly() {
   const retainedOpts = Array.from({ length: 10 }, (_, i) => i + 1).map(n =>
     `<option value="${n}" ${state.retMin === n ? 'selected' : ''}>≥${n} workout / sett.</option>`
   ).join('');
@@ -5515,6 +5586,391 @@ function pageRetention() {
     </div>
     ${body}
     ${sprintRetSection()}`;
+}
+
+// ── RETENTION · vista giornaliera (survival) ─────────────────────────
+//
+// Asse dei giorni: D0..D10 uno per uno (lì si decide la durata della prova), poi la coda
+// a salti. Le x del grafico sono spaziate per INDICE, non per valore del giorno, così la
+// coda non schiaccia la parte densa dove sta la decisione.
+const RETD_DAYS = [0,1,2,3,4,5,6,7,8,9,10,14,21,30];
+const RETD_TRIAL_DAY = 7;   // durata prova attuale, marcata sui grafici
+
+// Chiave del dataset "primario" (stats, tabella di dettaglio, barre dei persi):
+// il primo sprint selezionato, o il periodo libero se non ce n'è nessuno.
+function retDPrimaryKey() {
+  return state.retDSprintSel.length ? state.retDSprintSel[0] : 'free';
+}
+
+function retDSprintName(id) {
+  const s = (state.retDSprints || []).find(x => x.sprint_id === id);
+  return s ? s.nome : '—';
+}
+
+function retDDay(payload, d) {
+  if (!payload || !payload.days) return null;
+  return payload.days.find(x => Number(x.day) === d) || null;
+}
+
+// "—" quando il dato non è ancora osservabile. Mai 0%: uno zero si legge "sono andati via
+// tutti", il trattino si legge "non lo sappiamo ancora".
+function retDCell(v, suffix) {
+  return (v === null || v === undefined)
+    ? `<span style="color:var(--border2)">—</span>`
+    : `${v}${suffix || ''}`;
+}
+
+function pageRetentionDaily() {
+  const body = state.retDLoading
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon pulse">🔄</div><div class="empty-text" style="color:var(--muted)">Calcolo retention giornaliera...</div></div>`
+    : state.retDError
+    ? `<div style="padding:20px;color:var(--red);font-size:13px">⚠️ ${state.retDError}</div>`
+    : !Object.keys(state.retDData || {}).length
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon">📉</div><div class="empty-text" style="color:var(--muted)">Scegli il periodo e clicca Calcola.</div></div>`
+    : retDailyBody();
+
+  return `${retDailyBar()}${body}`;
+}
+
+function retDailyBar() {
+  const { from: dToday, to: tToday } = eventFunnelPresetRange('today');
+  const { from: dWeek,  to: tWeek  } = eventFunnelPresetRange('week');
+  const { from: dMonth, to: tMonth } = eventFunnelPresetRange('month');
+  const noSprint = !state.retDSprintSel.length;
+  const on = (f, t) => noSprint && state.retDFrom === f && state.retDTo === t;
+  const preset = (id, label, active) =>
+    `<button id="${id}" class="filter-btn ${active ? 'active' : ''}" style="padding:5px 12px;font-size:12px">${label}</button>`;
+
+  return `
+    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <span class="filter-label">Iscritti</span>
+      ${preset('retd-preset-today', 'Oggi',      on(dToday, tToday))}
+      ${preset('retd-preset-week',  'Settimana', on(dWeek,  tWeek))}
+      ${preset('retd-preset-month', 'Mese',      on(dMonth, tMonth))}
+      <div class="filter-sep"></div>
+      ${retDailySprintMenu()}
+      <div class="filter-sep"></div>
+      <input type="date" id="retd-from" class="form-input" value="${state.retDFrom}"
+        style="width:140px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="retd-to" class="form-input" value="${state.retDTo}"
+        style="width:140px;padding:5px 10px;font-size:12px">
+      <button id="retd-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
+    </div>`;
+}
+
+// Menu sprint a tendina: scala a N sprint. Ordine dal più recente (con 100 sprint quello
+// che cerchi è quasi sempre in cima), ogni riga con le date e la coorte — il numero da
+// solo non identifica più niente quando gli sprint sono tanti.
+function retDailySprintMenu() {
+  const rows = state.retDSprints || [];
+  const sel  = state.retDSprintSel;
+  const label = sel.length
+    ? `${retDSprintName(sel[0])}${sel.length > 1 ? ` +${sel.length - 1}` : ''}`
+    : 'Periodo libero';
+
+  const items = rows.map(r => {
+    const i  = sel.indexOf(r.sprint_id);
+    const c  = i >= 0 ? SPRINT_COLORS[i % SPRINT_COLORS.length] : 'transparent';
+    const br = i >= 0 ? c : 'var(--border2)';
+    const live = Number(r.max_day) < 0
+      ? `<span style="color:var(--amber);font-size:10px">in corso</span>`
+      : `<span style="color:var(--muted)">${r.cohort_size}</span>`;
+    return `
+      <div class="retd-row" data-retd-sprint="${r.sprint_id}">
+        <span style="width:9px;height:9px;border-radius:50%;background:${c};box-shadow:inset 0 0 0 1px ${br};flex:none"></span>
+        <span style="color:var(--text);min-width:64px">${r.nome}</span>
+        <span style="color:var(--muted);flex:1">${r.inizio} → ${r.fine}</span>
+        ${live}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="retd-menu">
+      <button id="retd-menu-btn" class="form-select" style="font-size:12px;padding:5px 10px;min-width:170px;text-align:left;cursor:pointer">
+        ${label} <span style="color:var(--muted);font-size:10px">▾</span>
+      </button>
+      ${state.retDDropdown ? `
+        <div class="retd-panel">
+          <div class="retd-quick">
+            <button data-retd-last="3">Ultimi 3</button>
+            <button data-retd-last="5">Ultimi 5</button>
+            <button data-retd-last="0">Nessuno</button>
+          </div>
+          <div class="retd-list">${items || '<div style="padding:12px;color:var(--muted);font-size:12px">Nessuno sprint.</div>'}</div>
+        </div>` : ''}
+    </div>`;
+}
+
+function retDailyBody() {
+  const key  = retDPrimaryKey();
+  const data = state.retDData[key];
+  if (!data) return `<div style="color:var(--muted);font-size:13px">Nessun dato.</div>`;
+
+  const title = key === 'free'
+    ? `${data.from} → ${data.to}`
+    : `${retDSprintName(key)} · ${data.from} → ${data.to}`;
+
+  return `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.8">
+      Utenti iscritti in <strong style="color:var(--text)">${title}</strong> ·
+      <strong style="color:var(--text)">${data.cohort_size}</strong> in coorte ·
+      seguiti oltre la finestra · esclusi account interni, test ed emulatori
+    </div>
+    ${retDailyStats(data)}
+    ${retDailyDecide(data)}
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title">Utenti ancora attivi</div>
+      ${retDailySurvivalChart()}
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title">Utenti persi, giorno per giorno</div>
+      ${retDailyLostBars(data)}
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title">Dettaglio per giorno</div>
+      ${retDailyTable(data)}
+    </div>
+    ${retDailyCompare()}`;
+}
+
+function retDailyStats(data) {
+  const d1 = retDDay(data, 1);
+  const d7 = retDDay(data, RETD_TRIAL_DAY);
+  const lost24 = d1 && d1.lost !== null && data.cohort_size
+    ? (d1.lost / data.cohort_size * 100).toFixed(1) + '%' : null;
+  // Il giorno con più utenti persi: è lì che il prodotto li perde davvero.
+  const peak = (data.days || [])
+    .filter(x => x.lost !== null && x.lost !== undefined)
+    .sort((a, b) => b.lost - a.lost)[0];
+
+  const box = (label, value, note, color) => `
+    <div class="card" style="flex:1;min-width:170px;margin:0">
+      <div style="font-size:12px;color:${color || 'var(--muted)'};margin-bottom:4px">${label}</div>
+      <div class="metric-val" style="font-size:24px;color:${color || 'var(--text)'}">${value}</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px">${note}</div>
+    </div>`;
+
+  return `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+      ${box('Persi nelle prime 24 ore', lost24 || '—',
+            d1 && d1.lost !== null ? `${d1.lost} di ${data.cohort_size}` : 'non osservabile', 'var(--red)')}
+      ${box('Giorno del crollo', peak ? 'D' + peak.day : '—',
+            peak ? `${peak.lost} utenti persi` : 'non osservabile')}
+      ${box(`Ancora attivi a D${RETD_TRIAL_DAY}`,
+            d7 && d7.pct !== null ? d7.pct + '%' : '—',
+            d7 && d7.alive !== null ? `${d7.alive} di ${data.cohort_size} · fine prova attuale` : 'non osservabile',
+            'var(--amber)')}
+      ${box('Ultimo accesso mediano',
+            data.median_last_day === null || data.median_last_day === undefined
+              ? '—' : 'giorno ' + Math.round(data.median_last_day),
+            'metà della coorte non va oltre')}
+    </div>`;
+}
+
+// Quante persone vedrebbero il paywall se la prova scadesse al giorno N. È la domanda
+// che la vista esiste per rispondere: una prova più lunga convince chi resta, ma la
+// mostra a molte meno persone.
+function retDailyDecide(data) {
+  const opts = [2, 3, 7, 14].map(n => {
+    const d   = retDDay(data, n);
+    const cur = n === RETD_TRIAL_DAY;
+    const val = d && d.alive !== null && d.alive !== undefined ? d.alive : null;
+    return `
+      <div style="flex:1;min-width:132px;background:var(--surface2);border:1px solid ${cur ? 'var(--amber)' : 'var(--border)'};border-radius:8px;padding:12px 14px">
+        <div style="font-size:12px;color:${cur ? 'var(--amber)' : 'var(--muted)'};margin-bottom:2px">Prova di ${n} giorni</div>
+        <div class="metric-val" style="font-size:20px;color:${val === null ? 'var(--muted)' : 'var(--text)'}">${val === null ? '—' : val}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">
+          ${val === null ? 'coorte non matura' : (d.pct + '%') + (cur ? ' · oggi' : '')}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:18px;border-left:3px solid var(--amber)">
+      <div class="card-title">Quante persone arriverebbero al paywall di fine prova</div>
+      <div style="font-size:12px;color:var(--muted);margin:-6px 0 14px;max-width:68ch">
+        Utenti ancora attivi il giorno in cui la prova scadrebbe. Misura la presenza,
+        non la disponibilità a pagare: non esiste ancora storia di un paywall a fine prova.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${opts}</div>
+    </div>`;
+}
+
+// Curve di sopravvivenza sovrapposte, una per sprint selezionato. Ogni curva si TRONCA
+// dove finisce l'osservabile per quello sprint (observable = 0): mai prolungata a zero,
+// che si leggerebbe come "sono andati via tutti".
+function retDailySurvivalChart() {
+  const W = 800, H = 210, PAD_T = 16, PAD_B = 26, PAD_L = 32, PAD_R = 12;
+  const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B;
+  const n = RETD_DAYS.length;
+  const xOf = i => PAD_L + (i / (n - 1)) * chartW;
+  const yOf = p => PAD_T + chartH - (p / 100) * chartH;
+
+  const refs = [0, 25, 50, 75, 100].map(p =>
+    `<line x1="${PAD_L}" y1="${yOf(p)}" x2="${W - PAD_R}" y2="${yOf(p)}" stroke="#252535" stroke-width="1"/>
+     <text x="${PAD_L - 4}" y="${yOf(p) + 3}" text-anchor="end" font-size="8" fill="#5a5a80">${p}%</text>`
+  ).join('');
+
+  const keys = state.retDSprintSel.length ? state.retDSprintSel : ['free'];
+  const series = keys.map((k, si) => {
+    const data = state.retDData[k];
+    if (!data) return '';
+    const color = SPRINT_COLORS[si % SPRINT_COLORS.length];
+    const dash  = SPRINT_DASHES[si % SPRINT_DASHES.length];
+    const pts = RETD_DAYS.map((d, i) => {
+      const row = retDDay(data, d);
+      return (row && row.pct !== null && row.pct !== undefined)
+        ? { x: xOf(i), y: yOf(Number(row.pct)) } : null;
+    }).filter(Boolean);
+    if (!pts.length) return '';
+    const line = pts.map(p => `${p.x},${p.y}`).join(' ');
+    const end  = pts[pts.length - 1];
+    return `
+      <polyline fill="none" stroke="${color}" stroke-width="2"
+        ${dash !== 'none' ? `stroke-dasharray="${dash}"` : ''} points="${line}"/>
+      <circle cx="${end.x}" cy="${end.y}" r="3.5" fill="${color}"/>`;
+  }).join('');
+
+  const trialX = xOf(RETD_DAYS.indexOf(RETD_TRIAL_DAY));
+  const labels = RETD_DAYS.map((d, i) =>
+    `<text x="${xOf(i)}" y="${H - 8}" text-anchor="middle" font-size="8"
+       fill="${d === RETD_TRIAL_DAY ? '#fbbf24' : '#5a5a80'}">D${d}</text>`).join('');
+
+  const legend = (state.retDSprintSel.length ? state.retDSprintSel : ['free']).map((k, si) => {
+    const name = k === 'free' ? 'Periodo libero' : retDSprintName(k);
+    return `<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
+      <i style="width:14px;height:2px;background:${SPRINT_COLORS[si % SPRINT_COLORS.length]};display:inline-block"></i>${name}</span>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">${legend}</div>
+    <div style="overflow-x:auto">
+      <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;min-width:560px;height:auto">
+        ${refs}
+        <line x1="${trialX}" y1="${PAD_T}" x2="${trialX}" y2="${PAD_T + chartH}"
+          stroke="#fbbf24" stroke-width="1" stroke-dasharray="3 4" opacity=".75"/>
+        <text x="${trialX + 4}" y="${PAD_T + 10}" font-size="8" fill="#fbbf24">fine prova</text>
+        ${series}
+        ${labels}
+      </svg>
+    </div>`;
+}
+
+// Barre dei persi per giorno, stesso asse X del grafico sopra (stesso PAD_L/PAD_R e
+// stesso spacing per indice) così le due letture si sovrappongono verticalmente.
+function retDailyLostBars(data) {
+  const W = 800, H = 110, PAD_T = 14, PAD_B = 22, PAD_L = 32, PAD_R = 12;
+  const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B;
+  const n = RETD_DAYS.length;
+  const xOf = i => PAD_L + (i / (n - 1)) * chartW;
+  const vals = RETD_DAYS.map(d => {
+    const r = retDDay(data, d);
+    return (r && r.lost !== null && r.lost !== undefined) ? Number(r.lost) : null;
+  });
+  const max = Math.max(1, ...vals.filter(v => v !== null));
+  const bw  = Math.min(26, chartW / n * 0.62);
+
+  const bars = vals.map((v, i) => {
+    if (v === null) return '';
+    const h = (v / max) * chartH;
+    return `<rect x="${xOf(i) - bw / 2}" y="${PAD_T + chartH - h}" width="${bw}" height="${h}" rx="2" fill="#f87171"/>
+            ${v === max ? `<text x="${xOf(i)}" y="${PAD_T + chartH - h - 4}" text-anchor="middle" font-size="8" fill="#f87171">${v}</text>` : ''}`;
+  }).join('');
+
+  const labels = RETD_DAYS.map((d, i) =>
+    `<text x="${xOf(i)}" y="${H - 6}" text-anchor="middle" font-size="8"
+       fill="${d === RETD_TRIAL_DAY ? '#fbbf24' : '#5a5a80'}">D${d}</text>`).join('');
+
+  return `
+    <div style="overflow-x:auto">
+      <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;min-width:560px;height:auto">
+        <line x1="${PAD_L}" y1="${PAD_T + chartH}" x2="${W - PAD_R}" y2="${PAD_T + chartH}" stroke="#333345" stroke-width="1"/>
+        ${bars}${labels}
+      </svg>
+    </div>`;
+}
+
+function retDailyTable(data) {
+  const rows = (data.days || []).map(r => {
+    const isTrial = Number(r.day) === RETD_TRIAL_DAY;
+    const pct = r.pct === null || r.pct === undefined ? null : Number(r.pct);
+    const color = pct === null ? 'var(--muted)'
+      : pct >= 40 ? 'var(--mattia)' : pct >= 20 ? 'var(--amber)' : 'var(--red)';
+    return `<tr${isTrial ? ' style="background:rgba(251,191,36,.06)"' : ''}>
+      <td style="color:var(--muted);font-size:12px">D${r.day}${Number(r.day) === 0 ? ' · signup' : ''}</td>
+      <td class="metric-val" style="font-size:13px">${retDCell(r.alive)}</td>
+      <td style="font-weight:700;color:${color}">${retDCell(pct, '%')}</td>
+      <td style="font-size:12px;color:var(--red)">${retDCell(r.lost)}</td>
+      <td style="font-size:12px;color:var(--muted)">${r.observable}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <table class="data-table" style="margin-top:10px">
+      <thead><tr>
+        <th>Giorno</th><th>Attivi</th><th>vs D0</th><th>Persi</th><th>Osservabili</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:12px;max-width:74ch;line-height:1.7">
+      <strong>Osservabili</strong> = utenti che hanno già vissuto per intero quel giorno.
+      Le percentuali sono calcolate su questa colonna, non sulla coorte intera. Dove la
+      colonna si azzera la riga resta vuota: un <span style="color:var(--border2)">—</span>
+      significa "non lo sappiamo ancora", uno <code>0%</code> avrebbe significato
+      "sono andati via tutti".
+    </div>`;
+}
+
+function retDailyCompare() {
+  const keys = state.retDSprintSel;
+  if (keys.length < 2) return '';
+
+  const rows = keys.map(k => {
+    const data = state.retDData[k];
+    if (!data) return '';
+    const meta = (state.retDSprints || []).find(x => x.sprint_id === k) || {};
+    const fo   = Number(meta.first_opens || 0);
+    // Qualifica priva di senso quando i primi avvii sono meno degli iscritti: per gli
+    // sprint vecchi anonymous_sessions non copre gli utenti pre-sistema-sessioni, e un
+    // rapporto sopra il 100% è un dato rotto, non un risultato.
+    const qual = fo > 0 && fo >= data.cohort_size
+      ? (data.cohort_size / fo * 100).toFixed(1) + '%'
+      : '<span style="color:var(--border2)">—</span>';
+    const cell = d => {
+      const r = retDDay(data, d);
+      return retDCell(r && r.pct !== null && r.pct !== undefined ? r.pct : null, '%');
+    };
+    return `<tr>
+      <td style="color:var(--text);font-size:12px">${meta.nome || '—'}</td>
+      <td style="font-size:12px;color:var(--muted)">${data.from} → ${data.to}</td>
+      <td class="metric-val" style="font-size:13px">${fo || '—'}</td>
+      <td class="metric-val" style="font-size:13px">${data.cohort_size}</td>
+      <td style="font-size:12px;color:var(--muted)">${qual}</td>
+      <td>${cell(1)}</td><td>${cell(3)}</td><td>${cell(7)}</td><td>${cell(14)}</td>
+      <td style="font-size:12px;color:var(--muted)">${
+        data.median_last_day === null || data.median_last_day === undefined
+          ? '—' : 'giorno ' + Math.round(data.median_last_day)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <div class="card-title">Confronto sprint</div>
+      <table class="data-table" style="margin-top:10px">
+        <thead><tr>
+          <th>Sprint</th><th>Periodo</th><th>Primi avvii</th><th>Iscritti</th>
+          <th>Qualifica</th><th>D1</th><th>D3</th><th>D7</th><th>D14</th><th>Ultimo accesso</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:12px;max-width:74ch;line-height:1.7">
+        <strong>Qualifica</strong> = iscritti su primi avvii. Serve a leggere le colonne D1-D14
+        sapendo quanto è selezionata la base: quando il signup si sposterà in fondo
+        all'onboarding, la coorte partirà più filtrata e le percentuali saliranno anche
+        senza che la retention sia migliorata.
+      </div>
+    </div>`;
 }
 
 function retentionBody() {
@@ -8910,6 +9366,69 @@ function attachEvents() {
       state.retChart = el.dataset.retChart;
       render();
     }));
+
+  // ── Retention · vista giornaliera ──────────────────────────────────
+  // Questi handler scrivono SOLO in state.retView e state.retD*: mai nei campi ret*
+  // della vista settimanale, mai nei campi funnel*. Il toggle non deve poter alterare
+  // i filtri dell'altra vista.
+  document.getElementById('ret-view-week')?.addEventListener('click', () => {
+    state.retView = 'week';
+    render();
+  });
+  document.getElementById('ret-view-day')?.addEventListener('click', () => {
+    state.retView = 'day';
+    state.retDDropdown = false;
+    if (!Object.keys(state.retDData || {}).length && !state.retDLoading) fetchRetentionDaily();
+    else render();
+  });
+
+  const retdPreset = (id, kind) =>
+    document.getElementById(id)?.addEventListener('click', () => {
+      const { from, to } = eventFunnelPresetRange(kind);
+      state.retDFrom = from;
+      state.retDTo   = to;
+      state.retDSprintSel = [];   // preset e sprint sono alternativi
+      fetchRetentionDaily();
+    });
+  retdPreset('retd-preset-today', 'today');
+  retdPreset('retd-preset-week',  'week');
+  retdPreset('retd-preset-month', 'month');
+
+  document.getElementById('retd-menu-btn')?.addEventListener('click', async () => {
+    state.retDDropdown = !state.retDDropdown;
+    if (state.retDDropdown && !state.retDSprints) await fetchRetentionDailySprints();
+    render();
+  });
+
+  document.querySelectorAll('[data-retd-sprint]').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.retdSprint;
+      const sel = state.retDSprintSel.slice();
+      const i   = sel.indexOf(id);
+      if (i >= 0) sel.splice(i, 1); else sel.push(id);
+      state.retDSprintSel = sel;
+      fetchRetentionDaily();
+    }));
+
+  document.querySelectorAll('[data-retd-last]').forEach(el =>
+    el.addEventListener('click', () => {
+      const n = +el.dataset.retdLast;
+      // retDSprints è già ordinato dal più recente: gli "ultimi N" sono i primi N.
+      state.retDSprintSel = n > 0
+        ? (state.retDSprints || []).slice(0, n).map(s => s.sprint_id)
+        : [];
+      state.retDDropdown = false;
+      fetchRetentionDaily();
+    }));
+
+  document.getElementById('retd-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('retd-from')?.value;
+    const to   = document.getElementById('retd-to')?.value;
+    if (from) state.retDFrom = from;
+    if (to)   state.retDTo   = to;
+    state.retDSprintSel = [];   // date esplicite = periodo libero
+    fetchRetentionDaily();
+  });
 
   document.getElementById('refresh-btn')?.addEventListener('click', manualRefresh);
 

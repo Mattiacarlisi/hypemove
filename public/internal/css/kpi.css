@@ -360,3 +360,28 @@
   .col-prev, .col-head { width: 48px; }
   .stat-row { gap: 24px; }
 }
+
+/* ── Retention · menu sprint della vista giornaliera ────────────────
+   Menu a tendina invece di una fila di chip: scala a N sprint senza che la barra
+   dei filtri cresca, e ogni riga può portare date e coorte — con molti sprint il
+   numero da solo non identifica più il periodo. */
+.retd-menu { position: relative; }
+.retd-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 320px;
+  background: var(--surface); border: 1px solid var(--border2, #333345);
+  border-radius: 9px; box-shadow: 0 14px 34px rgba(0, 0, 0, .55); overflow: hidden;
+}
+.retd-quick { display: flex; gap: 6px; padding: 9px 11px; border-bottom: 1px solid var(--border); }
+.retd-quick button {
+  font-family: inherit; font-size: 11.5px; padding: 4px 10px; background: transparent;
+  color: var(--muted); border: 1px solid var(--border2, #333345); border-radius: 6px; cursor: pointer;
+}
+.retd-quick button:hover { color: var(--text); border-color: var(--muted); }
+.retd-list { max-height: 244px; overflow-y: auto; scrollbar-width: thin; }
+.retd-row {
+  display: flex; align-items: center; gap: 9px; padding: 7px 11px; cursor: pointer;
+  border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.retd-row:last-child { border-bottom: 0; }
+.retd-row:hover { background: var(--surface2); }
