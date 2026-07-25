@@ -5908,6 +5908,7 @@ function pagePremium() {
         <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
         ${!state.editingPremiumFunnel ? `<button id="edit-premium-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
       </div>
+      ${premiumFunnelSemanticsBadge()}
       ${premiumFunnelRangeBar()}
       ${premiumFunnelViz(state.premiumFunnelRangeData?.funnel || f)}
 
@@ -6351,6 +6352,29 @@ function premiumFunnelEditPanel() {
     </div>`;
 }
 
+// Badge semantica funnel Premium (cutover 24/07/2026): dichiara esplicitamente cosa
+// legge il funnel — coorte di registrazione (sprint selezionato) o attività nel periodo
+// (range libero / periodo dashboard). Il range libero override sprint quando attivo.
+// Vedi _specs/analytics/cohort-semantics-cutover/.
+function premiumFunnelSemanticsBadge() {
+  const rangeActive = !!state.premiumFunnelRangeData;
+  const sprint = !rangeActive ? state.sprints.find(s => s.id === state.premiumSprintId) : null;
+  const [emoji, label, tip] = sprint
+    ? ['👥', `Coorte di registrazione — ${esc(sprint.nome)}`,
+       `Denominatore = utenti registrati nella finestra sprint (${sprint.inizio} → ${sprint.fine}). Numeratore = tutto quello che hanno fatto dal signup in avanti. Conversioni post-sprint attribuite alla coorte, non alla finestra evento.`]
+    : rangeActive
+      ? ['📅', 'Attività nel periodo (tutte le coorti)',
+         `Conta eventi/purchases avvenuti nella finestra ${state.premiumFunnelRangeFrom} → ${state.premiumFunnelRangeTo}, chiunque li abbia generati (anche utenti registrati prima). Utile per traffico, NON per confronti tra sprint.`]
+      : ['📅', 'Attività nel periodo (tutte le coorti)',
+         `Segue il periodo della dashboard sopra: conta eventi/purchases avvenuti nella finestra, chiunque li abbia generati. Per la coorte per-sprint, seleziona uno sprint sopra.`];
+  return `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px" title="${tip}">
+      <span style="font-size:14px">${emoji}</span>
+      <span style="font-size:12px;font-weight:600;color:var(--fg)">${label}</span>
+      <span style="font-size:10px;color:var(--muted);margin-left:auto">semantica funnel</span>
+    </div>`;
+}
+
 function premiumFunnelRangeBar() {
   const active = !!state.premiumFunnelRangeData;
   return `
@@ -6438,6 +6462,7 @@ function sprintPremiumFunnelSection() {
     <div id="sprint-premium-funnel-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
       <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
+        <span style="font-size:10px;color:var(--muted);font-weight:500" title="Ogni colonna conta gli utenti registrati nella finestra dello sprint e quello che hanno fatto dal signup in avanti. Non contamina più cross-sprint (cutover coorte, 24/07).">coorte reg. per sprint</span>
         ${badge}
       </div>
       <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
