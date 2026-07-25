@@ -928,23 +928,47 @@ async function fetchPremium() {
 // Apre il modal e carica la lista degli utenti che hanno raggiunto uno step di una creatività.
 // Usa lo stesso periodo/genere della pagina Premium (state.premiumFrom/To/Gender).
 async function fetchStepUsers(variant, step, label) {
-  state.stepUsersModal = { variant, step, label };
+  // step può essere una stringa singola o un array di nomi (schermate unite con lo stesso idx).
+  const steps = Array.isArray(step) ? step : [step];
+  const stepLabel = steps.join(' + ');
+  state.stepUsersModal = { variant, step: stepLabel, label };
   state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
   render();
   try {
     // stesso sprint (quindi stesso p_start/p_end) della pagina Premium, per coerenza dei conteggi
     const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_premium_step_users', {
+    const base = {
       p_variant: variant,
-      p_step:    step,
       inizio:    state.premiumFrom,
       fine:      state.premiumTo,
       p_gender:  state.premiumGender,
       p_start:   selSprint ? sprintStartTs(selSprint) : null,
       p_end:     selSprint ? sprintEndTs(selSprint) : null,
-    });
-    if (error) throw error;
-    state.stepUsersData = data;
+    };
+    const results = await Promise.all(steps.map(st =>
+      sb.rpc('kpi_premium_step_users', { ...base, p_step: st })));
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+    if (steps.length === 1) {
+      state.stepUsersData = results[0].data;
+    } else {
+      // più schermate con lo stesso idx: unisco le liste deduplicando per email (o nome+ts),
+      // sommando le viste. total_views è la somma esatta (conteggio eventi).
+      const byUser = new Map();
+      let totalViews = 0;
+      results.forEach(r => {
+        const d = r.data || {};
+        totalViews += d.total_views || 0;
+        (d.users || []).forEach(u => {
+          const key = u.email || `${u.nome || ''}|${u.ts || ''}`;
+          const ex = byUser.get(key);
+          if (!ex) byUser.set(key, { ...u });
+          else ex.views = (ex.views || 1) + (u.views || 1);
+        });
+      });
+      const users = Array.from(byUser.values());
+      state.stepUsersData = { variant, step: stepLabel, total_users: users.length, total_views: totalViews, users };
+    }
   } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti step'; }
   state.stepUsersLoading = false;
   render();
@@ -5936,17 +5960,44 @@ const CREATIVE_LABELS = {
 };
 function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
 
+// Unisce gli step con lo STESSO indice in un box solo. Serve quando una creatività
+// rinomina una schermata tra due build (es. video_ad: primo step "ad"→"hero" dal 21/07):
+// i due nomi convivono allo stesso idx e altrimenti verrebbero disegnati affiancati come
+// se fossero passi in fila → sembra un funnel che "sale". Qui si sommano (viewed è un
+// conteggio di eventi, quindi la somma è esatta); il nome mostrato è quello più visto e
+// il click interroga tutti i nomi uniti.
+function mergeStepsByIdx(steps) {
+  const byIdx = {}; const order = [];
+  steps.forEach(s => {
+    const k = s.idx;
+    if (byIdx[k] === undefined) {
+      byIdx[k] = { variant: s.variant, idx: s.idx, step: s.step,
+                   viewed: s.viewed || 0, viewed_users: s.viewed_users || 0,
+                   names: [{ step: s.step, viewed: s.viewed || 0 }] };
+      order.push(k);
+    } else {
+      const m = byIdx[k];
+      m.viewed += s.viewed || 0;
+      m.viewed_users += s.viewed_users || 0;
+      m.names.push({ step: s.step, viewed: s.viewed || 0 });
+      m.step = m.names.reduce((a, b) => b.viewed > a.viewed ? b : a).step; // canonico = più visto
+    }
+  });
+  return order.map(k => byIdx[k]);
+}
+
 // Percorso step inline di una creatività: per ogni schermata quanti la raggiungono,
 // con il calo % rispetto alla schermata precedente. Mostra dove si fermano gli utenti.
-function premiumStepPath(steps) {
-  if (!steps || !steps.length) return '<span style="color:var(--muted);font-size:11px">nessuno step</span>';
+function premiumStepPath(rawSteps) {
+  if (!rawSteps || !rawSteps.length) return '<span style="color:var(--muted);font-size:11px">nessuno step</span>';
+  const steps = mergeStepsByIdx(rawSteps);
   const first = steps[0].viewed || 0;
   // se il primo step ha idx > 0, il paywall apre direttamente su quella schermata
   // (salta le precedenti — es. cambio obiettivo che apre sui piani): non è un drop-off.
   const direct = steps[0].idx > 0
     ? `<div style="font-size:10px;color:#60a5fa;margin-top:5px">↪ apre diretto su "${esc(steps[0].step)}" (salta le schermate precedenti)</div>`
     : (steps.length === 1
-        ? `<div style="font-size:10px;color:var(--muted);margin-top:5px">una sola schermata tracciata</div>`
+        ? `<div style="font-size:10px;color:var(--muted);margin-top:5px">nessuno è andato oltre questa schermata nel periodo</div>`
         : '');
   const row = `<div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap">` +
     steps.map((s, i) => {
@@ -5960,11 +6011,16 @@ function premiumStepPath(steps) {
           <span style="font-size:13px;line-height:1">→</span>
         </div>` : '';
       const isLast = i === steps.length - 1;
+      const merged   = s.names && s.names.length > 1;
+      const allSteps = merged ? s.names.map(n => n.step).join(',') : s.step;
+      const boxTitle = merged
+        ? `Schermate unite (stesso passo, build diverse): ${s.names.map(n => n.step).join(' + ')} — clicca per gli utenti`
+        : 'Vedi gli utenti che si sono fermati qui';
       return arrow + `
-        <div class="premium-step-box" data-variant="${esc(s.variant)}" data-step="${esc(s.step)}" title="Vedi gli utenti che si sono fermati qui"
+        <div class="premium-step-box" data-variant="${esc(s.variant)}" data-step="${esc(s.step)}" data-steps="${esc(allSteps)}" title="${esc(boxTitle)}"
           style="text-align:center;min-width:48px;background:#111120;border:1px solid ${isLast ? '#1f5a3699' : '#1f1f33'};border-radius:6px;padding:5px 6px;cursor:pointer;transition:border-color .12s,background .12s">
           <div style="font-weight:700;color:var(--fg);font-size:13px;line-height:1">${s.viewed}</div>
-          <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(s.step)}</div>
+          <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(s.step)}${merged ? ' <span style="color:#60a5fa" title="schermate unite">≡</span>' : ''}</div>
           <div style="font-size:8px;color:#5a5a7a;line-height:1">${pctOf1}%</div>
         </div>`;
     }).join('') + `</div>`;
@@ -10187,9 +10243,9 @@ function attachEvents() {
   document.querySelectorAll('.premium-step-box').forEach(el =>
     el.addEventListener('click', () => {
       const variant = el.dataset.variant;
-      const step    = el.dataset.step;
+      const steps   = (el.dataset.steps || el.dataset.step || '').split(',').filter(Boolean);
       const label   = premiumCreativeLabel(variant);
-      fetchStepUsers(variant, step, label);
+      fetchStepUsers(variant, steps, label);
     }));
   document.getElementById('step-users-close')?.addEventListener('click', () => {
     state.stepUsersModal = null; state.stepUsersData = null; render();
