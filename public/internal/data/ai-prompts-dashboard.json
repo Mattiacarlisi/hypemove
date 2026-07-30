@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-07-30T09:26:18.805Z",
-  "promptVersion": "3.4.0",
-  "promptsHash": "53ea427267baadc21d56a9bf3d2d82aa74dd11f91c97daca5029d86a8c998f67",
+  "generatedAt": "2026-07-30T11:08:49.279Z",
+  "promptVersion": "3.5.0",
+  "promptsHash": "9faae47cf4ddcdc78a086f4a0330506eb2997b43819a3067dfb4e3c08abdfbb2",
   "separator": "\n\n",
   "budget": {
     "warnChars": 62000,
@@ -525,7 +525,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -1309,7 +1309,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -2093,7 +2093,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -2877,7 +2877,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -3661,7 +3661,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -4445,7 +4445,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
@@ -5229,7 +5229,7 @@
         },
         {
           "name": "propose_premium_upsell",
-          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced anche server-side). Se l'utente è già premium (PT context Gamification.Premium=true), NON usarlo mai.",
+          "description": "Mostra all'utente free una card che propone l'upgrade a Hypemove+. Usalo quando il free tocca un confine dell'entitlement: (1) save_coach_note o propose_medical_update ha ritornato AI_MEMORY_SLOT_FULL (slot memoria pieno) o AI_PREMIUM_REQUIRED → context save_preference / medical_memory; (2) l'utente ha chiesto esplicitamente di salvare qualcosa ('ricordati che', 'salva in memoria') → explicit_memory_request; (3) conversation_search/recent_chats ha ritornato truncated_premium=true (storico oltre la finestra free) → conversation_history; (4) l'utente ha toccato una feature premium-only (personalizzazione roadmap via chat → chat_personalization, riassunti settimanali → weekly_summary). Budget: massimo UNA attivazione per sessione (enforced server-side). Se l'utente è già premium, o nel turno c'è stata una confidenza medica (propose_medical_update), NON usarlo mai — il server lo rifiuta comunque.",
           "parameters": {
             "type": "object",
             "properties": {
