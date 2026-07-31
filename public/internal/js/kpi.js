@@ -53,6 +53,15 @@ const FUNNEL_LABELS = [
   'Fa ≥1 esercizio',                     // 16 · exercise_complete
   'Completa workout (evento)',           // 17 · workout_complete
   'Trial iniziato',                      // 18 · play_purchases is_trial=true (ha iniziato la prova)
+  // Step 19-21 (31/07/2026) — l'onboarding "auth in coda" misurato dal canale ANONIMO.
+  // Servono perché lo step 2 "Onboarding iniziato" è COUNT(auth.identities) = account creati:
+  // con la registrazione spostata in fondo, quel numero dice chi ha FINITO il questionario.
+  // ⚠️ L'inizio NON è view_Welcome (lo emette anche chi è già registrato a ogni riapertura:
+  // 56% di contaminazione misurata sullo Sprint 7) ma view_OnboardingName, la prima domanda vera.
+  // Esiste solo dall'11/07/2026 → gli sprint precedenti restano vuoti su queste tre righe.
+  'Inizio questionario (anonimo)',       // 19 · primo view_OnboardingName dell'identità nel periodo
+  'Onboarding completato (registrato)',  // 20 · di quelli, chi ha onboarding_complete (= mail confermata)
+  'Regalo prova ricevuto',               // 21 · di quelli, chi ha visto la schermata dei 7 giorni
 ];
 
 // Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_v2, UNION user_events+anonymous_events).
