@@ -63,16 +63,31 @@ const FUNNEL_LABELS = [
 // nel menu. NON è il posto per gli step del funnel standard (quelli girano sul funnel-utenti).
 const EVENT_CATALOG = [
   { event: 'first_open',                          label: 'Download / primo avvio' },
-  { event: 'view_OnboardingConfirmation',         label: 'Onboarding · Conferma email' },
-  { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario' },
+  { event: 'view_Welcome',                        label: 'Onboarding · Benvenuto (coach)' },
   { event: 'view_OnboardingName',                 label: 'Onboarding · Nome' },
   { event: 'view_OnboardingAge',                  label: 'Onboarding · Età' },
   { event: 'view_OnboardingGender',               label: 'Onboarding · Genere' },
   { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo' },
   { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo' },
   { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello' },
+  { event: 'view_OnboardingDuration',             label: 'Onboarding · Durata sessione' },
+  { event: 'view_OnboardingAvoid',                label: 'Onboarding · Movimenti da evitare' },
   { event: 'view_OnboardingNotifications',        label: 'Onboarding · Notifiche' },
+  { event: 'view_OnboardingCoachChat',            label: 'Onboarding · Chat col coach' },
+  { event: 'coach_chat_onboarding_send',          label: 'Onboarding · Ha scritto al coach' },
+  { event: 'coach_chat_onboarding_skip',          label: 'Onboarding · Ha saltato la chat' },
+  { event: 'view_OnboardingPlanReveal',           label: 'Onboarding · Piano pronto' },
+  { event: 'view_OnboardingAccount',              label: 'Onboarding · Gate account' },
+  { event: 'view_SignUp',                         label: 'Onboarding · Form email' },
+  { event: 'sign_up',                             label: 'Onboarding · Registrato' },
+  { event: 'view_OnboardingConfirmation',         label: 'Onboarding · Conferma email' },
   { event: 'onboarding_complete',                 label: 'Onboarding · Completato (fine)' },
+  { event: 'view_OnboardingTrialGift',            label: 'Onboarding · Schermata regalo (7 giorni)' },
+  { event: 'onboarding_age_gate_blocked',         label: 'Onboarding · Bloccato (minorenne)' },
+  { event: 'view_Home',                           label: 'Arrivo in Home' },
+  // Ritirato con il redesign coach-flow (l'intro questionario non esiste più): resta qui
+  // solo per rileggere gli sprint chiusi prima del rilascio del nuovo onboarding.
+  { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario (ritirato)' },
 ];
 
 // Etichetta leggibile di uno step evento: label salvata → catalogo → nome grezzo.
@@ -82,22 +97,60 @@ function eventStepLabel(row) {
   return c ? c.label : ((row && row.event) || '');
 }
 
-// Step canonici del funnel onboarding (built-in, come DEF_FUN_CFG è per il Default). Il segmento
-// (tutti/google/email) è un filtro separato a runtime, NON due funnel diversi: la schermata Conferma
-// email c'è sempre e per gli utenti Google risulterà ~0 (loro la saltano) — è informativo. Editabile
+// Step canonici del funnel onboarding (built-in, come DEF_FUN_CFG è per il Default). Editabile
 // in sessione (drag&drop, aggiungi/togli step); per tenere una variante si usa "+ Salva".
+//
+// ⚠️ Allineato al flusso "auth in coda" (spec auth-at-end-of-onboarding + free-onboarding-coach-flow):
+// il questionario si compila in ANONIMO e la registrazione si chiede alla fine, dopo il reveal del
+// piano. Conseguenze sulla lettura:
+//  - la Conferma email NON è più in testa: è penultima e solo sul ramo email (chi entra con Google
+//    la salta). Sta come variante figlia del gate account, fuori dalla cascata, altrimenti azzererebbe
+//    tutto il ramo Google a valle.
+//  - Durata, Movimenti da evitare, Chat col coach, Piano pronto e Gate account sono schermate NUOVE:
+//    negli sprint chiusi prima del rilascio del nuovo onboarding risultano 0, e la cascata (che è
+//    sequenziale) muore lì. È atteso, non è un buco di tracking: quelle schermate non esistevano.
+//  - `view_OnboardingQuestionnaireWelcome` è ritirata dal codice ma resta come variante di Nome per
+//    rileggere gli sprint vecchi.
 const ONBOARDING_FUNNEL_STEPS = [
-  { event: 'first_open',                          label: 'Download / primo avvio',        vsIdx: null },
-  { event: 'view_OnboardingConfirmation',         label: 'Onboarding · Conferma email',   vsIdx: 0 },
-  { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario', vsIdx: 1 },
-  { event: 'view_OnboardingName',                 label: 'Onboarding · Nome',             vsIdx: 2 },
-  { event: 'view_OnboardingAge',                  label: 'Onboarding · Età',              vsIdx: 3 },
-  { event: 'view_OnboardingGender',               label: 'Onboarding · Genere',           vsIdx: 4 },
-  { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo',        vsIdx: 5 },
-  { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo', vsIdx: 6 },
-  { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello',          vsIdx: 7 },
-  { event: 'view_OnboardingNotifications',        label: 'Onboarding · Notifiche',        vsIdx: 8 },
-  { event: 'onboarding_complete',                 label: 'Onboarding · Completato (fine)', vsIdx: 9 },
+  { event: 'first_open',                   label: 'Download / primo avvio',           vsIdx: null },
+  { event: 'view_Welcome',                 label: 'Onboarding · Benvenuto (coach)',   vsIdx: 0 },
+  { event: 'view_OnboardingName',          label: '1 · Nome',                         vsIdx: 1,
+    children: [
+      { event: 'view_OnboardingQuestionnaireWelcome', label: '— Intro questionario (build vecchia)' },
+    ] },
+  { event: 'view_OnboardingAge',           label: '2 · Età',                          vsIdx: 2,
+    children: [
+      // Vicolo cieco, non una progressione: chi dichiara meno di 18 anni viene fermato dal gate.
+      // Fuori cascata apposta — in spina azzererebbe tutto il funnel a valle.
+      { event: 'onboarding_age_gate_blocked', label: '— bloccato (minorenne)' },
+    ] },
+  { event: 'view_OnboardingGender',        label: '3 · Genere',                       vsIdx: 3 },
+  { event: 'view_OnboardingGoal',          label: '4 · Obiettivo',                    vsIdx: 4 },
+  { event: 'view_OnboardingGoalTrust',     label: 'Rinforzo obiettivo',               vsIdx: 5 },
+  { event: 'view_OnboardingLevel',         label: '5 · Livello',                      vsIdx: 6 },
+  { event: 'view_OnboardingDuration',      label: '6 · Durata sessione',              vsIdx: 7 },
+  { event: 'view_OnboardingAvoid',         label: '7 · Movimenti da evitare',         vsIdx: 8 },
+  { event: 'view_OnboardingNotifications', label: '8 · Notifiche',                    vsIdx: 9 },
+  { event: 'view_OnboardingCoachChat',     label: '9 · Chat col coach',               vsIdx: 10,
+    children: [
+      { event: 'coach_chat_onboarding_send', label: '— ha scritto al coach' },
+      { event: 'coach_chat_onboarding_skip', label: '— ha saltato la chat' },
+    ] },
+  { event: 'view_OnboardingPlanReveal',    label: 'Piano pronto',                     vsIdx: 11 },
+  { event: 'view_OnboardingAccount',       label: 'Gate account',                     vsIdx: 12,
+    children: [
+      { event: 'view_SignUp',                 label: '— ramo email (form)' },
+      { event: 'view_OnboardingConfirmation', label: '— ramo email (conferma)' },
+    ] },
+  { event: 'sign_up',                      label: 'Registrato',                       vsIdx: 13 },
+  { event: 'onboarding_complete',          label: 'Onboarding · Completato (fine)',   vsIdx: 14,
+    children: [
+      // Il regalo dei 7 giorni si mostra SOLO se la prova è stata davvero concessa
+      // (flag trial_grant_enabled + esito della RPC): non è uno step obbligato e in spina
+      // azzererebbe l'arrivo in Home ogni volta che il regalo non scatta.
+      { event: 'view_OnboardingTrialGift', label: '— schermata regalo (7 giorni)' },
+    ] },
+  { event: 'view_Home',                    label: 'Arrivo in Home',                   vsIdx: 15 },
 ];
 
 const LS_OV             = 'hm_overview_keys';
