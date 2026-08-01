@@ -408,7 +408,7 @@ let state = {
   deleteConfirm: null, // { id, nome } when modal is open
   premiumData: null, premiumLoading: false, premiumError: null,
   // Gate di fine prova: RPC dedicata (`kpi_trial_end_gate`), sezione a sé.
-  trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateAt: null,
+  trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateAt: null, trialGateWindow: null,
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1090,6 +1090,12 @@ async function fetchTrialGate() {
     if (error) throw error;
     state.trialGateData = data;
     state.trialGateAt = new Date();
+    // La finestra vera che ha prodotto questi numeri, scritta a schermo: se lo
+    // sprint selezionato la restringe, si vede subito invece di sembrare un
+    // evento non tracciato.
+    state.trialGateWindow = selSprint
+      ? `${selSprint.nome} (${selSprint.inizio} → ${selSprint.fine})`
+      : `${state.premiumFrom} → ${state.premiumTo}`;
   } catch (e) {
     // Il dato vecchio si BUTTA: una sessione scaduta lasciava a schermo numeri
     // di dieci minuti prima, indistinguibili da quelli veri. Meglio una sezione
@@ -6544,6 +6550,7 @@ function premiumTrialGateCard() {
         <div style="font-size:11px;color:var(--muted)">
           la schermata che si apre al primo ingresso dopo i 7 giorni regalati ·
           <code style="font-family:var(--mono)">variant = trial_end_gate</code>
+          ${state.trialGateWindow ? `<br><span style="color:#5a5a7a">periodo interrogato: ${esc(state.trialGateWindow)}</span>` : ''}
           ${state.trialGateAt ? ` · letto alle ${state.trialGateAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
         </div>
       </div>
@@ -6671,6 +6678,19 @@ function premiumTrialGateCard() {
     return b;
   }).join('');
 
+  // Un box senza dati NON sparisce: resta al suo posto e dice che è vuoto.
+  // Ometterlo in silenzio faceva sembrare non tracciata una schermata che invece
+  // era tracciata benissimo, solo fuori dal periodo interrogato.
+  const boxVuoto = (label, motivo) => `
+    <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 3px">
+      <span style="font-size:13px;line-height:1">→</span>
+    </div>
+    <div title="${esc(motivo)}" style="text-align:center;min-width:70px;background:#0d0d18;border:1px dashed #2a2a44;border-radius:6px;padding:6px 8px">
+      <div style="font-weight:700;color:#3a3a55;font-size:15px;line-height:1">—</div>
+      <div style="font-size:9px;color:#3a3a55;white-space:nowrap;margin-top:2px">${esc(label)}</div>
+      <div style="font-size:8px;color:#2f2f4a;line-height:1.3">nessun dato</div>
+    </div>`;
+
   const offerBox = offerStep
     ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, {
         // Entrambi i nomi al click: `fetchStepUsers` sa già unire più step in una
@@ -6678,7 +6698,7 @@ function premiumTrialGateCard() {
         step: offerRows.map(r => r.role).join(','),
         idx: offerStep.idx, border: '#3b2d63', color: '#c4b5fd',
       })
-    : '';
+    : boxVuoto('Offerta', 'Nessuno step plans/offer nel periodo interrogato: la schermata è tracciata, ma i suoi eventi cadono fuori da questa finestra.');
 
   // ── 3. la biforcazione ──
   const attempt   = (d.purchase_attempt && d.purchase_attempt.events) || 0;
@@ -6720,7 +6740,9 @@ function premiumTrialGateCard() {
         box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è partito davvero' }),
         `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`))}
       ${forkArm(branch('Va verso il gratuito', '#f59e0b',
-        (downStep ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' }) : '') +
+        (downStep
+          ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' })
+          : boxVuoto('Cosa si chiude', 'Nessuno step downgrade nel periodo interrogato.')) +
         box('Ci ripensa', reconsid, reconsid, null, { bucket: 'reconsidered', title: 'Da "cosa si chiude" torna all\'offerta (tap su Ci ripenso), nella stessa apertura' }) +
         box('Conferma il gratuito', freeConf, freeConf, null, { bucket: 'confirmed_free', title: 'paywall_close · continue_free' }),
         'i due esiti si escludono: chi ripensa non conferma'))}
