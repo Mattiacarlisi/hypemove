@@ -6523,9 +6523,11 @@ function trialGateBar(label, value, base, prev, opts) {
       <div style="flex:1;min-width:60px;height:22px;background:#0d0d18;border-radius:4px;overflow:hidden;position:relative">
         <div style="width:${Math.max(pct, value > 0 ? 2 : 0)}%;height:100%;background:${col};opacity:.72"></div>
       </div>
-      <div style="flex:0 0 108px;text-align:right;font-size:12px;color:var(--fg);font-weight:700">
+      <div style="flex:0 0 132px;text-align:right;font-size:12px;color:var(--fg);font-weight:700">
         ${value}<span style="color:#5a5a7a;font-weight:400;font-size:10px"> · ${pct}%</span>
         ${drop !== null && drop > 0 ? `<span style="color:${dropCol};font-size:10px;font-weight:700;margin-left:6px">-${drop}%</span>` : ''}
+        ${o.views !== undefined && o.views !== value
+          ? `<div style="font-size:9px;color:#5a5a7a;font-weight:400">${o.views} viste</div>` : ''}
       </div>
     </div>`;
 }
@@ -6603,13 +6605,13 @@ function premiumTrialGateCard() {
     const label = i === 0
       ? TRIAL_GATE_STEP_LABELS.hero
       : `${TRIAL_GATE_STEP_LABELS.recap} ${i}`;
-    const row = trialGateBar(label, s.viewed_users, base, prev, { color: '#60a5fa', sub: `step ${s.idx}` });
+    const row = trialGateBar(label, s.viewed_users, base, prev, { color: '#60a5fa', sub: `step ${s.idx}`, views: s.viewed });
     prev = s.viewed_users;
     return row;
   }).join('');
 
   const offerRow = offerStep
-    ? trialGateBar('Arriva all’offerta', offerStep.viewed_users, base, prev, { color: '#a78bfa', strong: true, sub: 'prezzi e bottone' })
+    ? trialGateBar('Arriva all’offerta', offerStep.viewed_users, base, prev, { color: '#a78bfa', strong: true, sub: 'prezzi e bottone', views: offerStep.viewed })
     : '';
 
   // ── 3. la biforcazione: comprare oppure passare da "cosa si chiude" ──
@@ -6670,8 +6672,9 @@ function premiumTrialGateCard() {
     ${verdict}
     ${mismatch}
     <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
-      Le barre contano <strong>utenti unici</strong>, non aperture: il gate si ripresenta finché non si sceglie, quindi
-      le viste sarebbero più delle persone. Percentuali sulla prima battuta del film.
+      Il numero grande delle barre sono <strong>persone</strong>, la riga sotto le <strong>viste</strong>: il gate si
+      ripresenta a ogni ingresso finché non si sceglie, quindi la stessa persona lo percorre più volte e i due numeri
+      divergono. In collaudo le persone restano 1 e a muoversi sono le viste. Percentuali sulla prima battuta del film.
       ${(d.terms_open || 0) > 0 ? `· ${d.terms_open} hanno aperto i termini.` : ''}
     </div>`);
 }
