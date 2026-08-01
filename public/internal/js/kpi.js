@@ -6702,7 +6702,7 @@ function premiumTrialGateCard() {
         `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`))}
       ${forkArm(branch('Va verso il gratuito', '#f59e0b',
         (downStep ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' }) : '') +
-        box('Ci ripensa', reconsid, reconsid, null, { bucket: 'reconsidered', title: 'Da lì torna indietro e tocca il bottone' }) +
+        box('Ci ripensa', reconsid, reconsid, null, { bucket: 'reconsidered', title: 'Da "cosa si chiude" torna all\'offerta (tap su Ci ripenso), nella stessa apertura' }) +
         box('Conferma il gratuito', freeConf, freeConf, null, { bucket: 'confirmed_free', title: 'paywall_close · continue_free' }),
         'i due esiti si escludono: chi ripensa non conferma'))}
     </div>`;
