@@ -408,7 +408,7 @@ let state = {
   deleteConfirm: null, // { id, nome } when modal is open
   premiumData: null, premiumLoading: false, premiumError: null,
   // Gate di fine prova: RPC dedicata (`kpi_trial_end_gate`), sezione a sé.
-  trialGateData: null, trialGateLoading: false, trialGateError: null,
+  trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateAt: null,
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1089,7 +1089,14 @@ async function fetchTrialGate() {
     });
     if (error) throw error;
     state.trialGateData = data;
-  } catch (e) { state.trialGateError = e.message || 'RPC kpi_trial_end_gate non disponibile'; }
+    state.trialGateAt = new Date();
+  } catch (e) {
+    // Il dato vecchio si BUTTA: una sessione scaduta lasciava a schermo numeri
+    // di dieci minuti prima, indistinguibili da quelli veri. Meglio una sezione
+    // che dice "non ho letto" di una che mente con l'aria di funzionare.
+    state.trialGateData = null;
+    state.trialGateError = e.message || 'RPC kpi_trial_end_gate non disponibile';
+  }
   state.trialGateLoading = false;
   render();
 }
@@ -6537,6 +6544,7 @@ function premiumTrialGateCard() {
         <div style="font-size:11px;color:var(--muted)">
           la schermata che si apre al primo ingresso dopo i 7 giorni regalati ·
           <code style="font-family:var(--mono)">variant = trial_end_gate</code>
+          ${state.trialGateAt ? ` · letto alle ${state.trialGateAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
         </div>
       </div>
       ${inner}
@@ -6546,6 +6554,17 @@ function premiumTrialGateCard() {
     return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico il percorso del gate…</div>`);
   }
   if (state.trialGateError) {
+    // Sessione scaduta: è il caso più frequente e il più insidioso, perché la
+    // pagina resta in piedi e sembra solo "senza dati".
+    const scaduta = /jwt|expired|denied|forbidden|401|permission/i.test(state.trialGateError);
+    if (scaduta) {
+      return wrap(`
+        <div style="background:#2b1114;border:1px solid #5a1f28;border-radius:8px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.5">
+          🔒 <strong>Sessione scaduta: questi numeri non sono stati letti.</strong>
+          Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
+          <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGateError)}</span>
+        </div>`);
+    }
     return wrap(`
       <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
         ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialGateError)}<br>
