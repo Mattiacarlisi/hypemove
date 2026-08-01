@@ -6703,6 +6703,14 @@ function premiumTrialGateCard() {
   // ── 3. la biforcazione ──
   const attempt   = (d.purchase_attempt && d.purchase_attempt.events) || 0;
   const attemptU  = (d.purchase_attempt && d.purchase_attempt.users) || 0;
+  // Un tentativo finito in errore NON è un acquisto. Senza questo numero i due
+  // box accanto ("tocca il bottone" e "acquisto avviato") a 1 e 1 sembravano
+  // dire che era andata a buon fine, mentre il pagamento moriva un istante dopo.
+  const errEv     = (d.purchase_error && d.purchase_error.events) || 0;
+  const errU      = (d.purchase_error && d.purchase_error.users) || 0;
+  const errPhases = (d.purchase_error && d.purchase_error.phases) || [];
+  const cancelEv  = (d.purchase_cancelled && d.purchase_cancelled.events) || 0;
+  const riusciti  = Math.max(0, attempt - errEv - cancelEv);
   const cta       = (d.cta_tap && d.cta_tap.events) || 0;
   const ctaU      = (d.cta_tap && d.cta_tap.users) || 0;
   const planEv    = ((d.plan_select && d.plan_select.monthly) || 0) + ((d.plan_select && d.plan_select.yearly) || 0);
@@ -6737,8 +6745,15 @@ function premiumTrialGateCard() {
       ${forkArm(branch('Dice di sì', '#4ade80',
         box('Cambia tessera', planEv, planU, null, { bucket: 'plan_select', title: 'Tap sulle tessere dei prezzi' }) +
         box('Tocca il bottone', cta, ctaU, planEv || null, { bucket: 'cta_tap', title: 'Intenzione, prima del pagamento' }) +
-        box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è partito davvero' }),
-        `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`))}
+        box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è PARTITO: non vuol dire riuscito — guarda il box accanto' }) +
+        (errEv + cancelEv > 0
+          ? box('Non riuscito', errEv + cancelEv, Math.max(errU, cancelEv > 0 ? 1 : 0), null, { border: '#5a1f28', color: '#f87171', title: 'Errori di pagamento e annullamenti: tentativi che non sono diventati acquisti' })
+          : ''),
+        `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}` +
+        (attempt > 0
+          ? `<br><strong style="color:${riusciti > 0 ? '#4ade80' : '#f87171'}">${riusciti} su ${attempt} ${riusciti === 1 ? 'è arrivato' : 'sono arrivati'} in fondo</strong>` +
+            (errPhases.length ? ` · errori: ${errPhases.map(f => `${esc(f.phase)} ×${f.n}`).join(', ')}` : '')
+          : '')))}
       ${forkArm(branch('Va verso il gratuito', '#f59e0b',
         (downStep
           ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' })
