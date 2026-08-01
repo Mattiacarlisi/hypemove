@@ -1051,8 +1051,8 @@ async function fetchPremium() {
 // Lista di chi ha fatto un'azione della biforcazione del gate (bucket senza
 // schermata: cambio tessera, tap CTA, acquisto avviato, ripensato, confermato
 // gratuito). Riusa lo STESSO modal degli step: la RPC ritorna la stessa shape.
-async function fetchGateBucketUsers(bucket, label) {
-  state.stepUsersModal = { variant: 'trial_end_gate', step: bucket, label: label || 'Gate fine prova' };
+async function fetchGateBucketUsers(bucket, label, step, idx) {
+  state.stepUsersModal = { variant: 'trial_end_gate', step: step || bucket, label: label || 'Gate fine prova' };
   state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
   render();
   try {
@@ -1064,6 +1064,8 @@ async function fetchGateBucketUsers(bucket, label) {
       p_gender: state.premiumGender,
       p_start:  selSprint ? sprintStartTs(selSprint) : null,
       p_end:    selSprint ? sprintEndTs(selSprint) : null,
+      p_step:   step || null,
+      p_idx:    (idx === undefined || idx === null || idx === '') ? null : Number(idx),
     });
     if (error) throw error;
     state.stepUsersData = data;
@@ -6655,8 +6657,13 @@ function premiumTrialGateCard() {
     // Tre gradi di cliccabilità: una schermata (`step`, via kpi_premium_step_users,
     // con `idx` per distinguere le due battute `recap`), un'azione della
     // biforcazione (`bucket`, via kpi_trial_end_gate_users), oppure niente.
+    // Le schermate del gate NON usano `kpi_premium_step_users`: quella legge
+    // `user_events`, dove gli eventi di una sessione non ancora legata a un
+    // account non esistono — il box contava 1 e la lista si apriva vuota.
+    // Conteggio e lista devono avere la stessa fonte, quindi passano entrambi
+    // da `kpi_trial_end_gate_users`.
     const clickable = o.step
-      ? `class="premium-step-box" data-variant="trial_end_gate" data-step="${esc(o.step)}" data-steps="${esc(o.step)}"${o.idx !== undefined ? ` data-idx="${o.idx}"` : ''} title="Vedi chi è arrivato a questa schermata" style="cursor:pointer;`
+      ? `class="gate-bucket-box" data-bucket="step" data-step="${esc(o.step)}"${o.idx !== undefined ? ` data-idx="${o.idx}"` : ''} title="Vedi chi è arrivato a questa schermata" style="cursor:pointer;`
       : o.bucket
         ? `class="gate-bucket-box" data-bucket="${esc(o.bucket)}" title="${esc(o.title || 'Vedi chi ha fatto questa azione')}" style="cursor:pointer;`
         : `title="${esc(o.title || '')}" style="`;
@@ -6747,7 +6754,7 @@ function premiumTrialGateCard() {
         box('Tocca il bottone', cta, ctaU, planEv || null, { bucket: 'cta_tap', title: 'Intenzione, prima del pagamento' }) +
         box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è PARTITO: non vuol dire riuscito — guarda il box accanto' }) +
         (errEv + cancelEv > 0
-          ? box('Non riuscito', errEv + cancelEv, Math.max(errU, cancelEv > 0 ? 1 : 0), null, { border: '#5a1f28', color: '#f87171', title: 'Errori di pagamento e annullamenti: tentativi che non sono diventati acquisti' })
+          ? box('Non riuscito', errEv + cancelEv, Math.max(errU, cancelEv > 0 ? 1 : 0), null, { bucket: 'purchase_error', border: '#5a1f28', color: '#f87171', title: 'Errori di pagamento e annullamenti: tentativi che non sono diventati acquisti' })
           : ''),
         `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}` +
         (attempt > 0
@@ -11192,7 +11199,8 @@ function attachEvents() {
     }));
   // click su un box-azione della biforcazione del gate → lista via RPC dedicata
   document.querySelectorAll('.gate-bucket-box').forEach(el =>
-    el.addEventListener('click', () => fetchGateBucketUsers(el.dataset.bucket, premiumCreativeLabel('trial_end_gate'))));
+    el.addEventListener('click', () => fetchGateBucketUsers(
+      el.dataset.bucket, premiumCreativeLabel('trial_end_gate'), el.dataset.step, el.dataset.idx)));
   document.getElementById('step-users-close')?.addEventListener('click', () => {
     state.stepUsersModal = null; state.stepUsersData = null; render();
   });
