@@ -6599,9 +6599,20 @@ function premiumTrialGateCard() {
   // = persone, come nelle creatività, così i due blocchi si leggono allo stesso modo.
   const filmSteps = steps.filter(s => s.role === 'hero' || s.role === 'recap');
   // `plans` è il ruolo vero (la schermata mostra tessere + CTA, come le altre
-  // creatività: così entra in "Arrivato ai piani"); `offer` è il fallback per i
-  // soli eventi di collaudo emessi prima della rinomina del 01/08.
-  const offerStep = steps.find(s => s.role === 'plans') || steps.find(s => s.role === 'offer');
+  // creatività: così entra in "Arrivato ai piani"); `offer` sono gli eventi di
+  // collaudo emessi prima della rinomina del 01/08. Si SOMMANO, non si preferisce
+  // uno dei due: è la stessa schermata con due nomi in build diverse, e tenerne
+  // uno solo faceva sembrare fermo il conteggio a ogni nuovo giro.
+  const offerRows = steps.filter(s => s.role === 'plans' || s.role === 'offer');
+  const offerStep = offerRows.length ? {
+    role: offerRows.some(s => s.role === 'plans') ? 'plans' : 'offer',
+    idx: offerRows[0].idx,
+    viewed: offerRows.reduce((a, s) => a + s.viewed, 0),
+    // Somma, non unione: la stessa persona che ha visto entrambe le versioni
+    // conta due volte. Accettato — vale solo per il periodo di collaudo a
+    // cavallo della rinomina, poi resta un nome solo.
+    viewed_users: offerRows.reduce((a, s) => a + s.viewed_users, 0),
+  } : null;
   const downStep  = steps.find(s => s.role === 'downgrade');
   const base = filmSteps.length ? filmSteps[0].viewed : (d.opened && d.opened.events) || 0;
 
@@ -6642,7 +6653,12 @@ function premiumTrialGateCard() {
   }).join('');
 
   const offerBox = offerStep
-    ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, { step: offerStep.role, idx: offerStep.idx, border: '#3b2d63', color: '#c4b5fd' })
+    ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, {
+        // Entrambi i nomi al click: `fetchStepUsers` sa già unire più step in una
+        // lista sola (è il meccanismo delle schermate rinominate fra build).
+        step: offerRows.map(r => r.role).join(','),
+        idx: offerStep.idx, border: '#3b2d63', color: '#c4b5fd',
+      })
     : '';
 
   // ── 3. la biforcazione ──
@@ -6664,18 +6680,31 @@ function premiumTrialGateCard() {
       ${note ? `<div style="font-size:10px;color:#5a5a7a;margin-top:8px;line-height:1.4">${note}</div>` : ''}
     </div>`;
 
+  // La diramazione si DISEGNA: un binario verticale che scende dal percorso e i
+  // due bracci con lo stub orizzontale, uno per esito. Due riquadri affiancati
+  // senza connettore si leggevano come sezioni indipendenti, non come le due
+  // strade che si aprono dall'offerta.
+  const forkArm = (b) => `
+    <div style="display:flex;align-items:stretch">
+      <div style="width:16px;flex:none;position:relative">
+        <div style="position:absolute;top:50%;left:0;right:0;border-top:2px solid #2a2a44"></div>
+      </div>
+      ${b}
+    </div>`;
+
   const fork = `
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
-      ${branch('Dice di sì', '#4ade80',
+    <div style="margin-top:8px;margin-left:22px;border-left:2px solid #2a2a44;display:flex;flex-direction:column;gap:10px;padding:4px 0 4px 0">
+      <div style="font-size:10px;color:#5a5a7a;padding-left:16px;margin-top:2px">dall'offerta si esce in due direzioni</div>
+      ${forkArm(branch('Dice di sì', '#4ade80',
         box('Cambia tessera', planEv, planU, null, { bucket: 'plan_select', title: 'Tap sulle tessere dei prezzi' }) +
         box('Tocca il bottone', cta, ctaU, planEv || null, { bucket: 'cta_tap', title: 'Intenzione, prima del pagamento' }) +
         box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è partito davvero' }),
-        `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`)}
-      ${branch('Va verso il gratuito', '#f59e0b',
+        `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`))}
+      ${forkArm(branch('Va verso il gratuito', '#f59e0b',
         (downStep ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' }) : '') +
         box('Ci ripensa', reconsid, reconsid, null, { bucket: 'reconsidered', title: 'Da lì torna indietro e tocca il bottone' }) +
         box('Conferma il gratuito', freeConf, freeConf, null, { bucket: 'confirmed_free', title: 'paywall_close · continue_free' }),
-        'i due esiti si escludono: chi ripensa non conferma')}
+        'i due esiti si escludono: chi ripensa non conferma'))}
     </div>`;
 
   // Il ripensamento è l'unico numero che dice se la seconda schermata serve.
