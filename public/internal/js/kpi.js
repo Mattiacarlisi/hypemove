@@ -1048,6 +1048,30 @@ async function fetchPremium() {
   void fetchTrialGate();
 }
 
+// Lista di chi ha fatto un'azione della biforcazione del gate (bucket senza
+// schermata: cambio tessera, tap CTA, acquisto avviato, ripensato, confermato
+// gratuito). Riusa lo STESSO modal degli step: la RPC ritorna la stessa shape.
+async function fetchGateBucketUsers(bucket, label) {
+  state.stepUsersModal = { variant: 'trial_end_gate', step: bucket, label: label || 'Gate fine prova' };
+  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_trial_end_gate_users', {
+      p_bucket: bucket,
+      inizio:   state.premiumFrom,
+      fine:     state.premiumTo,
+      p_gender: state.premiumGender,
+      p_start:  selSprint ? sprintStartTs(selSprint) : null,
+      p_end:    selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.stepUsersData = data;
+  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti bucket'; }
+  state.stepUsersLoading = false;
+  render();
+}
+
 // Percorso del gate di fine prova. Chiamata separata e tollerante: finché la RPC
 // non è applicata in produzione la sezione mostra il suo stato, non un errore di
 // pagina — il resto della dashboard non deve dipendere da questa.
@@ -1072,7 +1096,7 @@ async function fetchTrialGate() {
 
 // Apre il modal e carica la lista degli utenti che hanno raggiunto uno step di una creatività.
 // Usa lo stesso periodo/genere della pagina Premium (state.premiumFrom/To/Gender).
-async function fetchStepUsers(variant, step, label) {
+async function fetchStepUsers(variant, step, label, idx) {
   // step può essere una stringa singola o un array di nomi (schermate unite con lo stesso idx).
   const steps = Array.isArray(step) ? step : [step];
   const stepLabel = steps.join(' + ');
@@ -1089,6 +1113,9 @@ async function fetchStepUsers(variant, step, label) {
       p_gender:  state.premiumGender,
       p_start:   selSprint ? sprintStartTs(selSprint) : null,
       p_end:     selSprint ? sprintEndTs(selSprint) : null,
+      // Solo il gate lo passa: due sue schermate condividono il nome `recap` e
+      // senza l'indice i due box aprirebbero la stessa lista. NULL = come prima.
+      p_idx:     (idx === undefined || idx === null || idx === '') ? null : Number(idx),
     };
     const results = await Promise.all(steps.map(st =>
       sb.rpc('kpi_premium_step_users', { ...base, p_step: st })));
@@ -6571,7 +6598,10 @@ function premiumTrialGateCard() {
   // lista di chi ha raggiunto quella schermata. Numero grande = tocchi, riga sotto
   // = persone, come nelle creatività, così i due blocchi si leggono allo stesso modo.
   const filmSteps = steps.filter(s => s.role === 'hero' || s.role === 'recap');
-  const offerStep = steps.find(s => s.role === 'offer');
+  // `plans` è il ruolo vero (la schermata mostra tessere + CTA, come le altre
+  // creatività: così entra in "Arrivato ai piani"); `offer` è il fallback per i
+  // soli eventi di collaudo emessi prima della rinomina del 01/08.
+  const offerStep = steps.find(s => s.role === 'plans') || steps.find(s => s.role === 'offer');
   const downStep  = steps.find(s => s.role === 'downgrade');
   const base = filmSteps.length ? filmSteps[0].viewed : (d.opened && d.opened.events) || 0;
 
@@ -6585,9 +6615,14 @@ function premiumTrialGateCard() {
         ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
         <span style="font-size:13px;line-height:1">→</span>
       </div>` : '';
+    // Tre gradi di cliccabilità: una schermata (`step`, via kpi_premium_step_users,
+    // con `idx` per distinguere le due battute `recap`), un'azione della
+    // biforcazione (`bucket`, via kpi_trial_end_gate_users), oppure niente.
     const clickable = o.step
-      ? `class="premium-step-box" data-variant="trial_end_gate" data-step="${esc(o.step)}" data-steps="${esc(o.step)}" title="Vedi chi è arrivato a questa schermata" style="cursor:pointer;`
-      : `title="${esc(o.title || '')}" style="`;
+      ? `class="premium-step-box" data-variant="trial_end_gate" data-step="${esc(o.step)}" data-steps="${esc(o.step)}"${o.idx !== undefined ? ` data-idx="${o.idx}"` : ''} title="Vedi chi è arrivato a questa schermata" style="cursor:pointer;`
+      : o.bucket
+        ? `class="gate-bucket-box" data-bucket="${esc(o.bucket)}" title="${esc(o.title || 'Vedi chi ha fatto questa azione')}" style="cursor:pointer;`
+        : `title="${esc(o.title || '')}" style="`;
     return arrow + `
       <div ${clickable}text-align:center;min-width:70px;background:#111120;border:1px solid ${o.border || '#1f1f33'};border-radius:6px;padding:6px 8px;transition:border-color .12s">
         <div style="font-weight:700;color:${o.color || 'var(--fg)'};font-size:15px;line-height:1">${views}</div>
@@ -6599,13 +6634,15 @@ function premiumTrialGateCard() {
   let prev = null;
   const filmBoxes = filmSteps.map((s, i) => {
     const label = i === 0 ? 'Apertura' : `Racconto ${i}`;
-    const b = box(label, s.viewed, s.viewed_users, prev, { step: s.role });
+    // `idx` distingue le due battute `recap`: senza, i due box aprirebbero la
+    // stessa lista perché condividono il nome di step.
+    const b = box(label, s.viewed, s.viewed_users, prev, { step: s.role, idx: s.idx });
     prev = s.viewed;
     return b;
   }).join('');
 
   const offerBox = offerStep
-    ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, { step: 'offer', border: '#3b2d63', color: '#c4b5fd' })
+    ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, { step: offerStep.role, idx: offerStep.idx, border: '#3b2d63', color: '#c4b5fd' })
     : '';
 
   // ── 3. la biforcazione ──
@@ -6630,14 +6667,14 @@ function premiumTrialGateCard() {
   const fork = `
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
       ${branch('Dice di sì', '#4ade80',
-        box('Cambia tessera', planEv, planU, null, { title: 'Tap sulle tessere dei prezzi' }) +
-        box('Tocca il bottone', cta, ctaU, planEv || null, { title: 'Intenzione, prima del pagamento' }) +
-        box('Acquisto avviato', attempt, attemptU, cta || null, { border: '#1f5a36', color: '#4ade80', title: 'Il billing è partito davvero' }),
+        box('Cambia tessera', planEv, planU, null, { bucket: 'plan_select', title: 'Tap sulle tessere dei prezzi' }) +
+        box('Tocca il bottone', cta, ctaU, planEv || null, { bucket: 'cta_tap', title: 'Intenzione, prima del pagamento' }) +
+        box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è partito davvero' }),
         `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`)}
       ${branch('Va verso il gratuito', '#f59e0b',
-        (downStep ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', border: '#5a4318', color: '#fbbf24' }) : '') +
-        box('Ci ripensa', reconsid, reconsid, null, { title: 'Da lì torna indietro e tocca il bottone' }) +
-        box('Conferma il gratuito', freeConf, freeConf, null, { title: 'paywall_close · continue_free' }),
+        (downStep ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' }) : '') +
+        box('Ci ripensa', reconsid, reconsid, null, { bucket: 'reconsidered', title: 'Da lì torna indietro e tocca il bottone' }) +
+        box('Conferma il gratuito', freeConf, freeConf, null, { bucket: 'confirmed_free', title: 'paywall_close · continue_free' }),
         'i due esiti si escludono: chi ripensa non conferma')}
     </div>`;
 
@@ -6687,6 +6724,10 @@ const CREATIVE_LABELS = {
   coach_call_v2:     'Coach call v2',
   change_goal_premium: 'Cambio obiettivo',
   onboarding_results_chart: 'Fine onboarding · Risultati',
+  // Il gate ha ANCHE la sua sezione dedicata (film + biforcazione + trial_choice):
+  // questa riga lo tiene nel confronto standard fra creatività, dove entra da solo
+  // perché kpi_premium non filtra per lista chiusa di varianti.
+  trial_end_gate: 'Gate fine prova',
 };
 function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
 
@@ -11062,8 +11103,11 @@ function attachEvents() {
       const variant = el.dataset.variant;
       const steps   = (el.dataset.steps || el.dataset.step || '').split(',').filter(Boolean);
       const label   = premiumCreativeLabel(variant);
-      fetchStepUsers(variant, steps, label);
+      fetchStepUsers(variant, steps, label, el.dataset.idx);
     }));
+  // click su un box-azione della biforcazione del gate → lista via RPC dedicata
+  document.querySelectorAll('.gate-bucket-box').forEach(el =>
+    el.addEventListener('click', () => fetchGateBucketUsers(el.dataset.bucket, premiumCreativeLabel('trial_end_gate'))));
   document.getElementById('step-users-close')?.addEventListener('click', () => {
     state.stepUsersModal = null; state.stepUsersData = null; render();
   });
