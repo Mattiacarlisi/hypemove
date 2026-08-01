@@ -407,6 +407,8 @@ let state = {
   sprintRetCustom: false, sprintRetMin: 1, sprintRetWeeks: 6, sprintRetMinW0: 1,
   deleteConfirm: null, // { id, nome } when modal is open
   premiumData: null, premiumLoading: false, premiumError: null,
+  // Gate di fine prova: RPC dedicata (`kpi_trial_end_gate`), sezione a sé.
+  trialGateData: null, trialGateLoading: false, trialGateError: null,
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1040,6 +1042,31 @@ async function fetchPremium() {
     state.premiumData = data;
   } catch (e) { state.premiumError = e.message || 'Errore caricamento dati premium'; }
   state.premiumLoading = false;
+  render();
+  // Il gate di fine prova ha una RPC sua (percorso a biforcazione + verità a
+  // terra da `users.trial_choice`): si carica dopo, così la pagina non aspetta.
+  void fetchTrialGate();
+}
+
+// Percorso del gate di fine prova. Chiamata separata e tollerante: finché la RPC
+// non è applicata in produzione la sezione mostra il suo stato, non un errore di
+// pagina — il resto della dashboard non deve dipendere da questa.
+async function fetchTrialGate() {
+  state.trialGateLoading = true; state.trialGateError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_trial_end_gate', {
+      inizio: state.premiumFrom,
+      fine:   state.premiumTo,
+      p_gender: state.premiumGender,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.trialGateData = data;
+  } catch (e) { state.trialGateError = e.message || 'RPC kpi_trial_end_gate non disponibile'; }
+  state.trialGateLoading = false;
   render();
 }
 
@@ -6436,6 +6463,7 @@ function pagePremium() {
     </div>
 
     <!-- Creatività: quale paywall converte di più, col percorso step inline -->
+    ${premiumTrialGateCard()}
     ${premiumCreativesCard(d)}
 
     <!-- Chi ha tentato / acquistato -->
@@ -6461,6 +6489,191 @@ function premiumKpi(label, value, sub, color, note, infoKey, bucket) {
       ${note ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid #2a2a3d">${note}</div>` : ''}
       ${clickHint}
     </div>`;
+}
+
+// ── GATE DI FINE PROVA ────────────────────────────────────────────────
+// Sezione a sé, e non una riga in "Creatività paywall", per tre motivi che la
+// tabella non sa rappresentare: davanti c'è un film di battute che avanzano a
+// tocco, dopo l'offerta il percorso si BIFORCA (chi sceglie il gratuito passa da
+// una seconda schermata), e l'esito vero non sta negli eventi ma in una colonna
+// (`users.trial_choice`). Da qui la scelta di disegnarlo in verticale, con barre
+// proporzionali: si legge dove si perde gente senza dover confrontare numerini.
+
+/** Etichette umane dei ruoli di step del gate (vocabolario `PaywallStepRole`). */
+const TRIAL_GATE_STEP_LABELS = {
+  hero:      'Apertura del film',
+  recap:     'Battuta del racconto',
+  offer:     'L’offerta',
+  downgrade: 'Cosa si chiude',
+};
+
+/** Barra proporzionale con etichetta, valore e calo rispetto al passo precedente. */
+function trialGateBar(label, value, base, prev, opts) {
+  const o = opts || {};
+  const pct  = base > 0 ? Math.round(value / base * 100) : 0;
+  const drop = (prev !== null && prev !== undefined && prev > 0)
+    ? Math.round((1 - value / prev) * 100) : null;
+  const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+  const col = o.color || '#60a5fa';
+  return `
+    <div style="display:flex;align-items:center;gap:10px;padding:5px 0">
+      <div style="flex:0 0 172px;font-size:12px;color:${o.strong ? 'var(--fg)' : 'var(--muted)'};${o.strong ? 'font-weight:600;' : ''}line-height:1.3">
+        ${esc(label)}${o.sub ? `<div style="font-size:10px;color:#5a5a7a">${esc(o.sub)}</div>` : ''}
+      </div>
+      <div style="flex:1;min-width:60px;height:22px;background:#0d0d18;border-radius:4px;overflow:hidden;position:relative">
+        <div style="width:${Math.max(pct, value > 0 ? 2 : 0)}%;height:100%;background:${col};opacity:.72"></div>
+      </div>
+      <div style="flex:0 0 108px;text-align:right;font-size:12px;color:var(--fg);font-weight:700">
+        ${value}<span style="color:#5a5a7a;font-weight:400;font-size:10px"> · ${pct}%</span>
+        ${drop !== null && drop > 0 ? `<span style="color:${dropCol};font-size:10px;font-weight:700;margin-left:6px">-${drop}%</span>` : ''}
+      </div>
+    </div>`;
+}
+
+function premiumTrialGateCard() {
+  const wrap = (inner) => `
+    <div class="card" style="margin-bottom:16px">
+      <div style="margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:3px">Gate di fine prova · il film della settimana</div>
+        <div style="font-size:11px;color:var(--muted)">
+          la schermata che si apre al primo ingresso dopo i 7 giorni regalati ·
+          <code style="font-family:var(--mono)">variant = trial_end_gate</code>
+        </div>
+      </div>
+      ${inner}
+    </div>`;
+
+  if (state.trialGateLoading && !state.trialGateData) {
+    return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico il percorso del gate…</div>`);
+  }
+  if (state.trialGateError) {
+    return wrap(`
+      <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+        ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialGateError)}<br>
+        La RPC <code style="font-family:var(--mono)">kpi_trial_end_gate</code> va applicata in produzione, e il gate
+        deve essere rilasciato agli utenti: finché vive solo su <code style="font-family:var(--mono)">bender</code>
+        nessuno lo vede e non c'è niente da contare.
+      </div>`);
+  }
+
+  const d = state.trialGateData;
+  if (!d) return '';
+
+  const opened = (d.opened && d.opened.users) || 0;
+  const steps  = (d.steps || []).slice().sort((a, b) => a.idx - b.idx);
+  const choice = d.choice || {};
+  const decided = (choice.premium || 0) + (choice.free || 0);
+
+  if (!opened && !decided) {
+    return wrap(`
+      <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
+        Nessuna apertura del gate nel periodo selezionato.<br>
+        <span style="color:#5a5a7a">È il comportamento atteso finché la settimana regalata non è rilasciata:
+        il gate si mostra sette giorni dopo l'iscrizione, quindi i primi numeri arrivano una settimana dopo il rilascio.</span>
+      </div>`);
+  }
+
+  // ── 1. l'esito, in cima: è la verità a terra, non una deduzione dagli eventi ──
+  const esito = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">
+      ${[
+        { k: 'Ha scelto Hypemove+', v: choice.premium || 0, c: '#4ade80', s: 'trial_choice = premium' },
+        { k: 'Ha scelto il gratuito', v: choice.free || 0, c: '#f59e0b', s: 'trial_choice = free' },
+        { k: 'Non ha ancora scelto', v: choice.pending || 0, c: '#5a5a7a', s: 'prova finita, gate mai chiuso' },
+        {
+          k: 'Conversione al gate',
+          v: decided > 0 ? `${Math.round((choice.premium || 0) / decided * 100)}%` : '—',
+          c: '#22d3ee',
+          s: decided > 0 ? `su ${decided} che hanno deciso` : 'nessuna decisione ancora',
+        },
+      ].map(x => `
+        <div style="background:#111120;border:1px solid #1a1a2e;border-radius:8px;padding:11px 12px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(x.k)}</div>
+          <div style="font-size:24px;font-weight:700;color:${x.c};line-height:1.2;margin-top:3px">${x.v}</div>
+          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono);margin-top:2px">${esc(x.s)}</div>
+        </div>`).join('')}
+    </div>`;
+
+  // ── 2. il film, battuta per battuta ──
+  const filmSteps = steps.filter(s => s.role === 'hero' || s.role === 'recap');
+  const offerStep = steps.find(s => s.role === 'offer');
+  const base = filmSteps.length ? filmSteps[0].viewed_users : opened;
+  let prev = null;
+  const film = filmSteps.map((s, i) => {
+    const label = i === 0
+      ? TRIAL_GATE_STEP_LABELS.hero
+      : `${TRIAL_GATE_STEP_LABELS.recap} ${i}`;
+    const row = trialGateBar(label, s.viewed_users, base, prev, { color: '#60a5fa', sub: `step ${s.idx}` });
+    prev = s.viewed_users;
+    return row;
+  }).join('');
+
+  const offerRow = offerStep
+    ? trialGateBar('Arriva all’offerta', offerStep.viewed_users, base, prev, { color: '#a78bfa', strong: true, sub: 'prezzi e bottone' })
+    : '';
+
+  // ── 3. la biforcazione: comprare oppure passare da "cosa si chiude" ──
+  const attempt   = (d.purchase_attempt && d.purchase_attempt.users) || 0;
+  const cta       = (d.cta_tap && d.cta_tap.users) || 0;
+  const downgrade = d.downgrade || 0;
+  const reconsid  = d.reconsidered || 0;
+  const freeConf  = d.confirmed_free || 0;
+  const offerUsers = offerStep ? offerStep.viewed_users : base;
+
+  const branch = (title, color, rows) => `
+    <div style="flex:1;min-width:250px;background:#0d0d18;border:1px solid #1a1a2e;border-left:3px solid ${color};border-radius:8px;padding:12px 14px">
+      <div style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${esc(title)}</div>
+      ${rows}
+    </div>`;
+
+  const line = (label, value, note) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0;border-bottom:1px solid #111120">
+      <span style="font-size:12px;color:var(--muted)">${esc(label)}${note ? `<span style="display:block;font-size:10px;color:#5a5a7a">${esc(note)}</span>` : ''}</span>
+      <span style="font-size:14px;font-weight:700;color:var(--fg)">${value}</span>
+    </div>`;
+
+  const fork = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">
+      ${branch('Dice di sì', '#4ade80',
+        line('Tocca il bottone', cta, 'intenzione, prima del pagamento') +
+        line('Acquisto avviato', attempt, 'il billing è partito davvero') +
+        line('Cambia tessera', (d.plan_select && d.plan_select.users) || 0,
+             `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`))}
+      ${branch('Va verso il gratuito', '#f59e0b',
+        line('Vede "cosa si chiude"', downgrade, 'la schermata di conferma') +
+        line('Ci ripensa', reconsid, 'da lì torna indietro e tocca il bottone') +
+        line('Conferma il gratuito', freeConf, 'paywall_close · continue_free'))}
+    </div>`;
+
+  // Il ripensamento è l'unico numero che dice se la seconda schermata serve.
+  const reconsidRate = downgrade > 0 ? Math.round(reconsid / downgrade * 100) : null;
+  const verdict = downgrade > 0 ? `
+    <div style="margin-top:14px;background:#0f1830;border:1px solid #1e2f56;border-radius:8px;padding:10px 12px;font-size:11px;color:#93b4f5;line-height:1.55">
+      <strong>La schermata "cosa si chiude" recupera il ${reconsidRate}%</strong> di chi ci arriva
+      (${reconsid} su ${downgrade}). È l'unico numero che dice se quel passaggio in più vale la frizione che aggiunge:
+      sotto il 5% sta solo allungando l'uscita.
+    </div>` : '';
+
+  // Eventi contro colonna: se divergono, la colonna ha ragione.
+  const mismatch = (attempt > 0 && (choice.premium || 0) > 0 && Math.abs(attempt - (choice.premium || 0)) >= 3) ? `
+    <div style="margin-top:10px;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:9px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+      ⚠️ <strong>Eventi e stato non coincidono:</strong> ${attempt} acquisti avviati contro ${choice.premium} scelte premium
+      registrate su <code style="font-family:var(--mono)">users.trial_choice</code>. La colonna è la verità:
+      la differenza sono acquisti partiti e non andati a buon fine.
+    </div>` : '';
+
+  return wrap(`
+    ${esito}
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Il percorso, schermata per schermata</div>
+    ${film}${offerRow}
+    ${fork}
+    ${verdict}
+    ${mismatch}
+    <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
+      Le barre contano <strong>utenti unici</strong>, non aperture: il gate si ripresenta finché non si sceglie, quindi
+      le viste sarebbero più delle persone. Percentuali sulla prima battuta del film.
+      ${(d.terms_open || 0) > 0 ? `· ${d.terms_open} hanno aperto i termini.` : ''}
+    </div>`);
 }
 
 // ── CREATIVITÀ PAYWALL ────────────────────────────────────────────────
