@@ -6496,41 +6496,11 @@ function premiumKpi(label, value, sub, color, note, infoKey, bucket) {
 // tabella non sa rappresentare: davanti c'è un film di battute che avanzano a
 // tocco, dopo l'offerta il percorso si BIFORCA (chi sceglie il gratuito passa da
 // una seconda schermata), e l'esito vero non sta negli eventi ma in una colonna
-// (`users.trial_choice`). Da qui la scelta di disegnarlo in verticale, con barre
-// proporzionali: si legge dove si perde gente senza dover confrontare numerini.
-
-/** Etichette umane dei ruoli di step del gate (vocabolario `PaywallStepRole`). */
-const TRIAL_GATE_STEP_LABELS = {
-  hero:      'Apertura del film',
-  recap:     'Battuta del racconto',
-  offer:     'L’offerta',
-  downgrade: 'Cosa si chiude',
-};
-
-/** Barra proporzionale con etichetta, valore e calo rispetto al passo precedente. */
-function trialGateBar(label, value, base, prev, opts) {
-  const o = opts || {};
-  const pct  = base > 0 ? Math.round(value / base * 100) : 0;
-  const drop = (prev !== null && prev !== undefined && prev > 0)
-    ? Math.round((1 - value / prev) * 100) : null;
-  const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
-  const col = o.color || '#60a5fa';
-  return `
-    <div style="display:flex;align-items:center;gap:10px;padding:5px 0">
-      <div style="flex:0 0 172px;font-size:12px;color:${o.strong ? 'var(--fg)' : 'var(--muted)'};${o.strong ? 'font-weight:600;' : ''}line-height:1.3">
-        ${esc(label)}${o.sub ? `<div style="font-size:10px;color:#5a5a7a">${esc(o.sub)}</div>` : ''}
-      </div>
-      <div style="flex:1;min-width:60px;height:22px;background:#0d0d18;border-radius:4px;overflow:hidden;position:relative">
-        <div style="width:${Math.max(pct, value > 0 ? 2 : 0)}%;height:100%;background:${col};opacity:.72"></div>
-      </div>
-      <div style="flex:0 0 132px;text-align:right;font-size:12px;color:var(--fg);font-weight:700">
-        ${value}<span style="color:#5a5a7a;font-weight:400;font-size:10px"> · ${pct}%</span>
-        ${drop !== null && drop > 0 ? `<span style="color:${dropCol};font-size:10px;font-weight:700;margin-left:6px">-${drop}%</span>` : ''}
-        ${o.views !== undefined && o.views !== value
-          ? `<div style="font-size:9px;color:#5a5a7a;font-weight:400">${o.views} viste</div>` : ''}
-      </div>
-    </div>`;
-}
+// (`users.trial_choice`). Il percorso però si legge con la STESSA grammatica delle
+// creatività — box in fila, tocchi come numero grande, calo % sulla freccia — così
+// chi guarda la pagina non deve imparare due modi di leggere la stessa cosa. I box
+// del film portano `premium-step-box`, quindi il click che apre la lista di chi ci
+// è arrivato è già cablato e vale anche qui.
 
 function premiumTrialGateCard() {
   const wrap = (inner) => `
@@ -6596,55 +6566,79 @@ function premiumTrialGateCard() {
         </div>`).join('')}
     </div>`;
 
-  // ── 2. il film, battuta per battuta ──
+  // ── 2. il percorso, con la stessa grammatica delle creatività ──
+  // Box cliccabili `premium-step-box`: il gestore globale è già cablato e apre la
+  // lista di chi ha raggiunto quella schermata. Numero grande = tocchi, riga sotto
+  // = persone, come nelle creatività, così i due blocchi si leggono allo stesso modo.
   const filmSteps = steps.filter(s => s.role === 'hero' || s.role === 'recap');
   const offerStep = steps.find(s => s.role === 'offer');
-  const base = filmSteps.length ? filmSteps[0].viewed_users : opened;
+  const downStep  = steps.find(s => s.role === 'downgrade');
+  const base = filmSteps.length ? filmSteps[0].viewed : (d.opened && d.opened.events) || 0;
+
+  const box = (label, views, people, prev, opts) => {
+    const o = opts || {};
+    const pct  = base > 0 ? Math.round(views / base * 100) : 0;
+    const drop = (prev && prev > 0) ? Math.round((1 - views / prev) * 100) : null;
+    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+    const arrow = prev !== null && prev !== undefined ? `
+      <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 3px">
+        ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
+        <span style="font-size:13px;line-height:1">→</span>
+      </div>` : '';
+    const clickable = o.step
+      ? `class="premium-step-box" data-variant="trial_end_gate" data-step="${esc(o.step)}" data-steps="${esc(o.step)}" title="Vedi chi è arrivato a questa schermata" style="cursor:pointer;`
+      : `title="${esc(o.title || '')}" style="`;
+    return arrow + `
+      <div ${clickable}text-align:center;min-width:70px;background:#111120;border:1px solid ${o.border || '#1f1f33'};border-radius:6px;padding:6px 8px;transition:border-color .12s">
+        <div style="font-weight:700;color:${o.color || 'var(--fg)'};font-size:15px;line-height:1">${views}</div>
+        <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(label)}</div>
+        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${people} person${people === 1 ? 'a' : 'e'} · ${pct}%</div>
+      </div>`;
+  };
+
   let prev = null;
-  const film = filmSteps.map((s, i) => {
-    const label = i === 0
-      ? TRIAL_GATE_STEP_LABELS.hero
-      : `${TRIAL_GATE_STEP_LABELS.recap} ${i}`;
-    const row = trialGateBar(label, s.viewed_users, base, prev, { color: '#60a5fa', sub: `step ${s.idx}`, views: s.viewed });
-    prev = s.viewed_users;
-    return row;
+  const filmBoxes = filmSteps.map((s, i) => {
+    const label = i === 0 ? 'Apertura' : `Racconto ${i}`;
+    const b = box(label, s.viewed, s.viewed_users, prev, { step: s.role });
+    prev = s.viewed;
+    return b;
   }).join('');
 
-  const offerRow = offerStep
-    ? trialGateBar('Arriva all’offerta', offerStep.viewed_users, base, prev, { color: '#a78bfa', strong: true, sub: 'prezzi e bottone', views: offerStep.viewed })
+  const offerBox = offerStep
+    ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, { step: 'offer', border: '#3b2d63', color: '#c4b5fd' })
     : '';
 
-  // ── 3. la biforcazione: comprare oppure passare da "cosa si chiude" ──
-  const attempt   = (d.purchase_attempt && d.purchase_attempt.users) || 0;
-  const cta       = (d.cta_tap && d.cta_tap.users) || 0;
+  // ── 3. la biforcazione ──
+  const attempt   = (d.purchase_attempt && d.purchase_attempt.events) || 0;
+  const attemptU  = (d.purchase_attempt && d.purchase_attempt.users) || 0;
+  const cta       = (d.cta_tap && d.cta_tap.events) || 0;
+  const ctaU      = (d.cta_tap && d.cta_tap.users) || 0;
+  const planEv    = ((d.plan_select && d.plan_select.monthly) || 0) + ((d.plan_select && d.plan_select.yearly) || 0);
+  const planU     = (d.plan_select && d.plan_select.users) || 0;
   const downgrade = d.downgrade || 0;
   const reconsid  = d.reconsidered || 0;
   const freeConf  = d.confirmed_free || 0;
-  const offerUsers = offerStep ? offerStep.viewed_users : base;
+  const offerPrev = offerStep ? offerStep.viewed : prev;
 
-  const branch = (title, color, rows) => `
-    <div style="flex:1;min-width:250px;background:#0d0d18;border:1px solid #1a1a2e;border-left:3px solid ${color};border-radius:8px;padding:12px 14px">
-      <div style="font-size:11px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${esc(title)}</div>
-      ${rows}
-    </div>`;
-
-  const line = (label, value, note) => `
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0;border-bottom:1px solid #111120">
-      <span style="font-size:12px;color:var(--muted)">${esc(label)}${note ? `<span style="display:block;font-size:10px;color:#5a5a7a">${esc(note)}</span>` : ''}</span>
-      <span style="font-size:14px;font-weight:700;color:var(--fg)">${value}</span>
+  const branch = (title, color, boxes, note) => `
+    <div style="flex:1;min-width:290px;background:#0d0d18;border:1px solid #1a1a2e;border-left:3px solid ${color};border-radius:8px;padding:11px 13px">
+      <div style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px">${esc(title)}</div>
+      <div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap;overflow-x:auto">${boxes}</div>
+      ${note ? `<div style="font-size:10px;color:#5a5a7a;margin-top:8px;line-height:1.4">${note}</div>` : ''}
     </div>`;
 
   const fork = `
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:14px">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px">
       ${branch('Dice di sì', '#4ade80',
-        line('Tocca il bottone', cta, 'intenzione, prima del pagamento') +
-        line('Acquisto avviato', attempt, 'il billing è partito davvero') +
-        line('Cambia tessera', (d.plan_select && d.plan_select.users) || 0,
-             `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`))}
+        box('Cambia tessera', planEv, planU, null, { title: 'Tap sulle tessere dei prezzi' }) +
+        box('Tocca il bottone', cta, ctaU, planEv || null, { title: 'Intenzione, prima del pagamento' }) +
+        box('Acquisto avviato', attempt, attemptU, cta || null, { border: '#1f5a36', color: '#4ade80', title: 'Il billing è partito davvero' }),
+        `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}`)}
       ${branch('Va verso il gratuito', '#f59e0b',
-        line('Vede "cosa si chiude"', downgrade, 'la schermata di conferma') +
-        line('Ci ripensa', reconsid, 'da lì torna indietro e tocca il bottone') +
-        line('Conferma il gratuito', freeConf, 'paywall_close · continue_free'))}
+        (downStep ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', border: '#5a4318', color: '#fbbf24' }) : '') +
+        box('Ci ripensa', reconsid, reconsid, null, { title: 'Da lì torna indietro e tocca il bottone' }) +
+        box('Conferma il gratuito', freeConf, freeConf, null, { title: 'paywall_close · continue_free' }),
+        'i due esiti si escludono: chi ripensa non conferma')}
     </div>`;
 
   // Il ripensamento è l'unico numero che dice se la seconda schermata serve.
@@ -6666,15 +6660,16 @@ function premiumTrialGateCard() {
 
   return wrap(`
     ${esito}
-    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Il percorso, schermata per schermata</div>
-    ${film}${offerRow}
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Il film, fino all’offerta</div>
+    <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${filmBoxes}${offerBox}</div>
     ${fork}
     ${verdict}
     ${mismatch}
     <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
-      Il numero grande delle barre sono <strong>persone</strong>, la riga sotto le <strong>viste</strong>: il gate si
-      ripresenta a ogni ingresso finché non si sceglie, quindi la stessa persona lo percorre più volte e i due numeri
-      divergono. In collaudo le persone restano 1 e a muoversi sono le viste. Percentuali sulla prima battuta del film.
+      Numero grande = <strong>tocchi</strong>, riga sotto = <strong>persone</strong>, come nelle creatività paywall.
+      I due divergono di natura: il gate si ripresenta a ogni ingresso finché non si sceglie, quindi la stessa persona
+      lo percorre più volte. Percentuali e cali sulla prima schermata del film.
+      <strong>Clicca una schermata del film</strong> per vedere chi ci è arrivato.
       ${(d.terms_open || 0) > 0 ? `· ${d.terms_open} hanno aperto i termini.` : ''}
     </div>`);
 }
