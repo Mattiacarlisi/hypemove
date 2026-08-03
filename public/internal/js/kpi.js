@@ -7122,8 +7122,11 @@ function premiumTrialGiftCard() {
     </div>`;
 
   // ── 2. il percorso per fase, stessa grammatica del gate ma senza click ──
-  const base = phases.length ? phases[0].events : (entered.events || 0);
-  const box = (label, views, people, prev, opts) => {
+  // DUE imbuti, non uno: nuovi iscritti e utenti storici arrivano qui da flussi
+  // diversi (registrazione appena finita vs secondo onboarding di chi si allena
+  // da mesi) e vedono un saluto diverso. Sommarli produce una media che non
+  // descrive nessuno dei due, e nasconde il calo di uno dietro la tenuta dell'altro.
+  const box = (label, views, people, prev, base, opts) => {
     const o = opts || {};
     const pct  = base > 0 ? Math.round(views / base * 100) : 0;
     const drop = (prev && prev > 0) ? Math.round((1 - views / prev) * 100) : null;
@@ -7141,33 +7144,62 @@ function premiumTrialGiftCard() {
       </div>`;
   };
 
-  let prev = null;
-  const phaseBoxes = phases.map((p) => {
-    const label = TRIAL_GIFT_PHASE_LABELS[p.phase] || p.phase;
-    const hint  = TRIAL_GIFT_PHASE_HINTS[p.phase] || '';
-    const storici = (p.users_returning || 0) > 0 ? ` · di cui ${p.users_returning} storici` : '';
-    const b = box(label, p.events, p.users, prev, {
-      title: `${hint ? hint + ' · ' : ''}fase "${p.phase}"${storici}`,
-      color: TRIAL_GIFT_PHASE_HINTS[p.phase] ? '#5a5a7a' : 'var(--fg)',
+  // Un imbuto per pubblico. `pick` estrae i numeri della platea da una riga di
+  // fase: gli storici li porta la RPC, i nuovi sono il complemento — l'`audience`
+  // è fissata dal flusso, quindi nessuno può stare in entrambe le platee.
+  const funnel = (titolo, colore, sottotitolo, pick, exitEv, exitUsers) => {
+    const righe = phases.map(p => ({ p, ...pick(p) }));
+    const totale = righe.reduce((a, r) => a + r.events, 0) + exitEv;
+    if (!totale) {
+      return `
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;font-weight:700;color:${colore};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(titolo)}</div>
+          <div style="background:#0d0d18;border:1px dashed #2a2a44;border-radius:8px;padding:9px 12px;font-size:10px;color:#3a3a55">
+            Nessun passaggio di questa platea nel periodo interrogato.
+          </div>
+        </div>`;
+    }
+
+    const base = righe.length ? righe[0].events : 0;
+    let prev = null;
+    const boxes = righe.map(r => {
+      const label = TRIAL_GIFT_PHASE_LABELS[r.p.phase] || r.p.phase;
+      const hint  = TRIAL_GIFT_PHASE_HINTS[r.p.phase] || '';
+      const b = box(label, r.events, r.users, prev, base, {
+        title: `${hint ? hint + ' · ' : ''}fase "${r.p.phase}" · ${esc(titolo)}`,
+        color: TRIAL_GIFT_PHASE_HINTS[r.p.phase] ? '#5a5a7a' : 'var(--fg)',
+      });
+      prev = r.events;
+      return b;
+    }).join('');
+
+    const exit = box('Uscita (tap)', exitEv, exitUsers, prev, base, {
+      border: '#1f5a36', color: '#4ade80',
+      title: 'trial_gift_completed: tap sulla carta, si atterra in Home',
     });
-    prev = p.events;
-    return b;
-  }).join('');
 
-  // L'uscita chiude la fila: il divario con l'ultima fase è "ha chiuso l'app
-  // sull'ultima schermata" — il numero per cui questa sezione esiste.
-  const lastPhase = phases.length ? phases[phases.length - 1] : null;
-  const chiusiSullaCarta = lastPhase ? Math.max(0, (lastPhase.users || 0) - (completed.users || 0)) : 0;
-  const exitBox = box('Uscita (tap)', completed.events || 0, completed.users || 0, prev, {
-    border: '#1f5a36', color: '#4ade80',
-    title: 'trial_gift_completed: tap sulla carta, si atterra in Home',
-  });
+    // Il numero per cui questa sezione esiste: chi ha visto tutto il regalo e
+    // se n'è andato senza toccare la carta.
+    const ultima = righe.length ? righe[righe.length - 1] : null;
+    const chiusi = ultima ? Math.max(0, ultima.users - exitUsers) : 0;
+    const persi = chiusi > 0 ? `
+      <div style="margin-top:8px;font-size:10px;color:#fbbf24;line-height:1.5">
+        ⚠ <strong>${chiusi} ${chiusi === 1 ? 'ha' : 'hanno'} chiuso l'app su "${esc(TRIAL_GIFT_PHASE_LABELS[ultima.p.phase] || ultima.p.phase)}"</strong>
+        — ${chiusi === 1 ? 'ha' : 'hanno'} visto il regalo ma non ${chiusi === 1 ? 'è uscito' : 'sono usciti'} col tap.
+      </div>` : '';
 
-  const persi = lastPhase && chiusiSullaCarta > 0 ? `
-    <div style="margin-top:12px;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:9px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
-      <strong>${chiusiSullaCarta} ${chiusiSullaCarta === 1 ? 'persona ha' : 'persone hanno'} chiuso l'app sull'ultima schermata</strong>
-      (${esc(TRIAL_GIFT_PHASE_LABELS[lastPhase.phase] || lastPhase.phase)}): ${chiusiSullaCarta === 1 ? 'ha' : 'hanno'} visto il regalo ma non ${chiusiSullaCarta === 1 ? 'è uscita' : 'sono usciti'} col tap.
-    </div>` : '';
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px;font-weight:700;color:${colore};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
+          ${esc(titolo)} <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· ${esc(sottotitolo)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${boxes}${exit}</div>
+        ${persi}
+      </div>`;
+  };
+
+  const exitRetEv = completed.events_returning || 0;
+  const exitRetU  = completed.returning || 0;
 
   // Nessuna fase nei dati NON vuol dire "nessuno è passato di qui": vuol dire che
   // le build in circolazione non emettono ancora gli eventi di fase. Mostrare la
@@ -7175,12 +7207,23 @@ function premiumTrialGiftCard() {
   // invece è un funnel che non ha ancora cominciato a ricevere dati.
   const sequenza = phases.length
     ? `
-      <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${phaseBoxes}${exitBox}</div>
-      ${persi}
+      ${funnel(
+        'Nuovi iscritti', '#22d3ee', 'appena registrati · saluto "Benvenuto"',
+        p => ({ events: (p.events || 0) - (p.events_returning || 0), users: (p.users || 0) - (p.users_returning || 0) }),
+        Math.max(0, (completed.events || 0) - exitRetEv),
+        Math.max(0, (completed.users || 0) - exitRetU),
+      )}
+      ${funnel(
+        'Utenti storici', '#f59e0b', 'già iscritti da mesi · saluto "Bentornato"',
+        p => ({ events: p.events_returning || 0, users: p.users_returning || 0 }),
+        exitRetEv, exitRetU,
+      )}
       <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
         Numero grande = <strong>eventi</strong>, riga sotto = <strong>persone</strong>, come nel gate qui sotto.
-        Le fasi arrivano dai dati: se la sequenza cambia nell'app, qui compare da sola.
-        Percentuali e cali sulla prima fase.
+        I due percorsi restano separati apposta: stessa schermata, ma platee e momenti diversi —
+        un calo dei nuovi non va compensato dalla tenuta degli storici. Percentuali e cali sulla
+        prima fase <em>della propria platea</em>. Le fasi arrivano dai dati: se la sequenza cambia
+        nell'app, qui compare da sola.
       </div>`
     : `
       <div style="background:#0d0d18;border:1px dashed #2a2a44;border-radius:8px;padding:12px 14px;font-size:11px;color:#5a5a7a;line-height:1.6">
