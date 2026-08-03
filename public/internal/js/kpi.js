@@ -4930,6 +4930,20 @@ function installContextChips(installContext, from) {
     </div>`;
 }
 
+// Icone della card funnel. Separate da LUCIDE_ICONS perché quella mappa alimenta il picker delle
+// chip (`Object.keys(LUCIDE_ICONS)`) e queste non sono scelte dall'utente: sono struttura. Stesso
+// precedente dell'ingranaggio inline più sotto. SVG Lucide raw, stroke 2, viewBox 24 — la
+// dimensione la decide il CSS, così la stessa icona serve label da 9.5px e da 19px.
+// `users` e `flag` sono ripresi da LUCIDE_ICONS invece di essere riscritti.
+const FUNNEL_ICONS = {
+  users:   LUCIDE_ICONS.users,
+  flag:    LUCIDE_ICONS.flag,
+  clock:   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  drop:    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>',
+  hourglass: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',
+};
+const fIcon = (name, cls = '') => `<span class="fun-ico ${cls}" aria-hidden="true">${FUNNEL_ICONS[name] || ''}</span>`;
+
 // Durata leggibile a partire da secondi. Mai secondi grezzi sopra il minuto, mai più di due
 // unità, unità inferiore omessa quando è zero (3600 → "1h", non "1h 0m").
 // `—` e `0s` sono due cose diverse: il primo è "non misurabile" (nessuno ha raggiunto lo step,
@@ -5010,19 +5024,19 @@ function eventFunnelViz() {
     const cohortN = state.eventFunnel?.cohort_size ?? headN;
     const lastIdx = realIdxs[realIdxs.length - 1];
     const endStat = (realIdxs.length > 1 && headN > 0)
-      ? `<div class="stat"><span class="lbl">Arriva in fondo</span><span class="val">${(nums[lastIdx] / headN * 100).toFixed(1)}%<small>${nums[lastIdx]} su ${headN}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">${fIcon('flag')}Arriva in fondo</span><span class="val">${(nums[lastIdx] / headN * 100).toFixed(1)}%<small>${nums[lastIdx]} su ${headN}</small></span></div>`
       : '';
     // Il drop peggiore in percentuale, con accanto quante persone sono: su coorti piccole −60%
     // e −52.6% sono quasi lo stesso numero, ma tre persone e dieci persone no.
     const worstStat = worstIdx >= 0
-      ? `<div class="stat"><span class="lbl">Drop peggiore</span><span class="val bad">−${(100 - nums[worstIdx] / nums[realPrev[worstIdx]] * 100).toFixed(1)}%<small>${nums[realPrev[worstIdx]] - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">${fIcon('drop')}Drop peggiore</span><span class="val bad">−${(100 - nums[worstIdx] / nums[realPrev[worstIdx]] * 100).toFixed(1)}%<small>${nums[realPrev[worstIdx]] - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
       : '';
     // Quanto ci mette chi arriva in fondo: il cumulato mediano dell'ultimo step reale.
     // È sui soli arrivati, quindi con pochi sopravvissuti il numero è indicativo — il conteggio
     // accanto serve a dire quanto pesarlo.
     const endTime = rows_[lastIdx]?.t_cum_p50_sec;
     const timeStat = (realIdxs.length > 1 && endTime != null)
-      ? `<div class="stat"><span class="lbl">Ci mette</span><span class="val" title="${esc(tipCum(rows_[lastIdx], nums[lastIdx], headLabel))}">${fmtDur(endTime)}<small>mediana su ${nums[lastIdx]}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">${fIcon('clock')}Ci mette</span><span class="val" title="${esc(tipCum(rows_[lastIdx], nums[lastIdx], headLabel))}">${fmtDur(endTime)}<small>mediana su ${nums[lastIdx]}</small></span></div>`
       : '';
     // Il passaggio più lungo risponde a "dove perdono tempo", che è la controparte esatta del
     // drop peggiore ("dove perdono persone"). Cercato solo sugli step di spina oltre il primo:
@@ -5034,11 +5048,11 @@ function eventFunnelViz() {
       if (t > slowSec) { slowSec = t; slowIdx = i; }
     });
     const slowStat = slowIdx >= 0
-      ? `<div class="stat"><span class="lbl">Passaggio più lungo</span><span class="val slow" title="${esc(tipDelta(rows_[slowIdx], nums[slowIdx]))}">${fmtDur(slowSec)}<small>verso ${esc(eventStepLabel(cfg[slowIdx]) || '')}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">${fIcon('hourglass')}Passaggio più lungo</span><span class="val slow" title="${esc(tipDelta(rows_[slowIdx], nums[slowIdx]))}">${fmtDur(slowSec)}<small>verso ${esc(eventStepLabel(cfg[slowIdx]) || '')}</small></span></div>`
       : '';
     statRow = `
       <div class="stat-row">
-        <div class="stat"><span class="lbl">Coorte</span><span class="val">${cohortN}</span></div>
+        <div class="stat"><span class="lbl">${fIcon('users')}Coorte</span><span class="val">${cohortN}</span></div>
         ${endStat}
         ${timeStat}
         ${worstStat}
@@ -5050,8 +5064,8 @@ function eventFunnelViz() {
     <div class="fun-cols">
       <div class="col-label">Step</div>
       <div class="col-bar"></div>
-      <div class="col-who" title="${isAbs ? `Quante identità hanno emesso l'evento, e il rapporto sul primo step (${esc(headLabel)})` : `Quante persone arrivano fin qui, in valore assoluto e come quota di ${esc(headLabel)} (${headN})`}"><span>utenti</span><span>del totale</span></div>
-      <div class="col-when" title="Tempo mediano per arrivare qui dallo step precedente, e tempo mediano trascorso da ${esc(headLabel)}"><span>passaggio</span><span>da inizio</span></div>
+      <div class="col-who" title="${isAbs ? `Quante identità hanno emesso l'evento, e il rapporto sul primo step (${esc(headLabel)})` : `Quante persone arrivano fin qui, in valore assoluto e come quota di ${esc(headLabel)} (${headN})`}"><span>${fIcon('users')}utenti</span><span>del totale</span></div>
+      <div class="col-when" title="Tempo mediano per arrivare qui dallo step precedente, e tempo mediano trascorso da ${esc(headLabel)}"><span>${fIcon('clock')}passaggio</span><span>da inizio</span></div>
     </div>`;
 
   const rows = cfg.map((row, i) => {
@@ -5096,7 +5110,7 @@ function eventFunnelViz() {
       ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${vsN} non ${lostN === 1 ? 'è arrivata' : 'sono arrivate'} a "${label}"`
       : '';
     const lossTag = showLoss
-      ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></div>`
+      ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">${fIcon('drop')}−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></div>`
       : '';
 
     const parentRow = `
