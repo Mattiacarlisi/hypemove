@@ -284,14 +284,12 @@
 .col-label { width: 200px; flex-shrink: 0; }
 .col-bar   { flex: 1; }
 .col-n     { width: 52px; text-align: right; flex-shrink: 0; }
-.col-prev  { width: 62px; text-align: right; flex-shrink: 0; }
 .col-head  { width: 62px; text-align: right; flex-shrink: 0; }
 /* Tempo: Δ dallo step precedente e Σ dalla testa del funnel. La barra è flex:1 e si restringe
-   da sola per far loro spazio. In volumi escono dal flusso come già fa vs-prec — senza cascata
-   non c'è uno step precedente da cui misurare, e celle vuote leggerebbero come "misurato zero". */
-.col-tdelta { width: 60px; text-align: right; flex-shrink: 0; }
-.col-tcum   { width: 60px; text-align: right; flex-shrink: 0; }
-.fun-card[data-mode="absolute"] .col-prev,
+   da sola per far loro spazio. In volumi escono dal flusso — senza cascata non c'è uno step
+   precedente da cui misurare, e celle vuote leggerebbero come "misurato zero". */
+.col-tdelta { width: 62px; text-align: right; flex-shrink: 0; }
+.col-tcum   { width: 62px; text-align: right; flex-shrink: 0; }
 .fun-card[data-mode="absolute"] .col-tdelta,
 .fun-card[data-mode="absolute"] .col-tcum { display: none; }
 
@@ -322,6 +320,19 @@
   background: linear-gradient(90deg, var(--accent), var(--purple));
   transition: width .35s ease;
 }
+/* La perdita vive dentro la barra, sopra il tratteggio che la rappresenta già. Ancorata a
+   DESTRA del track e non alla fine del riempimento: posizione fissa riga dopo riga, così le
+   perdite formano una colonna dritta invece di rincorrere la lunghezza di ogni barra.
+   L'alone del colore della traccia la stacca dal tratteggio senza aggiungere un badge. */
+.loss {
+  position: absolute; top: 0; bottom: 0; right: 9px;
+  display: flex; align-items: center; gap: 5px;
+  font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: -.2px;
+  color: #fca5a5; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: auto;
+  text-shadow: 0 0 7px var(--surface2), 0 0 7px var(--surface2), 0 0 4px var(--surface2);
+}
+.loss .cnt { color: rgba(252,165,165,.66); font-weight: 500; }
+.loss.worst { color: var(--red); }
 .fun-card[data-mode="absolute"] .fill { background: linear-gradient(90deg, var(--blue, #2563eb), var(--danilo, #60a5fa)); }
 
 .n-val { font-family: var(--mono); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; }
@@ -371,9 +382,10 @@
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 @media (max-width: 900px) {
   .col-label { width: 130px; }
-  .col-prev, .col-head { width: 48px; }
-  .col-tdelta, .col-tcum { width: 46px; }
-  .fun-cols, .fun-row, .child-row { gap: 10px; }
+  .col-head { width: 48px; }
+  .col-tdelta, .col-tcum { width: 50px; }
+  .fun-cols, .fun-row, .child-row { gap: 11px; }
+  .loss { font-size: 10px; right: 6px; }
   .stat-row { gap: 24px; }
 }
 

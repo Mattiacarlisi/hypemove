@@ -5012,15 +5012,29 @@ function eventFunnelViz() {
     const endStat = (realIdxs.length > 1 && headN > 0)
       ? `<div class="stat"><span class="lbl">Arriva in fondo</span><span class="val">${(nums[lastIdx] / headN * 100).toFixed(1)}%<small>${nums[lastIdx]} su ${headN}</small></span></div>`
       : '';
+    // Il drop peggiore in percentuale, con accanto quante persone sono: su coorti piccole −60%
+    // e −52.6% sono quasi lo stesso numero, ma tre persone e dieci persone no.
     const worstStat = worstIdx >= 0
-      ? `<div class="stat"><span class="lbl">Drop peggiore</span><span class="val bad">−${(100 - nums[worstIdx] / nums[realPrev[worstIdx]] * 100).toFixed(1)}%<small>${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">Drop peggiore</span><span class="val bad">−${(100 - nums[worstIdx] / nums[realPrev[worstIdx]] * 100).toFixed(1)}%<small>${nums[realPrev[worstIdx]] - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
       : '';
     // Quanto ci mette chi arriva in fondo: il cumulato mediano dell'ultimo step reale.
     // È sui soli arrivati, quindi con pochi sopravvissuti il numero è indicativo — il conteggio
     // accanto serve a dire quanto pesarlo.
     const endTime = rows_[lastIdx]?.t_cum_p50_sec;
     const timeStat = (realIdxs.length > 1 && endTime != null)
-      ? `<div class="stat"><span class="lbl">Tempo per arrivare in fondo</span><span class="val" title="${esc(tipCum(rows_[lastIdx], nums[lastIdx], headLabel))}">${fmtDur(endTime)}<small>mediana su ${nums[lastIdx]}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">Ci mette</span><span class="val" title="${esc(tipCum(rows_[lastIdx], nums[lastIdx], headLabel))}">${fmtDur(endTime)}<small>mediana su ${nums[lastIdx]}</small></span></div>`
+      : '';
+    // Il passaggio più lungo risponde a "dove perdono tempo", che è la controparte esatta del
+    // drop peggiore ("dove perdono persone"). Cercato solo sugli step di spina oltre il primo:
+    // la testa non ha un passaggio, le varianti non sono passaggi.
+    let slowIdx = -1, slowSec = -1;
+    realIdxs.forEach(i => {
+      const t = rows_[i]?.t_p50_sec;
+      if (i === headIdx || t == null) return;
+      if (t > slowSec) { slowSec = t; slowIdx = i; }
+    });
+    const slowStat = slowIdx >= 0
+      ? `<div class="stat"><span class="lbl">Passaggio più lungo</span><span class="val slow" title="${esc(tipDelta(rows_[slowIdx], nums[slowIdx]))}">${fmtDur(slowSec)}<small>verso ${esc(eventStepLabel(cfg[slowIdx]) || '')}</small></span></div>`
       : '';
     statRow = `
       <div class="stat-row">
@@ -5028,6 +5042,7 @@ function eventFunnelViz() {
         ${endStat}
         ${timeStat}
         ${worstStat}
+        ${slowStat}
       </div>`;
   }
 
@@ -5035,11 +5050,10 @@ function eventFunnelViz() {
     <div class="fun-cols">
       <div class="col-label">Step</div>
       <div class="col-bar"></div>
-      <div class="col-n">n</div>
-      <div class="col-prev" title="Conversione rispetto allo step reale precedente">vs prec</div>
-      <div class="col-head" title="${isAbs ? `Rapporto sul primo step (${esc(headLabel)}) — non è una conversione` : `Conversione rispetto al primo step reale del funnel (${esc(headLabel)})`}">vs #1</div>
-      <div class="col-tdelta" title="Tempo mediano impiegato per passare dallo step precedente a questo">tempo</div>
-      <div class="col-tcum" title="Tempo mediano trascorso da ${esc(headLabel)} a questo step">da #1</div>
+      <div class="col-n">utenti</div>
+      <div class="col-head" title="${isAbs ? `Rapporto sul primo step (${esc(headLabel)}) — non è una conversione` : `Quota della coorte che arriva fin qui, rispetto a ${esc(headLabel)} (${headN})`}">del totale</div>
+      <div class="col-tdelta" title="Tempo mediano impiegato per passare dallo step precedente a questo">passaggio</div>
+      <div class="col-tcum" title="Tempo mediano trascorso da ${esc(headLabel)} a questo step">da inizio</div>
     </div>`;
 
   const rows = cfg.map((row, i) => {
@@ -5067,15 +5081,31 @@ function eventFunnelViz() {
 
     // Barra: track pieno = 100% del denominatore · ghost tratteggiato = livello dello step
     // precedente (la parte tratteggiata È il drop) · fill = step corrente.
+    //
+    // La perdita è scritta DENTRO la barra invece che in una colonna: il tratteggio è già largo
+    // esattamente quanto le persone che non sono passate, quindi la cifra sta sopra il buco che
+    // descrive e l'imbuto resta una colonna sola di barre che si accorciano, letta senza
+    // interruzioni. L'etichetta è ancorata a destra del track — posizione fissa, così le perdite
+    // formano una colonna dritta invece di spostarsi a ogni riga seguendo la fine del riempimento.
+    const lostN   = prevIdx !== null && vsN !== null ? vsN - n : null;
+    const lostPct = convPct !== null ? 100 - convPct : null;
+    const showLoss = !isAbs && lostN !== null && lostN > 0;
+    const lossTip = showLoss
+      ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${vsN} non ${lostN === 1 ? 'è arrivata' : 'sono arrivate'} a "${label}"`
+      : '';
+    const lossTag = showLoss
+      ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></div>`
+      : '';
+
     const parentRow = `
       <div class="fun-row">
         <div class="col-label">${chevron}${esc(label)}${countBadge}<span class="evt">${evtLine}</span></div>
         <div class="col-bar"><div class="track">
           ${!isAbs && prevIdx !== null ? `<div class="ghost ${isWorst ? 'worst' : ''}" style="width:${gw}%"></div>` : ''}
           <div class="fill" style="width:${w}%"></div>
+          ${lossTag}
         </div></div>
         <div class="col-n n-val">${n}</div>
-        <div class="col-prev pct ${convPct === null ? 'dash' : isWorst ? 'worst-pct' : ''}">${fmtP(convPct)}</div>
         <div class="col-head pct ${startPct === null ? 'dash' : 'head-pct'}" title="rispetto a ${esc(headLabel)} (${headN})">${fmtP(startPct)}</div>
         <div class="col-tdelta dur ${rows_[i]?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(rows_[i], n))}">${fmtDur(rows_[i]?.t_p50_sec)}</div>
         <div class="col-tcum dur cum ${rows_[i]?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(rows_[i], n, headLabel))}">${fmtDur(rows_[i]?.t_cum_p50_sec)}</div>
@@ -5083,9 +5113,10 @@ function eventFunnelViz() {
 
     if (!hasChildren || !expanded) return parentRow;
 
-    // Righe children indentate. `vs prec` = quota della variante sul parent (n_child/n_parent);
-    // `vs #1` = n_child/headN. La barra è sulla stessa scala del parent così si legge come
-    // una fetta del parent, non come uno step alla pari.
+    // Righe children indentate. Le varianti non sono un passaggio della cascata — sono una fetta
+    // del parent — quindi non hanno una perdita da mostrare nella barra: la loro quota sul parent
+    // vive nel title. `del totale` = n_child/headN. La barra è sulla stessa scala del parent così
+    // si legge come una fetta di quello, non come uno step alla pari.
     const childRows = children.map((c, ci) => {
       const cFlat = flatMap.child?.[i]?.[ci];
       const cn = (cFlat != null) ? (numById[cFlat] ?? 0) : 0;
@@ -5102,8 +5133,7 @@ function eventFunnelViz() {
         <div class="child-row">
           <div class="col-label"><span class="arr">↳</span>${esc(cLabel)}<span class="evt">${cEvt}</span></div>
           <div class="col-bar"><div class="child-track"><div class="child-fill" style="width:${cw}%"></div></div></div>
-          <div class="col-n n-val">${cn}</div>
-          <div class="col-prev pct" title="quota della variante sul parent (${n})">${fmtP(vsParentPct)}</div>
+          <div class="col-n n-val" title="${fmtP(vsParentPct)} del parent (${n})">${cn}</div>
           <div class="col-head pct" title="rispetto a ${esc(headLabel)} (${headN})">${fmtP(vsHeadPct)}</div>
           <div class="col-tdelta dur ${cRow?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(cRow, cn))}">${fmtDur(cRow?.t_p50_sec)}</div>
           <div class="col-tcum dur cum ${cRow?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(cRow, cn, headLabel))}">${fmtDur(cRow?.t_cum_p50_sec)}</div>
