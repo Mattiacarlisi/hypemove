@@ -284,14 +284,24 @@
 .col-label { width: 200px; flex-shrink: 0; }
 .col-bar   { flex: 1; }
 .col-n     { width: 52px; text-align: right; flex-shrink: 0; }
-.col-head  { width: 62px; text-align: right; flex-shrink: 0; }
-/* Tempo: Δ dallo step precedente e Σ dalla testa del funnel. La barra è flex:1 e si restringe
-   da sola per far loro spazio. In volumi escono dal flusso — senza cascata non c'è uno step
-   precedente da cui misurare, e celle vuote leggerebbero come "misurato zero". */
-.col-tdelta { width: 62px; text-align: right; flex-shrink: 0; }
-.col-tcum   { width: 62px; text-align: right; flex-shrink: 0; }
-.fun-card[data-mode="absolute"] .col-tdelta,
-.fun-card[data-mode="absolute"] .col-tcum { display: none; }
+/* Due blocchi invece di quattro colonne: `utenti` e `del totale` sono la stessa domanda in due
+   unità (29 persone È il 76.3%), e così i due tempi. Impilarli li presenta per quello che sono —
+   due fatti, non quattro — e libera l'altezza per una barra più spessa.
+   In volumi il blocco dei tempi esce dal flusso: senza cascata non c'è uno step precedente da cui
+   misurare, e celle vuote leggerebbero come "misurato zero". */
+.col-who, .col-when {
+  flex-shrink: 0; text-align: right; display: flex; flex-direction: column;
+  gap: 1px; line-height: 1.15;
+}
+.col-who  { width: 68px; }
+.col-when { width: 66px; }
+.col-who .a  { font-family: var(--mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.3px; }
+.col-who .b  { font-size: 11px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+.col-when .a { font-family: var(--mono); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: help; }
+.col-when .b { font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; cursor: help; }
+.col-who .dash, .col-when .dash { color: var(--muted); font-weight: 400; cursor: default; }
+.fun-cols .col-who, .fun-cols .col-when { font-family: 'Inter', sans-serif; }
+.fun-card[data-mode="absolute"] .col-when { display: none; }
 
 .fun-row {
   display: flex; align-items: center; gap: 16px; padding: 10px 0;
@@ -308,15 +318,17 @@
 .variants-tag { font-size: 10px; color: var(--muted); font-weight: 400; }
 .chev { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 10px; padding: 0 5px 0 0; font-family: inherit; }
 
-/* Barra: track pieno = 100% · ghost tratteggiato = livello step precedente (il drop) · fill = step */
-.track { position: relative; height: 24px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+/* Barra: track pieno = 100% · ghost tratteggiato = livello step precedente (il drop) · fill = step.
+   32px invece di 24: le celle impilate hanno alzato la riga, e una barra più spessa regge meglio
+   sia il tratteggio sia l'etichetta della perdita che ci vive dentro. */
+.track { position: relative; height: 32px; background: var(--surface2); border-radius: 6px; overflow: hidden; }
 .ghost {
-  position: absolute; inset: 0 auto 0 0; border-radius: 4px;
+  position: absolute; inset: 0 auto 0 0; border-radius: 6px;
   background: repeating-linear-gradient(-55deg, transparent 0 5px, #2e2e44 5px 7px);
 }
 .ghost.worst { background: repeating-linear-gradient(-55deg, transparent 0 5px, rgba(248,113,113,.38) 5px 7px); }
 .fill {
-  position: absolute; inset: 0 auto 0 0; border-radius: 4px;
+  position: absolute; inset: 0 auto 0 0; border-radius: 6px;
   background: linear-gradient(90deg, var(--accent), var(--purple));
   transition: width .35s ease;
 }
@@ -335,18 +347,8 @@
 .loss.worst { color: var(--red); }
 .fun-card[data-mode="absolute"] .fill { background: linear-gradient(90deg, var(--blue, #2563eb), var(--danilo, #60a5fa)); }
 
-.n-val { font-family: var(--mono); font-weight: 600; font-size: 15px; font-variant-numeric: tabular-nums; }
 .pct { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
-.pct.head-pct { font-weight: 500; color: var(--muted); }
-.pct.worst-pct { color: var(--red); }
-.pct.dash { color: var(--muted); font-weight: 400; }
 
-/* Durate: mono per allineare le cifre in colonna. Il Δ è la misura che si legge (peso pieno),
-   il Σ è contesto e resta smorzato — altrimenti due colonne numeriche adiacenti competono. */
-.dur { font-family: var(--mono); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); cursor: help; }
-.dur.cum { font-weight: 500; color: var(--muted); }
-.dur.dash { color: var(--muted); font-weight: 400; cursor: default; }
-.child-row .dur { font-size: 10.5px; font-weight: 500; color: var(--muted); }
 
 /* Varianti annidate — fetta del parent, stessa scala */
 .child-row {
@@ -355,11 +357,13 @@
 }
 .child-row .col-label { font-size: 11.5px; color: var(--muted); padding-left: 26px; }
 .child-row .col-label .arr { color: #4a4a68; margin-right: 5px; }
+.child-row .col-who .a  { font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.child-row .col-who .b  { font-size: 10px; }
+.child-row .col-when .a { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+.child-row .col-when .b { font-size: 9.5px; }
 .child-track { position: relative; height: 12px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
 .child-fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--purple); opacity: .5; }
 .fun-card[data-mode="absolute"] .child-fill { background: var(--danilo, #60a5fa); }
-.child-row .n-val { font-size: 12.5px; font-weight: 500; color: var(--muted); }
-.child-row .pct { font-size: 11px; font-weight: 500; color: var(--muted); }
 
 /* Contesto install — footer fuori dalla cascata */
 .fun-context {
@@ -382,10 +386,11 @@
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 @media (max-width: 900px) {
   .col-label { width: 130px; }
-  .col-head { width: 48px; }
-  .col-tdelta, .col-tcum { width: 50px; }
-  .fun-cols, .fun-row, .child-row { gap: 11px; }
-  .loss { font-size: 10px; right: 6px; }
+  .col-who { width: 58px; }
+  .col-when { width: 56px; }
+  .col-who .a { font-size: 14px; }
+  .fun-cols, .fun-row, .child-row { gap: 12px; }
+  .loss { font-size: 10px; right: 7px; }
   .stat-row { gap: 24px; }
 }
 

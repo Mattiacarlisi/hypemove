@@ -5050,10 +5050,8 @@ function eventFunnelViz() {
     <div class="fun-cols">
       <div class="col-label">Step</div>
       <div class="col-bar"></div>
-      <div class="col-n">utenti</div>
-      <div class="col-head" title="${isAbs ? `Rapporto sul primo step (${esc(headLabel)}) — non è una conversione` : `Quota della coorte che arriva fin qui, rispetto a ${esc(headLabel)} (${headN})`}">del totale</div>
-      <div class="col-tdelta" title="Tempo mediano impiegato per passare dallo step precedente a questo">passaggio</div>
-      <div class="col-tcum" title="Tempo mediano trascorso da ${esc(headLabel)} a questo step">da inizio</div>
+      <div class="col-who" title="${isAbs ? `Quante identità hanno emesso l'evento, e il rapporto sul primo step (${esc(headLabel)})` : `Quante persone arrivano fin qui, in valore assoluto e come quota di ${esc(headLabel)} (${headN})`}"><span>utenti</span><span>del totale</span></div>
+      <div class="col-when" title="Tempo mediano per arrivare qui dallo step precedente, e tempo mediano trascorso da ${esc(headLabel)}"><span>passaggio</span><span>da inizio</span></div>
     </div>`;
 
   const rows = cfg.map((row, i) => {
@@ -5064,6 +5062,10 @@ function eventFunnelViz() {
     const vsN   = prevIdx !== null ? nums[prevIdx] : null;
     const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     const startPct = i !== headIdx && headN > 0 ? (n / headN * 100) : null;
+    // Lo step di testa È il totale: la sua quota è 100%, non "non applicabile". Il trattino aveva
+    // senso quando la colonna si chiamava "vs #1" (un confronto con se stesso non esiste), non
+    // ora che dichiara la quota sulla coorte.
+    const sharePct = (i === headIdx && headN > 0) ? 100 : startPct;
     const isWorst = i === worstIdx;
     const w  = Math.min(n / denom * 100, 100);
     const gw = prevIdx !== null ? Math.min(nums[prevIdx] / denom * 100, 100) : 0;
@@ -5105,10 +5107,13 @@ function eventFunnelViz() {
           <div class="fill" style="width:${w}%"></div>
           ${lossTag}
         </div></div>
-        <div class="col-n n-val">${n}</div>
-        <div class="col-head pct ${startPct === null ? 'dash' : 'head-pct'}" title="rispetto a ${esc(headLabel)} (${headN})">${fmtP(startPct)}</div>
-        <div class="col-tdelta dur ${rows_[i]?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(rows_[i], n))}">${fmtDur(rows_[i]?.t_p50_sec)}</div>
-        <div class="col-tcum dur cum ${rows_[i]?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(rows_[i], n, headLabel))}">${fmtDur(rows_[i]?.t_cum_p50_sec)}</div>
+        <div class="col-who" title="rispetto a ${esc(headLabel)} (${headN})">
+          <span class="a">${n}</span><span class="b ${sharePct === null ? 'dash' : ''}">${fmtP(sharePct)}</span>
+        </div>
+        <div class="col-when">
+          <span class="a ${rows_[i]?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(rows_[i], n))}">${fmtDur(rows_[i]?.t_p50_sec)}</span>
+          <span class="b ${rows_[i]?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(rows_[i], n, headLabel))}">${fmtDur(rows_[i]?.t_cum_p50_sec)}</span>
+        </div>
       </div>`;
 
     if (!hasChildren || !expanded) return parentRow;
@@ -5133,10 +5138,13 @@ function eventFunnelViz() {
         <div class="child-row">
           <div class="col-label"><span class="arr">↳</span>${esc(cLabel)}<span class="evt">${cEvt}</span></div>
           <div class="col-bar"><div class="child-track"><div class="child-fill" style="width:${cw}%"></div></div></div>
-          <div class="col-n n-val" title="${fmtP(vsParentPct)} del parent (${n})">${cn}</div>
-          <div class="col-head pct" title="rispetto a ${esc(headLabel)} (${headN})">${fmtP(vsHeadPct)}</div>
-          <div class="col-tdelta dur ${cRow?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(cRow, cn))}">${fmtDur(cRow?.t_p50_sec)}</div>
-          <div class="col-tcum dur cum ${cRow?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(cRow, cn, headLabel))}">${fmtDur(cRow?.t_cum_p50_sec)}</div>
+          <div class="col-who" title="${fmtP(vsParentPct)} del parent (${n})">
+            <span class="a">${cn}</span><span class="b">${fmtP(vsHeadPct)}</span>
+          </div>
+          <div class="col-when">
+            <span class="a ${cRow?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(cRow, cn))}">${fmtDur(cRow?.t_p50_sec)}</span>
+            <span class="b ${cRow?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(cRow, cn, headLabel))}">${fmtDur(cRow?.t_cum_p50_sec)}</span>
+          </div>
         </div>`;
     }).join('');
 
