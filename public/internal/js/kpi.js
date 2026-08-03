@@ -409,6 +409,8 @@ let state = {
   premiumData: null, premiumLoading: false, premiumError: null,
   // Gate di fine prova: RPC dedicata (`kpi_trial_end_gate`), sezione a sé.
   trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateAt: null, trialGateWindow: null,
+  // Il regalo (D0 della prova): RPC dedicata (`kpi_trial_gift`), sezione gemella del gate.
+  trialGiftData: null, trialGiftLoading: false, trialGiftError: null, trialGiftAt: null, trialGiftWindow: null,
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1046,6 +1048,8 @@ async function fetchPremium() {
   // Il gate di fine prova ha una RPC sua (percorso a biforcazione + verità a
   // terra da `users.trial_choice`): si carica dopo, così la pagina non aspetta.
   void fetchTrialGate();
+  // Stessa cosa per il regalo (D0): sezione gemella, RPC gemella.
+  void fetchTrialGift();
 }
 
 // Lista di chi ha fatto un'azione della biforcazione del gate (bucket senza
@@ -1106,6 +1110,38 @@ async function fetchTrialGate() {
     state.trialGateError = e.message || 'RPC kpi_trial_end_gate non disponibile';
   }
   state.trialGateLoading = false;
+  render();
+}
+
+// Funnel per fase della schermata del regalo (D0 della prova). Stessa filosofia
+// del gate: chiamata separata e tollerante — finché la RPC non è applicata la
+// sezione mostra il suo stato, il resto della pagina non ne dipende.
+async function fetchTrialGift() {
+  state.trialGiftLoading = true; state.trialGiftError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_trial_gift', {
+      inizio: state.premiumFrom,
+      fine:   state.premiumTo,
+      p_gender: state.premiumGender,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.trialGiftData = data;
+    state.trialGiftAt = new Date();
+    // La finestra vera che ha prodotto questi numeri, scritta a schermo (stessa
+    // scelta del gate: uno sprint che la restringe deve vedersi subito).
+    state.trialGiftWindow = selSprint
+      ? `${selSprint.nome} (${selSprint.inizio} → ${selSprint.fine})`
+      : `${state.premiumFrom} → ${state.premiumTo}`;
+  } catch (e) {
+    // Come per il gate: il dato vecchio si BUTTA, mai numeri stantii che mentono.
+    state.trialGiftData = null;
+    state.trialGiftError = e.message || 'RPC kpi_trial_gift non disponibile';
+  }
+  state.trialGiftLoading = false;
   render();
 }
 
@@ -6554,8 +6590,10 @@ function pagePremium() {
       </div>
     </div>
 
-    <!-- Creatività: quale paywall converte di più, col percorso step inline -->
+    <!-- Il regalo (D0) e il gate (D7): l'inizio e la fine della settimana regalata -->
+    ${premiumTrialGiftCard()}
     ${premiumTrialGateCard()}
+    <!-- Creatività: quale paywall converte di più, col percorso step inline -->
     ${premiumCreativesCard(d)}
 
     <!-- Chi ha tentato / acquistato -->
@@ -6850,6 +6888,165 @@ function premiumTrialGateCard() {
       lo percorre più volte. Percentuali e cali sulla prima schermata del film.
       <strong>Clicca una schermata del film</strong> per vedere chi ci è arrivato.
       ${(d.terms_open || 0) > 0 ? `· ${d.terms_open} hanno aperto i termini.` : ''}
+    </div>`);
+}
+
+// ── IL REGALO (D0) ────────────────────────────────────────────────────
+// Sezione gemella del gate: il regalo è il giorno 0 della prova, il gate il
+// giorno 7. Stessa grammatica visiva (box in fila, calo % sulla freccia) ma
+// SENZA piani/tentativi/acquisti: qui non si vende niente, si misura solo dove
+// la sequenza perde le persone. Le fasi NON sono cablate: arrivano dai dati
+// (`metadata->phase`) — una fase nuova nel client compare da sola, con il suo
+// nome grezzo. Nessun box cliccabile: non esiste una RPC di lista (deliberato,
+// D3 della spec) e una classe cliccabile senza RPC aprirebbe modal vuoti — lo
+// stesso bug già pagato dal gate coi `premium-step-box`.
+
+// Etichette di RESA per le fasi note: chi manca cade sul nome grezzo dai dati.
+const TRIAL_GIFT_PHASE_LABELS = {
+  hello:   'Benvenuto',
+  gift:    'Il pacco',
+  opening: 'Apertura',
+  reveal:  'La carta',
+};
+const TRIAL_GIFT_PHASE_HINTS = {
+  opening: 'transizione automatica (1.5s): misura il timer, non l\'utente',
+};
+
+function premiumTrialGiftCard() {
+  const wrap = (inner) => `
+    <div class="card" style="margin-bottom:16px">
+      <div style="margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:3px">Il regalo · il D0 della prova</div>
+        <div style="font-size:11px;color:var(--muted)">
+          la sequenza che annuncia i 7 giorni regalati, fra la registrazione e la Home ·
+          <code style="font-family:var(--mono)">trial_gift_step_view</code>
+          ${state.trialGiftWindow ? `<br><span style="color:#5a5a7a">periodo interrogato: ${esc(state.trialGiftWindow)}</span>` : ''}
+          ${state.trialGiftAt ? ` · letto alle ${state.trialGiftAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+        </div>
+      </div>
+      ${inner}
+    </div>`;
+
+  if (state.trialGiftLoading && !state.trialGiftData) {
+    return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico il percorso del regalo…</div>`);
+  }
+  if (state.trialGiftError) {
+    // Sessione scaduta: il caso più insidioso — la pagina resta in piedi e
+    // sembra solo "senza dati". Stesso trattamento del gate.
+    const scaduta = /jwt|expired|denied|forbidden|401|permission/i.test(state.trialGiftError);
+    if (scaduta) {
+      return wrap(`
+        <div style="background:#2b1114;border:1px solid #5a1f28;border-radius:8px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.5">
+          🔒 <strong>Sessione scaduta: questi numeri non sono stati letti.</strong>
+          Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
+          <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGiftError)}</span>
+        </div>`);
+    }
+    return wrap(`
+      <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+        ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialGiftError)}<br>
+        La RPC <code style="font-family:var(--mono)">kpi_trial_gift</code> va applicata in produzione.
+      </div>`);
+  }
+
+  const d = state.trialGiftData;
+  if (!d) return '';
+
+  const granted   = d.granted || 0;
+  const entered   = d.entered || {};
+  const completed = d.completed || {};
+  const phases    = (d.phases || []).slice().sort((a, b) => a.idx - b.idx);
+
+  if (!granted && !(entered.users || 0) && !phases.length) {
+    return wrap(`
+      <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
+        Nessuna prova concessa e nessun ingresso nella sequenza nel periodo selezionato.<br>
+        <span style="color:#5a5a7a">Gli eventi di fase esistono solo nelle build dal 03/08 in poi:
+        su periodi precedenti questa sezione mostra al massimo gli ingressi.</span>
+      </div>`);
+  }
+
+  // ── 1. la verità a terra, in cima: concessi (server) contro visti (eventi) ──
+  const gapConcessi = granted - (entered.users || 0);
+  const esito = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">
+      ${[
+        { k: 'Prova concessa', v: granted, c: '#4ade80', s: 'users.trial_started_at nella finestra' },
+        { k: 'Hanno visto il regalo', v: entered.users || 0, c: '#22d3ee', s: `${entered.new || 0} nuovi · ${entered.returning || 0} storici` },
+        { k: 'Usciti col tap', v: completed.users || 0, c: '#c4b5fd', s: 'hanno visto tutta la sequenza' },
+        {
+          k: 'Concessi ma mai visto',
+          v: gapConcessi > 0 ? gapConcessi : (gapConcessi < 0 ? `+${-gapConcessi}` : 0),
+          c: gapConcessi > 0 ? '#f87171' : (gapConcessi < 0 ? '#fbbf24' : '#4ade80'),
+          s: gapConcessi > 0
+            ? 'ANOMALIA: prova attiva senza annuncio — da investigare'
+            : (gapConcessi < 0 ? 'visti > concessi: ingressi doppi o finestre sfalsate' : 'tutti i concessi hanno visto l\'annuncio'),
+        },
+      ].map(x => `
+        <div style="background:#111120;border:1px solid #1a1a2e;border-radius:8px;padding:11px 12px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(x.k)}</div>
+          <div style="font-size:24px;font-weight:700;color:${x.c};line-height:1.2;margin-top:3px">${x.v}</div>
+          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono);margin-top:2px">${esc(x.s)}</div>
+        </div>`).join('')}
+    </div>`;
+
+  // ── 2. il percorso per fase, stessa grammatica del gate ma senza click ──
+  const base = phases.length ? phases[0].events : (entered.events || 0);
+  const box = (label, views, people, prev, opts) => {
+    const o = opts || {};
+    const pct  = base > 0 ? Math.round(views / base * 100) : 0;
+    const drop = (prev && prev > 0) ? Math.round((1 - views / prev) * 100) : null;
+    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+    const arrow = prev !== null && prev !== undefined ? `
+      <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 3px">
+        ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
+        <span style="font-size:13px;line-height:1">→</span>
+      </div>` : '';
+    return arrow + `
+      <div title="${esc(o.title || '')}" style="text-align:center;min-width:70px;background:#111120;border:1px solid ${o.border || '#1f1f33'};border-radius:6px;padding:6px 8px">
+        <div style="font-weight:700;color:${o.color || 'var(--fg)'};font-size:15px;line-height:1">${views}</div>
+        <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(label)}</div>
+        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${people} person${people === 1 ? 'a' : 'e'} · ${pct}%</div>
+      </div>`;
+  };
+
+  let prev = null;
+  const phaseBoxes = phases.map((p) => {
+    const label = TRIAL_GIFT_PHASE_LABELS[p.phase] || p.phase;
+    const hint  = TRIAL_GIFT_PHASE_HINTS[p.phase] || '';
+    const storici = (p.users_returning || 0) > 0 ? ` · di cui ${p.users_returning} storici` : '';
+    const b = box(label, p.events, p.users, prev, {
+      title: `${hint ? hint + ' · ' : ''}fase "${p.phase}"${storici}`,
+      color: TRIAL_GIFT_PHASE_HINTS[p.phase] ? '#5a5a7a' : 'var(--fg)',
+    });
+    prev = p.events;
+    return b;
+  }).join('');
+
+  // L'uscita chiude la fila: il divario con l'ultima fase è "ha chiuso l'app
+  // sull'ultima schermata" — il numero per cui questa sezione esiste.
+  const lastPhase = phases.length ? phases[phases.length - 1] : null;
+  const chiusiSullaCarta = lastPhase ? Math.max(0, (lastPhase.users || 0) - (completed.users || 0)) : 0;
+  const exitBox = box('Uscita (tap)', completed.events || 0, completed.users || 0, prev, {
+    border: '#1f5a36', color: '#4ade80',
+    title: 'trial_gift_completed: tap sulla carta, si atterra in Home',
+  });
+
+  const persi = lastPhase && chiusiSullaCarta > 0 ? `
+    <div style="margin-top:12px;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:9px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+      <strong>${chiusiSullaCarta} ${chiusiSullaCarta === 1 ? 'persona ha' : 'persone hanno'} chiuso l'app sull'ultima schermata</strong>
+      (${esc(TRIAL_GIFT_PHASE_LABELS[lastPhase.phase] || lastPhase.phase)}): ${chiusiSullaCarta === 1 ? 'ha' : 'hanno'} visto il regalo ma non ${chiusiSullaCarta === 1 ? 'è uscita' : 'sono usciti'} col tap.
+    </div>` : '';
+
+  return wrap(`
+    ${esito}
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">La sequenza, fase per fase</div>
+    <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${phaseBoxes}${exitBox}</div>
+    ${persi}
+    <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
+      Numero grande = <strong>eventi</strong>, riga sotto = <strong>persone</strong>, come nel gate qui sotto.
+      Le fasi arrivano dai dati: se la sequenza cambia nell'app, qui compare da sola.
+      Percentuali e cali sulla prima fase.
     </div>`);
 }
 
