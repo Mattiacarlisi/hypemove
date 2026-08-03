@@ -7038,16 +7038,31 @@ function premiumTrialGiftCard() {
       (${esc(TRIAL_GIFT_PHASE_LABELS[lastPhase.phase] || lastPhase.phase)}): ${chiusiSullaCarta === 1 ? 'ha' : 'hanno'} visto il regalo ma non ${chiusiSullaCarta === 1 ? 'è uscita' : 'sono usciti'} col tap.
     </div>` : '';
 
+  // Nessuna fase nei dati NON vuol dire "nessuno è passato di qui": vuol dire che
+  // le build in circolazione non emettono ancora gli eventi di fase. Mostrare la
+  // fila con il solo box di uscita a zero si legge come un funnel rotto, quando
+  // invece è un funnel che non ha ancora cominciato a ricevere dati.
+  const sequenza = phases.length
+    ? `
+      <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${phaseBoxes}${exitBox}</div>
+      ${persi}
+      <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
+        Numero grande = <strong>eventi</strong>, riga sotto = <strong>persone</strong>, come nel gate qui sotto.
+        Le fasi arrivano dai dati: se la sequenza cambia nell'app, qui compare da sola.
+        Percentuali e cali sulla prima fase.
+      </div>`
+    : `
+      <div style="background:#0d0d18;border:1px dashed #2a2a44;border-radius:8px;padding:12px 14px;font-size:11px;color:#5a5a7a;line-height:1.6">
+        Nessun evento di fase in questa finestra — <strong style="color:#7b7b9a">atteso finché le build
+        aggiornate non circolano</strong>. Il tracciamento per fase esiste dal 03/08/2026: gli utenti
+        con l'app precedente attraversano la sequenza senza lasciare traccia, e qui non compaiono.
+        I ${entered.users || 0} ingressi qui sopra li vedi lo stesso perché quell'evento c'era già prima.
+      </div>`;
+
   return wrap(`
     ${esito}
     <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">La sequenza, fase per fase</div>
-    <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${phaseBoxes}${exitBox}</div>
-    ${persi}
-    <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
-      Numero grande = <strong>eventi</strong>, riga sotto = <strong>persone</strong>, come nel gate qui sotto.
-      Le fasi arrivano dai dati: se la sequenza cambia nell'app, qui compare da sola.
-      Percentuali e cali sulla prima fase.
-    </div>`);
+    ${sequenza}`);
 }
 
 // ── CREATIVITÀ PAYWALL ────────────────────────────────────────────────
