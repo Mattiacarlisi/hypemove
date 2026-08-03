@@ -1719,6 +1719,80 @@ async function fetchMetaInsights(dateParam, token) {
   return res.data?.[0] || null;
 }
 
+// Il time_range dell'API insights di Meta ha granularità giornaliera: l'orario di
+// uno sprint (inizio_ora/fine_ora) verrebbe ignorato, e due sprint che condividono
+// un giorno si prenderebbero entrambi la spesa dell'intera giornata. Quando lo
+// sprint ha un orario, chiedo il breakdown orario e riaggrego tenendo solo i
+// bucket che toccano la finestra. I bucket sono nel fuso dell'ad account (per noi
+// Europe/Rome, lo stesso in cui sono espressi gli orari degli sprint). Reach e
+// frequency non esistono su base oraria: restano null e la UI mostra '—' invece
+// di riportare il valore gonfiato dell'intera giornata.
+async function fetchMetaInsightsWindow(fromDate, toDate, inizioOra, fineOra, token) {
+  if (!inizioOra && !fineOra) {
+    const dp = 'time_range=' + encodeURIComponent(JSON.stringify({ since: fromDate, until: toDate }));
+    return fetchMetaInsights(dp, token);
+  }
+
+  let url = META_API + '/' + META_AD_ACCOUNT + '/insights'
+    + '?fields=spend,impressions,clicks,actions'
+    + '&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone'
+    + '&time_increment=1&limit=500'
+    + '&time_range=' + encodeURIComponent(JSON.stringify({ since: fromDate, until: toDate }))
+    + '&access_token=' + token;
+  const rows = [];
+  for (let page = 0; url && page < 10; page++) {
+    const res = await fetch(url).then(r => r.json());
+    if (res.error) throw new Error(res.error.message);
+    rows.push(...(res.data || []));
+    url = res.paging?.next || null;
+  }
+
+  const toHours = hhmm => { const p = String(hhmm).split(':'); return (+p[0]) + (+p[1] || 0) / 60; };
+  const startH = inizioOra ? toHours(inizioOra) : null;
+  const endH   = fineOra   ? toHours(fineOra)   : null;
+
+  // Bucket [h, h+1): dentro se tocca [startH, endH). Il ritaglio vale solo sul
+  // giorno di inizio/fine; i giorni pieni in mezzo passano interi.
+  const inWindow = row => {
+    const h = parseInt(String(row.hourly_stats_aggregated_by_advertiser_time_zone || '').slice(0, 2), 10);
+    if (isNaN(h)) return true;
+    if (startH != null && row.date_start === fromDate && h + 1 <= startH) return false;
+    if (endH   != null && row.date_start === toDate   && h >= endH)       return false;
+    return true;
+  };
+
+  let any = false;
+  const agg = { spend: 0, impressions: 0, clicks: 0, actions: {} };
+  for (const row of rows) {
+    if (!inWindow(row)) continue;
+    any = true;
+    agg.spend       += parseFloat(row.spend || 0);
+    agg.impressions += parseInt(row.impressions || 0, 10);
+    agg.clicks      += parseInt(row.clicks || 0, 10);
+    (row.actions || []).forEach(a => {
+      agg.actions[a.action_type] = (agg.actions[a.action_type] || 0) + parseFloat(a.value || 0);
+    });
+  }
+  if (!any) return null;
+
+  const actions = Object.keys(agg.actions).map(t => ({ action_type: t, value: String(agg.actions[t]) }));
+  return {
+    spend:       agg.spend.toFixed(2),
+    impressions: String(agg.impressions),
+    clicks:      String(agg.clicks),
+    ctr: agg.impressions > 0 ? String(agg.clicks / agg.impressions * 100) : null,
+    cpc: agg.clicks      > 0 ? String(agg.spend / agg.clicks)             : null,
+    cpm: agg.impressions > 0 ? String(agg.spend / agg.impressions * 1000) : null,
+    reach: null,
+    frequency: null,
+    actions,
+    cost_per_action_type: actions
+      .filter(a => parseFloat(a.value) > 0)
+      .map(a => ({ action_type: a.action_type, value: String(agg.spend / parseFloat(a.value)) })),
+    clipped: true,
+  };
+}
+
 async function fetchMetaAds() {
   if (!state.metaToken) { render(); return; }
   state.metaAdsLoading = true;
@@ -1750,8 +1824,14 @@ async function fetchMetaFunnel() {
   state.metaFunnelPeriod = state.funnelFrom + ' → ' + state.funnelTo;
   render();
   try {
-    const dp = 'time_range=' + encodeURIComponent(JSON.stringify({ since: state.funnelFrom, until: state.funnelTo }));
-    state.metaFunnelData = await fetchMetaInsights(dp, state.metaToken);
+    // se il periodo coincide con lo sprint selezionato, la spesa rispetta anche il suo orario
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    const clip = selSprint && selSprint.inizio === state.funnelFrom && selSprint.fine === state.funnelTo;
+    state.metaFunnelData = await fetchMetaInsightsWindow(
+      state.funnelFrom, state.funnelTo,
+      clip ? selSprint.inizio_ora : null,
+      clip ? selSprint.fine_ora : null,
+      state.metaToken);
   } catch (e) { state.metaFunnelError = e.message || 'Errore API Meta'; }
   state.metaFunnelLoading = false;
   render();
@@ -1765,8 +1845,7 @@ async function fetchMetaSprintData() {
     await Promise.all(state.metaSprintSel.map(async id => {
       const sprint = state.sprints.find(s => String(s.id) === String(id));
       if (!sprint) return;
-      const dp = 'time_range=' + encodeURIComponent(JSON.stringify({ since: sprint.inizio, until: sprint.fine }));
-      const data = await fetchMetaInsights(dp, state.metaToken);
+      const data = await fetchMetaInsightsWindow(sprint.inizio, sprint.fine, sprint.inizio_ora, sprint.fine_ora, state.metaToken);
       state.metaSprintData[id] = data;
     }));
   } catch (e) { console.error('fetchMetaSprintData', e); }
