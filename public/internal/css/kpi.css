@@ -286,7 +286,14 @@
 .col-n     { width: 52px; text-align: right; flex-shrink: 0; }
 .col-prev  { width: 62px; text-align: right; flex-shrink: 0; }
 .col-head  { width: 62px; text-align: right; flex-shrink: 0; }
-.fun-card[data-mode="absolute"] .col-prev { display: none; }
+/* Tempo: Δ dallo step precedente e Σ dalla testa del funnel. La barra è flex:1 e si restringe
+   da sola per far loro spazio. In volumi escono dal flusso come già fa vs-prec — senza cascata
+   non c'è uno step precedente da cui misurare, e celle vuote leggerebbero come "misurato zero". */
+.col-tdelta { width: 60px; text-align: right; flex-shrink: 0; }
+.col-tcum   { width: 60px; text-align: right; flex-shrink: 0; }
+.fun-card[data-mode="absolute"] .col-prev,
+.fun-card[data-mode="absolute"] .col-tdelta,
+.fun-card[data-mode="absolute"] .col-tcum { display: none; }
 
 .fun-row {
   display: flex; align-items: center; gap: 16px; padding: 10px 0;
@@ -323,6 +330,13 @@
 .pct.worst-pct { color: var(--red); }
 .pct.dash { color: var(--muted); font-weight: 400; }
 
+/* Durate: mono per allineare le cifre in colonna. Il Δ è la misura che si legge (peso pieno),
+   il Σ è contesto e resta smorzato — altrimenti due colonne numeriche adiacenti competono. */
+.dur { font-family: var(--mono); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); cursor: help; }
+.dur.cum { font-weight: 500; color: var(--muted); }
+.dur.dash { color: var(--muted); font-weight: 400; cursor: default; }
+.child-row .dur { font-size: 10.5px; font-weight: 500; color: var(--muted); }
+
 /* Varianti annidate — fetta del parent, stessa scala */
 .child-row {
   display: flex; align-items: center; gap: 16px; padding: 5px 0;
@@ -358,6 +372,8 @@
 @media (max-width: 900px) {
   .col-label { width: 130px; }
   .col-prev, .col-head { width: 48px; }
+  .col-tdelta, .col-tcum { width: 46px; }
+  .fun-cols, .fun-row, .child-row { gap: 10px; }
   .stat-row { gap: 24px; }
 }
 

@@ -4894,6 +4894,20 @@ function installContextChips(installContext, from) {
     </div>`;
 }
 
+// Durata leggibile a partire da secondi. Mai secondi grezzi sopra il minuto, mai più di due
+// unità, unità inferiore omessa quando è zero (3600 → "1h", non "1h 0m").
+// `—` e `0s` sono due cose diverse: il primo è "non misurabile" (nessuno ha raggiunto lo step,
+// oppure non c'è uno step precedente), il secondo è "istantaneo" — un tempo osservato di zero.
+function fmtDur(sec) {
+  if (sec === null || sec === undefined || !Number.isFinite(Number(sec))) return '—';
+  const t = Math.round(Number(sec));
+  if (t < 60)     return `${t}s`;
+  if (t < 3600)   { const m = Math.floor(t / 60),    s = t % 60;          return s ? `${m}m ${s}s` : `${m}m`; }
+  if (t < 172800) { const h = Math.floor(t / 3600),  m = Math.floor((t % 3600) / 60);  return m ? `${h}h ${m}m` : `${h}h`; }
+  const g = Math.floor(t / 86400), h = Math.floor((t % 86400) / 3600);
+  return h ? `${g}g ${h}h` : `${g}g`;
+}
+
 function eventFunnelViz() {
   const cfg  = state.eventFunnelConfig || [];
   const data = (state.eventFunnel && state.eventFunnel.steps) || [];
@@ -4901,12 +4915,30 @@ function eventFunnelViz() {
   const isAbs = state.eventFunnelMode === 'absolute';
   // allinea i risultati per posizione flat (la RPC ritorna idx = posizione nello p_steps flatten)
   const numById = {};
-  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
+  const rowById = {};
+  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); rowById[s.idx] = s; });
   const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
   const nums = cfg.map((_, i) => {
     const flat = flatMap.parent?.[i];
     return (flat != null) ? (numById[flat] ?? 0) : 0;
   });
+  // Riga RPC completa per step, da cui leggere le misure di tempo (t_p50_sec, t_p90_sec,
+  // t_cum_p50_sec, t_cum_p90_sec). In modalità volumi arrivano tutte null: senza cascata non
+  // esiste uno step precedente da cui misurare, e le colonne sono nascoste via CSS.
+  const rows_ = cfg.map((_, i) => {
+    const flat = flatMap.parent?.[i];
+    return (flat != null) ? (rowById[flat] || null) : null;
+  });
+  // Tooltip delle celle di tempo: dichiarano il p90, il fatto che la misura è sui soli
+  // sopravvissuti dello step e il troncamento oltre la finestra di osservazione.
+  const tipDelta = (r, n) => r == null || r.t_p50_sec == null ? 'Nessun tempo misurabile per questo step'
+    : `Tempo mediano dallo step precedente. 9 utenti su 10 entro ${fmtDur(r.t_p90_sec)}. `
+    + `Misurato sui ${n} che raggiungono lo step, non sull'intera coorte. `
+    + `I tempi sono osservati fino a 90 giorni: oltre, il valore alto è troncato.`;
+  const tipCum = (r, n, head) => r == null || r.t_cum_p50_sec == null ? 'Nessun tempo misurabile per questo step'
+    : `Tempo mediano da ${head}. 9 utenti su 10 entro ${fmtDur(r.t_cum_p90_sec)}. `
+    + `Misurato sui ${n} che arrivano fin qui: può scendere rispetto allo step precedente, `
+    + `perché chi prosegue è più veloce di chi si è fermato prima.`;
   // Step install = contesto (footer), esclusi dalla cascata e dai rate. La catena
   // vs prec / vs #1 corre solo sugli step reali: realPrev[i] = indice del precedente step
   // reale, headIdx = primo step reale del funnel.
@@ -4947,10 +4979,18 @@ function eventFunnelViz() {
     const worstStat = worstIdx >= 0
       ? `<div class="stat"><span class="lbl">Drop peggiore</span><span class="val bad">−${(100 - nums[worstIdx] / nums[realPrev[worstIdx]] * 100).toFixed(1)}%<small>${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
       : '';
+    // Quanto ci mette chi arriva in fondo: il cumulato mediano dell'ultimo step reale.
+    // È sui soli arrivati, quindi con pochi sopravvissuti il numero è indicativo — il conteggio
+    // accanto serve a dire quanto pesarlo.
+    const endTime = rows_[lastIdx]?.t_cum_p50_sec;
+    const timeStat = (realIdxs.length > 1 && endTime != null)
+      ? `<div class="stat"><span class="lbl">Tempo per arrivare in fondo</span><span class="val" title="${esc(tipCum(rows_[lastIdx], nums[lastIdx], headLabel))}">${fmtDur(endTime)}<small>mediana su ${nums[lastIdx]}</small></span></div>`
+      : '';
     statRow = `
       <div class="stat-row">
         <div class="stat"><span class="lbl">Coorte</span><span class="val">${cohortN}</span></div>
         ${endStat}
+        ${timeStat}
         ${worstStat}
       </div>`;
   }
@@ -4962,6 +5002,8 @@ function eventFunnelViz() {
       <div class="col-n">n</div>
       <div class="col-prev" title="Conversione rispetto allo step reale precedente">vs prec</div>
       <div class="col-head" title="${isAbs ? `Rapporto sul primo step (${esc(headLabel)}) — non è una conversione` : `Conversione rispetto al primo step reale del funnel (${esc(headLabel)})`}">vs #1</div>
+      <div class="col-tdelta" title="Tempo mediano impiegato per passare dallo step precedente a questo">tempo</div>
+      <div class="col-tcum" title="Tempo mediano trascorso da ${esc(headLabel)} a questo step">da #1</div>
     </div>`;
 
   const rows = cfg.map((row, i) => {
@@ -4999,6 +5041,8 @@ function eventFunnelViz() {
         <div class="col-n n-val">${n}</div>
         <div class="col-prev pct ${convPct === null ? 'dash' : isWorst ? 'worst-pct' : ''}">${fmtP(convPct)}</div>
         <div class="col-head pct ${startPct === null ? 'dash' : 'head-pct'}" title="rispetto a ${esc(headLabel)} (${headN})">${fmtP(startPct)}</div>
+        <div class="col-tdelta dur ${rows_[i]?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(rows_[i], n))}">${fmtDur(rows_[i]?.t_p50_sec)}</div>
+        <div class="col-tcum dur cum ${rows_[i]?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(rows_[i], n, headLabel))}">${fmtDur(rows_[i]?.t_cum_p50_sec)}</div>
       </div>`;
 
     if (!hasChildren || !expanded) return parentRow;
@@ -5014,6 +5058,10 @@ function eventFunnelViz() {
       const vsHeadPct = headN > 0 ? (cn / headN * 100) : null;
       const cw = Math.min(cn / denom * 100, 100);
       const cEvt = `${esc(c.event || '')}${c.filters ? ' · ' + esc(serializeFilters(c.filters)) : ''}`;
+      // Il tempo della variante è ancorato allo step precedente al parent, non al parent: così
+      // sta sulla stessa scala della riga sopra ed è confrontabile con essa. Ancorarlo al parent
+      // darebbe quasi sempre ~0, perché i due eventi sono spesso emessi nello stesso istante.
+      const cRow = (cFlat != null) ? (rowById[cFlat] || null) : null;
       return `
         <div class="child-row">
           <div class="col-label"><span class="arr">↳</span>${esc(cLabel)}<span class="evt">${cEvt}</span></div>
@@ -5021,6 +5069,8 @@ function eventFunnelViz() {
           <div class="col-n n-val">${cn}</div>
           <div class="col-prev pct" title="quota della variante sul parent (${n})">${fmtP(vsParentPct)}</div>
           <div class="col-head pct" title="rispetto a ${esc(headLabel)} (${headN})">${fmtP(vsHeadPct)}</div>
+          <div class="col-tdelta dur ${cRow?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(cRow, cn))}">${fmtDur(cRow?.t_p50_sec)}</div>
+          <div class="col-tcum dur cum ${cRow?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(cRow, cn, headLabel))}">${fmtDur(cRow?.t_cum_p50_sec)}</div>
         </div>`;
     }).join('');
 
