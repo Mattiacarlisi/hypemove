@@ -11308,51 +11308,10 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── GATE DI ACCESSO ──────────────────────────────────────────────────
-// Le RPC `kpi_*` giravano con la sola anon key, che è pubblica: sta dentro l'APK
-// e in questo file. Chiunque la estraesse leggeva l'intera analitica di prodotto,
-// incluse le conversazioni col Coach (dati sanitari) via kpi_ai_session_detail.
-// Dal 31/07/2026 il DB pretende un operatore in `public.internal_operators`, quindi
-// la dashboard deve presentarsi con un JWT vero prima di chiedere qualsiasi dato.
-// Il login è lo stesso magic link già usato dal pannello prompt (opsLoginMagicLink).
-function renderOpsGate(message) {
-  document.body.innerHTML =
-    '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;' +
-    'font-family:system-ui,-apple-system,sans-serif;background:#08080f;color:#e8e8f0">' +
-      '<div style="max-width:420px;width:100%">' +
-        '<div style="font-size:20px;font-weight:600;margin-bottom:6px">Dashboard interna</div>' +
-        '<div id="ops-gate-msg" style="font-size:13px;color:#9a9ab0;margin-bottom:18px;line-height:1.5">' +
-          (message || 'Accesso riservato agli operatori. Entra col magic link.') +
-        '</div>' +
-        '<input id="ops-gate-email" type="email" placeholder="you@example.com" autocomplete="email" ' +
-          'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
-          'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
-        '<button id="ops-gate-send" style="width:100%;background:#5b4bff;border:0;color:#fff;border-radius:6px;' +
-          'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Mandami il link</button>' +
-      '</div>' +
-    '</div>';
-
-  const emailEl = document.getElementById('ops-gate-email');
-  const msgEl   = document.getElementById('ops-gate-msg');
-  const send    = async () => {
-    const email = (emailEl.value || '').trim();
-    if (!email) return;
-    msgEl.textContent = 'Invio in corso…';
-    // `emailRedirectTo` riporta qui: supabase-js legge la sessione dall'URL al ritorno.
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href } });
-    msgEl.textContent = error
-      ? ('Non ha funzionato: ' + (error.message || String(error)))
-      : 'Link inviato. Aprilo dalla casella di ' + email + ' e torna qui.';
-  };
-  document.getElementById('ops-gate-send').addEventListener('click', send);
-  emailEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
-}
-
 (async () => {
-  // La sessione va risolta PRIMA di ogni fetch: senza, ogni RPC tornerebbe 403 e la
-  // dashboard mostrerebbe una griglia di errori invece di dire che manca il login.
-  // Qui si legge la sessione a mano invece di usare refreshOpsSession(): quella
-  // chiude con un render(), e a questo punto del boot loadSettings() non è ancora passata.
+  // La dashboard apre senza login: le RPC `kpi_*` rispondono di nuovo alla sola
+  // anon key. La sessione si legge lo stesso, ma non decide più l'accesso — serve
+  // al pannello prompt, l'unica cosa qui dentro che scrive e pretende un JWT.
   try {
     const { data: bootSession } = await sb.auth.getSession();
     state.opsSession = bootSession?.session || null;
@@ -11361,11 +11320,6 @@ function renderOpsGate(message) {
     state.opsSession = null;
   }
   state.opsSessionCheckedOnce = true;
-
-  if (!state.opsSession) {
-    renderOpsGate();
-    return;
-  }
 
   await loadSettings();
   render();
