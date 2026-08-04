@@ -5083,15 +5083,17 @@ function eventFunnelViz() {
   const denom = isAbs ? maxN : Math.max(headN, 1);
   const fmtP = p => p === null ? '—' : p.toFixed(1) + '%';
 
-  // Drop peggiore (solo coorte): step reale col vs-prec minimo — unico uso del rosso in card.
+  // Drop peggiore (solo coorte): lo step che perde più persone in assoluto. Non il vs-prec
+  // minimo: quello premia gli step in fondo, dove una manciata di persone su una base già
+  // ridotta produce percentuali enormi che non pesano nulla sulla coorte.
   let worstIdx = -1;
   if (!isAbs) {
-    let worstPct = Infinity;
+    let worstLost = 0;
     realIdxs.forEach(i => {
       const p = realPrev[i];
       if (p === null || nums[p] <= 0) return;
-      const pct = nums[i] / nums[p] * 100;
-      if (pct < worstPct) { worstPct = pct; worstIdx = i; }
+      const lost = nums[p] - nums[i];
+      if (lost > worstLost) { worstLost = lost; worstIdx = i; }
     });
   }
 
@@ -5108,7 +5110,7 @@ function eventFunnelViz() {
     // Il drop peggiore in percentuale, con accanto quante persone sono: su coorti piccole −60%
     // e −52.6% sono quasi lo stesso numero, ma tre persone e dieci persone no.
     const worstStat = worstIdx >= 0
-      ? `<div class="stat"><span class="lbl">${fIcon('drop')}Drop peggiore</span><span class="val bad">−${(100 - nums[worstIdx] / nums[realPrev[worstIdx]] * 100).toFixed(1)}%<small>${nums[realPrev[worstIdx]] - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">${fIcon('drop')}Drop peggiore</span><span class="val bad">−${((nums[realPrev[worstIdx]] - nums[worstIdx]) / headN * 100).toFixed(1)}%<small>${nums[realPrev[worstIdx]] - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
       : '';
     // Quanto ci mette chi arriva in fondo: il cumulato mediano dell'ultimo step reale.
     // È sui soli arrivati, quindi con pochi sopravvissuti il numero è indicativo — il conteggio
@@ -5182,11 +5184,19 @@ function eventFunnelViz() {
     // descrive e l'imbuto resta una colonna sola di barre che si accorciano, letta senza
     // interruzioni. L'etichetta è ancorata a destra del track — posizione fissa, così le perdite
     // formano una colonna dritta invece di spostarsi a ogni riga seguendo la fine del riempimento.
+    // La percentuale scritta qui è SEMPRE sulla coorte (headN), mai sullo step precedente:
+    // "−31%" deve voler dire "trentuno persone su cento di quelle entrate", altrimenti in
+    // fondo all'imbuto perdere tre persone su dieci sopravvissute grida più di perderne
+    // trenta all'ingresso. La lettura sullo step precedente resta nel tooltip. Come effetto
+    // secondario la cifra torna a coincidere con ciò che si vede: in modalità coorte il
+    // denominatore delle barre È headN, quindi il tratteggio occupa esattamente quella
+    // frazione del track, e le perdite di tutti gli step sommano al 100% − quota finale.
     const lostN   = prevIdx !== null && vsN !== null ? vsN - n : null;
-    const lostPct = convPct !== null ? 100 - convPct : null;
+    const lostPct = lostN !== null && headN > 0 ? (lostN / headN * 100) : null;
     const showLoss = !isAbs && lostN !== null && lostN > 0;
     const lossTip = showLoss
-      ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${vsN} non ${lostN === 1 ? 'è arrivata' : 'sono arrivate'} a "${label}"`
+      ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${headN} di ${headLabel} ${lostN === 1 ? 'si ferma' : 'si fermano'} prima di "${label}"`
+        + ` — ${fmtP(lostPct)} della coorte, ${fmtP(convPct !== null ? 100 - convPct : null)} di chi era arrivato allo step precedente (${vsN})`
       : '';
     const lossTag = showLoss
       ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">${fIcon('drop')}−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></div>`
