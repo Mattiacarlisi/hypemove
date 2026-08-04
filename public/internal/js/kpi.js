@@ -57,9 +57,13 @@ const FUNNEL_LABELS = [
   // Servono perché lo step 2 "Onboarding iniziato" è COUNT(auth.identities) = account creati:
   // con la registrazione spostata in fondo, quel numero dice chi ha FINITO il questionario.
   // ⚠️ L'inizio NON è view_Welcome (lo emette anche chi è già registrato a ogni riapertura:
-  // 56% di contaminazione misurata sullo Sprint 7) ma view_OnboardingName, la prima domanda vera.
+  // 56% di contaminazione misurata sullo Sprint 7) ma la PRIMA DOMANDA vera del questionario.
+  // Quale sia dipende dalla build: fino al riordino del 04/08/2026 era il Nome
+  // (view_OnboardingName), da lì in poi è l'Obiettivo (view_OnboardingGoal). La RPC ancora sul
+  // più vecchio dei due (LEAST) proprio per questo: le due build convivono in campo per settimane,
+  // e ancorare su uno solo azzererebbe una coorte o accorcerebbe la serie storica dell'altra.
   // Esiste solo dall'11/07/2026 → gli sprint precedenti restano vuoti su queste tre righe.
-  'Inizio questionario (anonimo)',       // 19 · primo view_OnboardingName dell'identità nel periodo
+  'Inizio questionario (anonimo)',       // 19 · prima domanda vista dall'identità nel periodo
   'Onboarding completato (registrato)',  // 20 · di quelli, chi ha onboarding_complete (= mail confermata)
   'Regalo prova ricevuto',               // 21 · di quelli, chi ha visto la schermata dei 7 giorni
 ];
@@ -73,9 +77,13 @@ const FUNNEL_LABELS = [
 const EVENT_CATALOG = [
   { event: 'first_open',                          label: 'Download / primo avvio' },
   { event: 'view_Welcome',                        label: 'Onboarding · Benvenuto (coach)' },
-  { event: 'view_OnboardingName',                 label: 'Onboarding · Nome' },
+  // Schermata ritirata dal flusso col riordino del 04/08/2026: il nome non si chiede più, si
+  // genera dall'email. Resta nel catalogo — e NON nel funnel standard — perché le build in campo
+  // continuano a emetterla: chi vuole rileggere uno sprint vecchio se la riaggiunge a mano.
+  { event: 'view_OnboardingName',                 label: 'Onboarding · Nome (ritirato)' },
   { event: 'view_OnboardingAge',                  label: 'Onboarding · Età' },
   { event: 'view_OnboardingGender',               label: 'Onboarding · Genere' },
+  { event: 'view_OnboardingWeight',               label: 'Onboarding · Peso' },
   { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo' },
   { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo' },
   { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello' },
@@ -118,33 +126,42 @@ function eventStepLabel(row) {
 //  - Durata, Movimenti da evitare, Chat col coach, Piano pronto e Gate account sono schermate NUOVE:
 //    negli sprint chiusi prima del rilascio del nuovo onboarding risultano 0, e la cascata (che è
 //    sequenziale) muore lì. È atteso, non è un buco di tracking: quelle schermate non esistevano.
-//  - `view_OnboardingQuestionnaireWelcome` è ritirata dal codice ma resta come variante di Nome per
-//    rileggere gli sprint vecchi.
+//
+// ⚠️ Riordinato il 04/08/2026 (spec onboarding-flow-reorder-weight-step): prima le domande sul
+// PERCORSO (obiettivo, livello, cosa evitare, durata), poi l'ANAGRAFICA (età, genere, peso). Chi
+// apre l'app vuole sapere cosa ci fa, non compilare una scheda. Conseguenze sulla lettura:
+//  - la schermata Nome è USCITA dal flusso (l'username si genera dall'email) e quindi da questa
+//    lista: le build vecchie continuano a emettere `view_OnboardingName`, ma tenerla in cascata
+//    azzererebbe tutto il funnel a valle appena la build nuova diventa maggioranza. Resta in
+//    EVENT_CATALOG insieme a `view_OnboardingQuestionnaireWelcome`: chi vuole rileggere uno sprint
+//    vecchio se le riaggiunge a mano.
+//  - `view_OnboardingWeight` è una schermata NUOVA: negli sprint chiusi prima del rilascio risulta
+//    0 e la cascata muore lì. Atteso, non è un buco di tracking.
+//  - nelle settimane di convivenza fra build vecchia e nuova gli step dell'anagrafica scendono più
+//    del dovuto: chi ha la build vecchia li ha visti PRIMA dell'obiettivo, quindi in cascata non
+//    risulta mai passato di lì. Si riassorbe da solo quando la build vecchia esce dal campo.
 const ONBOARDING_FUNNEL_STEPS = [
   { event: 'first_open',                   label: 'Download / primo avvio',           vsIdx: null },
   { event: 'view_Welcome',                 label: 'Onboarding · Benvenuto (coach)',   vsIdx: 0 },
-  { event: 'view_OnboardingName',          label: '1 · Nome',                         vsIdx: 1,
-    children: [
-      { event: 'view_OnboardingQuestionnaireWelcome', label: '— Intro questionario (build vecchia)' },
-    ] },
-  { event: 'view_OnboardingAge',           label: '2 · Età',                          vsIdx: 2,
+  { event: 'view_OnboardingGoal',          label: '1 · Obiettivo',                    vsIdx: 1 },
+  { event: 'view_OnboardingGoalTrust',     label: 'Rinforzo obiettivo',               vsIdx: 2 },
+  { event: 'view_OnboardingLevel',         label: '2 · Livello',                      vsIdx: 3 },
+  { event: 'view_OnboardingAvoid',         label: '3 · Movimenti da evitare',         vsIdx: 4 },
+  { event: 'view_OnboardingDuration',      label: '4 · Durata sessione',              vsIdx: 5 },
+  { event: 'view_OnboardingAge',           label: '5 · Età',                          vsIdx: 6,
     children: [
       // Vicolo cieco, non una progressione: chi dichiara meno di 18 anni viene fermato dal gate.
       // Fuori cascata apposta — in spina azzererebbe tutto il funnel a valle.
       { event: 'onboarding_age_gate_blocked', label: '— bloccato (minorenne)' },
     ] },
-  { event: 'view_OnboardingGender',        label: '3 · Genere',                       vsIdx: 3 },
-  { event: 'view_OnboardingGoal',          label: '4 · Obiettivo',                    vsIdx: 4 },
-  { event: 'view_OnboardingGoalTrust',     label: 'Rinforzo obiettivo',               vsIdx: 5 },
-  { event: 'view_OnboardingLevel',         label: '5 · Livello',                      vsIdx: 6 },
-  { event: 'view_OnboardingDuration',      label: '6 · Durata sessione',              vsIdx: 7 },
-  { event: 'view_OnboardingAvoid',         label: '7 · Movimenti da evitare',         vsIdx: 8 },
-  { event: 'view_OnboardingNotifications', label: '8 · Notifiche',                    vsIdx: 9 },
-  { event: 'view_OnboardingCoachChat',     label: '9 · Chat col coach',               vsIdx: 10,
+  { event: 'view_OnboardingGender',        label: '6 · Genere',                       vsIdx: 7 },
+  { event: 'view_OnboardingWeight',        label: '7 · Peso',                         vsIdx: 8 },
+  { event: 'view_OnboardingCoachChat',     label: '8 · Chat col coach',               vsIdx: 9,
     children: [
       { event: 'coach_chat_onboarding_send', label: '— ha scritto al coach' },
       { event: 'coach_chat_onboarding_skip', label: '— ha saltato la chat' },
     ] },
+  { event: 'view_OnboardingNotifications', label: '9 · Notifiche',                    vsIdx: 10 },
   { event: 'view_OnboardingPlanReveal',    label: 'Piano pronto',                     vsIdx: 11 },
   { event: 'view_OnboardingAccount',       label: 'Gate account',                     vsIdx: 12,
     children: [
