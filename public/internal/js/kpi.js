@@ -5187,10 +5187,15 @@ function eventFunnelViz() {
     // La percentuale scritta qui è SEMPRE sulla coorte (headN), mai sullo step precedente:
     // "−31%" deve voler dire "trentuno persone su cento di quelle entrate", altrimenti in
     // fondo all'imbuto perdere tre persone su dieci sopravvissute grida più di perderne
-    // trenta all'ingresso. La lettura sullo step precedente resta nel tooltip. Come effetto
-    // secondario la cifra torna a coincidere con ciò che si vede: in modalità coorte il
-    // denominatore delle barre È headN, quindi il tratteggio occupa esattamente quella
-    // frazione del track, e le perdite di tutti gli step sommano al 100% − quota finale.
+    // trenta all'ingresso. Come effetto secondario la cifra torna a coincidere con ciò che si
+    // vede: in modalità coorte il denominatore delle barre È headN, quindi il tratteggio occupa
+    // esattamente quella frazione del track, e le perdite di tutti gli step sommano al 100% −
+    // quota finale.
+    //
+    // Sotto, in corpo minore, la stessa perdita letta sullo step precedente — la tenuta del
+    // singolo passaggio, che dice se lo schermo funziona per chi ci arriva ed è l'unica lettura
+    // possibile quando la coorte è già dimezzata. Porta con sé la propria base ("di 71") perché
+    // una percentuale nuda accanto a un'altra si legge come la stessa cosa scritta due volte.
     const lostN   = prevIdx !== null && vsN !== null ? vsN - n : null;
     const lostPct = lostN !== null && headN > 0 ? (lostN / headN * 100) : null;
     const showLoss = !isAbs && lostN !== null && lostN > 0;
@@ -5198,8 +5203,14 @@ function eventFunnelViz() {
       ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${headN} di ${headLabel} ${lostN === 1 ? 'si ferma' : 'si fermano'} prima di "${label}"`
         + ` — ${fmtP(lostPct)} della coorte, ${fmtP(convPct !== null ? 100 - convPct : null)} di chi era arrivato allo step precedente (${vsN})`
       : '';
+    // Sul primo passaggio le due letture sono lo stesso numero — lo step precedente È la coorte:
+    // scriverlo due volte insegnerebbe a ignorare la riga piccola proprio dove poi conta.
+    const showRel = showLoss && prevIdx !== headIdx;
     const lossTag = showLoss
-      ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">${fIcon('drop')}−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></div>`
+      ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">
+           <span class="a">${fIcon('drop')}−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></span>
+           ${showRel ? `<span class="b">−${(100 - convPct).toFixed(1)}% di ${vsN}</span>` : ''}
+         </div>`
       : '';
 
     const parentRow = `
