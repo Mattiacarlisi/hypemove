@@ -85,7 +85,10 @@ const EVENT_CATALOG = [
   { event: 'view_OnboardingGender',               label: 'Onboarding · Genere' },
   { event: 'view_OnboardingWeight',               label: 'Onboarding · Peso' },
   { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo' },
-  { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo' },
+  // Interstitial "Non ti alleni mai da solo", eliminato dal wizard il 05/08/2026: non chiedeva
+  // niente e si auto-skippava dopo 3.5s. Come Nome, resta qui per rileggere gli sprint chiusi;
+  // nel funnel salvato "Onboarding" è sceso a variante fuori cascata.
+  { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo (ritirato)' },
   { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello' },
   { event: 'view_OnboardingDuration',             label: 'Onboarding · Durata sessione' },
   { event: 'view_OnboardingAvoid',                label: 'Onboarding · Movimenti da evitare' },
