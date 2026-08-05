@@ -429,6 +429,9 @@ let state = {
   trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateAt: null, trialGateWindow: null,
   // Il regalo (D0 della prova): RPC dedicata (`kpi_trial_gift`), sezione gemella del gate.
   trialGiftData: null, trialGiftLoading: false, trialGiftError: null, trialGiftAt: null, trialGiftWindow: null,
+  // La vita della prova (`kpi_trial_life`): la linea D0→D21 su cui la popolazione
+  // scorre da sola, l'onda che arriva al gate e la griglia delle coorti.
+  trialLifeData: null, trialLifeLoading: false, trialLifeError: null, trialLifeAt: null, trialLifeWindow: null,
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1068,6 +1071,38 @@ async function fetchPremium() {
   void fetchTrialGate();
   // Stessa cosa per il regalo (D0): sezione gemella, RPC gemella.
   void fetchTrialGift();
+  // E la linea del tempo che li tiene insieme: dove sta la gente FRA il regalo e il gate.
+  void fetchTrialLife();
+}
+
+// La vita della prova: una chiamata sola per la linea, l'onda e le coorti.
+// Tollerante come le due sorelle: se la RPC non c'è, la sezione lo dice e il
+// resto della pagina non se ne accorge.
+async function fetchTrialLife() {
+  state.trialLifeLoading = true; state.trialLifeError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_trial_life', {
+      inizio: state.premiumFrom,
+      fine:   state.premiumTo,
+      p_gender: state.premiumGender,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+      p_max_day: 21,
+    });
+    if (error) throw error;
+    state.trialLifeData = data;
+    state.trialLifeAt = new Date();
+    state.trialLifeWindow = selSprint
+      ? `${selSprint.nome} (${selSprint.inizio} → ${selSprint.fine})`
+      : `${state.premiumFrom} → ${state.premiumTo}`;
+  } catch (e) {
+    state.trialLifeData = null;
+    state.trialLifeError = e.message || 'RPC kpi_trial_life non disponibile';
+  }
+  state.trialLifeLoading = false;
+  render();
 }
 
 // Lista di chi ha fatto un'azione della biforcazione del gate (bucket senza
@@ -6760,6 +6795,8 @@ function pagePremium() {
       </div>
     </div>
 
+    <!-- La mappa prima dei due momenti: dove sta la gente lungo i giorni della prova -->
+    ${premiumTrialLifeCard()}
     <!-- Il regalo (D0) e il gate (D7): l'inizio e la fine della settimana regalata -->
     ${premiumTrialGiftCard()}
     ${premiumTrialGateCard()}
@@ -7081,6 +7118,248 @@ const TRIAL_GIFT_PHASE_LABELS = {
 const TRIAL_GIFT_PHASE_HINTS = {
   opening: 'transizione automatica (1.5s): misura il timer, non l\'utente',
 };
+
+// ── LA VITA DELLA PROVA (D0 → D21) ────────────────────────────────────
+// Non è un imbuto: è una LINEA DEL TEMPO. Nell'imbuto le persone passano da uno
+// step al successivo perché fanno qualcosa; qui scorrono di una casella al giorno
+// anche se non aprono l'app — il giorno 7 arriva comunque, e con lui il gate.
+// Per questo la sezione ha tre pezzi che rispondono a tre domande diverse:
+//   A. la linea    → DOVE sta la gente adesso (fotografia, cambia ogni giorno)
+//   B. l'onda      → QUANDO arriva al gate (calendario, aritmetica sulla scadenza)
+//   C. le coorti   → COME si è comportato chi è partito insieme (memoria, non cambia)
+// Il giorno è sempre relativo alla singola persona: il "giorno 7" di chi è partito
+// il 3 agosto è il 10, quello di chi è partito il 5 è il 12.
+const TRIAL_LIFE_STATES = [
+  { k: 'in_trial',  label: 'in prova',  color: '#22d3ee' },
+  { k: 'at_gate',   label: 'al gate',   color: '#fbbf24' },
+  { k: 'free',      label: 'gratuito',  color: '#5a5a7a' },
+  { k: 'converted', label: 'convertito', color: '#4ade80' },
+];
+const TRIAL_LIFE_BAR_H = 96;
+
+function premiumTrialLifeCard() {
+  const wrap = (inner) => `
+    <div class="card" style="margin-bottom:16px">
+      <div style="margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:3px">La vita della prova · giorno per giorno</div>
+        <div style="font-size:11px;color:var(--muted)">
+          dove si trova ogni persona lungo i suoi 7 giorni regalati, e cosa succede dopo ·
+          <code style="font-family:var(--mono)">users.trial_started_at</code>
+          ${state.trialLifeWindow ? `<br><span style="color:#5a5a7a">periodo interrogato: ${esc(state.trialLifeWindow)}</span>` : ''}
+          ${state.trialLifeAt ? ` · letto alle ${state.trialLifeAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+        </div>
+      </div>
+      ${inner}
+    </div>`;
+
+  if (state.trialLifeLoading && !state.trialLifeData) {
+    return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico la linea della prova…</div>`);
+  }
+  if (state.trialLifeError) {
+    const scaduta = /jwt|expired|denied|forbidden|401|permission/i.test(state.trialLifeError);
+    if (scaduta) {
+      return wrap(`
+        <div style="background:#2b1114;border:1px solid #5a1f28;border-radius:8px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.5">
+          🔒 <strong>Sessione scaduta: questi numeri non sono stati letti.</strong>
+          Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
+          <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialLifeError)}</span>
+        </div>`);
+    }
+    return wrap(`
+      <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+        ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialLifeError)}<br>
+        La RPC <code style="font-family:var(--mono)">kpi_trial_life</code> va applicata in produzione.
+      </div>`);
+  }
+
+  const d = state.trialLifeData;
+  if (!d) return '';
+
+  const t       = d.totals || {};
+  const line    = d.line || [];
+  const wave    = d.gate_wave || [];
+  const cohorts = d.cohorts || [];
+  const maxDay  = d.max_day || 21;
+  const convByDay = {};
+  (d.conversions || []).forEach(c => { convByDay[c.day] = c.n; });
+
+  if (!t.started) {
+    return wrap(`
+      <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
+        Nessuna prova iniziata nel periodo selezionato.
+      </div>`);
+  }
+
+  // ── testa: i numeri che si guardano per primi ──
+  // Il tasso di conversione si calcola sui DECISI, non su tutti: chi è al giorno 1
+  // non ha ancora avuto modo di scegliere, e metterlo al denominatore fa sembrare
+  // un disastro una prova che deve ancora finire.
+  const decisi = t.decided || 0;
+  const tasso  = decisi > 0 ? Math.round((t.converted || 0) / decisi * 100) : null;
+  const dormPct = t.started > 0 ? Math.round((t.dormant || 0) / t.started * 100) : 0;
+  const testa = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">
+      ${[
+        { k: 'Prove iniziate', v: t.started, c: '#c4b5fd', s: 'nella finestra interrogata' },
+        { k: 'Ancora in prova', v: t.in_trial, c: '#22d3ee', s: 'non hanno ancora visto il gate' },
+        { k: 'Al gate, in sospeso', v: t.at_gate, c: '#fbbf24', s: 'prova finita, nessuna scelta fatta' },
+        { k: 'Convertiti', v: t.converted, c: '#4ade80', s: tasso === null ? 'nessuno ha ancora deciso' : `${tasso}% di ${decisi} decisi` },
+        {
+          k: 'Dormienti',
+          v: t.dormant,
+          c: dormPct >= 50 ? '#f87171' : dormPct >= 25 ? '#fbbf24' : '#4ade80',
+          s: `${dormPct}% · nessun evento da 48h`,
+        },
+      ].map(x => `
+        <div style="background:#111120;border:1px solid #1a1a2e;border-radius:8px;padding:11px 12px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(x.k)}</div>
+          <div style="font-size:24px;font-weight:700;color:${x.c};line-height:1.2;margin-top:3px">${x.v ?? 0}</div>
+          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono);margin-top:2px">${esc(x.s)}</div>
+        </div>`).join('')}
+    </div>`;
+
+  // ── A. la linea: dove sta la gente ADESSO ──
+  // Le colonne oltre il giorno 7 esistono anche quando sono vuote: sono lo spazio
+  // che la popolazione percorrerà, e vederlo vuoto oggi è l'informazione (nessuno
+  // è ancora arrivato lì), non un buco nel grafico.
+  const maxPeople = Math.max(1, ...line.map(x => x.people || 0));
+  const colonne = line.map(row => {
+    const people = row.people || 0;
+    const hTot = people > 0 ? Math.max(3, Math.round(people / maxPeople * TRIAL_LIFE_BAR_H)) : 0;
+    const segmenti = TRIAL_LIFE_STATES
+      .filter(s => (row[s.k] || 0) > 0)
+      .map(s => `<div title="${row[s.k]} ${esc(s.label)} · giorno ${row.day}" style="height:${Math.max(2, Math.round((row[s.k] / people) * hTot))}px;background:${s.color};opacity:.85"></div>`)
+      .join('');
+    // Dormienti: velo a righe sopra la barra. Non è uno stato a sé (una persona è
+    // "in prova E dormiente"), quindi non può essere un segmento: è una trama.
+    const dormShare = people > 0 ? (row.dormant || 0) / people : 0;
+    const velo = dormShare > 0 ? `
+      <div title="${row.dormant} dormienti su ${people} al giorno ${row.day}" style="position:absolute;left:0;right:0;top:0;height:${Math.round(dormShare * hTot)}px;background:repeating-linear-gradient(45deg,rgba(10,10,20,.75) 0 3px,transparent 3px 6px)"></div>` : '';
+    const conv = convByDay[row.day] ? `
+      <div title="${convByDay[row.day]} conversioni avvenute al giorno ${row.day}" style="font-size:9px;font-weight:700;color:#4ade80;line-height:1;margin-bottom:2px">▲${convByDay[row.day]}</div>` : '';
+    const isGate = row.day === 7;
+    const oltre  = row.day > 7;
+    return `
+      <div style="display:flex;flex-direction:column;align-items:center;min-width:22px;flex:1">
+        <div style="height:12px;display:flex;align-items:flex-end">${conv}</div>
+        <div style="position:relative;width:100%;height:${TRIAL_LIFE_BAR_H}px;display:flex;flex-direction:column;justify-content:flex-end;
+                    ${isGate ? 'box-shadow:-1px 0 0 #fbbf24;' : ''}
+                    ${oltre ? 'background:linear-gradient(180deg,rgba(251,191,36,.04),transparent);' : ''}">
+          <div style="position:relative;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">
+            ${segmenti}${velo}
+          </div>
+        </div>
+        <div style="font-size:9px;color:${isGate ? '#fbbf24' : 'var(--muted)'};margin-top:4px;font-family:var(--mono)">${row.day}${row.day === maxDay ? '+' : ''}</div>
+        <div style="font-size:9px;font-weight:700;color:${people ? 'var(--fg)' : '#2a2a44'};line-height:1">${people || '·'}</div>
+      </div>`;
+  }).join('');
+
+  const linea = `
+    <div style="margin-bottom:20px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:10px;font-weight:700;color:#22d3ee;text-transform:uppercase;letter-spacing:.06em">
+          A · la linea <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· dove sta la gente adesso, per giorno di prova</span>
+        </div>
+        <div style="font-size:9px;color:#5a5a7a;display:flex;gap:9px;flex-wrap:wrap">
+          ${TRIAL_LIFE_STATES.map(s => `<span><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${s.color};margin-right:3px"></span>${esc(s.label)}</span>`).join('')}
+          <span><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:repeating-linear-gradient(45deg,#5a5a7a 0 2px,transparent 2px 4px);margin-right:3px"></span>dormienti</span>
+        </div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:2px;background:#0d0d18;border:1px solid #1a1a2e;border-radius:8px;padding:10px 8px 6px">
+        ${colonne}
+      </div>
+      <div style="margin-top:6px;font-size:10px;color:#5a5a7a;line-height:1.5">
+        La riga in ambra al giorno 7 è il gate: da lì in poi la prova è finita e lo stato non è più "in prova".
+        Il triangolo verde segna il giorno di vita in cui è avvenuta una conversione — non dove si trova adesso
+        chi ha convertito. Le colonne vuote a destra sono il futuro: nessuno ci è ancora arrivato.
+      </div>
+    </div>`;
+
+  // ── B. l'onda: quando arriva al gate ──
+  // Stesso dato di sopra, girato sul calendario. È l'unica parte che si può
+  // guardare per DECIDERE qualcosa oggi: chi arriva domani non si recupera dopo.
+  const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
+  const onda = wave.length ? `
+    <div style="margin-bottom:20px">
+      <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+        B · l'onda al gate <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· quante persone finiscono la prova, per data</span>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${wave.map(w => {
+          const dt = new Date(w.date + 'T00:00:00');
+          const fra = Math.round((dt - oggi) / 86400000);
+          const quando = fra <= 0 ? 'oggi' : fra === 1 ? 'domani' : `fra ${fra} giorni`;
+          const urgente = fra <= 2;
+          return `
+            <div style="background:#111120;border:1px solid ${urgente ? '#5a4318' : '#1a1a2e'};border-radius:8px;padding:8px 12px;min-width:104px">
+              <div style="font-size:10px;color:var(--muted);font-family:var(--mono)">${esc(dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }))}</div>
+              <div style="font-size:20px;font-weight:700;color:${urgente ? '#fbbf24' : '#c4b5fd'};line-height:1.2">${w.n}</div>
+              <div style="font-size:9px;color:#5a5a7a">${esc(quando)}</div>
+            </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  // ── C. le coorti: come si è comportato chi è partito insieme ──
+  // Questa NON è una fotografia: una cella scritta resta scritta. Serve a
+  // confrontare le partenze fra loro — se la coorte di domani tiene meglio di
+  // quella di ieri, qualcosa che abbiamo fatto in mezzo ha funzionato.
+  const testataGiorni = Array.from({ length: maxDay + 1 }, (_, i) => `
+    <th style="font-size:8px;color:${i === 7 ? '#fbbf24' : '#3a3a55'};font-weight:400;width:19px;padding:0;font-family:var(--mono)">${i}${i === maxDay ? '+' : ''}</th>`).join('');
+
+  const righeCoorti = cohorts.map(c => {
+    const byDay = {};
+    (c.cells || []).forEach(x => { byDay[x.day] = x; });
+    const celle = Array.from({ length: maxDay + 1 }, (_, i) => {
+      const cell = byDay[i];
+      if (!cell) {
+        return `<td style="width:19px;height:19px;background:#0d0d18;border:1px solid #12121f;border-radius:2px"></td>`;
+      }
+      const pct = c.size > 0 ? cell.active / c.size : 0;
+      const alpha = 0.12 + pct * 0.78;
+      const testo = pct >= 0.45 ? '#0b0b14' : '#8b8ba7';
+      return `
+        <td title="Coorte ${esc(c.coorte)} · giorno ${i}: ${cell.active} attivi su ${c.size} (${Math.round(pct * 100)}%)${cell.partial ? ' — giorno ancora in corso' : ''}"
+            style="width:19px;height:19px;text-align:center;font-size:8px;font-family:var(--mono);color:${testo};
+                   background:rgba(34,211,238,${alpha.toFixed(2)});border-radius:2px;
+                   border:1px ${cell.partial ? 'dashed #5a5a7a' : 'solid transparent'};${cell.partial ? 'opacity:.72' : ''}">${cell.active}</td>`;
+    }).join('');
+    const gateDt = c.gate_date ? new Date(c.gate_date + 'T00:00:00') : null;
+    return `
+      <tr>
+        <td style="font-size:10px;color:var(--fg);white-space:nowrap;padding-right:8px;font-family:var(--mono)">
+          ${esc(new Date(c.coorte + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }))}
+          <span style="color:#5a5a7a">· ${c.size}</span>
+        </td>
+        ${celle}
+        <td style="font-size:9px;color:#5a5a7a;white-space:nowrap;padding-left:8px">
+          gate ${gateDt ? esc(gateDt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })) : '—'}
+        </td>
+      </tr>`;
+  }).join('');
+
+  const griglia = cohorts.length ? `
+    <div>
+      <div style="font-size:10px;font-weight:700;color:#c4b5fd;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
+        C · le coorti <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· quanti erano ancora attivi al loro giorno N</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table style="border-collapse:separate;border-spacing:1px">
+          <thead><tr><th></th>${testataGiorni}<th></th></tr></thead>
+          <tbody>${righeCoorti}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:8px;font-size:10px;color:#5a5a7a;line-height:1.5">
+        Riga = giorno in cui è partita la prova (con quante persone). Cella = quante di quelle
+        hanno aperto l'app al loro giorno N. <strong style="color:#7b7b9a">Il bordo tratteggiato
+        segna un giorno ancora in corso</strong>: quel numero salirà, non è un crollo.
+        Il colore è la quota sulla dimensione della coorte, non il numero assoluto — così due
+        coorti di taglia diversa si confrontano a occhio.
+      </div>
+    </div>` : '';
+
+  return wrap(`${testa}${linea}${onda}${griglia}`);
+}
 
 function premiumTrialGiftCard() {
   const wrap = (inner) => `
