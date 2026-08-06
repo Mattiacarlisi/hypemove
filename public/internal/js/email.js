@@ -81,6 +81,13 @@ const state = {
     breakdown: null,
     loading: false,
   },
+  // pagina analytics avanzata
+  analytics: {
+    from: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10),
+    to: new Date().toISOString().slice(0, 10),
+    data: null,
+    loading: false,
+  },
 };
 
 // ---------- helpers ----------
@@ -210,6 +217,7 @@ function sidebar() {
       <nav class="nav">
         <div class="nav-section">Email</div>
         ${nav('overview', '📊', 'Overview')}
+        ${nav('analytics', '📈', 'Analytics')}
         ${nav('emails', '📥', 'Email inviate')}
         ${nav('broadcast', '📣', 'Broadcast')}
         ${nav('automations', '🤖', 'Automazioni')}
@@ -377,6 +385,139 @@ function pageOverview() {
         <tbody>${perfRows || '<tr><td colspan="7" class="empty">Nessun invio nel periodo.</td></tr>'}</tbody>
       </table></div>
       <p class="em-muted-line" style="margin-top:10px;">Verde/giallo/rosso secondo i benchmark: consegna ≥95%, apertura ≥35% (lifecycle), click ≥5% delle consegnate. I tassi degli invii precedenti al 06/08 (nascita del webhook) risultano bassi perché quegli invii non hanno tracking: restringi il periodo per un quadro fedele.</p>
+    </div>`;
+}
+
+// ---------- pagina: Analytics avanzata ----------
+
+async function loadAnalytics() {
+  const an = state.analytics;
+  an.loading = true; render();
+  const { data, error } = await sb.rpc('email_analytics', { p_from: an.from, p_to: an.to });
+  an.loading = false;
+  if (!error) an.data = data;
+  render();
+}
+
+function pageAnalytics() {
+  const an = state.analytics;
+  if (!an.data && !an.loading) { loadAnalytics(); return '<div class="empty">Caricamento…</div>'; }
+
+  const rangeBar = `
+    <div class="em-daterange">
+      <span class="em-muted-line" style="margin:0;">Dal</span>
+      <input type="date" id="an-from" value="${an.from}">
+      <span class="em-muted-line" style="margin:0;">al</span>
+      <input type="date" id="an-to" value="${an.to}">
+      <button class="btn btn-primary" data-act="analytics-apply">Applica</button>
+      <button class="btn btn-ghost" data-act="analytics-range" data-days="7">7g</button>
+      <button class="btn btn-ghost" data-act="analytics-range" data-days="30">30g</button>
+      <button class="btn btn-ghost" data-act="analytics-range" data-days="90">90g</button>
+    </div>`;
+
+  const header = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">Analytics</div>
+        <div class="page-sub">Le analisi che decidono cosa migliorare: quando spedire, chi ci blocca, cosa viene cliccato</div>
+      </div>
+    </div>${rangeBar}`;
+
+  if (an.loading || !an.data) return `${header}<div class="empty">Caricamento…</div>`;
+  const d = an.data;
+
+  // --- trend settimanale con tassi ---
+  const weekly = d.weekly || [];
+  const wMax = Math.max(1, ...weekly.map((w) => w.sent));
+  const weeklyRows = weekly.map((w) => `
+    <tr>
+      <td><span class="em-mail-when">sett. ${fmtDay(w.week)}</span></td>
+      <td style="width:40%;">
+        <div class="em-funnel-track" style="height:14px;"><div class="em-funnel-bar f-sent" style="width:${Math.max(2, Math.round((w.sent / wMax) * 100))}%"></div></div>
+      </td>
+      <td style="text-align:right;"><b>${w.sent}</b></td>
+      <td style="text-align:right;">${rateCell(w.delivered, w.sent, 95, 90)}</td>
+      <td style="text-align:right;">${rateCell(w.opened, w.delivered, 35, 20)}</td>
+    </tr>`).join('');
+
+  // --- heatmap aperture (ora italiana × giorno) ---
+  const hm = {};
+  let hmMax = 1;
+  (d.open_heatmap || []).forEach((c) => { hm[`${c.dow}-${c.hour}`] = c.n; hmMax = Math.max(hmMax, c.n); });
+  const dows = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+  const heatRows = dows.map((label, i) => {
+    const cells = Array.from({ length: 24 }, (_, h) => {
+      const n = hm[`${i + 1}-${h}`] || 0;
+      const op = n ? (0.25 + 0.75 * (n / hmMax)).toFixed(2) : 0;
+      return `<div class="em-heat-cell" title="${label} ${h}:00 · ${n} aperture" style="${n ? `background:rgba(124,58,237,${op});` : ''}"></div>`;
+    }).join('');
+    return `<div class="em-heat-row"><span class="em-heat-label">${label}</span>${cells}</div>`;
+  }).join('');
+  const heatHours = `<div class="em-heat-row"><span class="em-heat-label"></span>${Array.from({ length: 24 }, (_, h) => `<div class="em-heat-hour">${h % 3 === 0 ? h : ''}</div>`).join('')}</div>`;
+
+  // --- domini destinatari ---
+  const domainRows = (d.domains || []).map((x) => `
+    <tr>
+      <td><span class="em-mail-to">${esc(x.domain)}</span></td>
+      <td style="text-align:right;"><b>${x.sent}</b></td>
+      <td style="text-align:right;">${rateCell(x.delivered, x.sent, 95, 90)}</td>
+      <td style="text-align:right;">${rateCell(x.opened, x.delivered, 35, 20)}</td>
+      <td style="text-align:right;">${x.bounced > 0 ? `<span class="em-rate bad">${x.bounced}</span>` : '<span class="em-rate none">0</span>'}</td>
+    </tr>`).join('');
+
+  // --- top link cliccati ---
+  const linkRows = (d.top_links || []).map((l) => `
+    <tr>
+      <td><span class="em-mail-to" style="word-break:break-all;">${esc(l.link)}</span></td>
+      <td style="text-align:right;"><b>${l.n}</b></td>
+    </tr>`).join('');
+
+  // --- crescita consensi marketing ---
+  const cg = d.consent_growth || [];
+  const cgMax = Math.max(1, ...cg.map((c) => c.granted));
+  const consentBars = cg.map((c) => `
+    <div class="bar-wrap">
+      <div class="bar-tip">sett. ${fmtDay(c.week)} · +${c.granted} consensi</div>
+      <div class="bar" style="height:${Math.round((c.granted / cgMax) * 100)}%; background: var(--mattia);"></div>
+    </div>`).join('');
+
+  return `${header}
+    <div class="grid-2" style="margin-top:16px;">
+      <div class="card">
+        <div class="card-title">Trend settimanale</div>
+        <div class="table-wrap"><table class="em-mail-table">
+          <thead><tr><th>Settimana</th><th>Volume</th><th style="text-align:right;">Inviate</th><th style="text-align:right;">Consegna</th><th style="text-align:right;">Apertura</th></tr></thead>
+          <tbody>${weeklyRows || '<tr><td colspan="5" class="empty">Nessun invio nel periodo.</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Crescita consensi marketing</div>
+        ${cg.length ? `<div class="em-chart" style="height:100px;">${consentBars}</div>
+          <p class="em-muted-line">Nuovi consensi per settimana nel periodo — è il pubblico legale dei broadcast: farlo crescere è la leva n°1.</p>`
+          : '<div class="empty">Nessun nuovo consenso nel periodo.</div>'}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Quando aprono le email <span class="em-chip" style="margin-left:8px;">ora italiana</span></div>
+      <div class="em-heatmap">${heatRows}${heatHours}</div>
+      <p class="em-muted-line" style="margin-top:10px;">Ogni cella = aperture in quella fascia. Le zone più accese sono i momenti migliori per spedire i broadcast. Si popola man mano che il tracking (attivo da oggi) accumula aperture.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-title">Performance per provider del destinatario</div>
+        <div class="table-wrap"><table class="em-mail-table">
+          <thead><tr><th>Dominio</th><th style="text-align:right;">Inviate</th><th style="text-align:right;">Consegna</th><th style="text-align:right;">Apertura</th><th style="text-align:right;">Bounce</th></tr></thead>
+          <tbody>${domainRows || '<tr><td colspan="5" class="empty">Nessun dato.</td></tr>'}</tbody>
+        </table></div>
+        <p class="em-muted-line" style="margin-top:10px;">Se un provider (es. libero.it) mostra consegna bassa rispetto agli altri, è lui che ci filtra: problema specifico, non generale.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Link più cliccati</div>
+        <div class="table-wrap"><table class="em-mail-table">
+          <thead><tr><th>Link</th><th style="text-align:right;">Click</th></tr></thead>
+          <tbody>${linkRows || '<tr><td colspan="2" class="empty">Nessun click tracciato ancora (tracking attivo da oggi).</td></tr>'}</tbody>
+        </table></div>
+      </div>
     </div>`;
 }
 
@@ -832,6 +973,7 @@ function previewModal() {
 function renderPage() {
   switch (state.page) {
     case 'overview': return pageOverview();
+    case 'analytics': return pageAnalytics();
     case 'emails': return pageEmails();
     case 'broadcast': return pageBroadcast();
     case 'automations': return pageAutomations();
@@ -1164,6 +1306,22 @@ async function handleAction(el) {
     state.overview.from = iso(new Date(today.getTime() - (days - 1) * 864e5));
     state.overview.to = iso(today);
     loadOverview();
+    return;
+  }
+
+  if (act === 'analytics-apply') {
+    state.analytics.from = document.getElementById('an-from')?.value || state.analytics.from;
+    state.analytics.to = document.getElementById('an-to')?.value || state.analytics.to;
+    loadAnalytics();
+    return;
+  }
+  if (act === 'analytics-range') {
+    const days = Number(el.dataset.days) || 30;
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    state.analytics.from = iso(new Date(today.getTime() - (days - 1) * 864e5));
+    state.analytics.to = iso(today);
+    loadAnalytics();
     return;
   }
 }

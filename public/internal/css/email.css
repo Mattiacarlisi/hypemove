@@ -153,6 +153,16 @@
 .em-rate.bad  { color: #f87171; }
 .em-rate.none { color: var(--muted); font-weight: 400; }
 
+/* ---------- Heatmap aperture (Analytics) ---------- */
+.em-heatmap { display: flex; flex-direction: column; gap: 3px; overflow-x: auto; padding-bottom: 4px; }
+.em-heat-row { display: flex; gap: 3px; align-items: center; }
+.em-heat-label { width: 34px; flex: none; font-size: 10px; color: var(--muted); font-family: var(--mono); }
+.em-heat-cell {
+  flex: 1; min-width: 14px; height: 18px; border-radius: 3px;
+  background: var(--surface2); border: 1px solid var(--border);
+}
+.em-heat-hour { flex: 1; min-width: 14px; font-size: 9px; color: var(--muted); text-align: center; font-family: var(--mono); }
+
 /* Switch modalità editor template */
 .em-mode-switch { display: inline-flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
 .em-mode-switch button {
