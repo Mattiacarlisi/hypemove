@@ -28,6 +28,28 @@ const SEGMENT_LABELS = {
   inactive_14: { name: 'Inattivi 14+', desc: 'Con consenso marketing, nessun workout da 14 giorni' },
 };
 
+// Etichette umane per i tipi di email (mai slug tecnici in UI).
+const TYPE_META = {
+  no_first_workout_24h: { label: 'Primo workout (24h)', color: '#fb923c' },
+  no_workout_3_days: { label: 'Inattivo 3 giorni', color: '#60a5fa' },
+  no_workout_7_days: { label: 'Inattivo 7 giorni', color: '#c084fc' },
+  onboarding_recovery: { label: 'Recupero onboarding', color: '#4ade80' },
+  campaign_test: { label: 'Test broadcast', color: '#7070a0' },
+};
+function kindMeta(kind) {
+  if (kind && kind.startsWith('broadcast')) {
+    return { label: kind.replace('broadcast: ', 'Broadcast · '), color: '#a78bfa' };
+  }
+  return TYPE_META[kind] ?? { label: kind ?? '?', color: '#7070a0' };
+}
+function kindTag(kind) {
+  const m = kindMeta(kind);
+  return `<span class="em-kind"><span class="dot" style="background:${m.color}"></span>${esc(m.label)}</span>`;
+}
+function initialOf(nameOrEmail) {
+  return esc(String(nameOrEmail ?? '?').trim().charAt(0).toUpperCase() || '?');
+}
+
 const state = {
   page: 'overview',
   loading: true,
@@ -47,6 +69,10 @@ const state = {
   audience: { tab: 'marketing', members: null, total: 0, unsub: null, loading: false },
   // anteprima email {subject, html}
   preview: null,
+  // modale metriche {kind, key, label, from, to, data, loading}
+  metrics: null,
+  // modalità editor template: 'simple' | 'html'
+  editorMode: 'simple',
 };
 
 // ---------- helpers ----------
@@ -120,7 +146,11 @@ async function loadMailbox() {
   state.mailbox.loading = true; render();
   const res = await adminCall('emails_log', { limit: state.mailbox.limit, q: state.mailbox.q });
   state.mailbox.loading = false;
-  if (res.ok) { state.mailbox.items = res.items; state.mailbox.delivery = res.delivery; }
+  if (res.ok) {
+    state.mailbox.items = res.items;
+    state.mailbox.delivery = res.delivery;
+    state.mailbox.at = new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  }
   render();
 }
 
@@ -137,21 +167,24 @@ async function loadAudience() {
   a.loading = false; render();
 }
 
-// Stato "migliore" di un messaggio dai suoi eventi webhook.
+// Stato "migliore" di un messaggio dai suoi eventi webhook → pill con icona.
 function deliveryStatus(resendId, sendStatus) {
-  if (sendStatus === 'failed') return { label: 'Errore', cls: 'failed' };
-  if (sendStatus === 'skipped_suppressed') return { label: 'Soppressa', cls: 'skipped_suppressed' };
+  if (sendStatus === 'failed') return { label: 'Errore', cls: 'failed', icon: '✕' };
+  if (sendStatus === 'skipped_suppressed') return { label: 'Soppressa', cls: 'suppressed', icon: '⛔' };
   const ev = new Set(
     (state.mailbox.delivery || [])
       .filter((d) => d.resend_email_id === resendId)
       .map((d) => d.event_type),
   );
-  if (ev.has('complained')) return { label: '⚠️ Spam report', cls: 'cancelled' };
-  if (ev.has('bounced')) return { label: 'Bounce', cls: 'cancelled' };
-  if (ev.has('clicked')) return { label: 'Cliccata', cls: 'sent' };
-  if (ev.has('opened')) return { label: 'Aperta', cls: 'sending' };
-  if (ev.has('delivered')) return { label: 'Consegnata', cls: 'sent' };
-  return { label: 'Inviata', cls: 'draft' };
+  if (ev.has('complained')) return { label: 'Spam report', cls: 'spam', icon: '🚫' };
+  if (ev.has('bounced')) return { label: 'Bounce', cls: 'bounced', icon: '↩' };
+  if (ev.has('clicked')) return { label: 'Cliccata', cls: 'clicked', icon: '🖱' };
+  if (ev.has('opened')) return { label: 'Aperta', cls: 'opened', icon: '👁' };
+  if (ev.has('delivered')) return { label: 'Consegnata', cls: 'delivered', icon: '✓' };
+  return { label: 'Inviata', cls: 'sent', icon: '·' };
+}
+function statusPill(st) {
+  return `<span class="em-pill ${st.cls}"><span>${st.icon}</span>${st.label}</span>`;
 }
 
 // ---------- layout ----------
@@ -211,6 +244,7 @@ function pageOverview() {
         <div class="page-title">Overview</div>
         <div class="page-sub">Ultimi 30 giorni · webhook attivo dal 06/08 (consegne/aperture/click si accumulano da lì)</div>
       </div>
+      <button class="btn btn-ghost" data-act="metrics-open" data-kind="all" data-key="all" data-label="Tutte le email">📈 Analisi periodo</button>
     </div>
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-label">Inviate</div><div class="stat-value">${s.sent_30d}</div></div>
@@ -241,7 +275,8 @@ function pageBroadcast() {
       <td>${c.sent_count ?? 0}${c.failed_count ? ` <span style="color:#f87171">(${c.failed_count} err)</span>` : ''}</td>
       <td>${fmtDate(c.finished_at || c.started_at || c.created_at)}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-ghost" data-act="preview-campaign" data-id="${c.id}">👁</button>
+        ${c.status === 'sent' ? `<button class="btn btn-ghost" data-act="metrics-open" data-kind="campaign" data-key="${c.id}" data-label="${esc(c.name)}" title="Metriche">📊</button>` : ''}
+        <button class="btn btn-ghost" data-act="preview-campaign" data-id="${c.id}" title="Anteprima">👁</button>
         ${c.status === 'draft' ? `<button class="btn btn-ghost" data-act="edit-campaign" data-id="${c.id}">Apri</button>` : ''}
       </td>
     </tr>`).join('');
@@ -333,8 +368,9 @@ function pageAutomations() {
           <div class="em-muted-line">30 giorni: <b>${a.sent_30d}</b> inviate · ultima: ${fmtDate(a.last_sent_at)}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center;">
+          <button class="btn btn-ghost" data-act="metrics-open" data-kind="automation" data-key="${esc(a.key)}" data-label="${esc(a.name)}">📊 Metriche</button>
           <button class="btn btn-ghost" data-act="preview-automation" data-key="${esc(a.key)}">👁 Anteprima</button>
-          <button class="btn btn-ghost" data-act="edit-template" data-key="${esc(a.key)}">Modifica testi</button>
+          <button class="btn btn-ghost" data-act="edit-template" data-key="${esc(a.key)}">✏️ Modifica</button>
           <button class="em-toggle ${a.enabled ? 'on' : ''}" data-act="toggle-automation" data-key="${esc(a.key)}" data-enabled="${a.enabled}" title="${a.enabled ? 'Attiva' : 'Spenta'}"></button>
         </div>
       </div>
@@ -353,15 +389,45 @@ function templateEditor() {
   const a = state.automations.find((x) => x.key === state.editingTemplate);
   if (!a) { state.editingTemplate = null; return pageAutomations(); }
   const c = a.content || {};
-  return `
+  const mode = state.editorMode;
+
+  const header = `
     <div class="page-header">
       <div>
-        <div class="page-title">Testi: ${esc(a.name)}</div>
-        <div class="page-sub">{{firstName}} nell'oggetto diventa il nome dell'utente · le modifiche valgono dal prossimo invio</div>
+        <div class="page-title">${esc(a.name)}</div>
+        <div class="page-sub">{{firstName}} diventa il nome dell'utente · le modifiche valgono dal prossimo invio</div>
       </div>
-      <button class="btn btn-ghost" data-act="close-template">← Annulla</button>
-    </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <div class="em-mode-switch">
+          <button class="${mode === 'simple' ? 'active' : ''}" data-act="editor-mode" data-mode="simple">Editor guidato</button>
+          <button class="${mode === 'html' ? 'active' : ''}" data-act="editor-mode" data-mode="html">HTML libero</button>
+        </div>
+        <button class="btn btn-ghost" data-act="close-template">← Annulla</button>
+      </div>
+    </div>`;
+
+  if (mode === 'html') {
+    return `${header}
     <div class="card">
+      <div class="form-field">
+        <label class="form-label">Oggetto</label>
+        <input class="form-input" id="t-subject" value="${esc(a.subject)}">
+      </div>
+      <div class="form-field" style="margin-top:12px;">
+        <label class="form-label">HTML della mail (senza footer — viene aggiunto a ogni invio con il link di disiscrizione)</label>
+        <textarea class="em-html-input" id="t-html" style="min-height:340px;" placeholder="<div>...incolla qui il tuo HTML...</div>">${esc(a.html ?? '')}</textarea>
+      </div>
+      <p class="em-muted-line">Puoi usare {{firstName}} anche nell'HTML. Salvando in questa modalità la mail usa SOLO questo HTML; per tornare al layout guidato, passa a "Editor guidato" e salva da lì.</p>
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" data-act="preview-editing-template">👁 Anteprima con questo HTML</button>
+        <button class="btn btn-primary" data-act="save-template" data-key="${esc(a.key)}">Salva</button>
+      </div>
+    </div>`;
+  }
+
+  return `${header}
+    <div class="card">
+      ${a.html ? '<p class="em-muted-line" style="margin-bottom:12px;">⚠️ Questa automazione sta usando un HTML libero: salvando da qui tornerà al layout guidato qui sotto.</p>' : ''}
       <div class="form-grid" style="grid-template-columns: 1fr 1fr;">
         <div class="form-field"><label class="form-label">Oggetto</label>
           <input class="form-input" id="t-subject" value="${esc(a.subject)}"></div>
@@ -406,39 +472,65 @@ function pageAudience() {
   } else if (a.loading) {
     bodyHtml = '<div class="empty">Caricamento…</div>';
   } else if (a.tab === 'unsub') {
+    const reasonPill = (r) => r === 'complaint'
+      ? '<span class="em-pill spam">🚫 spam report</span>'
+      : r === 'bounce'
+      ? '<span class="em-pill bounced">↩ bounce</span>'
+      : '<span class="em-pill suppressed">⛔ opt-out</span>';
     const lifecycleRows = (a.unsub?.lifecycle_disabled || []).map((u) => `
-      <tr><td>${esc(u.email)}</td><td>${esc(u.name ?? '—')}</td><td>${fmtDate(u.created_at)}</td></tr>`).join('');
+      <tr><td><span class="em-mail-to">${esc(u.email)}</span></td><td>${esc(u.name ?? '—')}</td><td><span class="em-mail-when">${fmtDate(u.created_at)}</span></td></tr>`).join('');
     const suppRows = (a.unsub?.suppressions || []).map((s) => `
-      <tr><td>${esc(s.email)}</td><td><span class="em-status ${s.reason === 'complaint' ? 'cancelled' : 'skipped_suppressed'}">${esc(s.reason)}</span></td><td>${esc(s.source ?? '—')}</td><td>${fmtDate(s.created_at)}</td></tr>`).join('');
+      <tr><td><span class="em-mail-to">${esc(s.email)}</span></td><td>${reasonPill(s.reason)}</td><td><span class="em-kind">${esc(s.source ?? '—')}</span></td><td><span class="em-mail-when">${fmtDate(s.created_at)}</span></td></tr>`).join('');
     bodyHtml = `<div class="card">
-      <div class="card-title">Promemoria disattivati (${(a.unsub?.lifecycle_disabled || []).length})</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Email</th><th>Nome</th><th>Registrato</th></tr></thead>
+      <div class="card-title">Promemoria disattivati <span class="em-chip" style="margin-left:8px;"><b>${(a.unsub?.lifecycle_disabled || []).length}</b></span></div>
+      <div class="table-wrap"><table class="em-mail-table">
+        <thead><tr><th>Email</th><th>Nome</th><th style="text-align:right;">Registrato</th></tr></thead>
         <tbody>${lifecycleRows || '<tr><td colspan="3" class="empty">Nessuno 🎉</td></tr>'}</tbody>
       </table></div>
-      <div class="card-title" style="margin-top:20px;">Suppression list (${(a.unsub?.suppressions || []).length})</div>
-      <div class="em-muted-line" style="margin-bottom:8px;">Bounce, segnalazioni spam e opt-out permanenti: non ricevono mai più nulla.</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Email</th><th>Motivo</th><th>Origine</th><th>Quando</th></tr></thead>
+      <div class="card-title" style="margin-top:22px;">Suppression list <span class="em-chip" style="margin-left:8px;"><b>${(a.unsub?.suppressions || []).length}</b></span></div>
+      <div class="em-muted-line" style="margin-bottom:8px;">Bounce, segnalazioni spam e opt-out permanenti: non ricevono mai più nulla, da nessun flusso.</div>
+      <div class="table-wrap"><table class="em-mail-table">
+        <thead><tr><th>Email</th><th>Motivo</th><th>Origine</th><th style="text-align:right;">Quando</th></tr></thead>
         <tbody>${suppRows || '<tr><td colspan="4" class="empty">Vuota 🎉</td></tr>'}</tbody>
       </table></div>
     </div>`;
   } else {
-    const rows = (a.members || []).map((u) => `
+    const filter = (a.filter || '').toLowerCase();
+    const members = (a.members || []).filter((u) =>
+      !filter ||
+      (u.email || '').toLowerCase().includes(filter) ||
+      (u.name || '').toLowerCase().includes(filter));
+    const rows = members.map((u) => `
       <tr>
-        <td>${esc(u.email)}</td>
-        <td>${esc(u.name ?? '—')}</td>
-        <td>${u.marketing_consent ? '✅' : '—'}</td>
-        <td>${u.lifecycle_emails_enabled ? '✅' : '✕'}</td>
-        <td>${u.is_premium ? '⭐' : '—'}</td>
-        <td>${fmtDate(u.created_at)}</td>
+        <td>
+          <div style="display:flex; align-items:center; gap:11px;">
+            <div style="width:32px;height:32px;border-radius:50%;background:var(--accent-lo);border:1px solid var(--border2);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:var(--text);flex:none;">${initialOf(u.name || u.email)}</div>
+            <div style="min-width:0;">
+              <div style="font-size:13px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(u.name || '—')}</div>
+              <div class="em-mail-to" style="color:var(--muted);">${esc(u.email)}</div>
+            </div>
+          </div>
+        </td>
+        <td>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            ${u.marketing_consent ? '<span class="em-pill delivered">✓ Marketing</span>' : '<span class="em-pill sent">solo servizio</span>'}
+            ${u.lifecycle_emails_enabled === false ? '<span class="em-pill bounced">promemoria off</span>' : ''}
+            ${u.is_premium ? '<span class="em-pill clicked">⭐ Premium</span>' : ''}
+          </div>
+        </td>
+        <td><span class="em-mail-when">${fmtDate(u.created_at)}</span></td>
       </tr>`).join('');
     const lbl = SEGMENT_LABELS[a.tab]?.name ?? a.tab;
     bodyHtml = `<div class="card">
-      <div class="card-title">Membri di "${esc(lbl)}" — ${a.total} totali${a.total > 150 ? ' (primi 150)' : ''}</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Email</th><th>Nome</th><th>Marketing</th><th>Promemoria</th><th>Premium</th><th>Registrato</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" class="empty">Segmento vuoto.</td></tr>'}</tbody>
+      <div class="filter-bar" style="gap:10px; margin-bottom:6px; align-items:center;">
+        <div class="card-title" style="margin:0;">${esc(lbl)}</div>
+        <span class="em-chip"><b>${a.total}</b> membri${a.total > 150 ? ' · primi 150 mostrati' : ''}</span>
+        <span style="flex:1"></span>
+        <input class="form-input" id="audience-filter" placeholder="cerca tra i caricati..." value="${esc(a.filter || '')}" style="max-width:240px;">
+      </div>
+      <div class="table-wrap"><table class="em-mail-table">
+        <thead><tr><th>Utente</th><th>Stato</th><th style="text-align:right;">Registrato</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" class="empty">Nessun risultato.</td></tr>'}</tbody>
       </table></div>
     </div>`;
   }
@@ -498,39 +590,110 @@ function pageEmails() {
   const m = state.mailbox;
   if (m.items === null && !m.loading) { loadMailbox(); return '<div class="empty">Caricamento…</div>'; }
 
-  const rows = (m.items || []).map((it) => {
+  const items = m.items || [];
+  const rows = items.map((it) => {
     const st = deliveryStatus(it.resend_email_id, it.send_status);
     return `<tr>
-      <td>${esc(it.to)}</td>
-      <td>${esc(it.subject)}</td>
-      <td><span class="tag">${esc(it.kind)}</span></td>
-      <td><span class="em-status ${st.cls}">${st.label}</span></td>
-      <td>${fmtDate(it.sent_at)}</td>
+      <td><span class="em-mail-to">${esc(it.to)}</span></td>
+      <td><span class="em-mail-subject">${esc(it.subject)}</span></td>
+      <td>${kindTag(it.kind)}</td>
+      <td>${statusPill(st)}</td>
+      <td><span class="em-mail-when">${fmtDate(it.sent_at)}</span></td>
     </tr>`;
   }).join('');
+
+  // Chip riassuntivi degli stati sulla lista corrente.
+  const counts = {};
+  items.forEach((it) => {
+    const st = deliveryStatus(it.resend_email_id, it.send_status);
+    counts[st.label] = (counts[st.label] || 0) + 1;
+  });
+  const chips = Object.entries(counts)
+    .map(([label, n]) => `<span class="em-chip"><b>${n}</b> ${esc(label.toLowerCase())}</span>`)
+    .join('');
 
   return `
     <div class="page-header">
       <div>
         <div class="page-title">Email inviate</div>
-        <div class="page-sub">Tutte le email uscite dal sistema, con lo stato dai webhook (consegne/aperture dal 06/08)</div>
+        <div class="page-sub">Ogni email uscita dal sistema con l'esito reale dai webhook${m.at ? ` · aggiornato alle ${m.at}` : ''}</div>
       </div>
-      <button class="btn btn-ghost" data-act="mailbox-reload">↻ Aggiorna</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost" data-act="metrics-open" data-kind="all" data-key="all" data-label="Tutte le email">📈 Analisi periodo</button>
+        <button class="btn btn-ghost" data-act="mailbox-reload">↻ Aggiorna</button>
+      </div>
     </div>
     <div class="card">
-      <div class="filter-bar" style="gap:10px; margin-bottom:14px;">
-        <input class="form-input" id="mailbox-q" placeholder="filtra per indirizzo..." value="${esc(m.q)}" style="max-width:300px;">
+      <div class="filter-bar" style="gap:10px; margin-bottom:14px; align-items:center;">
+        <input class="form-input" id="mailbox-q" placeholder="filtra per indirizzo..." value="${esc(m.q)}" style="max-width:280px;">
         <button class="btn" data-act="mailbox-search">Filtra</button>
         ${m.q ? '<button class="btn btn-ghost" data-act="mailbox-clear">Pulisci</button>' : ''}
+        <span style="flex:1"></span>
+        <div class="em-chips">${chips}</div>
       </div>
       ${m.loading ? '<div class="empty">Caricamento…</div>' : `
-      <div class="table-wrap"><table>
-        <thead><tr><th>Destinatario</th><th>Oggetto</th><th>Tipo</th><th>Stato</th><th>Quando</th></tr></thead>
+      <div class="table-wrap"><table class="em-mail-table">
+        <thead><tr><th>Destinatario</th><th>Oggetto</th><th>Tipo</th><th>Stato</th><th style="text-align:right;">Quando</th></tr></thead>
         <tbody>${rows || '<tr><td colspan="5" class="empty">Nessuna email trovata.</td></tr>'}</tbody>
       </table></div>
-      ${(m.items || []).length >= m.limit ? '<div style="text-align:center;margin-top:14px;"><button class="btn btn-ghost" data-act="mailbox-more">Carica altre</button></div>' : ''}`}
-      <p class="em-muted-line" style="margin-top:12px;">Le email "Confirm Your Signup" (verifica registrazione) partono da Supabase Auth e si vedono solo sulla dashboard Resend.</p>
+      ${items.length >= m.limit ? '<div style="text-align:center;margin-top:14px;"><button class="btn btn-ghost" data-act="mailbox-more">Carica altre</button></div>' : ''}`}
+      <p class="em-muted-line" style="margin-top:12px;">ℹ️ Gli invii precedenti alle 11:41 del 06/08 restano "Inviata": il webhook che traccia consegne e aperture è nato in quel momento. Le mail di verifica registrazione ("Confirm Your Signup") partono da Supabase Auth e si vedono solo su Resend.</p>
     </div>`;
+}
+
+// ---------- metriche (funziona per tutto: automazioni, broadcast, totale) ----------
+
+async function loadMetrics() {
+  const m = state.metrics;
+  if (!m) return;
+  m.loading = true; render();
+  const { data, error } = await sb.rpc('email_metrics', {
+    p_kind: m.kind, p_key: m.key, p_from: m.from, p_to: m.to,
+  });
+  m.loading = false;
+  if (!error) m.data = data;
+  render();
+}
+
+function metricsModal() {
+  const m = state.metrics;
+  if (!m) return '';
+  const d = m.data;
+  const tile = (v, l, cls, sub) => `<div class="em-metric ${cls || ''}">
+    <div class="v">${v}</div><div class="l">${l}</div>${sub ? `<div class="s">${sub}</div>` : ''}
+  </div>`;
+  let grid = '<div class="empty">Caricamento…</div>';
+  if (!m.loading && d) {
+    grid = `<div class="em-metrics-grid">
+      ${tile(d.sent, 'Inviate')}
+      ${tile(d.delivered, 'Consegnate', 'good', `${pct(d.delivered, d.sent)} delle inviate`)}
+      ${tile(d.opened, 'Aperte', 'good', `${pct(d.opened, d.delivered)} delle consegnate`)}
+      ${tile(d.clicked, 'Click sul bottone', 'good', pct(d.clicked, d.delivered))}
+      ${tile(d.bounced, 'Bounce', d.bounced > 0 ? 'warn' : '')}
+      ${tile(d.complained, 'Spam report', d.complained > 0 ? 'bad' : '')}
+      ${tile(d.unsubscribed, 'Disiscritti', d.unsubscribed > 0 ? 'warn' : '')}
+      ${tile(d.delivered ? pct(d.opened, d.delivered) : '—', 'Open rate')}
+    </div>`;
+  }
+  return `<div class="modal-overlay" data-act="metrics-close">
+    <div class="modal" style="max-width:720px;width:94%;" onclick="event.stopPropagation()">
+      <div class="modal-title">📈 ${esc(m.label)}</div>
+      <div class="em-daterange">
+        <span class="em-muted-line" style="margin:0;">Dal</span>
+        <input type="date" id="metrics-from" value="${m.from}">
+        <span class="em-muted-line" style="margin:0;">al</span>
+        <input type="date" id="metrics-to" value="${m.to}">
+        <button class="btn btn-primary" data-act="metrics-apply">Applica</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost" data-act="metrics-range" data-days="7">7g</button>
+        <button class="btn btn-ghost" data-act="metrics-range" data-days="30">30g</button>
+        <button class="btn btn-ghost" data-act="metrics-range" data-days="90">90g</button>
+      </div>
+      ${grid}
+      <p class="em-muted-line">Consegne, aperture e click sono tracciati dal 06/08/2026 (nascita del webhook): gli invii precedenti contano solo come "inviate". Le disiscrizioni sono attribuite alla singola email per gli invii dal 06/08 in poi.</p>
+      <div class="modal-actions"><button class="btn btn-ghost" data-act="metrics-close">Chiudi</button></div>
+    </div>
+  </div>`;
 }
 
 // ---------- modale anteprima email ----------
@@ -565,6 +728,7 @@ function layout() {
       ${secretBanner()}
       ${state.loading ? '<div class="empty">Caricamento…</div>' : renderPage()}
     </main>
+    ${metricsModal()}
     ${previewModal()}
     ${toastHtml()}`;
 }
@@ -622,6 +786,33 @@ function attachEvents() {
   const segSelect = document.getElementById('c-segment');
   if (segSelect) {
     segSelect.addEventListener('change', () => { captureDraft(); render(); });
+  }
+
+  // Filtro live sui membri audience caricati (mantiene il focus dopo il re-render).
+  const audFilter = document.getElementById('audience-filter');
+  if (audFilter) {
+    let t;
+    audFilter.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        state.audience.filter = audFilter.value;
+        render();
+        const el2 = document.getElementById('audience-filter');
+        if (el2) { el2.focus(); el2.setSelectionRange(el2.value.length, el2.value.length); }
+      }, 250);
+    });
+  }
+
+  // Enter nel filtro casella = Filtra.
+  const mq = document.getElementById('mailbox-q');
+  if (mq) {
+    mq.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        state.mailbox.q = mq.value.trim();
+        state.mailbox.limit = 60;
+        loadMailbox();
+      }
+    });
   }
 }
 
@@ -718,17 +909,25 @@ async function handleAction(el) {
     return;
   }
 
-  if (act === 'edit-template') { state.editingTemplate = el.dataset.key; render(); return; }
+  if (act === 'edit-template') {
+    state.editingTemplate = el.dataset.key;
+    const a = state.automations.find((x) => x.key === el.dataset.key);
+    state.editorMode = a?.html ? 'html' : 'simple';
+    render();
+    return;
+  }
+  if (act === 'editor-mode') { state.editorMode = el.dataset.mode; render(); return; }
   if (act === 'close-template') { state.editingTemplate = null; render(); return; }
 
   if (act === 'save-template') {
     const key = el.dataset.key;
-    const content = collectTemplateEditorContent();
-    const res = await adminCall('update_template', {
-      key,
-      subject: document.getElementById('t-subject')?.value ?? '',
-      content,
-    });
+    const subject = document.getElementById('t-subject')?.value ?? '';
+    const payload = state.editorMode === 'html'
+      // HTML libero: salva l'html; se svuotato, torna al layout guidato.
+      ? { key, subject, html: document.getElementById('t-html')?.value ?? '' }
+      // Editor guidato: salva il content e azzera l'eventuale html libero.
+      : { key, subject, content: collectTemplateEditorContent(), html: '' };
+    const res = await adminCall('update_template', payload);
     if (res.ok) {
       toast('Testi salvati: valgono dal prossimo invio ✅');
       state.editingTemplate = null;
@@ -769,17 +968,21 @@ async function handleAction(el) {
 
   if (act === 'preview-automation') {
     const a = state.automations.find((x) => x.key === el.dataset.key);
-    if (!a?.content) return;
-    const res = await adminCall('render_template', { subject: a.subject, content: a.content });
+    if (!a) return;
+    const payload = a.html
+      ? { subject: a.subject, html: a.html }
+      : { subject: a.subject, content: a.content };
+    const res = await adminCall('render_template', payload);
     if (res.ok) { state.preview = res; render(); }
     return;
   }
 
   if (act === 'preview-editing-template') {
-    const res = await adminCall('render_template', {
-      subject: document.getElementById('t-subject')?.value ?? '',
-      content: collectTemplateEditorContent(),
-    });
+    const subject = document.getElementById('t-subject')?.value ?? '';
+    const payload = state.editorMode === 'html'
+      ? { subject, html: document.getElementById('t-html')?.value ?? '' }
+      : { subject, content: collectTemplateEditorContent() };
+    const res = await adminCall('render_template', payload);
     if (res.ok) { state.preview = res; render(); }
     return;
   }
@@ -796,6 +999,39 @@ async function handleAction(el) {
   }
 
   if (act === 'close-preview') { state.preview = null; render(); return; }
+
+  if (act === 'metrics-open') {
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    state.metrics = {
+      kind: el.dataset.kind,
+      key: el.dataset.key,
+      label: el.dataset.label,
+      from: iso(new Date(today.getTime() - 29 * 864e5)),
+      to: iso(today),
+      data: null,
+      loading: true,
+    };
+    render();
+    loadMetrics();
+    return;
+  }
+  if (act === 'metrics-apply') {
+    state.metrics.from = document.getElementById('metrics-from')?.value || state.metrics.from;
+    state.metrics.to = document.getElementById('metrics-to')?.value || state.metrics.to;
+    loadMetrics();
+    return;
+  }
+  if (act === 'metrics-range') {
+    const days = Number(el.dataset.days) || 30;
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    state.metrics.from = iso(new Date(today.getTime() - (days - 1) * 864e5));
+    state.metrics.to = iso(today);
+    loadMetrics();
+    return;
+  }
+  if (act === 'metrics-close') { state.metrics = null; render(); return; }
 }
 
 function collectTemplateEditorContent() {
@@ -820,5 +1056,8 @@ function collectTemplateEditorContent() {
 (function boot() {
   render();
   loadCore();
-  setInterval(loadCore, REFRESH_MS);
+  setInterval(() => {
+    loadCore();
+    if (state.page === 'emails' && getSecret()) loadMailbox();
+  }, REFRESH_MS);
 })();
