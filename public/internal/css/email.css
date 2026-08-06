@@ -1,0 +1,68 @@
+/* Sezione Email — stili specifici (il grosso arriva da shared.css) */
+
+/* Grafico a barre giornaliero (Overview) */
+.em-chart { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 8px; }
+.em-chart .bar-wrap { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; position: relative; }
+.em-chart .bar { background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; opacity: .85; }
+.em-chart .bar.delivered { background: var(--mattia); }
+.em-chart .bar-wrap:hover .bar { opacity: 1; }
+.em-chart .bar-tip {
+  display: none; position: absolute; bottom: calc(100% + 4px); left: 50%;
+  transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 6px; padding: 5px 8px; font-size: 10px; white-space: nowrap; z-index: 5;
+  color: var(--text);
+}
+.em-chart .bar-wrap:hover .bar-tip { display: block; }
+
+/* Toggle automazioni */
+.em-toggle {
+  position: relative; width: 40px; height: 22px; border-radius: 999px;
+  background: var(--border2); cursor: pointer; transition: background .2s; border: none;
+}
+.em-toggle::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--text); transition: transform .2s;
+}
+.em-toggle.on { background: var(--mattia); }
+.em-toggle.on::after { transform: translateX(18px); background: #06130b; }
+
+/* Composer broadcast */
+.em-composer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+@media (max-width: 1000px) { .em-composer-grid { grid-template-columns: 1fr; } }
+.em-html-input {
+  width: 100%; min-height: 320px; font-family: var(--mono); font-size: 12px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 12px; resize: vertical; line-height: 1.5;
+}
+.em-preview {
+  width: 100%; min-height: 380px; border: 1px solid var(--border2);
+  border-radius: 8px; background: #FDFDFD;
+}
+
+/* Badge stato campagna / esiti */
+.em-status { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+  padding: 3px 8px; border-radius: 999px; }
+.em-status.draft     { background: var(--surface2); color: var(--muted); }
+.em-status.scheduled { background: #2a2410; color: var(--amber, #fbbf24); }
+.em-status.sending   { background: #102a3a; color: #38bdf8; }
+.em-status.sent      { background: var(--mattia-bg); color: var(--mattia); }
+.em-status.cancelled { background: #2b1212; color: #f87171; }
+.em-status.failed    { background: #2b1212; color: #f87171; }
+.em-status.skipped_suppressed { background: var(--surface2); color: var(--muted); }
+
+/* Riga funnel per messaggio nel log */
+.em-flow { display: inline-flex; gap: 4px; align-items: center; }
+.em-flow .step { width: 8px; height: 8px; border-radius: 50%; background: var(--border2); }
+.em-flow .step.on { background: var(--mattia); }
+
+/* Banner secret admin */
+.em-secret-banner {
+  background: var(--accent-lo); border: 1px solid var(--accent);
+  border-radius: 10px; padding: 14px 18px; margin-bottom: 20px;
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+}
+.em-secret-banner input { flex: 1; min-width: 220px; }
+
+/* Card automazione */
+.em-automation-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.em-muted-line { font-size: 11px; color: var(--muted); margin-top: 4px; }
