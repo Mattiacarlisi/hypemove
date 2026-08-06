@@ -906,36 +906,131 @@ async function loadMetrics() {
   const m = state.metrics;
   if (!m) return;
   m.loading = true; render();
-  const { data, error } = await sb.rpc('email_metrics', {
-    p_kind: m.kind, p_key: m.key, p_from: m.from, p_to: m.to,
-  });
+  const [live, tests] = await Promise.all([
+    sb.rpc('email_metrics', { p_kind: m.kind, p_key: m.key, p_from: m.from, p_to: m.to }),
+    sb.rpc('email_tests_list', { p_kind: m.kind, p_key: m.key }),
+  ]);
   m.loading = false;
-  if (!error) m.data = data;
+  if (!live.error) m.data = live.data;
+  if (!tests.error) m.tests = tests.data || [];
   render();
+}
+
+async function loadComparison() {
+  const m = state.metrics;
+  if (!m?.selected?.length) { m.comparison = null; render(); return; }
+  m.comparing = true; render();
+  const { data, error } = await sb.rpc('email_tests_compare', { p_ids: m.selected });
+  m.comparing = false;
+  if (!error) m.comparison = data || [];
+  render();
+}
+
+// Le righe del funnel, sempre nello stesso ordine logico ma disegnate in
+// scala sul totale inviate: la lettura "dall'alto al basso" è immediata.
+const FUNNEL_ROWS = [
+  { key: 'sent', label: 'Inviate', cls: 'f-sent' },
+  { key: 'delivered', label: 'Consegnate', cls: 'f-delivered' },
+  { key: 'opened', label: 'Aperte', cls: 'f-opened' },
+  { key: 'clicked', label: 'Cliccate', cls: 'f-clicked' },
+  { key: 'bounced', label: 'Bounce', cls: 'f-bounce' },
+  { key: 'complained', label: 'Spam report', cls: 'f-spam' },
+  { key: 'unsubscribed', label: 'Disiscritti', cls: 'f-unsub' },
+];
+
+function funnelView(d) {
+  if (!d) return '';
+  const total = d.sent || 0;
+  // ordinamento decrescente per valore: il funnel "cade" naturalmente
+  const rows = FUNNEL_ROWS
+    .map((r) => ({ ...r, value: d[r.key] ?? 0 }))
+    .sort((a, b) => b.value - a.value);
+  return `<div class="em-funnel">${rows.map((r) => {
+    const w = total ? Math.max(r.value > 0 ? 2 : 0, Math.round((r.value / total) * 100)) : 0;
+    return `<div class="em-funnel-row">
+      <div class="em-funnel-label">${r.label}</div>
+      <div class="em-funnel-track"><div class="em-funnel-bar ${r.cls}" style="width:${w}%"></div></div>
+      <div class="em-funnel-nums"><b>${r.value}</b> <span>${total ? `${((r.value / total) * 100).toFixed(1)}%` : '—'}</span></div>
+    </div>`;
+  }).join('')}</div>
+  <p class="em-muted-line">Ogni percentuale è calcolata sul totale delle inviate (${total}), così le righe sono confrontabili fra loro.</p>`;
+}
+
+function comparisonView() {
+  const m = state.metrics;
+  if (!m.comparison?.length) return '';
+  // colonne: un test per colonna; delta rispetto al primo selezionato
+  const base = m.comparison[0];
+  const baseRate = (k) => base.metrics.sent ? (base.metrics[k] / base.metrics.sent) * 100 : null;
+  const cols = m.comparison.map((t, i) => {
+    const d = t.metrics;
+    const cells = FUNNEL_ROWS.map((r) => {
+      const v = d[r.key] ?? 0;
+      const rate = d.sent ? (v / d.sent) * 100 : null;
+      let delta = '';
+      if (i > 0 && rate != null && baseRate(r.key) != null) {
+        const diff = rate - baseRate(r.key);
+        if (Math.abs(diff) >= 0.1) {
+          // per bounce/spam/unsub un aumento è negativo, per il resto positivo
+          const inverse = ['bounced', 'complained', 'unsubscribed'].includes(r.key);
+          const good = inverse ? diff < 0 : diff > 0;
+          delta = `<span class="em-delta ${good ? 'up' : 'down'}">${diff > 0 ? '+' : ''}${diff.toFixed(1)}pt</span>`;
+        }
+      }
+      return `<tr>
+        <td class="em-cmp-label">${r.label}</td>
+        <td class="em-cmp-val"><b>${v}</b> <span>${rate != null ? `${rate.toFixed(1)}%` : '—'}</span> ${delta}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="em-cmp-col">
+      <div class="em-cmp-head">
+        <div class="em-cmp-name">${esc(t.name)}${i === 0 ? ' <span class="em-chip">base</span>' : ''}</div>
+        <div class="em-muted-line">${fmtDay(t.from)} → ${fmtDay(t.to)}</div>
+        ${t.hypothesis ? `<div class="em-cmp-hyp">${esc(t.hypothesis)}</div>` : ''}
+      </div>
+      <table class="em-cmp-table"><tbody>${cells}</tbody></table>
+    </div>`;
+  }).join('');
+  return `<div class="em-cmp-wrap">${cols}</div>
+    <p class="em-muted-line">I delta sono in punti percentuali rispetto al primo test selezionato (la "base"). Verde = miglioramento, rosso = peggioramento — per bounce, spam e disiscrizioni la logica è invertita.</p>`;
+}
+
+function testsSection() {
+  const m = state.metrics;
+  const tests = m.tests || [];
+  const rows = tests.map((t) => {
+    const on = (m.selected || []).includes(t.id);
+    return `<div class="em-test-row ${on ? 'on' : ''}" data-act="test-toggle" data-id="${t.id}">
+      <div class="em-test-check">${on ? '✓' : ''}</div>
+      <div style="min-width:0;flex:1;">
+        <div class="em-test-name">${esc(t.name)}</div>
+        <div class="em-muted-line">${fmtDay(t.from_date)} → ${fmtDay(t.to_date)}${t.hypothesis ? ` · ${esc(t.hypothesis)}` : ''}</div>
+      </div>
+      <button class="btn btn-ghost" data-act="test-load" data-id="${t.id}" title="Vedi solo questo periodo">↗</button>
+      <button class="btn btn-ghost" data-act="test-delete" data-id="${t.id}" title="Elimina">🗑</button>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="em-tests-block">
+      <div class="em-tests-head">
+        <div class="card-title" style="margin:0;">Test salvati</div>
+        <button class="btn" data-act="test-save">+ Salva questo periodo come test</button>
+      </div>
+      ${tests.length
+        ? `<div class="em-test-list">${rows}</div>
+           <div class="em-muted-line">Seleziona due o più test per confrontarli. ${m.selected?.length ? `<b>${m.selected.length} selezionati</b>` : ''}</div>`
+        : '<div class="empty" style="padding:18px;">Nessun test salvato per questa email. Imposta un periodo e salvalo: potrai confrontarlo con i prossimi.</div>'}
+    </div>`;
 }
 
 function metricsModal() {
   const m = state.metrics;
   if (!m) return '';
-  const d = m.data;
-  const tile = (v, l, cls, sub) => `<div class="em-metric ${cls || ''}">
-    <div class="v">${v}</div><div class="l">${l}</div>${sub ? `<div class="s">${sub}</div>` : ''}
-  </div>`;
-  let grid = '<div class="empty">Caricamento…</div>';
-  if (!m.loading && d) {
-    grid = `<div class="em-metrics-grid">
-      ${tile(d.sent, 'Inviate')}
-      ${tile(d.delivered, 'Consegnate', 'good', `${pct(d.delivered, d.sent)} delle inviate`)}
-      ${tile(d.opened, 'Aperte', 'good', `${pct(d.opened, d.delivered)} delle consegnate`)}
-      ${tile(d.clicked, 'Click sul bottone', 'good', pct(d.clicked, d.delivered))}
-      ${tile(d.bounced, 'Bounce', d.bounced > 0 ? 'warn' : '')}
-      ${tile(d.complained, 'Spam report', d.complained > 0 ? 'bad' : '')}
-      ${tile(d.unsubscribed, 'Disiscritti', d.unsubscribed > 0 ? 'warn' : '')}
-      ${tile(d.delivered ? pct(d.opened, d.delivered) : '—', 'Open rate')}
-    </div>`;
-  }
+  const showCompare = (m.selected || []).length >= 2 && m.comparison;
+
   return `<div class="modal-overlay" data-act="metrics-close">
-    <div class="modal" style="max-width:720px;width:94%;" onclick="event.stopPropagation()">
+    <div class="modal em-metrics-modal" onclick="event.stopPropagation()">
       <div class="modal-title">📈 ${esc(m.label)}</div>
       <div class="em-daterange">
         <span class="em-muted-line" style="margin:0;">Dal</span>
@@ -948,8 +1043,15 @@ function metricsModal() {
         <button class="btn btn-ghost" data-act="metrics-range" data-days="30">30g</button>
         <button class="btn btn-ghost" data-act="metrics-range" data-days="90">90g</button>
       </div>
-      ${grid}
-      <p class="em-muted-line">Consegne, aperture e click sono tracciati dal 06/08/2026 (nascita del webhook): gli invii precedenti contano solo come "inviate". Le disiscrizioni sono attribuite alla singola email per gli invii dal 06/08 in poi.</p>
+
+      ${m.loading ? '<div class="empty">Caricamento…</div>' : funnelView(m.data)}
+
+      ${testsSection()}
+
+      ${m.comparing ? '<div class="empty">Confronto in corso…</div>' : ''}
+      ${showCompare ? `<div class="card-title" style="margin-top:18px;">Confronto</div>${comparisonView()}` : ''}
+
+      <p class="em-muted-line">Consegne, aperture e click sono tracciati dal 06/08/2026 (nascita del webhook): gli invii precedenti contano solo come "inviate".</p>
       <div class="modal-actions"><button class="btn btn-ghost" data-act="metrics-close">Chiudi</button></div>
     </div>
   </div>`;
@@ -1271,9 +1373,63 @@ async function handleAction(el) {
       to: iso(today),
       data: null,
       loading: true,
+      tests: [],
+      selected: [],
+      comparison: null,
+      comparing: false,
     };
     render();
     loadMetrics();
+    return;
+  }
+
+  if (act === 'test-save') {
+    const m = state.metrics;
+    const name = prompt(`Nome del test (periodo ${fmtDay(m.from)} → ${fmtDay(m.to)}):\nes. "Oggetto più corto"`);
+    if (!name) return;
+    const hypothesis = prompt('Cosa hai cambiato e cosa ti aspetti? (facoltativo)') || null;
+    const res = await adminCall('save_test', {
+      test: {
+        scope_kind: m.kind, scope_key: m.key, name, hypothesis,
+        from_date: m.from, to_date: m.to,
+      },
+    });
+    if (res.ok) { toast('Test salvato ✅'); loadMetrics(); }
+    else toast(`Errore: ${res.error ?? '?'}`, true);
+    return;
+  }
+
+  if (act === 'test-toggle') {
+    const m = state.metrics;
+    const id = el.dataset.id;
+    m.selected = (m.selected || []).includes(id)
+      ? m.selected.filter((x) => x !== id)
+      : [...(m.selected || []), id];
+    if (m.selected.length >= 2) loadComparison();
+    else { m.comparison = null; render(); }
+    return;
+  }
+
+  if (act === 'test-load') {
+    const m = state.metrics;
+    const t = (m.tests || []).find((x) => x.id === el.dataset.id);
+    if (!t) return;
+    m.from = t.from_date;
+    m.to = t.to_date;
+    loadMetrics();
+    return;
+  }
+
+  if (act === 'test-delete') {
+    if (!confirm('Eliminare questo test salvato? Le email e i dati non vengono toccati.')) return;
+    const res = await adminCall('delete_test', { test_id: el.dataset.id });
+    if (res.ok) {
+      const m = state.metrics;
+      m.selected = (m.selected || []).filter((x) => x !== el.dataset.id);
+      m.comparison = null;
+      toast('Test eliminato');
+      loadMetrics();
+    }
     return;
   }
   if (act === 'metrics-apply') {

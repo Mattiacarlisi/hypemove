@@ -106,6 +106,7 @@
 .em-chip b { color: var(--text); }
 
 /* ---------- Modale metriche ---------- */
+.em-metrics-modal { max-width: 860px; width: 94%; max-height: 88vh; overflow-y: auto; }
 .em-metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; }
 @media (max-width: 700px) { .em-metrics-grid { grid-template-columns: repeat(2, 1fr); } }
 .em-metric { background: var(--surface2); border: 1px solid var(--border2); border-radius: 10px; padding: 12px 14px; }
@@ -115,6 +116,49 @@
 .em-metric.good .v { color: var(--mattia); }
 .em-metric.warn .v { color: #fbbf24; }
 .em-metric.bad .v { color: #f87171; }
+
+/* Funnel dentro la modale (righe ordinate per valore) */
+.em-funnel { margin-top: 16px; }
+.em-funnel-bar.f-bounce { background: #fb923c; }
+.em-funnel-bar.f-spam   { background: #f87171; }
+.em-funnel-bar.f-unsub  { background: #fbbf24; }
+
+/* Test salvati */
+.em-tests-block { margin-top: 20px; border-top: 1px solid var(--border2); padding-top: 16px; }
+.em-tests-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.em-test-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.em-test-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 9px;
+  cursor: pointer; transition: border-color .15s, background .15s;
+}
+.em-test-row:hover { border-color: var(--border2); background: var(--surface); }
+.em-test-row.on { border-color: var(--accent); background: var(--accent-lo); }
+.em-test-check {
+  width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border2);
+  display: flex; align-items: center; justify-content: center; font-size: 11px;
+  color: var(--text); flex: none;
+}
+.em-test-row.on .em-test-check { background: var(--accent); border-color: var(--accent); }
+.em-test-name { font-size: 13px; font-weight: 600; color: var(--text); }
+
+/* Confronto affiancato */
+.em-cmp-wrap { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px; margin-top: 10px; }
+.em-cmp-col {
+  flex: 1; min-width: 240px; background: var(--surface2);
+  border: 1px solid var(--border2); border-radius: 10px; padding: 14px;
+}
+.em-cmp-head { margin-bottom: 10px; }
+.em-cmp-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.em-cmp-hyp { font-size: 11px; color: var(--muted); margin-top: 6px; font-style: italic; }
+.em-cmp-table { width: 100%; border-collapse: collapse; }
+.em-cmp-table td { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.em-cmp-label { color: var(--muted); }
+.em-cmp-val { text-align: right; font-family: var(--mono); color: var(--text); }
+.em-cmp-val span { color: var(--muted); font-size: 11px; margin-left: 4px; }
+.em-delta { font-size: 11px; font-weight: 700; margin-left: 6px; }
+.em-delta.up { color: var(--mattia); }
+.em-delta.down { color: #f87171; }
 .em-daterange { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .em-daterange input[type="date"] {
   background: var(--bg); color: var(--text); border: 1px solid var(--border2);
