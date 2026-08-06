@@ -69,8 +69,10 @@ const state = {
   audience: { tab: 'marketing', members: null, total: 0, unsub: null, loading: false },
   // anteprima email {subject, html}
   preview: null,
-  // modale metriche {kind, key, label, from, to, data, loading}
-  metrics: null,
+  // pagina dettaglio email {kind, key, label, from, to, data, tests, selected...}
+  detail: null,
+  // dialog form (sostituisce prompt/confirm nativi)
+  dialog: null,
   // modalità editor template: 'simple' | 'html'
   editorMode: 'simple',
   // overview analitica guidata dal range di date
@@ -114,6 +116,61 @@ function toast(msg, isError) {
   state.toast = { msg, isError: Boolean(isError) };
   render();
   setTimeout(() => { state.toast = null; render(); }, 3500);
+}
+
+// ---------- dialog (sostituisce prompt/confirm nativi del browser) ----------
+// La callback vive fuori dallo state: lo state viene riletto a ogni render,
+// le funzioni no.
+let pendingDialogAction = null;
+
+function openDialog(config, onConfirm) {
+  state.dialog = config;
+  pendingDialogAction = onConfirm;
+  render();
+  const first = document.querySelector('.em-dialog [data-field]');
+  if (first) { first.focus(); if (first.select) first.select(); }
+}
+
+function closeDialog() {
+  state.dialog = null;
+  pendingDialogAction = null;
+  render();
+}
+
+function dialogFieldHtml(f) {
+  const common = `id="dlg-${f.id}" data-field="${f.id}" class="form-input"`;
+  const input = f.type === 'textarea'
+    ? `<textarea ${common} rows="3" placeholder="${esc(f.placeholder ?? '')}">${esc(f.value ?? '')}</textarea>`
+    : `<input ${common} type="${f.type ?? 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder ?? '')}">`;
+  return `<div class="form-field" style="margin-bottom:14px;">
+    <label class="form-label" for="dlg-${f.id}">${esc(f.label)}</label>
+    ${input}
+    ${f.hint ? `<div class="em-muted-line">${f.hint}</div>` : ''}
+  </div>`;
+}
+
+function dialogModal() {
+  const d = state.dialog;
+  if (!d) return '';
+  const fields = (d.fields || []);
+  const grid = fields.some((f) => f.half);
+  return `<div class="modal-overlay em-dialog-overlay" data-act="dialog-cancel">
+    <div class="modal em-dialog" onclick="event.stopPropagation()">
+      <div class="modal-title">${esc(d.title)}</div>
+      ${d.subtitle ? `<p class="em-muted-line" style="margin:-6px 0 16px;">${d.subtitle}</p>` : ''}
+      ${d.warning ? `<div class="em-dialog-warning">${d.warning}</div>` : ''}
+      ${grid
+        ? `<div class="form-grid" style="grid-template-columns:1fr 1fr;">
+             ${fields.filter((f) => f.half).map(dialogFieldHtml).join('')}
+           </div>
+           ${fields.filter((f) => !f.half).map(dialogFieldHtml).join('')}`
+        : fields.map(dialogFieldHtml).join('')}
+      <div class="modal-actions">
+        <button class="btn btn-ghost" data-act="dialog-cancel">Annulla</button>
+        <button class="btn ${d.danger ? 'btn-red' : 'btn-primary'}" data-act="dialog-confirm">${esc(d.confirmLabel ?? 'Conferma')}</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 async function adminCall(action, payload = {}) {
@@ -903,7 +960,7 @@ function pageEmails() {
 // ---------- metriche (funziona per tutto: automazioni, broadcast, totale) ----------
 
 async function loadMetrics() {
-  const m = state.metrics;
+  const m = state.detail;
   if (!m) return;
   m.loading = true; render();
   const [live, tests] = await Promise.all([
@@ -917,8 +974,8 @@ async function loadMetrics() {
 }
 
 async function loadComparison() {
-  const m = state.metrics;
-  if (!m?.selected?.length) { m.comparison = null; render(); return; }
+  const m = state.detail;
+  if (!m?.selected?.length) { if (m) m.comparison = null; render(); return; }
   m.comparing = true; render();
   const { data, error } = await sb.rpc('email_tests_compare', { p_ids: m.selected });
   m.comparing = false;
@@ -957,7 +1014,7 @@ function funnelView(d) {
 }
 
 function comparisonView() {
-  const m = state.metrics;
+  const m = state.detail;
   if (!m.comparison?.length) return '';
   // colonne: un test per colonna; delta rispetto al primo selezionato
   const base = m.comparison[0];
@@ -996,65 +1053,84 @@ function comparisonView() {
 }
 
 function testsSection() {
-  const m = state.metrics;
+  const m = state.detail;
   const tests = m.tests || [];
   const rows = tests.map((t) => {
     const on = (m.selected || []).includes(t.id);
-    return `<div class="em-test-row ${on ? 'on' : ''}" data-act="test-toggle" data-id="${t.id}">
-      <div class="em-test-check">${on ? '✓' : ''}</div>
-      <div style="min-width:0;flex:1;">
-        <div class="em-test-name">${esc(t.name)}</div>
-        <div class="em-muted-line">${fmtDay(t.from_date)} → ${fmtDay(t.to_date)}${t.hypothesis ? ` · ${esc(t.hypothesis)}` : ''}</div>
+    return `<div class="em-test-row ${on ? 'on' : ''}">
+      <div class="em-test-pick" data-act="test-toggle" data-id="${t.id}">
+        <div class="em-test-check">${on ? '✓' : ''}</div>
+        <div style="min-width:0;flex:1;">
+          <div class="em-test-name">${esc(t.name)}</div>
+          <div class="em-muted-line">${fmtDay(t.from_date)} → ${fmtDay(t.to_date)}${t.hypothesis ? ` · ${esc(t.hypothesis)}` : ''}</div>
+        </div>
       </div>
-      <button class="btn btn-ghost" data-act="test-load" data-id="${t.id}" title="Vedi solo questo periodo">↗</button>
+      <button class="btn btn-ghost" data-act="test-load" data-id="${t.id}" title="Carica questo periodo">↗</button>
+      <button class="btn btn-ghost" data-act="test-edit" data-id="${t.id}" title="Modifica">✏️</button>
       <button class="btn btn-ghost" data-act="test-delete" data-id="${t.id}" title="Elimina">🗑</button>
     </div>`;
   }).join('');
 
   return `
-    <div class="em-tests-block">
+    <div class="card">
       <div class="em-tests-head">
-        <div class="card-title" style="margin:0;">Test salvati</div>
-        <button class="btn" data-act="test-save">+ Salva questo periodo come test</button>
+        <div>
+          <div class="card-title" style="margin:0;">Test salvati</div>
+          <div class="em-muted-line">Ogni test è un periodo con la sua ipotesi. Selezionane due o più per confrontarli.</div>
+        </div>
+        <button class="btn btn-primary" data-act="test-save">+ Salva periodo come test</button>
       </div>
       ${tests.length
         ? `<div class="em-test-list">${rows}</div>
-           <div class="em-muted-line">Seleziona due o più test per confrontarli. ${m.selected?.length ? `<b>${m.selected.length} selezionati</b>` : ''}</div>`
-        : '<div class="empty" style="padding:18px;">Nessun test salvato per questa email. Imposta un periodo e salvalo: potrai confrontarlo con i prossimi.</div>'}
+           ${m.selected?.length ? `<div class="em-muted-line"><b>${m.selected.length}</b> selezionati${m.selected.length === 1 ? ' — selezionane un altro per confrontare' : ''}</div>` : ''}`
+        : '<div class="empty" style="padding:22px;">Nessun test ancora. Imposta un periodo qui sopra e salvalo: potrai confrontarlo con i prossimi cambiamenti.</div>'}
     </div>`;
 }
 
-function metricsModal() {
-  const m = state.metrics;
-  if (!m) return '';
+// ---------- pagina: dettaglio email (analisi + test) ----------
+
+function pageDetail() {
+  const m = state.detail;
+  if (!m) { state.page = 'automations'; return pageAutomations(); }
   const showCompare = (m.selected || []).length >= 2 && m.comparison;
+  const backTo = m.kind === 'campaign' ? 'broadcast' : m.kind === 'all' ? 'overview' : 'automations';
+  const backLabel = m.kind === 'campaign' ? 'Broadcast' : m.kind === 'all' ? 'Overview' : 'Automazioni';
 
-  return `<div class="modal-overlay" data-act="metrics-close">
-    <div class="modal em-metrics-modal" onclick="event.stopPropagation()">
-      <div class="modal-title">📈 ${esc(m.label)}</div>
-      <div class="em-daterange">
-        <span class="em-muted-line" style="margin:0;">Dal</span>
-        <input type="date" id="metrics-from" value="${m.from}">
-        <span class="em-muted-line" style="margin:0;">al</span>
-        <input type="date" id="metrics-to" value="${m.to}">
-        <button class="btn btn-primary" data-act="metrics-apply">Applica</button>
-        <span style="flex:1"></span>
-        <button class="btn btn-ghost" data-act="metrics-range" data-days="7">7g</button>
-        <button class="btn btn-ghost" data-act="metrics-range" data-days="30">30g</button>
-        <button class="btn btn-ghost" data-act="metrics-range" data-days="90">90g</button>
+  return `
+    <div class="page-header">
+      <div>
+        <button class="em-back" data-nav="${backTo}">← ${backLabel}</button>
+        <div class="page-title" style="margin-top:6px;">${esc(m.label)}</div>
+        <div class="page-sub">Analisi del periodo e confronto tra i test salvati</div>
       </div>
-
-      ${m.loading ? '<div class="empty">Caricamento…</div>' : funnelView(m.data)}
-
-      ${testsSection()}
-
-      ${m.comparing ? '<div class="empty">Confronto in corso…</div>' : ''}
-      ${showCompare ? `<div class="card-title" style="margin-top:18px;">Confronto</div>${comparisonView()}` : ''}
-
-      <p class="em-muted-line">Consegne, aperture e click sono tracciati dal 06/08/2026 (nascita del webhook): gli invii precedenti contano solo come "inviate".</p>
-      <div class="modal-actions"><button class="btn btn-ghost" data-act="metrics-close">Chiudi</button></div>
     </div>
-  </div>`;
+
+    <div class="em-daterange" style="margin-bottom:18px;">
+      <span class="em-muted-line" style="margin:0;">Dal</span>
+      <input type="date" id="metrics-from" value="${m.from}">
+      <span class="em-muted-line" style="margin:0;">al</span>
+      <input type="date" id="metrics-to" value="${m.to}">
+      <button class="btn btn-primary" data-act="metrics-apply">Applica</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost" data-act="metrics-range" data-days="7">7g</button>
+      <button class="btn btn-ghost" data-act="metrics-range" data-days="30">30g</button>
+      <button class="btn btn-ghost" data-act="metrics-range" data-days="90">90g</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Funnel del periodo</div>
+      ${m.loading ? '<div class="empty">Caricamento…</div>' : funnelView(m.data)}
+    </div>
+
+    ${testsSection()}
+
+    ${m.comparing ? '<div class="card"><div class="empty">Confronto in corso…</div></div>' : ''}
+    ${showCompare ? `<div class="card">
+        <div class="card-title">Confronto tra test</div>
+        ${comparisonView()}
+      </div>` : ''}
+
+    <p class="em-muted-line">Consegne, aperture e click sono tracciati dal 06/08/2026 (nascita del webhook): gli invii precedenti contano solo come "inviate".</p>`;
 }
 
 // ---------- modale anteprima email ----------
@@ -1080,6 +1156,7 @@ function renderPage() {
     case 'broadcast': return pageBroadcast();
     case 'automations': return pageAutomations();
     case 'audience': return pageAudience();
+    case 'detail': return pageDetail();
     default: return pageOverview();
   }
 }
@@ -1090,8 +1167,8 @@ function layout() {
       ${secretBanner()}
       ${state.loading ? '<div class="empty">Caricamento…</div>' : renderPage()}
     </main>
-    ${metricsModal()}
     ${previewModal()}
+    ${dialogModal()}
     ${toastHtml()}`;
 }
 
@@ -1239,22 +1316,34 @@ async function handleAction(el) {
     state.draft.id = saved.campaign.id;
     const n = saved.recipients_count;
     const segName = SEGMENT_LABELS[state.draft.segment_key]?.name ?? state.draft.segment_key;
-    // 2. conferma esplicita col numero reale
-    const typed = prompt(`Stai per inviare "${state.draft.subject}" a ${n} utenti del segmento ${segName}.\n\nPer confermare scrivi: INVIA`);
-    if (typed !== 'INVIA') { toast('Invio annullato.'); return; }
-    // 3. spara (la chiamata resta appesa finché il motore non finisce)
-    state.sending = { campaignId: state.draft.id };
-    render();
-    const res = await adminCall('send_campaign', { campaign_id: state.draft.id });
-    state.sending = null;
-    if (res.ok) {
-      toast(`Campagna inviata: ${res.sent} ok, ${res.failed} errori, ${res.skipped_suppressed} soppressi ✅`);
-      state.draft = null;
+    // 2. conferma esplicita col numero reale: va digitato INVIA
+    openDialog({
+      title: 'Confermi l\'invio?',
+      subtitle: `"${esc(state.draft.subject)}" partirà verso <b>${n} utenti</b> del segmento <b>${esc(segName)}</b>. L'operazione non è annullabile.`,
+      confirmLabel: `Invia a ${n} utenti`,
+      danger: true,
+      fields: [{
+        id: 'confirm', label: 'Scrivi INVIA per confermare', placeholder: 'INVIA',
+      }],
+    }, async (v) => {
+      if ((v.confirm || '').trim().toUpperCase() !== 'INVIA') {
+        toast('Scrivi INVIA per confermare.', true);
+        return false;
+      }
+      // 3. spara (la chiamata resta appesa finché il motore non finisce)
+      state.sending = { campaignId: state.draft.id };
+      render();
+      const res = await adminCall('send_campaign', { campaign_id: state.draft.id });
+      state.sending = null;
+      if (res.ok) {
+        toast(`Campagna inviata: ${res.sent} ok, ${res.failed} errori, ${res.skipped_suppressed} soppressi ✅`);
+        state.draft = null;
+      } else {
+        toast(`Errore invio: ${res.error ?? '?'} — riapri e riprova: gli invii già fatti non si duplicano.`, true);
+      }
       loadCore();
-    } else {
-      toast(`Errore invio: ${res.error ?? '?'} — riapri e riprova: gli invii già fatti non si duplicano.`, true);
-      loadCore();
-    }
+      return true;
+    });
     return;
   }
 
@@ -1365,7 +1454,7 @@ async function handleAction(el) {
   if (act === 'metrics-open') {
     const iso = (d) => d.toISOString().slice(0, 10);
     const today = new Date();
-    state.metrics = {
+    state.detail = {
       kind: el.dataset.kind,
       key: el.dataset.key,
       label: el.dataset.label,
@@ -1378,29 +1467,59 @@ async function handleAction(el) {
       comparison: null,
       comparing: false,
     };
+    state.page = 'detail';
     render();
     loadMetrics();
     return;
   }
 
-  if (act === 'test-save') {
-    const m = state.metrics;
-    const name = prompt(`Nome del test (periodo ${fmtDay(m.from)} → ${fmtDay(m.to)}):\nes. "Oggetto più corto"`);
-    if (!name) return;
-    const hypothesis = prompt('Cosa hai cambiato e cosa ti aspetti? (facoltativo)') || null;
-    const res = await adminCall('save_test', {
-      test: {
-        scope_kind: m.kind, scope_key: m.key, name, hypothesis,
-        from_date: m.from, to_date: m.to,
-      },
+  // Salva/modifica test: stessa dialog, precompilata in modifica.
+  if (act === 'test-save' || act === 'test-edit') {
+    const m = state.detail;
+    const existing = act === 'test-edit'
+      ? (m.tests || []).find((x) => x.id === el.dataset.id)
+      : null;
+    openDialog({
+      title: existing ? 'Modifica test' : 'Salva periodo come test',
+      subtitle: existing
+        ? 'Cambia nome, ipotesi o periodo: le metriche si ricalcolano da sole.'
+        : 'Dai un nome a questo esperimento per ritrovarlo e confrontarlo in futuro.',
+      confirmLabel: existing ? 'Salva modifiche' : 'Salva test',
+      fields: [
+        {
+          id: 'name', label: 'Nome del test', value: existing?.name ?? '',
+          placeholder: 'es. Oggetto più corto',
+        },
+        {
+          id: 'hypothesis', label: 'Cosa hai cambiato e cosa ti aspetti', type: 'textarea',
+          value: existing?.hypothesis ?? '',
+          placeholder: 'es. Tolto il nome dall\'oggetto, mi aspetto più aperture',
+        },
+        { id: 'from_date', label: 'Dal', type: 'date', half: true, value: existing?.from_date ?? m.from },
+        { id: 'to_date', label: 'Al', type: 'date', half: true, value: existing?.to_date ?? m.to },
+      ],
+    }, async (v) => {
+      if (!v.name?.trim()) { toast('Serve un nome per il test.', true); return false; }
+      const res = await adminCall('save_test', {
+        test: {
+          id: existing?.id,
+          scope_kind: m.kind, scope_key: m.key,
+          name: v.name.trim(),
+          hypothesis: v.hypothesis?.trim() || null,
+          from_date: v.from_date, to_date: v.to_date,
+        },
+      });
+      if (!res.ok) { toast(`Errore: ${res.error ?? '?'}`, true); return false; }
+      toast(existing ? 'Test aggiornato ✅' : 'Test salvato ✅');
+      if (m.comparison) loadComparison();
+      loadMetrics();
+      return true;
     });
-    if (res.ok) { toast('Test salvato ✅'); loadMetrics(); }
-    else toast(`Errore: ${res.error ?? '?'}`, true);
     return;
   }
 
   if (act === 'test-toggle') {
-    const m = state.metrics;
+    const m = state.detail;
     const id = el.dataset.id;
     m.selected = (m.selected || []).includes(id)
       ? m.selected.filter((x) => x !== id)
@@ -1411,7 +1530,7 @@ async function handleAction(el) {
   }
 
   if (act === 'test-load') {
-    const m = state.metrics;
+    const m = state.detail;
     const t = (m.tests || []).find((x) => x.id === el.dataset.id);
     if (!t) return;
     m.from = t.from_date;
@@ -1421,20 +1540,41 @@ async function handleAction(el) {
   }
 
   if (act === 'test-delete') {
-    if (!confirm('Eliminare questo test salvato? Le email e i dati non vengono toccati.')) return;
-    const res = await adminCall('delete_test', { test_id: el.dataset.id });
-    if (res.ok) {
-      const m = state.metrics;
+    const m = state.detail;
+    const t = (m.tests || []).find((x) => x.id === el.dataset.id);
+    openDialog({
+      title: 'Eliminare questo test?',
+      subtitle: `"${esc(t?.name ?? '')}" sparisce dall'elenco. Le email e i dati non vengono toccati.`,
+      confirmLabel: 'Elimina',
+      danger: true,
+      fields: [],
+    }, async () => {
+      const res = await adminCall('delete_test', { test_id: el.dataset.id });
+      if (!res.ok) { toast(`Errore: ${res.error ?? '?'}`, true); return false; }
       m.selected = (m.selected || []).filter((x) => x !== el.dataset.id);
       m.comparison = null;
       toast('Test eliminato');
       loadMetrics();
-    }
+      return true;
+    });
+    return;
+  }
+
+  // ---- dialog ----
+  if (act === 'dialog-cancel') { closeDialog(); return; }
+  if (act === 'dialog-confirm') {
+    const values = {};
+    document.querySelectorAll('.em-dialog [data-field]').forEach((f) => {
+      values[f.dataset.field] = f.value;
+    });
+    const fn = pendingDialogAction;
+    const ok = fn ? await fn(values) : true;
+    if (ok !== false) closeDialog();
     return;
   }
   if (act === 'metrics-apply') {
-    state.metrics.from = document.getElementById('metrics-from')?.value || state.metrics.from;
-    state.metrics.to = document.getElementById('metrics-to')?.value || state.metrics.to;
+    state.detail.from = document.getElementById('metrics-from')?.value || state.detail.from;
+    state.detail.to = document.getElementById('metrics-to')?.value || state.detail.to;
     loadMetrics();
     return;
   }
@@ -1442,12 +1582,11 @@ async function handleAction(el) {
     const days = Number(el.dataset.days) || 30;
     const iso = (d) => d.toISOString().slice(0, 10);
     const today = new Date();
-    state.metrics.from = iso(new Date(today.getTime() - (days - 1) * 864e5));
-    state.metrics.to = iso(today);
+    state.detail.from = iso(new Date(today.getTime() - (days - 1) * 864e5));
+    state.detail.to = iso(today);
     loadMetrics();
     return;
   }
-  if (act === 'metrics-close') { state.metrics = null; render(); return; }
 
   if (act === 'overview-apply') {
     state.overview.from = document.getElementById('ov-from')?.value || state.overview.from;

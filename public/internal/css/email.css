@@ -123,16 +123,34 @@
 .em-funnel-bar.f-spam   { background: #f87171; }
 .em-funnel-bar.f-unsub  { background: #fbbf24; }
 
+/* Dialog (rimpiazza prompt/confirm nativi del browser) */
+.em-dialog-overlay { z-index: 400; }
+.em-dialog { max-width: 520px; width: 92%; }
+.em-dialog .form-input { width: 100%; }
+.em-dialog textarea.form-input { resize: vertical; font-family: inherit; line-height: 1.5; }
+.em-dialog-warning {
+  background: #2b1a10; border: 1px solid #4a2f15; color: #fbbf24;
+  border-radius: 9px; padding: 11px 14px; font-size: 12px; line-height: 1.5; margin-bottom: 16px;
+}
+
+/* Torna indietro (pagina dettaglio) */
+.em-back {
+  background: none; border: none; color: var(--muted); font-size: 12px;
+  cursor: pointer; padding: 0; transition: color .15s;
+}
+.em-back:hover { color: var(--accent); }
+
 /* Test salvati */
 .em-tests-block { margin-top: 20px; border-top: 1px solid var(--border2); padding-top: 16px; }
-.em-tests-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.em-tests-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
 .em-test-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .em-test-row {
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  display: flex; align-items: center; gap: 6px; padding: 9px 12px;
   background: var(--surface2); border: 1px solid var(--border2); border-radius: 9px;
-  cursor: pointer; transition: border-color .15s, background .15s;
+  transition: border-color .15s, background .15s;
 }
-.em-test-row:hover { border-color: var(--border2); background: var(--surface); }
+.em-test-pick { display: flex; align-items: center; gap: 11px; flex: 1; min-width: 0; cursor: pointer; }
+.em-test-row:hover { background: var(--surface); }
 .em-test-row.on { border-color: var(--accent); background: var(--accent-lo); }
 .em-test-check {
   width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--border2);
