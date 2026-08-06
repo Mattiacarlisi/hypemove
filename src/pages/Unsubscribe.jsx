@@ -83,9 +83,12 @@ export default function Unsubscribe() {
     setStatus("loading");
 
     try {
-      const response = await fetch(`${FUNCTION_URL}?token=${encodeURIComponent(token)}`, {
-        method: "GET",
-      });
+      // confirm=true è obbligatorio: senza, la edge function risponde 200
+      // con la propria pagina di cortesia ma NON disattiva le email.
+      const response = await fetch(
+        `${FUNCTION_URL}?token=${encodeURIComponent(token)}&confirm=true`,
+        { method: "GET" },
+      );
 
       setStatus(response.ok ? "success" : "error");
     } catch {
