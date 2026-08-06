@@ -73,6 +73,14 @@ const state = {
   metrics: null,
   // modalità editor template: 'simple' | 'html'
   editorMode: 'simple',
+  // overview analitica guidata dal range di date
+  overview: {
+    from: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10),
+    to: new Date().toISOString().slice(0, 10),
+    metrics: null,
+    breakdown: null,
+    loading: false,
+  },
 };
 
 // ---------- helpers ----------
@@ -227,38 +235,148 @@ function toastHtml() {
 
 // ---------- pagina: Overview ----------
 
+async function loadOverview() {
+  const o = state.overview;
+  o.loading = true; render();
+  const [m, b] = await Promise.all([
+    sb.rpc('email_metrics', { p_kind: 'all', p_key: 'all', p_from: o.from, p_to: o.to }),
+    sb.rpc('email_performance_breakdown', { p_from: o.from, p_to: o.to }),
+  ]);
+  o.loading = false;
+  if (!m.error) o.metrics = m.data;
+  if (!b.error) o.breakdown = b.data || [];
+  render();
+}
+
+// Cella-tasso con giudizio a soglie (benchmark email fitness/lifecycle).
+// Denominatore troppo piccolo → numero neutro, niente giudizio.
+function rateCell(num, den, goodAt, warnAt) {
+  if (!den) return '<span class="em-rate none">—</span>';
+  const r = (num / den) * 100;
+  const label = `${r.toFixed(r >= 10 ? 0 : 1)}%`;
+  if (den < 10) return `<span class="em-rate none" title="campione piccolo (${den})">${label}</span>`;
+  const cls = r >= goodAt ? 'good' : r >= warnAt ? 'warn' : 'bad';
+  return `<span class="em-rate ${cls}">${label}</span>`;
+}
+
 function pageOverview() {
-  const s = state.stats;
-  if (!s) return '<div class="empty">Caricamento…</div>';
-  const daily = s.daily || [];
-  const max = Math.max(1, ...daily.map((d) => d.sent));
-  const bars = daily.map((d) => `
+  const o = state.overview;
+  if (!o.metrics && !o.loading) { loadOverview(); return '<div class="empty">Caricamento…</div>'; }
+  const d = o.metrics;
+  const suppTotal = state.stats?.suppressions_total ?? '—';
+
+  const rangeBar = `
+    <div class="em-daterange">
+      <span class="em-muted-line" style="margin:0;">Dal</span>
+      <input type="date" id="ov-from" value="${o.from}">
+      <span class="em-muted-line" style="margin:0;">al</span>
+      <input type="date" id="ov-to" value="${o.to}">
+      <button class="btn btn-primary" data-act="overview-apply">Applica</button>
+      <button class="btn btn-ghost" data-act="overview-range" data-days="7">7g</button>
+      <button class="btn btn-ghost" data-act="overview-range" data-days="30">30g</button>
+      <button class="btn btn-ghost" data-act="overview-range" data-days="90">90g</button>
+    </div>`;
+
+  if (o.loading || !d) {
+    return `<div class="page-header"><div><div class="page-title">Overview</div></div></div>${rangeBar}<div class="empty">Caricamento…</div>`;
+  }
+
+  // --- funnel inviate → consegnate → aperte → cliccate ---
+  const funnelStep = (label, value, prev, cls) => {
+    const w = d.sent ? Math.max(2, Math.round((value / d.sent) * 100)) : 0;
+    return `<div class="em-funnel-row">
+      <div class="em-funnel-label">${label}</div>
+      <div class="em-funnel-track"><div class="em-funnel-bar ${cls}" style="width:${w}%"></div></div>
+      <div class="em-funnel-nums"><b>${value}</b> <span>${prev != null ? pct(value, prev) : ''}</span></div>
+    </div>`;
+  };
+  const funnel = `
+    ${funnelStep('Inviate', d.sent, null, 'f-sent')}
+    ${funnelStep('Consegnate', d.delivered, d.sent, 'f-delivered')}
+    ${funnelStep('Aperte', d.opened, d.delivered, 'f-opened')}
+    ${funnelStep('Cliccate', d.clicked, d.opened, 'f-clicked')}`;
+
+  // --- salute deliverability con soglie di settore ---
+  const health = (label, num, den, warnAt, badAt, note) => {
+    const r = den ? (num / den) * 100 : 0;
+    const cls = !den || r < warnAt ? 'ok' : r < badAt ? 'warn' : 'bad';
+    return `<div class="em-health ${cls}">
+      <div class="em-health-value">${den ? r.toFixed(2) : '0.00'}%</div>
+      <div class="em-health-label">${label}</div>
+      <div class="em-health-note">${num} su ${den || 0} · ${note}</div>
+    </div>`;
+  };
+  const healthStrip = `
+    ${health('Bounce rate', d.bounced, d.sent, 2, 5, 'soglia sana &lt; 2%')}
+    ${health('Spam rate', d.complained, d.delivered, 0.1, 0.3, 'Gmail pretende &lt; 0,1%')}
+    ${health('Unsub rate', d.unsubscribed, d.delivered, 1, 2, 'fisiologico &lt; 1%')}`;
+
+  // --- andamento giornaliero: inviate + consegnate affiancate ---
+  const daily = d.daily || [];
+  const max = Math.max(1, ...daily.map((x) => x.sent));
+  const bars = daily.map((x) => `
     <div class="bar-wrap">
-      <div class="bar-tip">${fmtDay(d.day)} · inviate ${d.sent} · consegnate ${d.delivered} · aperte ${d.opened}</div>
-      <div class="bar" style="height:${Math.round((d.sent / max) * 100)}%"></div>
+      <div class="bar-tip">${fmtDay(x.day)} · inviate ${x.sent} · consegnate ${x.delivered} · aperte ${x.opened}</div>
+      <div class="em-bar-pair">
+        <div class="bar" style="height:${Math.round((x.sent / max) * 100)}%"></div>
+        <div class="bar delivered" style="height:${Math.round((x.delivered / max) * 100)}%"></div>
+      </div>
     </div>`).join('');
+
+  // --- tabella di confronto performance ---
+  const perfRows = (o.breakdown || []).map((r) => `
+    <tr>
+      <td>${kindTag(r.kind === 'campaign' ? `broadcast: ${r.label}` : r.key)}</td>
+      <td style="text-align:right;"><b>${r.sent}</b></td>
+      <td style="text-align:right;">${rateCell(r.delivered, r.sent, 95, 90)}</td>
+      <td style="text-align:right;">${rateCell(r.opened, r.delivered, 35, 20)}</td>
+      <td style="text-align:right;">${rateCell(r.clicked, r.delivered, 5, 2)}</td>
+      <td style="text-align:right;">${r.unsubscribed > 0 ? `<span class="em-rate warn">${r.unsubscribed}</span>` : '<span class="em-rate none">0</span>'}</td>
+      <td style="text-align:right;">${r.complained > 0 ? `<span class="em-rate bad">${r.complained}</span>` : '<span class="em-rate none">0</span>'}</td>
+    </tr>`).join('');
 
   return `
     <div class="page-header">
       <div>
         <div class="page-title">Overview</div>
-        <div class="page-sub">Ultimi 30 giorni · webhook attivo dal 06/08 (consegne/aperture/click si accumulano da lì)</div>
+        <div class="page-sub">Analisi del periodo selezionato · tutte le metriche si riferiscono agli invii del periodo</div>
       </div>
-      <button class="btn btn-ghost" data-act="metrics-open" data-kind="all" data-key="all" data-label="Tutte le email">📈 Analisi periodo</button>
     </div>
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-label">Inviate</div><div class="stat-value">${s.sent_30d}</div></div>
-      <div class="stat-card"><div class="stat-label">Consegnate</div><div class="stat-value green">${s.delivered_30d}</div><div class="stat-sub">${pct(s.delivered_30d, s.sent_30d)} delle inviate</div></div>
-      <div class="stat-card"><div class="stat-label">Aperte</div><div class="stat-value purple">${s.opened_30d}</div><div class="stat-sub">${pct(s.opened_30d, s.delivered_30d)} delle consegnate</div></div>
-      <div class="stat-card"><div class="stat-label">Click</div><div class="stat-value purple">${s.clicked_30d}</div></div>
-      <div class="stat-card"><div class="stat-label">Bounce</div><div class="stat-value ${s.bounced_30d > 0 ? 'amber' : ''}">${s.bounced_30d}</div></div>
-      <div class="stat-card"><div class="stat-label">Spam report</div><div class="stat-value ${s.complained_30d > 0 ? 'red' : ''}">${s.complained_30d}</div><div class="stat-sub">tenere sotto lo 0,1%</div></div>
-      <div class="stat-card"><div class="stat-label">Disiscritti (30g)</div><div class="stat-value">${s.unsub_30d}</div></div>
-      <div class="stat-card"><div class="stat-label">Suppression list</div><div class="stat-value">${s.suppressions_total}</div><div class="stat-sub">bounce/complaint/manuali</div></div>
+    ${rangeBar}
+    <div class="stats-grid" style="margin-top:16px;">
+      <div class="stat-card"><div class="stat-label">Inviate</div><div class="stat-value">${d.sent}</div></div>
+      <div class="stat-card"><div class="stat-label">Consegnate</div><div class="stat-value green">${d.delivered}</div><div class="stat-sub">${pct(d.delivered, d.sent)} delle inviate</div></div>
+      <div class="stat-card"><div class="stat-label">Aperte</div><div class="stat-value purple">${d.opened}</div><div class="stat-sub">${pct(d.opened, d.delivered)} delle consegnate</div></div>
+      <div class="stat-card"><div class="stat-label">Click</div><div class="stat-value purple">${d.clicked}</div><div class="stat-sub">${pct(d.clicked, d.delivered)} delle consegnate</div></div>
+      <div class="stat-card"><div class="stat-label">Disiscritti</div><div class="stat-value ${d.unsubscribed > 0 ? 'amber' : ''}">${d.unsubscribed}</div></div>
+      <div class="stat-card"><div class="stat-label">Suppression list</div><div class="stat-value">${suppTotal}</div><div class="stat-sub">totale storico</div></div>
+    </div>
+    <div class="grid-2" style="margin-top:4px;">
+      <div class="card">
+        <div class="card-title">Funnel del periodo</div>
+        ${funnel}
+      </div>
+      <div class="card">
+        <div class="card-title">Salute deliverability</div>
+        <div class="em-health-strip">${healthStrip}</div>
+      </div>
     </div>
     <div class="card">
-      <div class="card-title">Invii per giorno</div>
+      <div class="card-title">Andamento giornaliero <span class="em-chip" style="margin-left:8px;">■ inviate · <span style="color:var(--mattia)">■</span> consegnate</span></div>
       <div class="em-chart">${bars}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Confronto performance per email</div>
+      <div class="table-wrap"><table class="em-mail-table">
+        <thead><tr>
+          <th>Email</th><th style="text-align:right;">Inviate</th>
+          <th style="text-align:right;">Consegna</th><th style="text-align:right;">Apertura</th>
+          <th style="text-align:right;">Click</th><th style="text-align:right;">Disiscritti</th>
+          <th style="text-align:right;">Spam</th>
+        </tr></thead>
+        <tbody>${perfRows || '<tr><td colspan="7" class="empty">Nessun invio nel periodo.</td></tr>'}</tbody>
+      </table></div>
+      <p class="em-muted-line" style="margin-top:10px;">Verde/giallo/rosso secondo i benchmark: consegna ≥95%, apertura ≥35% (lifecycle), click ≥5% delle consegnate. I tassi degli invii precedenti al 06/08 (nascita del webhook) risultano bassi perché quegli invii non hanno tracking: restringi il periodo per un quadro fedele.</p>
     </div>`;
 }
 
@@ -1032,6 +1150,22 @@ async function handleAction(el) {
     return;
   }
   if (act === 'metrics-close') { state.metrics = null; render(); return; }
+
+  if (act === 'overview-apply') {
+    state.overview.from = document.getElementById('ov-from')?.value || state.overview.from;
+    state.overview.to = document.getElementById('ov-to')?.value || state.overview.to;
+    loadOverview();
+    return;
+  }
+  if (act === 'overview-range') {
+    const days = Number(el.dataset.days) || 30;
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const today = new Date();
+    state.overview.from = iso(new Date(today.getTime() - (days - 1) * 864e5));
+    state.overview.to = iso(today);
+    loadOverview();
+    return;
+  }
 }
 
 function collectTemplateEditorContent() {
@@ -1058,6 +1192,7 @@ function collectTemplateEditorContent() {
   loadCore();
   setInterval(() => {
     loadCore();
+    if (state.page === 'overview') loadOverview();
     if (state.page === 'emails' && getSecret()) loadMailbox();
   }, REFRESH_MS);
 })();

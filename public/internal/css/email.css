@@ -122,6 +122,37 @@
   color-scheme: dark;
 }
 
+/* ---------- Overview analitica ---------- */
+.em-funnel-row { display: grid; grid-template-columns: 90px 1fr 110px; gap: 12px; align-items: center; padding: 9px 0; }
+.em-funnel-label { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
+.em-funnel-track { height: 18px; background: var(--surface2); border-radius: 6px; overflow: hidden; }
+.em-funnel-bar { height: 100%; border-radius: 6px; transition: width .4s ease; }
+.em-funnel-bar.f-sent      { background: var(--accent); }
+.em-funnel-bar.f-delivered { background: var(--mattia); }
+.em-funnel-bar.f-opened    { background: #60a5fa; }
+.em-funnel-bar.f-clicked   { background: #c084fc; }
+.em-funnel-nums { font-family: var(--mono); font-size: 12px; color: var(--text); text-align: right; }
+.em-funnel-nums span { color: var(--muted); font-size: 11px; margin-left: 6px; }
+
+.em-health-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+@media (max-width: 900px) { .em-health-strip { grid-template-columns: 1fr; } }
+.em-health { border-radius: 10px; padding: 14px; border: 1px solid var(--border2); background: var(--surface2); }
+.em-health-value { font-family: var(--mono); font-size: 22px; font-weight: 700; }
+.em-health-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-top: 2px; }
+.em-health-note { font-size: 11px; color: var(--muted); margin-top: 5px; }
+.em-health.ok   { border-color: #1d4028; } .em-health.ok .em-health-value { color: var(--mattia); }
+.em-health.warn { border-color: #4a3a12; } .em-health.warn .em-health-value { color: #fbbf24; }
+.em-health.bad  { border-color: #4a1515; } .em-health.bad .em-health-value { color: #f87171; }
+
+.em-bar-pair { display: flex; align-items: flex-end; gap: 1px; height: 100%; }
+.em-bar-pair .bar { flex: 1; }
+
+.em-rate { font-family: var(--mono); font-size: 12px; font-weight: 700; }
+.em-rate.good { color: var(--mattia); }
+.em-rate.warn { color: #fbbf24; }
+.em-rate.bad  { color: #f87171; }
+.em-rate.none { color: var(--muted); font-weight: 400; }
+
 /* Switch modalità editor template */
 .em-mode-switch { display: inline-flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
 .em-mode-switch button {
