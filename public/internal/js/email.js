@@ -27,7 +27,10 @@ const SEGMENT_LABELS = {
   marketing: { name: 'Marketing', desc: 'Consenso marketing esplicito — unico segmento per broadcast commerciali' },
   all_service: { name: 'Tutti (servizio)', desc: 'Solo comunicazioni di servizio (es. cambio termini) — niente marketing' },
   premium: { name: 'Premium', desc: 'Utenti premium con consenso marketing' },
-  inactive_14: { name: 'Inattivi 14+', desc: 'Con consenso marketing, nessun workout da 14 giorni' },
+  inactive_14: { name: 'Inattivi 14+ (marketing)', desc: 'Con consenso marketing, nessun workout da 14 giorni' },
+  inactive_30_service: { name: 'Inattivi 30+ (win-back)', desc: 'Fermi da oltre un mese ma con almeno un workout fatto — solo contenuti di servizio, niente offerte' },
+  inactive_60_service: { name: 'Inattivi 60+ (win-back)', desc: 'Fermi da oltre due mesi — ultimo tentativo, solo contenuti di servizio' },
+  never_started_service: { name: 'Mai partiti', desc: 'Onboarding completato ma nessun workout, iscritti da oltre 7 giorni — il gruppo più numeroso' },
 };
 
 // Etichette umane per i tipi di email (mai slug tecnici in UI).
@@ -592,7 +595,15 @@ function pageBroadcast() {
       <td>${esc(SEGMENT_LABELS[c.segment_key]?.name ?? c.segment_key)}</td>
       <td><span class="em-status ${esc(c.status)}">${esc(c.status)}</span></td>
       <td>${c.recipients_total ?? '—'}</td>
-      <td>${c.sent_count ?? 0}${c.failed_count ? ` <span style="color:#f87171">(${c.failed_count} err)</span>` : ''}</td>
+      <td>
+        ${c.sent_count ?? 0}${c.failed_count ? ` <span style="color:#f87171">(${c.failed_count} err)</span>` : ''}
+        ${c.status === 'sending' && c.recipients_total
+          ? `<div class="em-progress" title="${c.sent_count} di ${c.recipients_total}">
+               <div class="em-progress-bar" style="width:${Math.round(((c.sent_count ?? 0) / c.recipients_total) * 100)}%"></div>
+             </div>
+             <div class="em-muted-line">${Math.max(0, c.recipients_total - (c.sent_count ?? 0))} rimanenti · riprende domani</div>`
+          : ''}
+      </td>
       <td>${fmtDate(c.finished_at || c.started_at || c.created_at)}</td>
       <td style="white-space:nowrap;">
         ${c.status === 'sent' ? `<button class="btn btn-ghost" data-act="metrics-open" data-kind="campaign" data-key="${c.id}" data-label="${esc(c.name)}" title="Metriche">📊</button>` : ''}
@@ -647,8 +658,20 @@ function composerView() {
         <div class="form-field">
           <label class="form-label">Segmento</label>
           <select class="form-input" id="c-segment">
-            ${seg('marketing')}${seg('premium')}${seg('inactive_14')}${seg('all_service')}
+            ${seg('marketing')}${seg('premium')}${seg('inactive_14')}
+            ${seg('inactive_30_service')}${seg('inactive_60_service')}
+            ${seg('never_started_service')}${seg('all_service')}
           </select>
+        </div>
+      </div>
+      <div class="form-grid" style="grid-template-columns: 220px 1fr; margin-top:12px; align-items:end;">
+        <div class="form-field">
+          <label class="form-label">Invii per giorno</label>
+          <input class="form-input" id="c-cap" type="number" min="1" max="500" value="${d.daily_cap ?? 50}">
+        </div>
+        <div class="em-muted-line" style="padding-bottom:10px;">
+          Il piano Resend free consente <b>100 email al giorno in tutto</b> e le automazioni ne usano già ~40.
+          La campagna si ferma al tetto e riprende da sola ogni giorno alle 12:00 finché la lista non è esaurita.
         </div>
       </div>
       <div class="em-composer-grid" style="margin-top:16px;">
@@ -690,6 +713,7 @@ function pageAutomations() {
         <div style="display:flex; gap:10px; align-items:center;">
           <button class="btn btn-ghost" data-act="metrics-open" data-kind="automation" data-key="${esc(a.key)}" data-label="${esc(a.name)}">📊 Metriche</button>
           <button class="btn btn-ghost" data-act="preview-automation" data-key="${esc(a.key)}">👁 Anteprima</button>
+          <button class="btn btn-ghost" data-act="test-send-automation" data-key="${esc(a.key)}" title="Ricevi questa mail per davvero">✉️ Provala</button>
           <button class="btn btn-ghost" data-act="edit-template" data-key="${esc(a.key)}">✏️ Modifica</button>
           <button class="em-toggle ${a.enabled ? 'on' : ''}" data-act="toggle-automation" data-key="${esc(a.key)}" data-enabled="${a.enabled}" title="${a.enabled ? 'Attiva' : 'Spenta'}"></button>
         </div>
@@ -1200,6 +1224,8 @@ function captureDraft() {
   state.draft.subject = v('c-subject') ?? state.draft.subject;
   state.draft.segment_key = v('c-segment') ?? state.draft.segment_key;
   state.draft.html = v('c-html') ?? state.draft.html;
+  const cap = v('c-cap');
+  if (cap !== undefined) state.draft.daily_cap = Number(cap) || null;
 }
 
 // ---------- events ----------
@@ -1340,7 +1366,9 @@ async function handleAction(el) {
       const res = await adminCall('send_campaign', { campaign_id: state.draft.id });
       state.sending = null;
       if (res.ok) {
-        toast(`Campagna inviata: ${res.sent} ok, ${res.failed} errori, ${res.skipped_suppressed} soppressi ✅`);
+        toast(res.paused_for_cap
+          ? `Inviate ${res.sent} email (tetto giornaliero). Restano ${res.remaining}: riprende da sola domani ⏳`
+          : `Campagna inviata: ${res.sent} ok, ${res.failed} errori, ${res.skipped_suppressed} soppressi ✅`);
         state.draft = null;
       } else {
         toast(`Errore invio: ${res.error ?? '?'} — riapri e riprova: gli invii già fatti non si duplicano.`, true);
@@ -1429,6 +1457,27 @@ async function handleAction(el) {
       : { subject: a.subject, content: a.content };
     const res = await adminCall('render_template', payload);
     if (res.ok) { state.preview = res; render(); }
+    return;
+  }
+
+  if (act === 'test-send-automation') {
+    const a = state.automations.find((x) => x.key === el.dataset.key);
+    if (!a) return;
+    openDialog({
+      title: 'Ricevi questa email',
+      subtitle: `Ti arriva "${esc(a.name)}" esattamente come la riceveranno gli utenti, leggendo i testi salvati.`,
+      confirmLabel: 'Inviami la prova',
+      fields: [
+        { id: 'to', label: 'A quale indirizzo', value: 'carlisimattia@gmail.com', half: true },
+        { id: 'first_name', label: 'Nome da usare in {{firstName}}', value: 'Mattia', half: true },
+      ],
+    }, async (v) => {
+      const res = await adminCall('test_send_automation', {
+        key: a.key, to: v.to, first_name: v.first_name,
+      });
+      toast(res.ok ? `Prova inviata a ${v.to} ✅` : `Errore: ${res.error ?? '?'}`, !res.ok);
+      return res.ok;
+    });
     return;
   }
 

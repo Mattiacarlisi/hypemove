@@ -123,6 +123,10 @@
 .em-funnel-bar.f-spam   { background: #f87171; }
 .em-funnel-bar.f-unsub  { background: #fbbf24; }
 
+/* Barra di avanzamento campagna a scaglioni */
+.em-progress { height: 5px; background: var(--surface2); border-radius: 3px; margin-top: 6px; overflow: hidden; width: 120px; }
+.em-progress-bar { height: 100%; background: #38bdf8; border-radius: 3px; transition: width .4s ease; }
+
 /* Dialog (rimpiazza prompt/confirm nativi del browser) */
 .em-dialog-overlay { z-index: 400; }
 .em-dialog { max-width: 520px; width: 92%; }
