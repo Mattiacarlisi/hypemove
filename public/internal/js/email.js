@@ -1016,7 +1016,8 @@ async function loadComparison() {
 const FUNNEL_ROWS = [
   { key: 'sent', label: 'Inviate', cls: 'f-sent' },
   { key: 'delivered', label: 'Consegnate', cls: 'f-delivered' },
-  { key: 'opened', label: 'Aperte', cls: 'f-opened' },
+  { key: 'opened_human', label: 'Aperte (persone)', cls: 'f-opened' },
+  { key: 'opened_machine', label: 'Aperte (automatiche)', cls: 'f-machine' },
   { key: 'clicked', label: 'Cliccate', cls: 'f-clicked' },
   { key: 'bounced', label: 'Bounce', cls: 'f-bounce' },
   { key: 'complained', label: 'Spam report', cls: 'f-spam' },
@@ -1038,7 +1039,8 @@ function funnelView(d) {
       <div class="em-funnel-nums"><b>${r.value}</b> <span>${total ? `${((r.value / total) * 100).toFixed(1)}%` : '—'}</span></div>
     </div>`;
   }).join('')}</div>
-  <p class="em-muted-line">Ogni percentuale è calcolata sul totale delle inviate (${total}), così le righe sono confrontabili fra loro.</p>`;
+  <p class="em-muted-line">Ogni percentuale è calcolata sul totale delle inviate (${total}), così le righe sono confrontabili fra loro.
+  <br>Le <b>aperture automatiche</b> sono i precaricamenti di Gmail e Apple Mail (immagini scaricate entro 30 secondi dalla consegna): non sono letture vere e vanno ignorate quando giudichi una mail. Guarda "aperte (persone)" e i click.</p>`;
 }
 
 function comparisonView() {

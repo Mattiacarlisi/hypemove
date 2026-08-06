@@ -236,3 +236,6 @@
   padding: 7px 14px; cursor: pointer;
 }
 .em-mode-switch button.active { background: var(--accent-lo); color: var(--text); }
+
+/* Aperture automatiche (precaricamenti) nel funnel */
+.em-funnel-bar.f-machine { background: #4b5563; }
