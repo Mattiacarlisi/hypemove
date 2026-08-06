@@ -35,13 +35,18 @@ const state = {
   segments: [],
   automations: [],
   campaigns: [],
-  log: null,
   contact: null,
   contactQuery: '',
   draft: null,          // campagna in editing {id?, name, subject, segment_key, html}
   sending: null,        // { campaignId } durante l'invio
   editingTemplate: null,
   toast: null,
+  // casella email inviate
+  mailbox: { items: null, delivery: [], q: '', limit: 60, loading: false },
+  // audience explorer
+  audience: { tab: 'marketing', members: null, total: 0, unsub: null, loading: false },
+  // anteprima email {subject, html}
+  preview: null,
 };
 
 // ---------- helpers ----------
@@ -111,9 +116,42 @@ async function loadCore() {
   render();
 }
 
-async function loadLog() {
-  const res = await adminCall('recent_log');
-  if (res.ok) { state.log = res; render(); }
+async function loadMailbox() {
+  state.mailbox.loading = true; render();
+  const res = await adminCall('emails_log', { limit: state.mailbox.limit, q: state.mailbox.q });
+  state.mailbox.loading = false;
+  if (res.ok) { state.mailbox.items = res.items; state.mailbox.delivery = res.delivery; }
+  render();
+}
+
+async function loadAudience() {
+  const a = state.audience;
+  a.loading = true; render();
+  if (a.tab === 'unsub') {
+    const res = await adminCall('unsubscribed_list');
+    if (res.ok) a.unsub = res;
+  } else {
+    const res = await adminCall('segment_members', { segment_key: a.tab, limit: 150 });
+    if (res.ok) { a.members = res.members; a.total = res.total; }
+  }
+  a.loading = false; render();
+}
+
+// Stato "migliore" di un messaggio dai suoi eventi webhook.
+function deliveryStatus(resendId, sendStatus) {
+  if (sendStatus === 'failed') return { label: 'Errore', cls: 'failed' };
+  if (sendStatus === 'skipped_suppressed') return { label: 'Soppressa', cls: 'skipped_suppressed' };
+  const ev = new Set(
+    (state.mailbox.delivery || [])
+      .filter((d) => d.resend_email_id === resendId)
+      .map((d) => d.event_type),
+  );
+  if (ev.has('complained')) return { label: '⚠️ Spam report', cls: 'cancelled' };
+  if (ev.has('bounced')) return { label: 'Bounce', cls: 'cancelled' };
+  if (ev.has('clicked')) return { label: 'Cliccata', cls: 'sent' };
+  if (ev.has('opened')) return { label: 'Aperta', cls: 'sending' };
+  if (ev.has('delivered')) return { label: 'Consegnata', cls: 'sent' };
+  return { label: 'Inviata', cls: 'draft' };
 }
 
 // ---------- layout ----------
@@ -131,10 +169,10 @@ function sidebar() {
       <nav class="nav">
         <div class="nav-section">Email</div>
         ${nav('overview', '📊', 'Overview')}
+        ${nav('emails', '📥', 'Email inviate')}
         ${nav('broadcast', '📣', 'Broadcast')}
         ${nav('automations', '🤖', 'Automazioni')}
-        ${nav('segments', '👥', 'Segmenti')}
-        ${nav('log', '📜', 'Log invii')}
+        ${nav('audience', '👥', 'Audience')}
       </nav>
       <div class="sidebar-footer">Mattia &amp; Danilo · 50/50</div>
     </div>`;
@@ -202,7 +240,8 @@ function pageBroadcast() {
       <td>${c.recipients_total ?? '—'}</td>
       <td>${c.sent_count ?? 0}${c.failed_count ? ` <span style="color:#f87171">(${c.failed_count} err)</span>` : ''}</td>
       <td>${fmtDate(c.finished_at || c.started_at || c.created_at)}</td>
-      <td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-ghost" data-act="preview-campaign" data-id="${c.id}">👁</button>
         ${c.status === 'draft' ? `<button class="btn btn-ghost" data-act="edit-campaign" data-id="${c.id}">Apri</button>` : ''}
       </td>
     </tr>`).join('');
@@ -294,6 +333,7 @@ function pageAutomations() {
           <div class="em-muted-line">30 giorni: <b>${a.sent_30d}</b> inviate · ultima: ${fmtDate(a.last_sent_at)}</div>
         </div>
         <div style="display:flex; gap:10px; align-items:center;">
+          <button class="btn btn-ghost" data-act="preview-automation" data-key="${esc(a.key)}">👁 Anteprima</button>
           <button class="btn btn-ghost" data-act="edit-template" data-key="${esc(a.key)}">Modifica testi</button>
           <button class="em-toggle ${a.enabled ? 'on' : ''}" data-act="toggle-automation" data-key="${esc(a.key)}" data-enabled="${a.enabled}" title="${a.enabled ? 'Attiva' : 'Spenta'}"></button>
         </div>
@@ -341,22 +381,67 @@ function templateEditor() {
       <div class="form-field" style="margin-top:12px;"><label class="form-label">Box finale evidenziato (opzionale)</label>
         <input class="form-input" id="t-note" value="${esc(c.note ?? '')}"></div>
       <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn" data-act="preview-editing-template">👁 Anteprima con questi testi</button>
         <button class="btn btn-primary" data-act="save-template" data-key="${esc(a.key)}">Salva</button>
       </div>
     </div>`;
 }
 
-// ---------- pagina: Segmenti ----------
+// ---------- pagina: Audience ----------
 
-function pageSegments() {
+function pageAudience() {
+  const a = state.audience;
   const cards = state.segments.map((s) => {
     const lbl = SEGMENT_LABELS[s.segment] || { name: s.segment, desc: '' };
-    return `<div class="stat-card">
+    return `<div class="stat-card" style="cursor:pointer;${a.tab === s.segment ? 'border-color:var(--accent);' : ''}" data-act="audience-tab" data-tab="${esc(s.segment)}">
       <div class="stat-label">${esc(lbl.name)}</div>
       <div class="stat-value">${s.recipients}</div>
       <div class="stat-sub">${esc(lbl.desc)}</div>
     </div>`;
   }).join('');
+
+  let bodyHtml = '';
+  if (!getSecret()) {
+    bodyHtml = '<div class="empty">La lista dei membri contiene email: serve il secret admin (banner in alto).</div>';
+  } else if (a.loading) {
+    bodyHtml = '<div class="empty">Caricamento…</div>';
+  } else if (a.tab === 'unsub') {
+    const lifecycleRows = (a.unsub?.lifecycle_disabled || []).map((u) => `
+      <tr><td>${esc(u.email)}</td><td>${esc(u.name ?? '—')}</td><td>${fmtDate(u.created_at)}</td></tr>`).join('');
+    const suppRows = (a.unsub?.suppressions || []).map((s) => `
+      <tr><td>${esc(s.email)}</td><td><span class="em-status ${s.reason === 'complaint' ? 'cancelled' : 'skipped_suppressed'}">${esc(s.reason)}</span></td><td>${esc(s.source ?? '—')}</td><td>${fmtDate(s.created_at)}</td></tr>`).join('');
+    bodyHtml = `<div class="card">
+      <div class="card-title">Promemoria disattivati (${(a.unsub?.lifecycle_disabled || []).length})</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Email</th><th>Nome</th><th>Registrato</th></tr></thead>
+        <tbody>${lifecycleRows || '<tr><td colspan="3" class="empty">Nessuno 🎉</td></tr>'}</tbody>
+      </table></div>
+      <div class="card-title" style="margin-top:20px;">Suppression list (${(a.unsub?.suppressions || []).length})</div>
+      <div class="em-muted-line" style="margin-bottom:8px;">Bounce, segnalazioni spam e opt-out permanenti: non ricevono mai più nulla.</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Email</th><th>Motivo</th><th>Origine</th><th>Quando</th></tr></thead>
+        <tbody>${suppRows || '<tr><td colspan="4" class="empty">Vuota 🎉</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+  } else {
+    const rows = (a.members || []).map((u) => `
+      <tr>
+        <td>${esc(u.email)}</td>
+        <td>${esc(u.name ?? '—')}</td>
+        <td>${u.marketing_consent ? '✅' : '—'}</td>
+        <td>${u.lifecycle_emails_enabled ? '✅' : '✕'}</td>
+        <td>${u.is_premium ? '⭐' : '—'}</td>
+        <td>${fmtDate(u.created_at)}</td>
+      </tr>`).join('');
+    const lbl = SEGMENT_LABELS[a.tab]?.name ?? a.tab;
+    bodyHtml = `<div class="card">
+      <div class="card-title">Membri di "${esc(lbl)}" — ${a.total} totali${a.total > 150 ? ' (primi 150)' : ''}</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Email</th><th>Nome</th><th>Marketing</th><th>Promemoria</th><th>Premium</th><th>Registrato</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="6" class="empty">Segmento vuoto.</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+  }
 
   let contactHtml = '';
   if (state.contact) {
@@ -389,11 +474,13 @@ function pageSegments() {
   return `
     <div class="page-header">
       <div>
-        <div class="page-title">Segmenti</div>
-        <div class="page-sub">Query live sul database: si aggiornano da soli, nessuna lista da mantenere</div>
+        <div class="page-title">Audience</div>
+        <div class="page-sub">Segmenti live sul database — clicca una card per vedere chi c'è dentro</div>
       </div>
+      <button class="btn ${a.tab === 'unsub' ? 'btn-primary' : 'btn-ghost'}" data-act="audience-tab" data-tab="unsub">Disiscritti &amp; soppressi</button>
     </div>
     <div class="stats-grid">${cards}</div>
+    ${bodyHtml}
     <div class="card">
       <div class="card-title">Cerca contatto</div>
       <div class="filter-bar" style="gap:10px;">
@@ -404,51 +491,59 @@ function pageSegments() {
     ${contactHtml}`;
 }
 
-// ---------- pagina: Log ----------
+// ---------- pagina: Email inviate (la "casella") ----------
 
-function pageLog() {
-  if (!getSecret()) return '<div class="empty">Il log contiene indirizzi email: serve il secret admin (banner in alto).</div>';
-  if (!state.log) { loadLog(); return '<div class="empty">Caricamento log…</div>'; }
-  const deliveryByEmailId = {};
-  (state.log.delivery || []).forEach((d) => {
-    (deliveryByEmailId[d.resend_email_id] ??= new Set()).add(d.event_type);
-  });
-  const flow = (resendId) => {
-    const ev = deliveryByEmailId[resendId] || new Set();
-    const dot = (on, label) => `<span class="step ${on ? 'on' : ''}" title="${label}"></span>`;
-    return `<span class="em-flow">
-      ${dot(true, 'inviata')}${dot(ev.has('delivered'), 'consegnata')}${dot(ev.has('opened'), 'aperta')}${dot(ev.has('clicked'), 'cliccata')}
-    </span>`;
-  };
-  const lifecycleRows = (state.log.lifecycle || []).map((r) => {
-    const email = Array.isArray(r.users) ? r.users[0]?.email : r.users?.email;
-    return `<tr><td>${esc(email ?? '?')}</td><td><span class="tag">${esc(r.email_type)}</span></td>
-      <td>${flow(r.metadata?.resend_email_id)}</td><td>${fmtDate(r.sent_at)}</td></tr>`;
+function pageEmails() {
+  if (!getSecret()) return '<div class="empty">La casella contiene indirizzi email: serve il secret admin (banner in alto).</div>';
+  const m = state.mailbox;
+  if (m.items === null && !m.loading) { loadMailbox(); return '<div class="empty">Caricamento…</div>'; }
+
+  const rows = (m.items || []).map((it) => {
+    const st = deliveryStatus(it.resend_email_id, it.send_status);
+    return `<tr>
+      <td>${esc(it.to)}</td>
+      <td>${esc(it.subject)}</td>
+      <td><span class="tag">${esc(it.kind)}</span></td>
+      <td><span class="em-status ${st.cls}">${st.label}</span></td>
+      <td>${fmtDate(it.sent_at)}</td>
+    </tr>`;
   }).join('');
-  const campaignRows = (state.log.campaigns || []).map((r) => `
-    <tr><td>${esc(r.email)}</td><td><span class="tag">broadcast</span></td>
-      <td>${r.status === 'sent' ? flow(r.resend_email_id) : `<span class="em-status ${esc(r.status)}">${esc(r.status)}</span>`}</td>
-      <td>${fmtDate(r.sent_at)}</td></tr>`).join('');
+
   return `
     <div class="page-header">
       <div>
-        <div class="page-title">Log invii</div>
-        <div class="page-sub">Timeline per messaggio: inviata → consegnata → aperta → cliccata</div>
+        <div class="page-title">Email inviate</div>
+        <div class="page-sub">Tutte le email uscite dal sistema, con lo stato dai webhook (consegne/aperture dal 06/08)</div>
       </div>
-      <button class="btn btn-ghost" data-act="reload-log">↻ Aggiorna</button>
+      <button class="btn btn-ghost" data-act="mailbox-reload">↻ Aggiorna</button>
     </div>
     <div class="card">
-      <div class="card-title">Automazioni (ultime 40)</div>
+      <div class="filter-bar" style="gap:10px; margin-bottom:14px;">
+        <input class="form-input" id="mailbox-q" placeholder="filtra per indirizzo..." value="${esc(m.q)}" style="max-width:300px;">
+        <button class="btn" data-act="mailbox-search">Filtra</button>
+        ${m.q ? '<button class="btn btn-ghost" data-act="mailbox-clear">Pulisci</button>' : ''}
+      </div>
+      ${m.loading ? '<div class="empty">Caricamento…</div>' : `
       <div class="table-wrap"><table>
-        <thead><tr><th>Destinatario</th><th>Tipo</th><th>Percorso</th><th>Quando</th></tr></thead>
-        <tbody>${lifecycleRows || '<tr><td colspan="4" class="empty">Nessun invio.</td></tr>'}</tbody>
+        <thead><tr><th>Destinatario</th><th>Oggetto</th><th>Tipo</th><th>Stato</th><th>Quando</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="empty">Nessuna email trovata.</td></tr>'}</tbody>
       </table></div>
-      <div class="card-title" style="margin-top:20px;">Broadcast (ultimi 40)</div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Destinatario</th><th>Tipo</th><th>Percorso</th><th>Quando</th></tr></thead>
-        <tbody>${campaignRows || '<tr><td colspan="4" class="empty">Nessun broadcast ancora.</td></tr>'}</tbody>
-      </table></div>
+      ${(m.items || []).length >= m.limit ? '<div style="text-align:center;margin-top:14px;"><button class="btn btn-ghost" data-act="mailbox-more">Carica altre</button></div>' : ''}`}
+      <p class="em-muted-line" style="margin-top:12px;">Le email "Confirm Your Signup" (verifica registrazione) partono da Supabase Auth e si vedono solo sulla dashboard Resend.</p>
     </div>`;
+}
+
+// ---------- modale anteprima email ----------
+
+function previewModal() {
+  if (!state.preview) return '';
+  return `<div class="modal-overlay" data-act="close-preview">
+    <div class="modal" style="max-width:640px;width:92%;" onclick="event.stopPropagation()">
+      <div class="modal-title">${esc(state.preview.subject ?? 'Anteprima')}</div>
+      <iframe class="em-preview" style="min-height:480px;background:#FDFDFD;" id="preview-frame" sandbox=""></iframe>
+      <div class="modal-actions"><button class="btn btn-ghost" data-act="close-preview">Chiudi</button></div>
+    </div>
+  </div>`;
 }
 
 // ---------- render ----------
@@ -456,10 +551,10 @@ function pageLog() {
 function renderPage() {
   switch (state.page) {
     case 'overview': return pageOverview();
+    case 'emails': return pageEmails();
     case 'broadcast': return pageBroadcast();
     case 'automations': return pageAutomations();
-    case 'segments': return pageSegments();
-    case 'log': return pageLog();
+    case 'audience': return pageAudience();
     default: return pageOverview();
   }
 }
@@ -470,6 +565,7 @@ function layout() {
       ${secretBanner()}
       ${state.loading ? '<div class="empty">Caricamento…</div>' : renderPage()}
     </main>
+    ${previewModal()}
     ${toastHtml()}`;
 }
 
@@ -477,6 +573,8 @@ function render() {
   document.getElementById('app').innerHTML = layout();
   attachEvents();
   refreshPreviewFrame();
+  const pf = document.getElementById('preview-frame');
+  if (pf && state.preview) pf.srcdoc = state.preview.html;
 }
 
 function refreshPreviewFrame() {
@@ -504,8 +602,8 @@ function attachEvents() {
     el.addEventListener('click', () => {
       captureDraft();
       state.page = el.dataset.nav;
-      if (state.page === 'log') state.log = null;
       render();
+      if (state.page === 'audience' && state.audience.members === null && getSecret()) loadAudience();
     });
   });
 
@@ -625,17 +723,12 @@ async function handleAction(el) {
 
   if (act === 'save-template') {
     const key = el.dataset.key;
-    const v = (id) => document.getElementById(id)?.value ?? '';
-    const content = {
-      title: v('t-title'),
-      paragraphs: v('t-paragraphs').split('\n').map((s) => s.trim()).filter(Boolean),
-      ctaLabel: v('t-cta-label'),
-      ctaUrl: v('t-cta-url'),
-    };
-    if (v('t-badge')) content.badge = v('t-badge');
-    if (v('t-emoji')) content.emoji = v('t-emoji');
-    if (v('t-note')) content.note = v('t-note');
-    const res = await adminCall('update_template', { key, subject: v('t-subject'), content });
+    const content = collectTemplateEditorContent();
+    const res = await adminCall('update_template', {
+      key,
+      subject: document.getElementById('t-subject')?.value ?? '',
+      content,
+    });
     if (res.ok) {
       toast('Testi salvati: valgono dal prossimo invio ✅');
       state.editingTemplate = null;
@@ -655,7 +748,68 @@ async function handleAction(el) {
     return;
   }
 
-  if (act === 'reload-log') { state.log = null; render(); loadLog(); return; }
+  if (act === 'mailbox-reload') { loadMailbox(); return; }
+  if (act === 'mailbox-search') {
+    state.mailbox.q = document.getElementById('mailbox-q')?.value?.trim() ?? '';
+    state.mailbox.limit = 60;
+    loadMailbox();
+    return;
+  }
+  if (act === 'mailbox-clear') { state.mailbox.q = ''; state.mailbox.limit = 60; loadMailbox(); return; }
+  if (act === 'mailbox-more') { state.mailbox.limit = Math.min(state.mailbox.limit + 60, 200); loadMailbox(); return; }
+
+  if (act === 'audience-tab') {
+    state.audience.tab = el.dataset.tab;
+    state.audience.members = null;
+    state.audience.unsub = null;
+    render();
+    if (getSecret()) loadAudience();
+    return;
+  }
+
+  if (act === 'preview-automation') {
+    const a = state.automations.find((x) => x.key === el.dataset.key);
+    if (!a?.content) return;
+    const res = await adminCall('render_template', { subject: a.subject, content: a.content });
+    if (res.ok) { state.preview = res; render(); }
+    return;
+  }
+
+  if (act === 'preview-editing-template') {
+    const res = await adminCall('render_template', {
+      subject: document.getElementById('t-subject')?.value ?? '',
+      content: collectTemplateEditorContent(),
+    });
+    if (res.ok) { state.preview = res; render(); }
+    return;
+  }
+
+  if (act === 'preview-campaign') {
+    const c = state.campaigns.find((x) => x.id === el.dataset.id);
+    if (!c) return;
+    state.preview = {
+      subject: c.subject,
+      html: `<!doctype html><body style="margin:0;background:#FDFDFD;">${c.html}<div style="max-width:560px;margin:0 auto;text-align:center;padding:22px 12px;font-family:Arial;"><p style="font-size:12px;color:#777;">[footer disiscrizione automatico]</p></div></body>`,
+    };
+    render();
+    return;
+  }
+
+  if (act === 'close-preview') { state.preview = null; render(); return; }
+}
+
+function collectTemplateEditorContent() {
+  const v = (id) => document.getElementById(id)?.value ?? '';
+  const content = {
+    title: v('t-title'),
+    paragraphs: v('t-paragraphs').split('\n').map((s) => s.trim()).filter(Boolean),
+    ctaLabel: v('t-cta-label'),
+    ctaUrl: v('t-cta-url'),
+  };
+  if (v('t-badge')) content.badge = v('t-badge');
+  if (v('t-emoji')) content.emoji = v('t-emoji');
+  if (v('t-note')) content.note = v('t-note');
+  return content;
 }
 
 // ---------- boot ----------
