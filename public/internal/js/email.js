@@ -18,6 +18,8 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const ADMIN_FN = `${SUPABASE_URL}/functions/v1/email-admin`;
 const SECRET_LS_KEY = 'hm_email_admin_secret';
 const REFRESH_MS = 5 * 60 * 1000;
+// La casella si aggiorna più spesso: è la pagina dove ci si aspetta il "live".
+const MAILBOX_REFRESH_MS = 30 * 1000;
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -35,6 +37,8 @@ const TYPE_META = {
   no_workout_7_days: { label: 'Inattivo 7 giorni', color: '#c084fc' },
   onboarding_recovery: { label: 'Recupero onboarding', color: '#4ade80' },
   campaign_test: { label: 'Test broadcast', color: '#7070a0' },
+  auth: { label: 'Verifica account', color: '#38bdf8' },
+  test_or_other: { label: 'Prova / altro', color: '#7070a0' },
 };
 function kindMeta(kind) {
   if (kind && kind.startsWith('broadcast')) {
@@ -214,8 +218,8 @@ async function loadCore() {
   render();
 }
 
-async function loadMailbox() {
-  state.mailbox.loading = true; render();
+async function loadMailbox(silent) {
+  if (!silent) { state.mailbox.loading = true; render(); }
   const res = await adminCall('emails_log', { limit: state.mailbox.limit, q: state.mailbox.q });
   state.mailbox.loading = false;
   if (res.ok) {
@@ -953,7 +957,7 @@ function pageEmails() {
         <tbody>${rows || '<tr><td colspan="5" class="empty">Nessuna email trovata.</td></tr>'}</tbody>
       </table></div>
       ${items.length >= m.limit ? '<div style="text-align:center;margin-top:14px;"><button class="btn btn-ghost" data-act="mailbox-more">Carica altre</button></div>' : ''}`}
-      <p class="em-muted-line" style="margin-top:12px;">ℹ️ Gli invii precedenti alle 11:41 del 06/08 restano "Inviata": il webhook che traccia consegne e aperture è nato in quel momento. Le mail di verifica registrazione ("Confirm Your Signup") partono da Supabase Auth e si vedono solo su Resend.</p>
+      <p class="em-muted-line" style="margin-top:12px;">ℹ️ Qui c'è <b>tutto</b> ciò che esce dal dominio: automazioni, broadcast, verifiche account di Supabase Auth e invii di prova. Gli invii precedenti alle 11:41 del 06/08 restano "Inviata" perché il webhook che traccia consegne e aperture è nato in quel momento. Le prove e le verifiche account non entrano nelle metriche.</p>
     </div>`;
 }
 
@@ -1646,6 +1650,9 @@ function collectTemplateEditorContent() {
   setInterval(() => {
     loadCore();
     if (state.page === 'overview') loadOverview();
-    if (state.page === 'emails' && getSecret()) loadMailbox();
   }, REFRESH_MS);
+  // Auto-refresh dedicato della casella (silenzioso: nessuno spinner).
+  setInterval(() => {
+    if (state.page === 'emails' && getSecret() && !state.dialog) loadMailbox(true);
+  }, MAILBOX_REFRESH_MS);
 })();
