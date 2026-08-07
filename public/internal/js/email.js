@@ -821,15 +821,18 @@ function pageAudience() {
       : r === 'bounce'
       ? '<span class="em-pill bounced">↩ bounce</span>'
       : '<span class="em-pill suppressed">⛔ opt-out</span>';
+    // Da quale email si è disiscritto: "campaign:<uuid>" → broadcast,
+    // altrimenti la chiave dell'automazione (es. no_workout_3_days).
+    const unsubFrom = (t) => !t ? '—' : t.startsWith('campaign:') ? 'broadcast' : t;
     const lifecycleRows = (a.unsub?.lifecycle_disabled || []).map((u) => `
-      <tr><td><span class="em-mail-to">${esc(u.email)}</span></td><td>${esc(u.name ?? '—')}</td><td><span class="em-mail-when">${fmtDate(u.created_at)}</span></td></tr>`).join('');
+      <tr><td><span class="em-mail-to">${esc(u.email)}</span></td><td>${esc(u.name ?? '—')}</td><td><span class="em-kind">${esc(unsubFrom(u.unsubscribed_from))}</span></td><td><span class="em-mail-when">${fmtDate(u.unsubscribed_at)}</span></td></tr>`).join('');
     const suppRows = (a.unsub?.suppressions || []).map((s) => `
       <tr><td><span class="em-mail-to">${esc(s.email)}</span></td><td>${reasonPill(s.reason)}</td><td><span class="em-kind">${esc(s.source ?? '—')}</span></td><td><span class="em-mail-when">${fmtDate(s.created_at)}</span></td></tr>`).join('');
     bodyHtml = `<div class="card">
       <div class="card-title">Promemoria disattivati <span class="em-chip" style="margin-left:8px;"><b>${(a.unsub?.lifecycle_disabled || []).length}</b></span></div>
       <div class="table-wrap"><table class="em-mail-table">
-        <thead><tr><th>Email</th><th>Nome</th><th style="text-align:right;">Registrato</th></tr></thead>
-        <tbody>${lifecycleRows || '<tr><td colspan="3" class="empty">Nessuno 🎉</td></tr>'}</tbody>
+        <thead><tr><th>Email</th><th>Nome</th><th>Da</th><th style="text-align:right;">Disiscritto</th></tr></thead>
+        <tbody>${lifecycleRows || '<tr><td colspan="4" class="empty">Nessuno 🎉</td></tr>'}</tbody>
       </table></div>
       <div class="card-title" style="margin-top:22px;">Suppression list <span class="em-chip" style="margin-left:8px;"><b>${(a.unsub?.suppressions || []).length}</b></span></div>
       <div class="em-muted-line" style="margin-bottom:8px;">Bounce, segnalazioni spam e opt-out permanenti: non ricevono mai più nulla, da nessun flusso.</div>
