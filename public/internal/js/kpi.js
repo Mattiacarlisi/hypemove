@@ -380,6 +380,7 @@ let state = {
   eventBrowserOpen: false,     // visibilità del modale
   eventBrowserTargetRow: null, // indice dello step di eventFunnelConfig da riempire (null = nessuno)
   eventBrowserTargetChild: null, // se non-null, il target è la variante children[N] dello step targetRow (invece del parent stesso)
+  eventBrowserTargetOr: null,  // se non-null, si sta scegliendo un evento in OR del target: -1 = nuovo slot, >=0 = sostituisce orEvents[N]
   ebSearch: '',                // query ricerca fuzzy
   ebScreen: null,              // filtro schermata attiva (null = tutte)
   ebType: null,                // filtro tipo (action/click/navigation) — null = tutti
@@ -705,7 +706,9 @@ async function fetchFunnel() {
 }
 
 // Serializza eventFunnelConfig in { flatSteps, parentMap, childMap } dove:
-//  - flatSteps = array [{event, source?}] da mandare a kpi_funnel_v2 come p_steps (parent seguiti dai loro children in sequenza)
+//  - flatSteps = array [{event, events?, source?, filters?}] da mandare a kpi_funnel_v2 come p_steps (parent seguiti dai loro children in sequenza)
+//    `events` compare solo sugli step multi-evento (OR): uno step OR resta UNA riga flat, quindi
+//    gli indici di parentMap/childMap e i variant_of non si spostano.
 //  - parentMap[uiIdx] = posizione del parent in flatSteps (o null se il parent non ha event)
 //  - childMap[uiIdx][cIdx] = posizione del child in flatSteps (o null se il child non ha event)
 // La coorte del RPC (idx=0 con cohort_anchor) resta il primo evento inviato: se il primo step UI ha children, la coorte è il parent (event dei children conta contro quella).
@@ -732,10 +735,36 @@ function serializeFilters(f) {
   return Object.entries(f).map(([k, v]) => `${k}=${v}`).join(', ');
 }
 
+// Raccoglie gli eventi aggiuntivi in OR di una riga, ripuliti: niente vuoti, niente duplicati,
+// niente ripetizione del primario. Ritorna sempre un array (vuoto se la riga non ne ha).
+// `orEvents` è ADDITIVO rispetto a `event`: una riga senza il campo è indistinguibile da com'era
+// prima della spec multi-evento, e le config salvate su funnel_definitions restano valide.
+function rowOrEvents(row) {
+  if (!row || !Array.isArray(row.orEvents)) return [];
+  const primary = row.event ? String(row.event).trim() : '';
+  const seen = new Set();
+  return row.orEvents
+    .map(e => (e == null ? '' : String(e).trim()))
+    .filter(e => e && e !== primary && !seen.has(e) && seen.add(e));
+}
+
+// Tutti gli eventi di una riga in ordine di dichiarazione: primario per primo, poi gli OR.
+// È la lista che si mostra a schermo e che si manda alla RPC.
+function rowAllEvents(row) {
+  const primary = row && row.event ? String(row.event).trim() : '';
+  return primary ? [primary, ...rowOrEvents(row)] : rowOrEvents(row);
+}
+
 // Costruisce lo step piatto da passare a kpi_funnel_v2. Preferisce `filters` (formato moderno);
 // mantiene backward-compat con `source` (che il RPC mappa internamente a filters {source:x}).
 function buildFlatStep(row) {
   const step = { event: row.event.trim() };
+  // Step multi-evento (OR): la RPC legge `events` se la chiave c'è (CTE `steps`, il CASE su
+  // `a.s ? 'events'`) e matcha chi ha emesso ALMENO UNO dei nomi. `event` resta nel payload
+  // perché il client lo rilegge (isInstallEvent, righe di fallback in computeEventFunnel).
+  // Senza OR la chiave non si aggiunge affatto: payload identico a prima, byte per byte.
+  const ors = rowOrEvents(row);
+  if (ors.length) step.events = [step.event, ...ors];
   const inline = row.filters && typeof row.filters === 'object' ? row.filters : null;
   if (inline) {
     const clean = {};
@@ -4306,7 +4335,12 @@ function eventBrowserModal() {
   if (!state.eventBrowserOpen) return '';
   const filtered = eventBrowserFiltered();
   const tgt = state.eventBrowserTargetRow;
-  const stepCtx = tgt != null ? ` · Step ${tgt + 1} del funnel` : '';
+  // In modalità OR il modale non sta scegliendo *l'*evento dello step ma uno in più: il testo
+  // lo dice, altrimenti sembra che si stia per sovrascrivere quello già scelto.
+  const isOr = state.eventBrowserTargetOr != null;
+  const stepCtx = tgt != null
+    ? (isOr ? ` · in OR allo step ${tgt + 1}` : ` · Step ${tgt + 1} del funnel`)
+    : '';
 
   // colonna schermate: conta gli eventi (post alive/vol/type, ignorando il filtro schermata) per screen
   const forScreens = state.eventRegistry.filter(ev => {
@@ -4399,7 +4433,7 @@ function eventBrowserModal() {
     <div class="eb-overlay" id="eb-overlay">
       <div class="eb-modal">
         <div class="eb-head">
-          <div class="eb-title">Scegli evento<span class="ctx">${stepCtx}</span></div>
+          <div class="eb-title">${isOr ? 'Aggiungi evento in OR' : 'Scegli evento'}<span class="ctx">${stepCtx}</span></div>
           <input id="eb-search" class="eb-search" type="text" placeholder="🔍  Cerca evento…" value="${esc(state.ebSearch)}" autocomplete="off">
           <button class="eb-close" id="eb-close">×</button>
         </div>
@@ -4422,7 +4456,7 @@ function eventBrowserModal() {
         <div class="eb-foot">
           <div class="eb-selprev">${state.ebSelected ? `Selezionato: <span class="nm">${esc(state.ebSelected)}</span>` : 'Nessun evento selezionato'}</div>
           <button class="btn btn-ghost" id="eb-cancel" style="font-size:12px;padding:8px 14px">Annulla</button>
-          <button class="eb-add" id="eb-add" ${state.ebSelected ? '' : 'disabled'}>${tgt != null ? `Aggiungi allo step ${tgt + 1}` : 'Aggiungi'}</button>
+          <button class="eb-add" id="eb-add" ${state.ebSelected ? '' : 'disabled'}>${tgt != null ? (isOr ? `Aggiungi in OR allo step ${tgt + 1}` : `Aggiungi allo step ${tgt + 1}`) : 'Aggiungi'}</button>
         </div>
       </div>
     </div>`;
@@ -4430,16 +4464,23 @@ function eventBrowserModal() {
 
 // Apre il modale event browser puntando allo step targetRow di eventFunnelConfig. Se targetChild
 // è un numero, il target è la variante children[targetChild] dello step, non il parent stesso.
+// Se targetOr è un numero, si sta lavorando sugli eventi in OR di quel target: -1 = aggiungi uno
+// slot nuovo, >= 0 = sostituisci l'OR in quella posizione.
 // Preseleziona l'evento già presente sul target (se c'è) così si può anche solo cambiarlo.
-function openEventBrowser(targetRow, targetChild) {
+function openEventBrowser(targetRow, targetChild, targetOr) {
   state.eventBrowserOpen = true;
   state.eventBrowserTargetRow = targetRow;
   state.eventBrowserTargetChild = (typeof targetChild === 'number') ? targetChild : null;
+  state.eventBrowserTargetOr = (typeof targetOr === 'number') ? targetOr : null;
   const row = state.eventFunnelConfig[targetRow];
   const target = state.eventBrowserTargetChild !== null && row && Array.isArray(row.children)
     ? row.children[state.eventBrowserTargetChild]
     : row;
-  state.ebSelected = (target && target.event) || null;
+  state.ebSelected = state.eventBrowserTargetOr != null
+    // Slot OR: in modifica preseleziona l'evento di quello slot, in aggiunta si parte puliti
+    // (preselezionare il primario farebbe scattare il dedup e il bottone resterebbe morto).
+    ? (state.eventBrowserTargetOr >= 0 ? (rowOrEvents(target)[state.eventBrowserTargetOr] || null) : null)
+    : ((target && target.event) || null);
   state.ebSearch = ''; state.ebScreen = null; state.ebType = null;
   state.ebVolAll = false; state.ebAliveOnly = true;
   state.ebTab = 'details'; state.ebNextRows = null; state.ebNextLoading = false;
@@ -4451,11 +4492,14 @@ function closeEventBrowser() {
   state.eventBrowserOpen = false;
   state.eventBrowserTargetRow = null;
   state.eventBrowserTargetChild = null;
+  state.eventBrowserTargetOr = null;
   state.ebSelected = null;
   render();
 }
 
 // Conferma la selezione: scrive event + label sullo step target (parent o child) e chiude.
+// In modalità OR scrive invece dentro target.orEvents e NON tocca la label: la label descrive
+// lo step nel suo insieme ("Registrati + attivati"), non il singolo evento che lo alimenta.
 function confirmEventBrowser() {
   const i = state.eventBrowserTargetRow;
   if (i == null || !state.ebSelected) return;
@@ -4465,10 +4509,27 @@ function confirmEventBrowser() {
       ? row.children[state.eventBrowserTargetChild]
       : row;
     if (target) {
-      target.event = state.ebSelected;
-      const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
-      target.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
-      persistEventFunnelConfig();
+      const orIdx = state.eventBrowserTargetOr;
+      if (orIdx != null) {
+        const ors = rowOrEvents(target);
+        const already = ors.indexOf(state.ebSelected);
+        // Già presente (come primario o come altro OR): niente da fare, si chiude e basta.
+        if (state.ebSelected !== target.event && (already === -1 || already === orIdx)) {
+          if (orIdx >= 0 && orIdx < ors.length) ors[orIdx] = state.ebSelected;
+          else ors.push(state.ebSelected);
+          target.orEvents = ors;
+          persistEventFunnelConfig();
+        }
+      } else {
+        target.event = state.ebSelected;
+        // Dedup inverso: se il nuovo primario era fra gli OR, esce da lì (altrimenti lo step
+        // manderebbe due volte lo stesso nome alla RPC).
+        const ors = rowOrEvents(target);
+        if (ors.length) target.orEvents = ors; else delete target.orEvents;
+        const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
+        target.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
+        persistEventFunnelConfig();
+      }
     }
   }
   closeEventBrowser();
@@ -4911,6 +4972,35 @@ function pageFunnelEvent() {
     ${funnelParamsSection()}`;
 }
 
+// Sub-riga con gli eventi in OR di uno step (parent o variante). Uno step multi-evento conta
+// chi ha emesso ALMENO UNO dei nomi: serve per gli step che hanno due esiti legittimi, es.
+// "Registrati + attivati" = sign_up OR sign_in, dove chi rientra con un account esistente
+// altrimenti risulterebbe perso dalla cascata.
+// Nascosta finché lo step non ha un evento primario (l'OR di niente non vuol dire niente) e sugli
+// pseudo-eventi install, che non passano dalla RPC e si contano client-side su un nome solo.
+function orEventsChipsHtml(row, i, ci) {
+  if (!row || !row.event || isInstallEvent(row.event)) return '';
+  const isChild = typeof ci === 'number';
+  const ds = isChild ? `data-parent="${i}" data-child="${ci}"` : `data-row="${i}"`;
+  const ors = rowOrEvents(row);
+  const chips = ors.map((ev, k) => `
+    <span class="event-funnel-or-chip" style="display:inline-flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);font-family:var(--mono);font-size:11px">
+      <span style="color:var(--muted);font-size:9px;letter-spacing:.08em">OR</span>
+      <button class="event-funnel-or-edit" ${ds} data-or="${k}" title="Cambia questo evento"
+        style="background:transparent;border:0;padding:0;color:var(--fg);font-family:inherit;font-size:inherit;cursor:pointer">${esc(ev)}</button>
+      <button class="event-funnel-or-remove" ${ds} data-or="${k}" title="Togli questo evento dallo step"
+        style="background:transparent;border:0;padding:0 2px;color:var(--red);font-size:13px;line-height:1;cursor:pointer;font-family:inherit">×</button>
+    </span>`).join('');
+  const addBtn = `
+    <button class="event-funnel-or-add" ${ds}
+      title="Aggiungi un evento in OR: lo step conterà chi ha emesso almeno uno dei nomi"
+      style="padding:2px 9px;font-size:10px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:5px;cursor:pointer;font-family:inherit;${ors.length ? '' : 'opacity:.7'}">+ OR</button>`;
+  return `
+    <div class="event-funnel-or-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:${ors.length ? '4px' : '2px'} 0 ${ors.length ? '6px' : '2px'} ${isChild ? 28 : 52}px">
+      ${chips}${addBtn}
+    </div>`;
+}
+
 // Riga editor del funnel a eventi. row = {event, label, children?}. Ordine colonne: label
 // (rinominabile) → evento (picker) → preview % (regola fissa: % vs step precedente + % vs primo
 // step). Il campo `vsIdx` in row resta per retro-compatibilità coi preset salvati ma non è più
@@ -4947,8 +5037,11 @@ function eventFunnelEditRow(row, i) {
   const labelPlaceholder = row.event ? (EVENT_CATALOG.find(e => e.event === row.event)?.label || row.event) : 'Nome step';
 
   // Evento = picker (apre event browser). Mostra prevalentemente l'event_name tecnico.
+  // Con eventi in OR il picker resta sul primario e porta un contatore: la lista completa vive
+  // nella sub-riga sotto, che può finire fuori vista quando l'editor è lungo.
   const picked = row.event;
-  const pickText = picked || '— scegli evento —';
+  const orCount = rowOrEvents(row).length;
+  const pickText = picked ? (orCount ? `${picked}  +${orCount}` : picked) : '— scegli evento —';
 
   // Sezione children (varianti annidate). Se il parent ha già children è sempre visibile; se non
   // ne ha, è visibile solo se il parent è espanso (per non appesantire la lista). L'expand qui
@@ -4993,6 +5086,7 @@ function eventFunnelEditRow(row, i) {
           style="padding:4px 8px;font-size:11px;line-height:1;color:${hasChildren ? 'var(--purple)' : 'var(--muted)'};background:transparent;border:1px solid var(--border);border-radius:6px;cursor:pointer;flex-shrink:0;font-family:inherit">${hasChildren ? (expanded ? '▾ ' + children.length : '▸ ' + children.length) : (expanded ? '▾' : '▸')}</button>
         <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
       </div>
+      ${orEventsChipsHtml(row, i)}
       ${childrenBlock}
     </div>`;
 }
@@ -5013,8 +5107,12 @@ function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) 
   const labelValue = child.label || '';
   const labelPlaceholder = child.event ? (EVENT_CATALOG.find(e => e.event === child.event)?.label || child.event) : 'Nome variante';
   const picked = child.event;
-  const pickText = picked || '— scegli evento variante —';
+  const cOrCount = rowOrEvents(child).length;
+  const pickText = picked
+    ? (cOrCount ? `${picked}  +${cOrCount}` : picked)
+    : '— scegli evento variante —';
   return `
+    <div class="event-funnel-child-block" style="display:flex;flex-direction:column;gap:0">
     <div class="event-funnel-child-row" data-parent="${parentI}" data-child="${ci}" style="display:flex;align-items:center;gap:8px">
       <span style="font-size:11px;color:#5a5a80;flex-shrink:0;width:20px;text-align:right">↳</span>
       <input class="form-input event-funnel-child-label" data-parent="${parentI}" data-child="${ci}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
@@ -5033,6 +5131,8 @@ function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) 
       <span style="width:29px;flex-shrink:0"></span>
       <button class="btn btn-ghost event-funnel-child-remove" data-parent="${parentI}" data-child="${ci}"
         style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>
+    ${orEventsChipsHtml(child, parentI, ci)}
     </div>`;
 }
 
@@ -5227,7 +5327,9 @@ function eventFunnelViz() {
     const countBadge = hasChildren
       ? ` <span class="variants-tag">· ${children.length} variant${children.length > 1 ? 'i' : 'e'}</span>`
       : '';
-    const evtLine = `${esc(row.event || '')}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}`;
+    // Step multi-evento: si stampano tutti i nomi separati da `|`, così si legge a colpo d'occhio
+    // che lo step ha due strade valide e il conteggio non è quello di un evento solo.
+    const evtLine = `${esc(rowAllEvents(row).join(' | '))}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}`;
 
     // Barra: track pieno = 100% del denominatore · ghost tratteggiato = livello dello step
     // precedente (la parte tratteggiata È il drop) · fill = step corrente.
@@ -5268,7 +5370,7 @@ function eventFunnelViz() {
 
     const parentRow = `
       <div class="fun-row">
-        <div class="col-label">${chevron}${esc(label)}${countBadge}<span class="evt">${evtLine}</span></div>
+        <div class="col-label"${rowOrEvents(row).length ? ` title="Step multi-evento (OR): conta chi ha emesso almeno uno fra ${esc(rowAllEvents(row).join(', '))}"` : ''}>${chevron}${esc(label)}${countBadge}<span class="evt">${evtLine}</span></div>
         <div class="col-bar"><div class="track">
           ${!isAbs && prevIdx !== null ? `<div class="ghost ${isWorst ? 'worst' : ''}" style="width:${gw}%"></div>` : ''}
           <div class="fill" style="width:${w}%"></div>
@@ -5296,7 +5398,7 @@ function eventFunnelViz() {
       const vsParentPct = n > 0 ? (cn / n * 100) : null;
       const vsHeadPct = headN > 0 ? (cn / headN * 100) : null;
       const cw = Math.min(cn / denom * 100, 100);
-      const cEvt = `${esc(c.event || '')}${c.filters ? ' · ' + esc(serializeFilters(c.filters)) : ''}`;
+      const cEvt = `${esc(rowAllEvents(c).join(' | '))}${c.filters ? ' · ' + esc(serializeFilters(c.filters)) : ''}`;
       // Il tempo della variante è ancorato allo step precedente al parent, non al parent: così
       // sta sulla stessa scala della riga sopra ed è confrontabile con essa. Ancorarlo al parent
       // darebbe quasi sempre ~0, perché i due eventi sono spesso emessi nello stesso istante.
@@ -5534,7 +5636,16 @@ async function fetchSprintEventFunnel() {
   render();
   try {
     // Stesso schema di fetchEventFunnel: computeEventFunnel gestisce l'override install_* client-side.
-    const p_steps  = steps.map(r => ({ event: r.event.trim(), source: (r.source || '').trim() || undefined }));
+    // ⚠️ Serializzatore separato da buildFlatStep, e già oggi non porta `filters` né i children:
+    // il confronto sprint mostra la sola spina con i filtri vecchio stile `source`. Gli eventi in
+    // OR invece DEVONO esserci, altrimenti lo stesso funnel darebbe due numeri diversi fra la viz
+    // e il confronto — un drift silenzioso proprio sugli step che ne hanno più bisogno.
+    const p_steps  = steps.map(r => {
+      const p = { event: r.event.trim(), source: (r.source || '').trim() || undefined };
+      const ors = rowOrEvents(r);
+      if (ors.length) p.events = [p.event, ...ors];
+      return p;
+    });
     const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
     const results  = await Promise.all(selected.map(s =>
       computeEventFunnel(p_steps, {
@@ -11010,6 +11121,46 @@ function attachEvents() {
       if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
       row.children[ci].label = el.value;
       persistEventFunnelConfig();
+    }));
+
+  // ── Eventi in OR (step multi-evento) ────────────────────────────────────────
+  // Un solo set di handler per parent e varianti: `data-child` presente = variante.
+  // Risolve la riga bersaglio una volta sola, così i tre handler restano tre righe.
+  const orTarget = (el) => {
+    if (el.dataset.parent != null) {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return null;
+      return { target: row.children[ci], row: pi, child: ci };
+    }
+    const i = +el.dataset.row;
+    const row = state.eventFunnelConfig[i];
+    return row ? { target: row, row: i, child: undefined } : null;
+  };
+
+  document.querySelectorAll('.event-funnel-or-add').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = orTarget(el);
+      if (t) openEventBrowser(t.row, t.child, -1);
+    }));
+
+  document.querySelectorAll('.event-funnel-or-edit').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = orTarget(el);
+      if (t) openEventBrowser(t.row, t.child, +el.dataset.or);
+    }));
+
+  // Rimozione: se l'array si svuota il campo sparisce del tutto, così la config torna
+  // byte-identica al formato a evento singolo (nessun `orEvents: []` residuo su DB).
+  document.querySelectorAll('.event-funnel-or-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = orTarget(el);
+      if (!t) return;
+      const ors = rowOrEvents(t.target);
+      ors.splice(+el.dataset.or, 1);
+      if (ors.length) t.target.orEvents = ors; else delete t.target.orEvents;
+      persistEventFunnelConfig();
+      render();
     }));
 
   // Filtro metadata sul parent: `provider=google` → filters {provider:'google'}. change→refetch not
