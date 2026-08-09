@@ -775,6 +775,14 @@ function buildFlatStep(row) {
     if (Object.keys(clean).length) step.filters = clean;
   }
   if (!step.filters && row.source && String(row.source).trim()) step.source = String(row.source).trim();
+  // Profondità e sopravvivenza (RPC 2026-08-09). Copiati solo quando dicono davvero qualcosa,
+  // così il payload di uno step normale resta byte-identico a com'era prima della spec.
+  //   min_count > 1          → la N-esima occorrenza dell'evento contata dall'ancora coorte
+  //   active_after_hours > 0 → "vivo dopo N ore da quell'ancora", qualunque evento
+  const minCount = Number(row.min_count);
+  if (Number.isFinite(minCount) && minCount > 1) step.min_count = Math.floor(minCount);
+  const activeAfter = Number(row.active_after_hours);
+  if (Number.isFinite(activeAfter) && activeAfter > 0) step.active_after_hours = Math.floor(activeAfter);
   return step;
 }
 
@@ -5229,6 +5237,24 @@ function eventFunnelViz() {
   const headIdx = realIdxs.length ? realIdxs[0] : null;
   const realPrev = {};
   realIdxs.forEach((idx, k) => { realPrev[idx] = k > 0 ? realIdxs[k - 1] : null; });
+  // Base matura (`denom_base` della RPC): valorizzata solo sugli step di sopravvivenza — quelli
+  // che chiedono "sei ancora vivo dopo N ore?". Lì il denominatore della riga NON è lo step
+  // precedente ma il sottoinsieme che ha già avuto il tempo di rispondere alla domanda: chi è
+  // entrato nella coorte tre giorni fa non è perso, è ancora in volo. `0` è un valore pieno
+  // ("nessuno ancora giudicabile") e la riga si legge "n.d."; `null` = step normale.
+  const matureBase = (i) => {
+    const d = rows_[i]?.denom_base;
+    return (d === null || d === undefined) ? null : Number(d);
+  };
+  // Il denominatore effettivo della riga i: base matura se lo step ne ha una, altrimenti lo
+  // step reale precedente. Unico punto da cui passano quota, tenuta, barra fantasma e perdita,
+  // così le quattro letture non possono divergere.
+  const baseOf = (i) => {
+    const mb = matureBase(i);
+    if (mb !== null) return mb;
+    const p = realPrev[i];
+    return p !== null ? nums[p] : null;
+  };
   const maxN = Math.max(...realIdxs.map(i => nums[i]), 1);
   const headN = headIdx !== null ? nums[headIdx] : 0;
   const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : 'step 1';
@@ -5243,9 +5269,9 @@ function eventFunnelViz() {
   if (!isAbs) {
     let worstLost = 0;
     realIdxs.forEach(i => {
-      const p = realPrev[i];
-      if (p === null || nums[p] <= 0) return;
-      const lost = nums[p] - nums[i];
+      const base = baseOf(i);
+      if (realPrev[i] === null || base === null || base <= 0) return;
+      const lost = base - nums[i];
       if (lost > worstLost) { worstLost = lost; worstIdx = i; }
     });
   }
@@ -5257,13 +5283,17 @@ function eventFunnelViz() {
   } else if (headIdx !== null) {
     const cohortN = state.eventFunnel?.cohort_size ?? headN;
     const lastIdx = realIdxs[realIdxs.length - 1];
-    const endStat = (realIdxs.length > 1 && headN > 0)
-      ? `<div class="stat"><span class="lbl">${fIcon('flag')}Arriva in fondo</span><span class="val">${(nums[lastIdx] / headN * 100).toFixed(1)}%<small>${nums[lastIdx]} su ${headN}</small></span></div>`
+    // Se l'ultimo step è di sopravvivenza, "arriva in fondo" si legge sulla base matura: sulla
+    // coorte intera direbbe che l'80% è caduto, quando in realtà non è ancora stato interrogato.
+    const endBase = matureBase(lastIdx) !== null ? matureBase(lastIdx) : headN;
+    const endSuffix = matureBase(lastIdx) !== null ? `${nums[lastIdx]} su ${endBase} maturi` : `${nums[lastIdx]} su ${headN}`;
+    const endStat = (realIdxs.length > 1 && endBase > 0)
+      ? `<div class="stat"><span class="lbl">${fIcon('flag')}Arriva in fondo</span><span class="val">${(nums[lastIdx] / endBase * 100).toFixed(1)}%<small>${endSuffix}</small></span></div>`
       : '';
     // Il drop peggiore in percentuale, con accanto quante persone sono: su coorti piccole −60%
     // e −52.6% sono quasi lo stesso numero, ma tre persone e dieci persone no.
     const worstStat = worstIdx >= 0
-      ? `<div class="stat"><span class="lbl">${fIcon('drop')}Drop peggiore</span><span class="val bad">−${((nums[realPrev[worstIdx]] - nums[worstIdx]) / headN * 100).toFixed(1)}%<small>${nums[realPrev[worstIdx]] - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
+      ? `<div class="stat"><span class="lbl">${fIcon('drop')}Drop peggiore</span><span class="val bad">−${((baseOf(worstIdx) - nums[worstIdx]) / headN * 100).toFixed(1)}%<small>${baseOf(worstIdx) - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
       : '';
     // Quanto ci mette chi arriva in fondo: il cumulato mediano dell'ultimo step reale.
     // È sui soli arrivati, quindi con pochi sopravvissuti il numero è indicativo — il conteggio
@@ -5307,16 +5337,21 @@ function eventFunnelViz() {
     const n     = nums[i];
     const label = eventStepLabel(row) || ('step ' + (i + 1));
     const prevIdx = realPrev[i];
-    const vsN   = prevIdx !== null ? nums[prevIdx] : null;
+    const mBase = matureBase(i);          // base matura, solo sugli step di sopravvivenza
+    const vsN   = prevIdx !== null ? baseOf(i) : null;
     const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
-    const startPct = i !== headIdx && headN > 0 ? (n / headN * 100) : null;
+    // Sugli step di sopravvivenza la quota si legge sulla base matura, non sulla coorte: gli
+    // immaturi non hanno ancora avuto modo di rispondere e gonfierebbero il denominatore.
+    const startPct = mBase !== null
+      ? (mBase > 0 ? (n / mBase * 100) : null)
+      : (i !== headIdx && headN > 0 ? (n / headN * 100) : null);
     // Lo step di testa È il totale: la sua quota è 100%, non "non applicabile". Il trattino aveva
     // senso quando la colonna si chiamava "vs #1" (un confronto con se stesso non esiste), non
     // ora che dichiara la quota sulla coorte.
     const sharePct = (i === headIdx && headN > 0) ? 100 : startPct;
     const isWorst = i === worstIdx;
     const w  = Math.min(n / denom * 100, 100);
-    const gw = prevIdx !== null ? Math.min(nums[prevIdx] / denom * 100, 100) : 0;
+    const gw = vsN !== null ? Math.min(vsN / denom * 100, 100) : 0;
 
     const children = Array.isArray(row.children) ? row.children : [];
     const hasChildren = children.length > 0;
@@ -5329,7 +5364,17 @@ function eventFunnelViz() {
       : '';
     // Step multi-evento: si stampano tutti i nomi separati da `|`, così si legge a colpo d'occhio
     // che lo step ha due strade valide e il conteggio non è quello di un evento solo.
-    const evtLine = `${esc(rowAllEvents(row).join(' | '))}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}`;
+    // Sugli step di sopravvivenza il nome dell'evento è un segnaposto (la RPC guarda qualunque
+    // evento): stamparlo direbbe una cosa falsa, quindi si scrive la regola vera.
+    // Su quelli a occorrenze multiple si dichiara quante ne servono, altrimenti tre righe
+    // identiche `workout_complete` sembrerebbero lo stesso conteggio ripetuto.
+    const minCountOf = (r) => { const v = Number(r && r.min_count); return Number.isFinite(v) && v > 1 ? Math.floor(v) : null; };
+    const activeAfterOf = (r) => { const v = Number(r && r.active_after_hours); return Number.isFinite(v) && v > 0 ? Math.floor(v) : null; };
+    const rowActiveAfter = activeAfterOf(row);
+    const rowMinCount = minCountOf(row);
+    const evtLine = rowActiveAfter !== null
+      ? `qualsiasi evento oltre ${fmtDur(rowActiveAfter * 3600)} dall'ingresso in coorte`
+      : `${esc(rowAllEvents(row).join(' | '))}${rowMinCount !== null ? ` · ${rowMinCount}ª volta` : ''}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}`;
 
     // Barra: track pieno = 100% del denominatore · ghost tratteggiato = livello dello step
     // precedente (la parte tratteggiata È il drop) · fill = step corrente.
@@ -5351,12 +5396,20 @@ function eventFunnelViz() {
     // singolo passaggio, che dice se lo schermo funziona per chi ci arriva ed è l'unica lettura
     // possibile quando la coorte è già dimezzata. Porta con sé la propria base ("di 71") perché
     // una percentuale nuda accanto a un'altra si legge come la stessa cosa scritta due volte.
+    //
+    // Sugli step di sopravvivenza la perdita si misura sulla base matura: contare fra i persi
+    // chi non ha ancora compiuto la settimana disegnerebbe un crollo che è solo tempo non
+    // ancora trascorso. Con base 0 non c'è perdita da mostrare — non si è ancora misurato niente.
     const lostN   = prevIdx !== null && vsN !== null ? vsN - n : null;
     const lostPct = lostN !== null && headN > 0 ? (lostN / headN * 100) : null;
     const showLoss = !isAbs && lostN !== null && lostN > 0;
     const lossTip = showLoss
-      ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${headN} di ${headLabel} ${lostN === 1 ? 'si ferma' : 'si fermano'} prima di "${label}"`
-        + ` — ${fmtP(lostPct)} della coorte, ${fmtP(convPct !== null ? 100 - convPct : null)} di chi era arrivato allo step precedente (${vsN})`
+      ? (mBase !== null
+          ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${mBase} già ${mBase === 1 ? 'giudicabile' : 'giudicabili'} non ${lostN === 1 ? 'risulta' : 'risultano'} ${lostN === 1 ? 'attiva' : 'attive'} — `
+            + `${fmtP(convPct !== null ? 100 - convPct : null)} della base matura. `
+            + `Chi è entrato in coorte troppo di recente non è qui dentro: non è perso, non è ancora misurabile.`
+          : `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${headN} di ${headLabel} ${lostN === 1 ? 'si ferma' : 'si fermano'} prima di "${label}"`
+            + ` — ${fmtP(lostPct)} della coorte, ${fmtP(convPct !== null ? 100 - convPct : null)} di chi era arrivato allo step precedente (${vsN})`)
       : '';
     // Sul primo passaggio le due letture sono lo stesso numero — lo step precedente È la coorte:
     // scriverlo due volte insegnerebbe a ignorare la riga piccola proprio dove poi conta.
@@ -5376,8 +5429,12 @@ function eventFunnelViz() {
           <div class="fill" style="width:${w}%"></div>
           ${lossTag}
         </div></div>
-        <div class="col-who" title="rispetto a ${esc(headLabel)} (${headN})">
-          <span class="a">${n}</span><span class="b ${sharePct === null ? 'dash' : ''}">${fmtP(sharePct)}</span>
+        <div class="col-who" title="${mBase !== null
+            ? esc(mBase > 0
+                ? `${n} su ${mBase}: la quota è sui soli maturi, cioè chi è entrato in coorte da abbastanza tempo da poter essere attivo oltre la soglia. Gli altri non sono persi, devono ancora arrivarci.`
+                : `Nessuno della coorte ha ancora superato la soglia: la riga non è misurabile su questo periodo, non è uno zero di performance.`)
+            : `rispetto a ${esc(headLabel)} (${headN})`}">
+          <span class="a">${n}</span><span class="b ${sharePct === null ? 'dash' : ''}">${fmtP(sharePct)}${mBase !== null && mBase > 0 ? `<small> su ${mBase} maturi</small>` : ''}</span>
         </div>
         <div class="col-when">
           <span class="a ${rows_[i]?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(rows_[i], n))}">${fmtDur(rows_[i]?.t_p50_sec)}</span>
@@ -5640,10 +5697,16 @@ async function fetchSprintEventFunnel() {
     // il confronto sprint mostra la sola spina con i filtri vecchio stile `source`. Gli eventi in
     // OR invece DEVONO esserci, altrimenti lo stesso funnel darebbe due numeri diversi fra la viz
     // e il confronto — un drift silenzioso proprio sugli step che ne hanno più bisogno.
+    // min_count/active_after_hours seguono la stessa logica degli OR: senza, "Secondo workout"
+    // conterebbe come il primo e il confronto sprint direbbe il contrario della viz.
     const p_steps  = steps.map(r => {
       const p = { event: r.event.trim(), source: (r.source || '').trim() || undefined };
       const ors = rowOrEvents(r);
       if (ors.length) p.events = [p.event, ...ors];
+      const minCount = Number(r.min_count);
+      if (Number.isFinite(minCount) && minCount > 1) p.min_count = Math.floor(minCount);
+      const activeAfter = Number(r.active_after_hours);
+      if (Number.isFinite(activeAfter) && activeAfter > 0) p.active_after_hours = Math.floor(activeAfter);
       return p;
     });
     const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
@@ -5680,10 +5743,19 @@ function sprintEventFunnelTable() {
   const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
   // numeri per sprint: mappa idx→numero
   const numsOf = {};
+  // Base matura per sprint (denom_base): sugli step di sopravvivenza il denominatore della
+  // conversione è quello, non lo step precedente — come nella viz principale, altrimenti lo
+  // stesso funnel darebbe due percentuali diverse nelle due schermate.
+  const baseOf_ = {};
   selected.forEach(s => {
     const steps = (state.sprintEventData[s.id] && state.sprintEventData[s.id].steps) || [];
-    const m = {}; steps.forEach(st => { m[st.idx] = Number(st.numero ?? 0); });
+    const m = {}, b = {};
+    steps.forEach(st => {
+      m[st.idx] = Number(st.numero ?? 0);
+      if (st.denom_base !== null && st.denom_base !== undefined) b[st.idx] = Number(st.denom_base);
+    });
     numsOf[s.id] = m;
+    baseOf_[s.id] = b;
   });
 
   const headers = selected.map((s, i) => `
@@ -5730,8 +5802,11 @@ function sprintEventFunnelTable() {
     // Al primo step reale (convPct null per tutti) nessuno vince: il top-of-funnel misura
     // traffico, non performance. Fallback su null → nessuna cella evidenziata su quello step.
     const convPcts = selected.map(s => {
+      const mb = baseOf_[s.id][ri];
+      const vsN = mb !== undefined
+        ? mb
+        : (realPrev[ri] !== null ? (numsOf[s.id][realPrev[ri]] ?? 0) : null);
       const n = numsOf[s.id][ri] ?? 0;
-      const vsN = realPrev[ri] !== null ? (numsOf[s.id][realPrev[ri]] ?? 0) : null;
       return vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
     });
     const validPcts = convPcts.filter(p => p !== null);
