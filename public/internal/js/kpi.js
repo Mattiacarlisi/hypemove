@@ -1145,8 +1145,25 @@ async function fetchTrialLife() {
 // Lista di chi ha fatto un'azione della biforcazione del gate (bucket senza
 // schermata: cambio tessera, tap CTA, acquisto avviato, ripensato, confermato
 // gratuito). Riusa lo STESSO modal degli step: la RPC ritorna la stessa shape.
+// I bucket per PERSONA (la consegna) non sono "step raggiunti": sono definiti da
+// quello che NON è successo, e la colonna Giorno/Ora della lista porta l'istante
+// della SCADENZA, non di un'azione. Senza questa riga il modal diceva "utenti che
+// hanno raggiunto questo step" sopra la lista di chi non ha aperto niente.
+const GATE_BUCKET_DESC = {
+  expired:          'prove finite nel periodo · giorno e ora sono quelli della scadenza',
+  returned:         'ha riaperto l\'app dopo la scadenza · giorno e ora sono quelli della scadenza',
+  seen:             'ha aperto il gate dopo la scadenza · giorno e ora sono quelli della scadenza',
+  decided:          'ha una scelta scritta in trial_choice · giorno e ora sono quelli della scadenza',
+  never_returned:   'non ha più aperto l\'app dopo la scadenza · giorno e ora sono quelli della scadenza',
+  returned_no_gate: 'è rientrata ma il gate non l\'ha intercettata · giorno e ora sono quelli della scadenza',
+  waiting:          'scaduta, gate mai visto, scelta ancora nulla · giorno e ora sono quelli della scadenza',
+};
+
 async function fetchGateBucketUsers(bucket, label, step, idx) {
-  state.stepUsersModal = { variant: 'trial_end_gate', step: step || bucket, label: label || 'Gate fine prova' };
+  state.stepUsersModal = {
+    variant: 'trial_end_gate', step: step || bucket, label: label || 'Gate fine prova',
+    desc: GATE_BUCKET_DESC[bucket] || null,
+  };
   state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
   render();
   try {
@@ -7072,7 +7089,11 @@ function premiumTrialGateCard() {
   const choice = d.choice || {};
   const decided = (choice.premium || 0) + (choice.free || 0);
 
-  if (!opened && !decided) {
+  // Zero aperture NON vuol dire zero da mostrare: se in quel periodo delle prove
+  // sono scadute, il numero interessante è proprio che nessuna di quelle persone
+  // ha visto il gate. La consegna si calcola più sotto, quindi la scorciatoia
+  // vale solo quando non c'è nemmeno una prova finita da raccontare.
+  if (!opened && !decided && !((d.delivery && d.delivery.expired) || 0)) {
     return wrap(`
       <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
         Nessuna apertura del gate nel periodo selezionato.<br>
@@ -7080,6 +7101,129 @@ function premiumTrialGateCard() {
         il gate si mostra sette giorni dopo l'iscrizione, quindi i primi numeri arrivano una settimana dopo il rilascio.</span>
       </div>`);
   }
+
+  // ── 0. la consegna: quante di quelle persone il gate le ha VISTE ──────────
+  // Il funnel qui sotto racconta cosa succede dentro il gate e per mesi non ha
+  // avuto un denominatore: "8 aperture" sembrava un numero piccolo ma sano.
+  // Quelle 8 stanno su 92 prove finite — la consegna è del 9%, e nessuna
+  // ottimizzazione delle schermate recupera gli 83 che non hanno più riaperto
+  // l'app. Sta PRIMA dell'esito perché è la domanda che viene prima: non "come
+  // ha risposto chi l'ha visto", ma "chi l'ha visto".
+  const dv = d.delivery;
+  const consegna = (!dv || !dv.expired) ? '' : (() => {
+    const tot = dv.expired;
+    const pc  = (n) => Math.round(n / tot * 100);
+    // Stessa grammatica dei box del film: numero grande, etichetta, quota sulla
+    // platea. Qui però il numero grande è già PERSONE — non ci sono tocchi da
+    // contare, una prova finisce una volta sola.
+    const dbox = (label, n, bucket, color, hint) => `
+      <div class="gate-bucket-box" data-bucket="${esc(bucket)}" title="${esc(hint || 'Vedi chi c\'è dietro questo numero')}"
+        style="cursor:pointer;text-align:center;min-width:96px;background:#111120;border:1px solid #1f1f33;border-radius:6px;padding:8px 10px;transition:border-color .12s">
+        <div style="font-weight:700;color:${color};font-size:19px;line-height:1">${n}</div>
+        <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:3px">${esc(label)}</div>
+        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${pc(n)}% dei scaduti</div>
+      </div>`;
+    const freccia = (prec, ora) => {
+      const drop = prec > 0 ? Math.round((1 - ora / prec) * 100) : null;
+      const col = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+      return `
+        <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 4px">
+          ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${col};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
+          <span style="font-size:13px;line-height:1">→</span>
+        </div>`;
+    };
+
+    // Le due perdite non sono lo stesso problema e non si risolvono nello stesso
+    // posto: una è retention (non torna), l'altra è il gate che non intercetta
+    // chi invece è tornato. Tenerle in un box solo le renderebbe una sola voce
+    // "persi", che è esattamente il modo di non fare niente per nessuna delle due.
+    const perdita = (label, n, bucket, color, spiega) => n <= 0 ? '' : `
+      <div class="gate-bucket-box" data-bucket="${esc(bucket)}" title="Vedi chi c'è dietro questo numero"
+        style="cursor:pointer;flex:1;min-width:210px;background:#0d0d18;border:1px solid #1a1a2e;border-left:3px solid ${color};border-radius:8px;padding:9px 12px">
+        <div style="display:flex;align-items:baseline;gap:7px">
+          <span style="font-size:20px;font-weight:700;color:${color};line-height:1">${n}</span>
+          <span style="font-size:11px;color:var(--fg)">${esc(label)}</span>
+        </div>
+        <div style="font-size:10px;color:#5a5a7a;margin-top:4px;line-height:1.45">${spiega}</div>
+      </div>`;
+
+    // Un giorno la cui ultima scadenza ha meno di 24h non ha ancora avuto il
+    // tempo di produrre i rientri: senza il tratteggio l'ultima riga si legge
+    // sempre come un crollo, che è il modo più veloce per farsi un'idea sbagliata.
+    const giorni = (dv.by_day || []).map(r => {
+      const wSeen = r.expired > 0 ? (r.seen / r.expired * 100) : 0;
+      const wRest = r.expired > 0 ? ((r.returned - r.seen) / r.expired * 100) : 0;
+      const dt = new Date(r.d + 'T12:00:00');
+      const et = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
+      return `
+        <div style="display:grid;grid-template-columns:58px 42px 1fr auto;gap:8px;align-items:center;font-size:10px;padding:2px 0">
+          <div style="color:var(--muted);font-family:var(--mono)">${esc(et)}</div>
+          <div style="color:var(--fg);text-align:right;font-weight:600">${r.expired}</div>
+          <div style="height:13px;background:#14141f;border-radius:3px;overflow:hidden;display:flex;
+                      ${r.partial ? 'outline:1px dashed #3a3a55;outline-offset:1px' : ''}">
+            <div style="width:${wSeen}%;background:#4ade80"></div>
+            <div style="width:${wRest}%;background:#fbbf24"></div>
+          </div>
+          <div style="color:#5a5a7a;white-space:nowrap">
+            ${r.returned} rientrat${r.returned === 1 ? 'o' : 'i'} · <span style="color:#4ade80">${r.seen} vist${r.seen === 1 ? 'o' : 'i'}</span>${r.partial ? ' <span style="color:#3a3a55">· in corso</span>' : ''}
+          </div>
+        </div>`;
+    }).join('');
+
+    const tassoConsegna = pc(dv.seen);
+    // Il fantasma: una scelta scritta in colonna senza che il gate sia mai
+    // comparso. È la colonna su cui si calcola la conversione, quindi finché
+    // esiste va detta — non dedotta da una differenza fra due box.
+    const fantasma = (dv.choice_without_gate || 0) > 0 ? `
+      <div style="margin-top:10px;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:9px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+        ⚠️ <strong>${dv.choice_without_gate} scelt${dv.choice_without_gate === 1 ? 'a registrata' : 'e registrate'} senza gate:</strong>
+        <code style="font-family:var(--mono)">trial_choice</code> è valorizzata per chi il gate non l'ha mai aperto.
+        Non l'ha decisa nessuno — ma finisce lo stesso nel denominatore della conversione qui sotto.
+      </div>` : '';
+
+    return `
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
+        Chi ci arriva · la consegna del gate
+      </div>
+      <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin-bottom:10px">
+        ${dbox('Prova finita', tot, 'expired', 'var(--fg)', 'Tutte le prove scadute nel periodo: è la platea di ogni numero qui sotto')}
+        ${freccia(tot, dv.returned)}
+        ${dbox('È tornata nell\'app', dv.returned, 'returned', '#22d3ee', 'Almeno un evento DOPO la scadenza')}
+        ${freccia(dv.returned, dv.seen)}
+        ${dbox('Ha visto il gate', dv.seen, 'seen', '#c4b5fd', 'Ha aperto il film della settimana')}
+        ${freccia(dv.seen, dv.decided)}
+        ${dbox('Ha scelto', dv.decided, 'decided', '#4ade80', 'trial_choice non è più nulla')}
+      </div>
+
+      <div style="background:${tassoConsegna < 25 ? '#2b1114' : '#0f1830'};border:1px solid ${tassoConsegna < 25 ? '#5a1f28' : '#1e2f56'};
+                  border-radius:8px;padding:10px 12px;font-size:11px;color:${tassoConsegna < 25 ? '#fca5a5' : '#93b4f5'};line-height:1.55;margin-bottom:10px">
+        <strong>Il gate viene consegnato al ${tassoConsegna}% di chi finisce la prova</strong> (${dv.seen} su ${tot}).
+        Il collo di bottiglia non è dentro le schermate: è che ${dv.never_returned} person${dv.never_returned === 1 ? 'a' : 'e'}
+        non ${dv.never_returned === 1 ? 'ha' : 'hanno'} più riaperto l'app dopo la scadenza.
+        ${dv.median_lag_h !== null && dv.median_lag_h !== undefined
+          ? `Chi torna lo vede in mediana dopo <strong>${String(dv.median_lag_h).replace('.', ',')} ore</strong>.`
+          : ''}
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:${giorni ? '14px' : '18px'}">
+        ${perdita('non ha più aperto l\'app', dv.never_returned, 'never_returned', '#ef4444',
+          'Il gate non c\'entra: qui si vince con una notifica alla scadenza, non con una schermata migliore.')}
+        ${perdita('è tornata e non l\'ha visto', dv.returned_no_gate, 'returned_no_gate', '#fbbf24',
+          (dv.missed_in_session > 0
+            ? `${dv.missed_in_session} ${dv.missed_in_session === 1 ? 'era già dentro l\'app' : 'erano già dentro l\'app'} quando la prova è scaduta: il redirect vive solo su Home, chi scade a metà allenamento finisce e se ne va senza passarci (DRIFT-2).`
+            : 'È rientrata ma il redirect non l\'ha intercettata.'))}
+        ${perdita('il gate le aspetta', dv.waiting, 'waiting', '#5a5a7a',
+          'Scadute, gate mai visto, scelta ancora nulla: lo vedranno al primo ingresso, il gate si ripresenta finché non si sceglie (R2).')}
+      </div>
+
+      ${giorni ? `
+        <div style="font-size:10px;color:#5a5a7a;margin-bottom:5px">
+          per giorno di scadenza · <span style="color:#4ade80">verde</span> = ha visto il gate ·
+          <span style="color:#fbbf24">giallo</span> = è tornata senza vederlo · il resto non è tornato
+        </div>
+        <div style="margin-bottom:18px">${giorni}</div>` : ''}
+      ${fantasma}`;
+  })();
 
   // ── 1. l'esito, in cima: è la verità a terra, non una deduzione dagli eventi ──
   const esito = `
@@ -7269,6 +7413,7 @@ function premiumTrialGateCard() {
     </div>` : '';
 
   return wrap(`
+    ${consegna}
     ${esito}
     <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Il film, fino all’offerta</div>
     <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${filmBoxes}${offerBox}</div>
@@ -7912,7 +8057,7 @@ function premiumCreativesCard(d) {
 // Per ogni utente: giorno, ora, nome, email. Aperto cliccando su un box del percorso step.
 function stepUsersModal() {
   if (!state.stepUsersModal) return '';
-  const { variant, step, label } = state.stepUsersModal;
+  const { variant, step, label, desc } = state.stepUsersModal;
   const d = state.stepUsersData;
   const users = (d && d.users) || [];
 
@@ -7965,7 +8110,7 @@ function stepUsersModal() {
               const sel = state.sprints.find(s => s.id === state.premiumSprintId);
               const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
               return `<div style="font-size:11px;color:var(--muted);margin-top:3px">
-                utenti che hanno raggiunto questo step${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${win.text}
+                ${desc ? esc(desc) : 'utenti che hanno raggiunto questo step'}${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${win.text}
               </div>`;
             })()}
           </div>
