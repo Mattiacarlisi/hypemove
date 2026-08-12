@@ -4,6 +4,39 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ── RPC CON RITENTATIVO SUI TIMEOUT ──────────────────────────────────
+// Il ruolo `anon` di Supabase annulla ogni query oltre i 3s (statement_timeout). Dal
+// 03/08/2026 il traffico è passato da ~1 a ~90 nuovi utenti al giorno, e le RPC più
+// pesanti (kpi_funnel, kpi_premium, kpi_ai_sessions) sforano quel tetto SOLO a cache
+// fredda: la stessa identica query rilanciata subito dopo chiude in 1-2s, perché le
+// pagine lette restano in memoria anche quando lo statement viene annullato (misurato
+// 12/08/2026: funnel 3.77s KO → 2.55s OK, chat AI 4.04s KO → 1.07s OK).
+// Senza ritentativo la dashboard mostrava "canceling statement due to statement
+// timeout" a caso, su schede diverse a ogni caricamento.
+// ⚠️ Cerotto consapevole, non la cura: la cura sta lato DB (alzare lo statement_timeout
+// del ruolo anon e alleggerire le query) e vive nel repo dell'app.
+const RPC_TIMEOUT_CODE = '57014';
+const RPC_MAX_RETRY    = 2;
+
+const rpcDirect = sb.rpc.bind(sb);
+sb.rpc = async (fn, params, opts) => {
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await rpcDirect(fn, params, opts);
+    if (res.error?.code !== RPC_TIMEOUT_CODE || attempt >= RPC_MAX_RETRY) break;
+    console.warn(`[rpc] ${fn}: timeout del DB, ritento (${attempt + 1}/${RPC_MAX_RETRY})`);
+    await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+  }
+  // Il messaggio grezzo di Postgres finisce a schermo (i pannelli stampano e.message):
+  // sostituito con qualcosa che dica cosa è successo e cosa fare.
+  if (res.error?.code === RPC_TIMEOUT_CODE) {
+    res = { ...res, error: { ...res.error, message:
+      'Il database ci ha messo troppo (limite 3s) e ha annullato la query. ' +
+      'Riprova tra qualche secondo — capita a cache fredda, soprattutto sui periodi lunghi.' } };
+  }
+  return res;
+};
+
 const REFRESH_MS  = 5 * 60 * 1000;
 const BETA_START  = '2026-06-11';
 const TODAY       = new Date().toISOString().slice(0, 10);
