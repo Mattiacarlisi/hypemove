@@ -16,23 +16,36 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // ⚠️ Cerotto consapevole, non la cura: la cura sta lato DB (alzare lo statement_timeout
 // del ruolo anon e alleggerire le query) e vive nel repo dell'app.
 const RPC_TIMEOUT_CODE = '57014';
-const RPC_MAX_RETRY    = 2;
+const RPC_MAX_RETRY    = 3;
+// Attese fra un tentativo e l'altro. 250ms non bastavano: quando il timeout nasce
+// da più RPC pesanti lanciate insieme, il secondo tentativo ripartiva mentre le
+// altre stavano ancora leggendo da disco e moriva uguale (13/08/2026, sezione gate).
+const RPC_RETRY_WAIT_MS = [600, 1400, 2600];
+
+// Riconoscere il timeout dal solo `code` non basta: a seconda di dove viene
+// annullata la query PostgREST a volte restituisce il messaggio senza codice.
+const isRpcTimeout = (err) =>
+  !!err && (err.code === RPC_TIMEOUT_CODE || /statement timeout/i.test(err.message || ''));
+// I pannelli tengono in stato solo `e.message`: il marcatore serve a far
+// riconoscere il timeout a chi disegna il riquadro d'errore (che altrimenti
+// accusa la RPC di non essere stata applicata in produzione — vedi sotto).
+const RPC_TIMEOUT_MARK = 'timeout-db';
 
 const rpcDirect = sb.rpc.bind(sb);
 sb.rpc = async (fn, params, opts) => {
   let res;
   for (let attempt = 0; ; attempt++) {
     res = await rpcDirect(fn, params, opts);
-    if (res.error?.code !== RPC_TIMEOUT_CODE || attempt >= RPC_MAX_RETRY) break;
+    if (!isRpcTimeout(res.error) || attempt >= RPC_MAX_RETRY) break;
     console.warn(`[rpc] ${fn}: timeout del DB, ritento (${attempt + 1}/${RPC_MAX_RETRY})`);
-    await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
+    await new Promise(r => setTimeout(r, RPC_RETRY_WAIT_MS[attempt] || 2600));
   }
   // Il messaggio grezzo di Postgres finisce a schermo (i pannelli stampano e.message):
   // sostituito con qualcosa che dica cosa è successo e cosa fare.
-  if (res.error?.code === RPC_TIMEOUT_CODE) {
+  if (isRpcTimeout(res.error)) {
     res = { ...res, error: { ...res.error, message:
-      'Il database ci ha messo troppo (limite 3s) e ha annullato la query. ' +
-      'Riprova tra qualche secondo — capita a cache fredda, soprattutto sui periodi lunghi.' } };
+      `Il database ci ha messo troppo e ha annullato la query [${RPC_TIMEOUT_MARK}]. ` +
+      'Capita alla prima apertura, a cache fredda: riprova fra qualche secondo.' } };
   }
   return res;
 };
@@ -1136,13 +1149,20 @@ async function fetchPremium() {
   } catch (e) { state.premiumError = e.message || 'Errore caricamento dati premium'; }
   state.premiumLoading = false;
   render();
-  // Il gate di fine prova ha una RPC sua (percorso a biforcazione + verità a
-  // terra da `users.trial_choice`): si carica dopo, così la pagina non aspetta.
-  void fetchTrialGate();
-  // Stessa cosa per il regalo (D0): sezione gemella, RPC gemella.
-  void fetchTrialGift();
-  // E la linea del tempo che li tiene insieme: dove sta la gente FRA il regalo e il gate.
-  void fetchTrialLife();
+  // Le tre sezioni della prova hanno una RPC ciascuna (il gate ha un percorso a
+  // biforcazione e la verità a terra in `users.trial_choice`, il regalo è la sua
+  // gemella a D0, la linea tiene insieme le due). Si caricano dopo `kpi_premium`,
+  // così la pagina non le aspetta — ma IN FILA, non insieme.
+  // ⚠️ Lanciarle in parallelo era la ragione per cui il gate spariva: leggono tutte
+  // le stesse pagine di `events`, e a cache fredda si facevano concorrenza a vicenda
+  // finendo tutte contro il tetto dei 3s (misurato 13/08/2026: da fredde 3,8s / 3,2s
+  // in fila, 0,4-0,7s l'una quando le pagine sono già in memoria). In fila la prima
+  // paga la lettura da disco e scalda la cache per le altre due.
+  void (async () => {
+    await fetchTrialGate();
+    await fetchTrialGift();
+    await fetchTrialLife();
+  })();
 }
 
 // La vita della prova: una chiamata sola per la linea, l'onda e le coorti.
@@ -7075,6 +7095,23 @@ function premiumKpi(label, value, sub, color, note, infoKey, bucket) {
 // del film portano `premium-step-box`, quindi il click che apre la lista di chi ci
 // è arrivato è già cablato e vale anche qui.
 
+// Un timeout del DB non è una funzionalità mancante, ed è l'errore più frequente
+// da agosto 2026 (traffico ×10, tetto di 3s per statement). Prima finiva nello
+// stesso riquadro di "la RPC non è ancora applicata": si leggeva "il gate non è
+// rilasciato" mentre in realtà i numeri esistevano e la query era stata annullata.
+// Qui la sezione lo dice per quello che è e offre il bottone per rileggere.
+function sezioneTimeoutBox(msg, retryCall) {
+  return `
+    <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+      ⏳ <strong>Il database non ha fatto in tempo a rispondere.</strong>
+      I dati ci sono: la query è stata annullata dopo 3 secondi, cosa che capita alla prima apertura
+      con la cache fredda.<br>
+      <button onclick="${retryCall}" style="margin-top:7px;background:#3a2d10;border:1px solid #5a4318;color:#fbbf24;
+        border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">↻ Rileggi questa sezione</button>
+      <span style="color:#8b7a4a;margin-left:8px">${esc(msg)}</span>
+    </div>`;
+}
+
 function premiumTrialGateCard() {
   const wrap = (inner) => `
     <div class="card" style="margin-bottom:16px">
@@ -7104,6 +7141,9 @@ function premiumTrialGateCard() {
           Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
           <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGateError)}</span>
         </div>`);
+    }
+    if (state.trialGateError.includes(RPC_TIMEOUT_MARK)) {
+      return wrap(sezioneTimeoutBox(state.trialGateError, 'fetchTrialGate()'));
     }
     return wrap(`
       <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
@@ -7529,6 +7569,9 @@ function premiumTrialLifeCard() {
           <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialLifeError)}</span>
         </div>`);
     }
+    if (state.trialLifeError.includes(RPC_TIMEOUT_MARK)) {
+      return wrap(sezioneTimeoutBox(state.trialLifeError, 'fetchTrialLife()'));
+    }
     return wrap(`
       <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
         ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialLifeError)}<br>
@@ -7754,6 +7797,9 @@ function premiumTrialGiftCard() {
           Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
           <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGiftError)}</span>
         </div>`);
+    }
+    if (state.trialGiftError.includes(RPC_TIMEOUT_MARK)) {
+      return wrap(sezioneTimeoutBox(state.trialGiftError, 'fetchTrialGift()'));
     }
     return wrap(`
       <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
