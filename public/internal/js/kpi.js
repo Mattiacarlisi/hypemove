@@ -16,20 +16,17 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // ⚠️ Cerotto consapevole, non la cura: la cura sta lato DB (alzare lo statement_timeout
 // del ruolo anon e alleggerire le query) e vive nel repo dell'app.
 const RPC_TIMEOUT_CODE = '57014';
-const RPC_MAX_RETRY    = 3;
-// Attese fra un tentativo e l'altro. 250ms non bastavano: quando il timeout nasce
-// da più RPC pesanti lanciate insieme, il secondo tentativo ripartiva mentre le
-// altre stavano ancora leggendo da disco e moriva uguale (13/08/2026, sezione gate).
-const RPC_RETRY_WAIT_MS = [600, 1400, 2600];
+const RPC_MAX_RETRY    = 4;
+// Attese fra un tentativo e l'altro. Il primo ritentativo parte quasi subito
+// apposta: le pagine appena lette restano in memoria solo finché il traffico
+// dell'app non le sfratta, quindi aspettare troppo butta via il vantaggio. Poi
+// si allarga, per il caso in cui il DB sia occupato davvero.
+const RPC_RETRY_WAIT_MS = [120, 400, 900, 1800];
 
 // Riconoscere il timeout dal solo `code` non basta: a seconda di dove viene
 // annullata la query PostgREST a volte restituisce il messaggio senza codice.
 const isRpcTimeout = (err) =>
-  !!err && (err.code === RPC_TIMEOUT_CODE || /statement timeout/i.test(err.message || ''));
-// I pannelli tengono in stato solo `e.message`: il marcatore serve a far
-// riconoscere il timeout a chi disegna il riquadro d'errore (che altrimenti
-// accusa la RPC di non essere stata applicata in produzione — vedi sotto).
-const RPC_TIMEOUT_MARK = 'timeout-db';
+  !!err && (err.code === RPC_TIMEOUT_CODE || /statement timeout|ci ha messo troppo/i.test(err.message || ''));
 
 const rpcDirect = sb.rpc.bind(sb);
 sb.rpc = async (fn, params, opts) => {
@@ -43,9 +40,9 @@ sb.rpc = async (fn, params, opts) => {
   // Il messaggio grezzo di Postgres finisce a schermo (i pannelli stampano e.message):
   // sostituito con qualcosa che dica cosa è successo e cosa fare.
   if (isRpcTimeout(res.error)) {
-    res = { ...res, error: { ...res.error, message:
-      `Il database ci ha messo troppo e ha annullato la query [${RPC_TIMEOUT_MARK}]. ` +
-      'Capita alla prima apertura, a cache fredda: riprova fra qualche secondo.' } };
+    res = { ...res, error: { ...res.error, code: RPC_TIMEOUT_CODE, message:
+      'Il database ci ha messo troppo e ha annullato la query. ' +
+      'Capita a cache fredda: riprova fra qualche secondo.' } };
   }
   return res;
 };
@@ -471,14 +468,18 @@ let state = {
   sprintRetOpen: false, sprintRetSel: [], sprintRetData: {}, sprintRetLoading: false, sprintRetError: null,
   sprintRetCustom: false, sprintRetMin: 1, sprintRetWeeks: 6, sprintRetMinW0: 1,
   deleteConfirm: null, // { id, nome } when modal is open
-  premiumData: null, premiumLoading: false, premiumError: null,
+  // `…ErrorTimeout`: la query è stata ANNULLATA dal DB, non è un guasto. Serve
+  // separato dal messaggio perché il riquadro da mostrare è un altro (i dati ci
+  // sono, basta rileggere) e perché una sezione annullata non deve buttare giù
+  // le altre della stessa pagina.
+  premiumData: null, premiumLoading: false, premiumError: null, premiumErrorTimeout: false,
   // Gate di fine prova: RPC dedicata (`kpi_trial_end_gate`), sezione a sé.
-  trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateAt: null, trialGateWindow: null,
+  trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateErrorTimeout: false, trialGateAt: null, trialGateWindow: null,
   // Il regalo (D0 della prova): RPC dedicata (`kpi_trial_gift`), sezione gemella del gate.
-  trialGiftData: null, trialGiftLoading: false, trialGiftError: null, trialGiftAt: null, trialGiftWindow: null,
+  trialGiftData: null, trialGiftLoading: false, trialGiftError: null, trialGiftErrorTimeout: false, trialGiftAt: null, trialGiftWindow: null,
   // La vita della prova (`kpi_trial_life`): la linea D0→D21 su cui la popolazione
   // scorre da sola, l'onda che arriva al gate e la griglia delle coorti.
-  trialLifeData: null, trialLifeLoading: false, trialLifeError: null, trialLifeAt: null, trialLifeWindow: null,
+  trialLifeData: null, trialLifeLoading: false, trialLifeError: null, trialLifeErrorTimeout: false, trialLifeAt: null, trialLifeWindow: null,
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1133,7 +1134,7 @@ async function fetchContinuityRetention() {
 }
 
 async function fetchPremium() {
-  state.premiumLoading = true; state.premiumError = null;
+  state.premiumLoading = true; state.premiumError = null; state.premiumErrorTimeout = false;
   render();
   try {
     const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
@@ -1146,7 +1147,10 @@ async function fetchPremium() {
     });
     if (error) throw error;
     state.premiumData = data;
-  } catch (e) { state.premiumError = e.message || 'Errore caricamento dati premium'; }
+  } catch (e) {
+    state.premiumError = e.message || 'Errore caricamento dati premium';
+    state.premiumErrorTimeout = isRpcTimeout(e);
+  }
   state.premiumLoading = false;
   render();
   // Le tre sezioni della prova hanno una RPC ciascuna (il gate ha un percorso a
@@ -1190,6 +1194,7 @@ async function fetchTrialLife() {
   } catch (e) {
     state.trialLifeData = null;
     state.trialLifeError = e.message || 'RPC kpi_trial_life non disponibile';
+    state.trialLifeErrorTimeout = isRpcTimeout(e);
   }
   state.trialLifeLoading = false;
   render();
@@ -1268,6 +1273,7 @@ async function fetchTrialGate() {
     // che dice "non ho letto" di una che mente con l'aria di funzionare.
     state.trialGateData = null;
     state.trialGateError = e.message || 'RPC kpi_trial_end_gate non disponibile';
+    state.trialGateErrorTimeout = isRpcTimeout(e);
   }
   state.trialGateLoading = false;
   render();
@@ -1300,6 +1306,7 @@ async function fetchTrialGift() {
     // Come per il gate: il dato vecchio si BUTTA, mai numeri stantii che mentono.
     state.trialGiftData = null;
     state.trialGiftError = e.message || 'RPC kpi_trial_gift non disponibile';
+    state.trialGiftErrorTimeout = isRpcTimeout(e);
   }
   state.trialGiftLoading = false;
   render();
@@ -6951,31 +6958,11 @@ function premiumPurchaserModel(p) {
   };
 }
 
-function pagePremium() {
-  if (state.premiumLoading) return `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Caricamento dati premium...</div>`;
-  if (state.premiumError)   return `<div class="card" style="color:var(--red);padding:24px">${state.premiumError}</div>`;
-  if (!state.premiumData)   return `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Nessun dato</div>`;
-
-  const d = state.premiumData;
-  const f = d.funnel;
-  const rc = d.real_conv || {};
-  // denominatore CANONICO del funnel: paywall_shown (step0) copre il 100% delle varianti.
-  // fallback su view_paywall per compatibilità con risposte RPC vecchie (cache).
-  const shownTotal = premiumNum(f.paywall_shown_total ?? f.view_paywall_total);
-  const shownUsers = premiumNum(f.paywall_shown ?? f.view_paywall);
-  const shownToOpen = shownUsers > 0 ? (f.paywall_views / shownUsers * 100).toFixed(1) : '0.0';
-  const shownToBuy  = shownUsers > 0 ? (f.purchase_attempts / shownUsers * 100).toFixed(1) : '0.0';
-  const avgShown = shownUsers > 0 ? (shownTotal / shownUsers).toFixed(1) : null;
-  const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
-  const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
-  const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
-  const purchasers = (d.purchasers || []).map(premiumPurchaserModel);
-  const lastDays = rc.last_days;
-  const lastNote = lastDays === null || lastDays === undefined
-    ? 'nessuna conversione nel periodo'
-    : `ultima conversione ${rc.last_date} · ${lastDays} g fa`;
-  const lastColor = (rc.new_total > 0) ? '#4ade80' : (lastDays > 14 ? '#ef4444' : 'var(--muted)');
-
+// Testata + filtri della pagina Premium. Estratta perché deve comparire ANCHE
+// quando `kpi_premium` fallisce: senza di lei la pagina d'errore non aveva né il
+// selettore del periodo né il bottone per ricalcolare, e l'unica via d'uscita
+// era ricaricare il browser.
+function premiumHeaderBar() {
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap">
       <div>
@@ -7011,7 +6998,61 @@ function pagePremium() {
       return `<div style="font-size:11px;color:var(--muted);margin-bottom:16px">
         ${win.text} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
       </div>`;
-    })()}
+    })()}`;
+}
+
+function pagePremium() {
+  if (state.premiumLoading && !state.premiumData) {
+    return `${premiumHeaderBar()}<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Caricamento dati premium...</div>`;
+  }
+  // ⚠️ `kpi_premium` è la RPC più pesante della dashboard e a volte il DB la
+  // annulla (misurato 13/08/2026: 2,7s ok · 1,8s ok · 1,8s ok · 3,9s annullata,
+  // a caso). Prima quel singolo inciampo sostituiva TUTTA la pagina con una riga
+  // rossa: sparivano anche il gate, il regalo e la linea della prova, che hanno
+  // una RPC ciascuna e quasi sempre ce l'hanno fatta. Ora la testata resta, il
+  // blocco che non ha letto lo dice, e il resto della pagina si vede.
+  if (state.premiumError && !state.premiumData) {
+    const box = state.premiumErrorTimeout
+      ? sezioneTimeoutBox(state.premiumError, 'fetchPremium()')
+      : `<div class="card" style="color:var(--red);padding:24px">${esc(state.premiumError)}</div>`;
+    return `
+      ${premiumHeaderBar()}
+      <div style="margin-bottom:16px">${box}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
+        Manca solo il blocco qui sopra (abbonati, MRR, funnel di conversione, creatività).
+        Le sezioni della prova hanno una lettura loro e sono qui sotto.
+      </div>
+      ${premiumTrialLifeCard()}
+      ${premiumTrialGiftCard()}
+      ${premiumTrialGateCard()}`;
+  }
+  if (!state.premiumData)   return `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Nessun dato</div>`;
+
+  const d = state.premiumData;
+  const f = d.funnel;
+  const rc = d.real_conv || {};
+  // denominatore CANONICO del funnel: paywall_shown (step0) copre il 100% delle varianti.
+  // fallback su view_paywall per compatibilità con risposte RPC vecchie (cache).
+  const shownTotal = premiumNum(f.paywall_shown_total ?? f.view_paywall_total);
+  const shownUsers = premiumNum(f.paywall_shown ?? f.view_paywall);
+  const shownToOpen = shownUsers > 0 ? (f.paywall_views / shownUsers * 100).toFixed(1) : '0.0';
+  const shownToBuy  = shownUsers > 0 ? (f.purchase_attempts / shownUsers * 100).toFixed(1) : '0.0';
+  const avgShown = shownUsers > 0 ? (shownTotal / shownUsers).toFixed(1) : null;
+  const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
+  const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
+  const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
+  const purchasers = (d.purchasers || []).map(premiumPurchaserModel);
+  const lastDays = rc.last_days;
+  const lastNote = lastDays === null || lastDays === undefined
+    ? 'nessuna conversione nel periodo'
+    : `ultima conversione ${rc.last_date} · ${lastDays} g fa`;
+  const lastColor = (rc.new_total > 0) ? '#4ade80' : (lastDays > 14 ? '#ef4444' : 'var(--muted)');
+
+  return `
+    ${premiumHeaderBar()}
+    ${state.premiumError ? `<div style="margin-bottom:14px;font-size:11px;color:#fbbf24;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:8px 11px">
+      ⚠️ L'ultimo ricalcolo non è andato a buon fine: <strong>questi numeri sono quelli di prima</strong>. ${esc(state.premiumError)}
+    </div>` : ''}
 
     <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
     <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
@@ -7142,7 +7183,7 @@ function premiumTrialGateCard() {
           <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGateError)}</span>
         </div>`);
     }
-    if (state.trialGateError.includes(RPC_TIMEOUT_MARK)) {
+    if (state.trialGateErrorTimeout) {
       return wrap(sezioneTimeoutBox(state.trialGateError, 'fetchTrialGate()'));
     }
     return wrap(`
@@ -7569,7 +7610,7 @@ function premiumTrialLifeCard() {
           <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialLifeError)}</span>
         </div>`);
     }
-    if (state.trialLifeError.includes(RPC_TIMEOUT_MARK)) {
+    if (state.trialLifeErrorTimeout) {
       return wrap(sezioneTimeoutBox(state.trialLifeError, 'fetchTrialLife()'));
     }
     return wrap(`
@@ -7798,7 +7839,7 @@ function premiumTrialGiftCard() {
           <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGiftError)}</span>
         </div>`);
     }
-    if (state.trialGiftError.includes(RPC_TIMEOUT_MARK)) {
+    if (state.trialGiftErrorTimeout) {
       return wrap(sezioneTimeoutBox(state.trialGiftError, 'fetchTrialGift()'));
     }
     return wrap(`
