@@ -127,6 +127,7 @@ const EVENT_CATALOG = [
   { event: 'view_OnboardingAge',                  label: 'Onboarding · Età' },
   { event: 'view_OnboardingGender',               label: 'Onboarding · Genere' },
   { event: 'view_OnboardingWeight',               label: 'Onboarding · Peso' },
+  { event: 'view_OnboardingHeight',               label: 'Onboarding · Altezza' },
   { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo' },
   // Interstitial "Non ti alleni mai da solo", eliminato dal wizard il 05/08/2026: non chiedeva
   // niente e si auto-skippava dopo 3.5s. Come Nome, resta qui per rileggere gli sprint chiusi;
