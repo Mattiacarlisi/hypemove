@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-23T11:41:28.428Z",
+  "generatedAt": "2026-08-23T14:44:37.019Z",
   "promptVersion": "3.16.0",
   "promptsHash": "26356cba34ad67cb7e7f5788fddc09b186645fe180e9ea1b30050ecc49e5d59b",
   "separator": "\n\n",
@@ -285,7 +285,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -303,7 +302,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -1308,7 +1306,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -1326,7 +1323,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -2331,7 +2327,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -2349,7 +2344,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -3354,7 +3348,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -3372,7 +3365,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -4377,7 +4369,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -4395,7 +4386,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -5400,7 +5390,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -5418,7 +5407,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -6423,7 +6411,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
@@ -6441,7 +6428,6 @@
                   "type": "string",
                   "enum": [
                     "none",
-                    "mat",
                     "chair",
                     "dumbbells",
                     "bands",
