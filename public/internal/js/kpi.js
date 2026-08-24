@@ -474,13 +474,9 @@ let state = {
   // sono, basta rileggere) e perché una sezione annullata non deve buttare giù
   // le altre della stessa pagina.
   premiumData: null, premiumLoading: false, premiumError: null, premiumErrorTimeout: false,
-  // Gate di fine prova: RPC dedicata (`kpi_trial_end_gate`), sezione a sé.
-  trialGateData: null, trialGateLoading: false, trialGateError: null, trialGateErrorTimeout: false, trialGateAt: null, trialGateWindow: null,
-  // Il regalo (D0 della prova): RPC dedicata (`kpi_trial_gift`), sezione gemella del gate.
-  trialGiftData: null, trialGiftLoading: false, trialGiftError: null, trialGiftErrorTimeout: false, trialGiftAt: null, trialGiftWindow: null,
-  // La vita della prova (`kpi_trial_life`): la linea D0→D21 su cui la popolazione
-  // scorre da sola, l'onda che arriva al gate e la griglia delle coorti.
-  trialLifeData: null, trialLifeLoading: false, trialLifeError: null, trialLifeErrorTimeout: false, trialLifeAt: null, trialLifeWindow: null,
+  // Le sezioni della prova regalata (gate/regalo/vita) sono state RIMOSSE dalla
+  // pagina il 24/08/2026 (decisione Mattia): al loro posto c'è la card Coach Spot.
+  // Le RPC kpi_trial_* restano a DB, inutilizzate da qui.
   premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
   premiumFunnelConfig: loadPremiumFunnelConfig(),
   editingPremiumFunnel: false,
@@ -1154,164 +1150,8 @@ async function fetchPremium() {
   }
   state.premiumLoading = false;
   render();
-  // Le tre sezioni della prova hanno una RPC ciascuna (il gate ha un percorso a
-  // biforcazione e la verità a terra in `users.trial_choice`, il regalo è la sua
-  // gemella a D0, la linea tiene insieme le due). Si caricano dopo `kpi_premium`,
-  // così la pagina non le aspetta — ma IN FILA, non insieme.
-  // ⚠️ Lanciarle in parallelo era la ragione per cui il gate spariva: leggono tutte
-  // le stesse pagine di `events`, e a cache fredda si facevano concorrenza a vicenda
-  // finendo tutte contro il tetto dei 3s (misurato 13/08/2026: da fredde 3,8s / 3,2s
-  // in fila, 0,4-0,7s l'una quando le pagine sono già in memoria). In fila la prima
-  // paga la lettura da disco e scalda la cache per le altre due.
-  void (async () => {
-    await fetchTrialGate();
-    await fetchTrialGift();
-    await fetchTrialLife();
-  })();
 }
 
-// La vita della prova: una chiamata sola per la linea, l'onda e le coorti.
-// Tollerante come le due sorelle: se la RPC non c'è, la sezione lo dice e il
-// resto della pagina non se ne accorge.
-async function fetchTrialLife() {
-  state.trialLifeLoading = true; state.trialLifeError = null;
-  render();
-  try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_trial_life', {
-      inizio: state.premiumFrom,
-      fine:   state.premiumTo,
-      p_gender: state.premiumGender,
-      p_start: selSprint ? sprintStartTs(selSprint) : null,
-      p_end:   selSprint ? sprintEndTs(selSprint) : null,
-      p_max_day: 21,
-    });
-    if (error) throw error;
-    state.trialLifeData = data;
-    state.trialLifeAt = new Date();
-    state.trialLifeWindow = selSprint
-      ? `${selSprint.nome} (${selSprint.inizio} → ${selSprint.fine})`
-      : `${state.premiumFrom} → ${state.premiumTo}`;
-  } catch (e) {
-    state.trialLifeData = null;
-    state.trialLifeError = e.message || 'RPC kpi_trial_life non disponibile';
-    state.trialLifeErrorTimeout = isRpcTimeout(e);
-  }
-  state.trialLifeLoading = false;
-  render();
-}
-
-// Lista di chi ha fatto un'azione della biforcazione del gate (bucket senza
-// schermata: cambio tessera, tap CTA, acquisto avviato, ripensato, confermato
-// gratuito). Riusa lo STESSO modal degli step: la RPC ritorna la stessa shape.
-// I bucket per PERSONA (la consegna) non sono "step raggiunti": sono definiti da
-// quello che NON è successo, e la colonna Giorno/Ora della lista porta l'istante
-// della SCADENZA, non di un'azione. Senza questa riga il modal diceva "utenti che
-// hanno raggiunto questo step" sopra la lista di chi non ha aperto niente.
-const GATE_BUCKET_DESC = {
-  expired:          'prove finite nel periodo · giorno e ora sono quelli della scadenza',
-  returned:         'ha riaperto l\'app dopo la scadenza · giorno e ora sono quelli della scadenza',
-  seen:             'ha aperto il gate dopo la scadenza · giorno e ora sono quelli della scadenza',
-  decided:          'ha una scelta scritta in trial_choice · giorno e ora sono quelli della scadenza',
-  never_returned:   'non ha più aperto l\'app dopo la scadenza · giorno e ora sono quelli della scadenza',
-  returned_no_gate: 'è rientrata ma il gate non l\'ha intercettata · giorno e ora sono quelli della scadenza',
-  waiting:          'scaduta, gate mai visto, scelta ancora nulla · giorno e ora sono quelli della scadenza',
-};
-
-async function fetchGateBucketUsers(bucket, label, step, idx) {
-  state.stepUsersModal = {
-    variant: 'trial_end_gate', step: step || bucket, label: label || 'Gate fine prova',
-    desc: GATE_BUCKET_DESC[bucket] || null,
-  };
-  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
-  render();
-  try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_trial_end_gate_users', {
-      p_bucket: bucket,
-      inizio:   state.premiumFrom,
-      fine:     state.premiumTo,
-      p_gender: state.premiumGender,
-      p_start:  selSprint ? sprintStartTs(selSprint) : null,
-      p_end:    selSprint ? sprintEndTs(selSprint) : null,
-      p_step:   step || null,
-      p_idx:    (idx === undefined || idx === null || idx === '') ? null : Number(idx),
-    });
-    if (error) throw error;
-    state.stepUsersData = data;
-  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti bucket'; }
-  state.stepUsersLoading = false;
-  render();
-}
-
-// Percorso del gate di fine prova. Chiamata separata e tollerante: finché la RPC
-// non è applicata in produzione la sezione mostra il suo stato, non un errore di
-// pagina — il resto della dashboard non deve dipendere da questa.
-async function fetchTrialGate() {
-  state.trialGateLoading = true; state.trialGateError = null;
-  render();
-  try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_trial_end_gate', {
-      inizio: state.premiumFrom,
-      fine:   state.premiumTo,
-      p_gender: state.premiumGender,
-      p_start: selSprint ? sprintStartTs(selSprint) : null,
-      p_end:   selSprint ? sprintEndTs(selSprint) : null,
-    });
-    if (error) throw error;
-    state.trialGateData = data;
-    state.trialGateAt = new Date();
-    // La finestra vera che ha prodotto questi numeri, scritta a schermo: se lo
-    // sprint selezionato la restringe, si vede subito invece di sembrare un
-    // evento non tracciato.
-    state.trialGateWindow = selSprint
-      ? `${selSprint.nome} (${selSprint.inizio} → ${selSprint.fine})`
-      : `${state.premiumFrom} → ${state.premiumTo}`;
-  } catch (e) {
-    // Il dato vecchio si BUTTA: una sessione scaduta lasciava a schermo numeri
-    // di dieci minuti prima, indistinguibili da quelli veri. Meglio una sezione
-    // che dice "non ho letto" di una che mente con l'aria di funzionare.
-    state.trialGateData = null;
-    state.trialGateError = e.message || 'RPC kpi_trial_end_gate non disponibile';
-    state.trialGateErrorTimeout = isRpcTimeout(e);
-  }
-  state.trialGateLoading = false;
-  render();
-}
-
-// Funnel per fase della schermata del regalo (D0 della prova). Stessa filosofia
-// del gate: chiamata separata e tollerante — finché la RPC non è applicata la
-// sezione mostra il suo stato, il resto della pagina non ne dipende.
-async function fetchTrialGift() {
-  state.trialGiftLoading = true; state.trialGiftError = null;
-  render();
-  try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_trial_gift', {
-      inizio: state.premiumFrom,
-      fine:   state.premiumTo,
-      p_gender: state.premiumGender,
-      p_start: selSprint ? sprintStartTs(selSprint) : null,
-      p_end:   selSprint ? sprintEndTs(selSprint) : null,
-    });
-    if (error) throw error;
-    state.trialGiftData = data;
-    state.trialGiftAt = new Date();
-    // La finestra vera che ha prodotto questi numeri, scritta a schermo (stessa
-    // scelta del gate: uno sprint che la restringe deve vedersi subito).
-    state.trialGiftWindow = selSprint
-      ? `${selSprint.nome} (${selSprint.inizio} → ${selSprint.fine})`
-      : `${state.premiumFrom} → ${state.premiumTo}`;
-  } catch (e) {
-    // Come per il gate: il dato vecchio si BUTTA, mai numeri stantii che mentono.
-    state.trialGiftData = null;
-    state.trialGiftError = e.message || 'RPC kpi_trial_gift non disponibile';
-    state.trialGiftErrorTimeout = isRpcTimeout(e);
-  }
-  state.trialGiftLoading = false;
-  render();
-}
 
 // Apre il modal e carica la lista degli utenti che hanno raggiunto uno step di una creatività.
 // Usa lo stesso periodo/genere della pagina Premium (state.premiumFrom/To/Gender).
@@ -7018,14 +6858,7 @@ function pagePremium() {
       : `<div class="card" style="color:var(--red);padding:24px">${esc(state.premiumError)}</div>`;
     return `
       ${premiumHeaderBar()}
-      <div style="margin-bottom:16px">${box}</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
-        Manca solo il blocco qui sopra (abbonati, MRR, funnel di conversione, creatività).
-        Le sezioni della prova hanno una lettura loro e sono qui sotto.
-      </div>
-      ${premiumTrialLifeCard()}
-      ${premiumTrialGiftCard()}
-      ${premiumTrialGateCard()}`;
+      <div style="margin-bottom:16px">${box}</div>`;
   }
   if (!state.premiumData)   return `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Nessun dato</div>`;
 
@@ -7093,11 +6926,8 @@ function pagePremium() {
       </div>
     </div>
 
-    <!-- La mappa prima dei due momenti: dove sta la gente lungo i giorni della prova -->
-    ${premiumTrialLifeCard()}
-    <!-- Il regalo (D0) e il gate (D7): l'inizio e la fine della settimana regalata -->
-    ${premiumTrialGiftCard()}
-    ${premiumTrialGateCard()}
+    <!-- Coach Spot: l'unico paywall post-workout in produzione -->
+    ${premiumCoachSpotCard(d)}
     <!-- Creatività: quale paywall converte di più, col percorso step inline -->
     ${premiumCreativesCard(d)}
 
@@ -7154,863 +6984,116 @@ function sezioneTimeoutBox(msg, retryCall) {
     </div>`;
 }
 
-function premiumTrialGateCard() {
-  const wrap = (inner) => `
-    <div class="card" style="margin-bottom:16px">
-      <div style="margin-bottom:12px">
-        <div class="card-title" style="margin-bottom:3px">Gate di fine prova · il film della settimana</div>
-        <div style="font-size:11px;color:var(--muted)">
-          la schermata che si apre al primo ingresso dopo i 7 giorni regalati ·
-          <code style="font-family:var(--mono)">variant = trial_end_gate</code>
-          ${state.trialGateWindow ? `<br><span style="color:#5a5a7a">periodo interrogato: ${esc(state.trialGateWindow)}</span>` : ''}
-          ${state.trialGateAt ? ` · letto alle ${state.trialGateAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
-        </div>
-      </div>
-      ${inner}
-    </div>`;
-
-  if (state.trialGateLoading && !state.trialGateData) {
-    return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico il percorso del gate…</div>`);
-  }
-  if (state.trialGateError) {
-    // Sessione scaduta: è il caso più frequente e il più insidioso, perché la
-    // pagina resta in piedi e sembra solo "senza dati".
-    const scaduta = /jwt|expired|denied|forbidden|401|permission/i.test(state.trialGateError);
-    if (scaduta) {
-      return wrap(`
-        <div style="background:#2b1114;border:1px solid #5a1f28;border-radius:8px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.5">
-          🔒 <strong>Sessione scaduta: questi numeri non sono stati letti.</strong>
-          Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
-          <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGateError)}</span>
-        </div>`);
-    }
-    if (state.trialGateErrorTimeout) {
-      return wrap(sezioneTimeoutBox(state.trialGateError, 'fetchTrialGate()'));
-    }
-    return wrap(`
-      <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
-        ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialGateError)}<br>
-        La RPC <code style="font-family:var(--mono)">kpi_trial_end_gate</code> va applicata in produzione, e il gate
-        deve essere rilasciato agli utenti: finché vive solo su <code style="font-family:var(--mono)">bender</code>
-        nessuno lo vede e non c'è niente da contare.
-      </div>`);
-  }
-
-  const d = state.trialGateData;
-  if (!d) return '';
-
-  const opened = (d.opened && d.opened.users) || 0;
-  const steps  = (d.steps || []).slice().sort((a, b) => a.idx - b.idx);
-  const choice = d.choice || {};
-  const decided = (choice.premium || 0) + (choice.free || 0);
-
-  // Zero aperture NON vuol dire zero da mostrare: se in quel periodo delle prove
-  // sono scadute, il numero interessante è proprio che nessuna di quelle persone
-  // ha visto il gate. La consegna si calcola più sotto, quindi la scorciatoia
-  // vale solo quando non c'è nemmeno una prova finita da raccontare.
-  if (!opened && !decided && !((d.delivery && d.delivery.expired) || 0)) {
-    return wrap(`
-      <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
-        Nessuna apertura del gate nel periodo selezionato.<br>
-        <span style="color:#5a5a7a">È il comportamento atteso finché la settimana regalata non è rilasciata:
-        il gate si mostra sette giorni dopo l'iscrizione, quindi i primi numeri arrivano una settimana dopo il rilascio.</span>
-      </div>`);
-  }
-
-  // ── 0. la consegna: quante di quelle persone il gate le ha VISTE ──────────
-  // Il funnel qui sotto racconta cosa succede dentro il gate e per mesi non ha
-  // avuto un denominatore: "8 aperture" sembrava un numero piccolo ma sano.
-  // Quelle 8 stanno su 92 prove finite — la consegna è del 9%, e nessuna
-  // ottimizzazione delle schermate recupera gli 83 che non hanno più riaperto
-  // l'app. Sta PRIMA dell'esito perché è la domanda che viene prima: non "come
-  // ha risposto chi l'ha visto", ma "chi l'ha visto".
-  const dv = d.delivery;
-  const consegna = (!dv || !dv.expired) ? '' : (() => {
-    const tot = dv.expired;
-    const pc  = (n) => Math.round(n / tot * 100);
-    // Stessa grammatica dei box del film: numero grande, etichetta, quota sulla
-    // platea. Qui però il numero grande è già PERSONE — non ci sono tocchi da
-    // contare, una prova finisce una volta sola.
-    const dbox = (label, n, bucket, color, hint) => `
-      <div class="gate-bucket-box" data-bucket="${esc(bucket)}" title="${esc(hint || 'Vedi chi c\'è dietro questo numero')}"
-        style="cursor:pointer;text-align:center;min-width:96px;background:#111120;border:1px solid #1f1f33;border-radius:6px;padding:8px 10px;transition:border-color .12s">
-        <div style="font-weight:700;color:${color};font-size:19px;line-height:1">${n}</div>
-        <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:3px">${esc(label)}</div>
-        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${pc(n)}% dei scaduti</div>
-      </div>`;
-    const freccia = (prec, ora) => {
-      const drop = prec > 0 ? Math.round((1 - ora / prec) * 100) : null;
-      const col = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
-      return `
-        <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 4px">
-          ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${col};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
-          <span style="font-size:13px;line-height:1">→</span>
-        </div>`;
-    };
-
-    // Le due perdite non sono lo stesso problema e non si risolvono nello stesso
-    // posto: una è retention (non torna), l'altra è il gate che non intercetta
-    // chi invece è tornato. Tenerle in un box solo le renderebbe una sola voce
-    // "persi", che è esattamente il modo di non fare niente per nessuna delle due.
-    const perdita = (label, n, bucket, color, spiega) => n <= 0 ? '' : `
-      <div class="gate-bucket-box" data-bucket="${esc(bucket)}" title="Vedi chi c'è dietro questo numero"
-        style="cursor:pointer;flex:1;min-width:210px;background:#0d0d18;border:1px solid #1a1a2e;border-left:3px solid ${color};border-radius:8px;padding:9px 12px">
-        <div style="display:flex;align-items:baseline;gap:7px">
-          <span style="font-size:20px;font-weight:700;color:${color};line-height:1">${n}</span>
-          <span style="font-size:11px;color:var(--fg)">${esc(label)}</span>
-        </div>
-        <div style="font-size:10px;color:#5a5a7a;margin-top:4px;line-height:1.45">${spiega}</div>
-      </div>`;
-
-    // Un giorno la cui ultima scadenza ha meno di 24h non ha ancora avuto il
-    // tempo di produrre i rientri: senza il tratteggio l'ultima riga si legge
-    // sempre come un crollo, che è il modo più veloce per farsi un'idea sbagliata.
-    const giorni = (dv.by_day || []).map(r => {
-      const wSeen = r.expired > 0 ? (r.seen / r.expired * 100) : 0;
-      const wRest = r.expired > 0 ? ((r.returned - r.seen) / r.expired * 100) : 0;
-      const dt = new Date(r.d + 'T12:00:00');
-      const et = dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' });
-      return `
-        <div style="display:grid;grid-template-columns:58px 42px 1fr auto;gap:8px;align-items:center;font-size:10px;padding:2px 0">
-          <div style="color:var(--muted);font-family:var(--mono)">${esc(et)}</div>
-          <div style="color:var(--fg);text-align:right;font-weight:600">${r.expired}</div>
-          <div style="height:13px;background:#14141f;border-radius:3px;overflow:hidden;display:flex;
-                      ${r.partial ? 'outline:1px dashed #3a3a55;outline-offset:1px' : ''}">
-            <div style="width:${wSeen}%;background:#4ade80"></div>
-            <div style="width:${wRest}%;background:#fbbf24"></div>
-          </div>
-          <div style="color:#5a5a7a;white-space:nowrap">
-            ${r.returned} rientrat${r.returned === 1 ? 'o' : 'i'} · <span style="color:#4ade80">${r.seen} vist${r.seen === 1 ? 'o' : 'i'}</span>${r.partial ? ' <span style="color:#3a3a55">· in corso</span>' : ''}
-          </div>
-        </div>`;
-    }).join('');
-
-    const tassoConsegna = pc(dv.seen);
-    // Il fantasma: una scelta scritta in colonna senza che il gate sia mai
-    // comparso. È la colonna su cui si calcola la conversione, quindi finché
-    // esiste va detta — non dedotta da una differenza fra due box.
-    const fantasma = (dv.choice_without_gate || 0) > 0 ? `
-      <div style="margin-top:10px;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:9px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
-        ⚠️ <strong>${dv.choice_without_gate} scelt${dv.choice_without_gate === 1 ? 'a registrata' : 'e registrate'} senza gate:</strong>
-        <code style="font-family:var(--mono)">trial_choice</code> è valorizzata per chi il gate non l'ha mai aperto.
-        Non l'ha decisa nessuno — ma finisce lo stesso nel denominatore della conversione qui sotto.
-      </div>` : '';
-
-    return `
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">
-        Chi ci arriva · la consegna del gate
-      </div>
-      <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap;margin-bottom:10px">
-        ${dbox('Prova finita', tot, 'expired', 'var(--fg)', 'Tutte le prove scadute nel periodo: è la platea di ogni numero qui sotto')}
-        ${freccia(tot, dv.returned)}
-        ${dbox('È tornata nell\'app', dv.returned, 'returned', '#22d3ee', 'Almeno un evento DOPO la scadenza')}
-        ${freccia(dv.returned, dv.seen)}
-        ${dbox('Ha visto il gate', dv.seen, 'seen', '#c4b5fd', 'Ha aperto il film della settimana')}
-        ${freccia(dv.seen, dv.decided)}
-        ${dbox('Ha scelto', dv.decided, 'decided', '#4ade80', 'trial_choice non è più nulla')}
-      </div>
-
-      <div style="background:${tassoConsegna < 25 ? '#2b1114' : '#0f1830'};border:1px solid ${tassoConsegna < 25 ? '#5a1f28' : '#1e2f56'};
-                  border-radius:8px;padding:10px 12px;font-size:11px;color:${tassoConsegna < 25 ? '#fca5a5' : '#93b4f5'};line-height:1.55;margin-bottom:10px">
-        <strong>Il gate viene consegnato al ${tassoConsegna}% di chi finisce la prova</strong> (${dv.seen} su ${tot}).
-        Il collo di bottiglia non è dentro le schermate: è che ${dv.never_returned} person${dv.never_returned === 1 ? 'a' : 'e'}
-        non ${dv.never_returned === 1 ? 'ha' : 'hanno'} più riaperto l'app dopo la scadenza.
-        ${dv.median_lag_h !== null && dv.median_lag_h !== undefined
-          ? `Chi torna lo vede in mediana dopo <strong>${String(dv.median_lag_h).replace('.', ',')} ore</strong>.`
-          : ''}
-      </div>
-
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:${giorni ? '14px' : '18px'}">
-        ${perdita('non ha più aperto l\'app', dv.never_returned, 'never_returned', '#ef4444',
-          'Il gate non c\'entra: qui si vince con una notifica alla scadenza, non con una schermata migliore.')}
-        ${perdita('è tornata e non l\'ha visto', dv.returned_no_gate, 'returned_no_gate', '#fbbf24',
-          (dv.missed_in_session > 0
-            ? `${dv.missed_in_session} ${dv.missed_in_session === 1 ? 'era già dentro l\'app' : 'erano già dentro l\'app'} quando la prova è scaduta: il redirect vive solo su Home, chi scade a metà allenamento finisce e se ne va senza passarci (DRIFT-2).`
-            : 'È rientrata ma il redirect non l\'ha intercettata.'))}
-        ${perdita('il gate le aspetta', dv.waiting, 'waiting', '#5a5a7a',
-          'Scadute, gate mai visto, scelta ancora nulla: lo vedranno al primo ingresso, il gate si ripresenta finché non si sceglie (R2).')}
-      </div>
-
-      ${giorni ? `
-        <div style="font-size:10px;color:#5a5a7a;margin-bottom:5px">
-          per giorno di scadenza · <span style="color:#4ade80">verde</span> = ha visto il gate ·
-          <span style="color:#fbbf24">giallo</span> = è tornata senza vederlo · il resto non è tornato
-        </div>
-        <div style="margin-bottom:18px">${giorni}</div>` : ''}
-      ${fantasma}`;
-  })();
-
-  // ── 1. l'esito, in cima: è la verità a terra, non una deduzione dagli eventi ──
-  const esito = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">
-      ${[
-        { k: 'Ha scelto Hypemove+', v: choice.premium || 0, c: '#4ade80', s: 'trial_choice = premium' },
-        { k: 'Ha scelto il gratuito', v: choice.free || 0, c: '#f59e0b', s: 'trial_choice = free' },
-        { k: 'Non ha ancora scelto', v: choice.pending || 0, c: '#5a5a7a', s: 'prova finita, gate mai chiuso' },
-        {
-          k: 'Conversione al gate',
-          v: decided > 0 ? `${Math.round((choice.premium || 0) / decided * 100)}%` : '—',
-          c: '#22d3ee',
-          s: decided > 0 ? `su ${decided} che hanno deciso` : 'nessuna decisione ancora',
-        },
-      ].map(x => `
-        <div style="background:#111120;border:1px solid #1a1a2e;border-radius:8px;padding:11px 12px">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(x.k)}</div>
-          <div style="font-size:24px;font-weight:700;color:${x.c};line-height:1.2;margin-top:3px">${x.v}</div>
-          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono);margin-top:2px">${esc(x.s)}</div>
-        </div>`).join('')}
-    </div>`;
-
-  // ── 2. il percorso, con la stessa grammatica delle creatività ──
-  // Box cliccabili `premium-step-box`: il gestore globale è già cablato e apre la
-  // lista di chi ha raggiunto quella schermata. Numero grande = tocchi, riga sotto
-  // = persone, come nelle creatività, così i due blocchi si leggono allo stesso modo.
-  const filmSteps = steps.filter(s => s.role === 'hero' || s.role === 'recap');
-  // `plans` è il ruolo vero (la schermata mostra tessere + CTA, come le altre
-  // creatività: così entra in "Arrivato ai piani"); `offer` sono gli eventi di
-  // collaudo emessi prima della rinomina del 01/08. Si SOMMANO, non si preferisce
-  // uno dei due: è la stessa schermata con due nomi in build diverse, e tenerne
-  // uno solo faceva sembrare fermo il conteggio a ogni nuovo giro.
-  const offerRows = steps.filter(s => s.role === 'plans' || s.role === 'offer');
-  const offerStep = offerRows.length ? {
-    role: offerRows.some(s => s.role === 'plans') ? 'plans' : 'offer',
-    idx: offerRows[0].idx,
-    viewed: offerRows.reduce((a, s) => a + s.viewed, 0),
-    // Somma, non unione: la stessa persona che ha visto entrambe le versioni
-    // conta due volte. Accettato — vale solo per il periodo di collaudo a
-    // cavallo della rinomina, poi resta un nome solo.
-    viewed_users: offerRows.reduce((a, s) => a + s.viewed_users, 0),
-  } : null;
-  const downStep  = steps.find(s => s.role === 'downgrade');
-  const base = filmSteps.length ? filmSteps[0].viewed : (d.opened && d.opened.events) || 0;
-
-  const box = (label, views, people, prev, opts) => {
-    const o = opts || {};
-    const pct  = base > 0 ? Math.round(views / base * 100) : 0;
-    const drop = (prev && prev > 0) ? Math.round((1 - views / prev) * 100) : null;
-    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
-    const arrow = prev !== null && prev !== undefined ? `
-      <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 3px">
-        ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
-        <span style="font-size:13px;line-height:1">→</span>
-      </div>` : '';
-    // Tre gradi di cliccabilità: una schermata (`step`, via kpi_premium_step_users,
-    // con `idx` per distinguere le due battute `recap`), un'azione della
-    // biforcazione (`bucket`, via kpi_trial_end_gate_users), oppure niente.
-    // Le schermate del gate NON usano `kpi_premium_step_users`: quella legge
-    // `user_events`, dove gli eventi di una sessione non ancora legata a un
-    // account non esistono — il box contava 1 e la lista si apriva vuota.
-    // Conteggio e lista devono avere la stessa fonte, quindi passano entrambi
-    // da `kpi_trial_end_gate_users`.
-    const clickable = o.step
-      ? `class="gate-bucket-box" data-bucket="step" data-step="${esc(o.step)}"${o.idx !== undefined ? ` data-idx="${o.idx}"` : ''} title="Vedi chi è arrivato a questa schermata" style="cursor:pointer;`
-      : o.bucket
-        ? `class="gate-bucket-box" data-bucket="${esc(o.bucket)}" title="${esc(o.title || 'Vedi chi ha fatto questa azione')}" style="cursor:pointer;`
-        : `title="${esc(o.title || '')}" style="`;
-    return arrow + `
-      <div ${clickable}text-align:center;min-width:70px;background:#111120;border:1px solid ${o.border || '#1f1f33'};border-radius:6px;padding:6px 8px;transition:border-color .12s">
-        <div style="font-weight:700;color:${o.color || 'var(--fg)'};font-size:15px;line-height:1">${views}</div>
-        <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(label)}</div>
-        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${people} person${people === 1 ? 'a' : 'e'} · ${pct}%</div>
-      </div>`;
-  };
-
-  let prev = null;
-  const filmBoxes = filmSteps.map((s, i) => {
-    const label = i === 0 ? 'Apertura' : `Racconto ${i}`;
-    // `idx` distingue le due battute `recap`: senza, i due box aprirebbero la
-    // stessa lista perché condividono il nome di step.
-    const b = box(label, s.viewed, s.viewed_users, prev, { step: s.role, idx: s.idx });
-    prev = s.viewed;
-    return b;
-  }).join('');
-
-  // Un box senza dati NON sparisce: resta al suo posto e dice che è vuoto.
-  // Ometterlo in silenzio faceva sembrare non tracciata una schermata che invece
-  // era tracciata benissimo, solo fuori dal periodo interrogato.
-  const boxVuoto = (label, motivo) => `
-    <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 3px">
-      <span style="font-size:13px;line-height:1">→</span>
-    </div>
-    <div title="${esc(motivo)}" style="text-align:center;min-width:70px;background:#0d0d18;border:1px dashed #2a2a44;border-radius:6px;padding:6px 8px">
-      <div style="font-weight:700;color:#3a3a55;font-size:15px;line-height:1">—</div>
-      <div style="font-size:9px;color:#3a3a55;white-space:nowrap;margin-top:2px">${esc(label)}</div>
-      <div style="font-size:8px;color:#2f2f4a;line-height:1.3">nessun dato</div>
-    </div>`;
-
-  const offerBox = offerStep
-    ? box('Offerta', offerStep.viewed, offerStep.viewed_users, prev, {
-        // Entrambi i nomi al click: `fetchStepUsers` sa già unire più step in una
-        // lista sola (è il meccanismo delle schermate rinominate fra build).
-        step: offerRows.map(r => r.role).join(','),
-        idx: offerStep.idx, border: '#3b2d63', color: '#c4b5fd',
-      })
-    : boxVuoto('Offerta', 'Nessuno step plans/offer nel periodo interrogato: la schermata è tracciata, ma i suoi eventi cadono fuori da questa finestra.');
-
-  // ── 3. la biforcazione ──
-  const attempt   = (d.purchase_attempt && d.purchase_attempt.events) || 0;
-  const attemptU  = (d.purchase_attempt && d.purchase_attempt.users) || 0;
-  // Un tentativo finito in errore NON è un acquisto. Senza questo numero i due
-  // box accanto ("tocca il bottone" e "acquisto avviato") a 1 e 1 sembravano
-  // dire che era andata a buon fine, mentre il pagamento moriva un istante dopo.
-  const errEv     = (d.purchase_error && d.purchase_error.events) || 0;
-  const errU      = (d.purchase_error && d.purchase_error.users) || 0;
-  const errPhases = (d.purchase_error && d.purchase_error.phases) || [];
-  const cancelEv  = (d.purchase_cancelled && d.purchase_cancelled.events) || 0;
-  const riusciti  = Math.max(0, attempt - errEv - cancelEv);
-  const cta       = (d.cta_tap && d.cta_tap.events) || 0;
-  const ctaU      = (d.cta_tap && d.cta_tap.users) || 0;
-  const planEv    = ((d.plan_select && d.plan_select.monthly) || 0) + ((d.plan_select && d.plan_select.yearly) || 0);
-  const planU     = (d.plan_select && d.plan_select.users) || 0;
-  const downgrade = d.downgrade || 0;
-  const reconsid  = d.reconsidered || 0;
-  const freeConf  = d.confirmed_free || 0;
-  const offerPrev = offerStep ? offerStep.viewed : prev;
-
-  const branch = (title, color, boxes, note) => `
-    <div style="flex:1;min-width:290px;background:#0d0d18;border:1px solid #1a1a2e;border-left:3px solid ${color};border-radius:8px;padding:11px 13px">
-      <div style="font-size:10px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px">${esc(title)}</div>
-      <div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap;overflow-x:auto">${boxes}</div>
-      ${note ? `<div style="font-size:10px;color:#5a5a7a;margin-top:8px;line-height:1.4">${note}</div>` : ''}
-    </div>`;
-
-  // La diramazione si DISEGNA: un binario verticale che scende dal percorso e i
-  // due bracci con lo stub orizzontale, uno per esito. Due riquadri affiancati
-  // senza connettore si leggevano come sezioni indipendenti, non come le due
-  // strade che si aprono dall'offerta.
-  const forkArm = (b) => `
-    <div style="display:flex;align-items:stretch">
-      <div style="width:16px;flex:none;position:relative">
-        <div style="position:absolute;top:50%;left:0;right:0;border-top:2px solid #2a2a44"></div>
-      </div>
-      ${b}
-    </div>`;
-
-  const fork = `
-    <div style="margin-top:8px;margin-left:22px;border-left:2px solid #2a2a44;display:flex;flex-direction:column;gap:10px;padding:4px 0 4px 0">
-      <div style="font-size:10px;color:#5a5a7a;padding-left:16px;margin-top:2px">dall'offerta si esce in due direzioni</div>
-      ${forkArm(branch('Dice di sì', '#4ade80',
-        box('Cambia tessera', planEv, planU, null, { bucket: 'plan_select', title: 'Tap sulle tessere dei prezzi' }) +
-        box('Tocca il bottone', cta, ctaU, planEv || null, { bucket: 'cta_tap', title: 'Intenzione, prima del pagamento' }) +
-        box('Acquisto avviato', attempt, attemptU, cta || null, { bucket: 'purchase_attempt', border: '#1f5a36', color: '#4ade80', title: 'Il billing è PARTITO: non vuol dire riuscito — guarda il box accanto' }) +
-        (errEv + cancelEv > 0
-          ? box('Non riuscito', errEv + cancelEv, Math.max(errU, cancelEv > 0 ? 1 : 0), null, { bucket: 'purchase_error', border: '#5a1f28', color: '#f87171', title: 'Errori di pagamento e annullamenti: tentativi che non sono diventati acquisti' })
-          : ''),
-        `mensile ${(d.plan_select && d.plan_select.monthly) || 0} · annuale ${(d.plan_select && d.plan_select.yearly) || 0}` +
-        (attempt > 0
-          ? `<br><strong style="color:${riusciti > 0 ? '#4ade80' : '#f87171'}">${riusciti} su ${attempt} ${riusciti === 1 ? 'è arrivato' : 'sono arrivati'} in fondo</strong>` +
-            (errPhases.length ? ` · errori: ${errPhases.map(f => `${esc(f.phase)} ×${f.n}`).join(', ')}` : '')
-          : '')))}
-      ${forkArm(branch('Va verso il gratuito', '#f59e0b',
-        (downStep
-          ? box('Cosa si chiude', downStep.viewed, downStep.viewed_users, offerPrev, { step: 'downgrade', idx: downStep.idx, border: '#5a4318', color: '#fbbf24' })
-          : boxVuoto('Cosa si chiude', 'Nessuno step downgrade nel periodo interrogato.')) +
-        box('Ci ripensa', reconsid, reconsid, null, { bucket: 'reconsidered', title: 'Da "cosa si chiude" torna all\'offerta (tap su Ci ripenso), nella stessa apertura' }) +
-        box('Conferma il gratuito', freeConf, freeConf, null, { bucket: 'confirmed_free', title: 'paywall_close · continue_free' }),
-        'i due esiti si escludono: chi ripensa non conferma'))}
-    </div>`;
-
-  // Il ripensamento è l'unico numero che dice se la seconda schermata serve.
-  const reconsidRate = downgrade > 0 ? Math.round(reconsid / downgrade * 100) : null;
-  const verdict = downgrade > 0 ? `
-    <div style="margin-top:14px;background:#0f1830;border:1px solid #1e2f56;border-radius:8px;padding:10px 12px;font-size:11px;color:#93b4f5;line-height:1.55">
-      <strong>La schermata "cosa si chiude" recupera il ${reconsidRate}%</strong> di chi ci arriva
-      (${reconsid} su ${downgrade}). È l'unico numero che dice se quel passaggio in più vale la frizione che aggiunge:
-      sotto il 5% sta solo allungando l'uscita.
-    </div>` : '';
-
-  // Eventi contro colonna: se divergono, la colonna ha ragione.
-  const mismatch = (attempt > 0 && (choice.premium || 0) > 0 && Math.abs(attempt - (choice.premium || 0)) >= 3) ? `
-    <div style="margin-top:10px;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:9px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
-      ⚠️ <strong>Eventi e stato non coincidono:</strong> ${attempt} acquisti avviati contro ${choice.premium} scelte premium
-      registrate su <code style="font-family:var(--mono)">users.trial_choice</code>. La colonna è la verità:
-      la differenza sono acquisti partiti e non andati a buon fine.
-    </div>` : '';
-
-  return wrap(`
-    ${consegna}
-    ${esito}
-    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">Il film, fino all’offerta</div>
-    <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${filmBoxes}${offerBox}</div>
-    ${fork}
-    ${verdict}
-    ${mismatch}
-    <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
-      Numero grande = <strong>tocchi</strong>, riga sotto = <strong>persone</strong>, come nelle creatività paywall.
-      I due divergono di natura: il gate si ripresenta a ogni ingresso finché non si sceglie, quindi la stessa persona
-      lo percorre più volte. Percentuali e cali sulla prima schermata del film.
-      <strong>Clicca una schermata del film</strong> per vedere chi ci è arrivato.
-      ${(d.terms_open || 0) > 0 ? `· ${d.terms_open} hanno aperto i termini.` : ''}
-    </div>`);
-}
-
-// ── IL REGALO (D0) ────────────────────────────────────────────────────
-// Sezione gemella del gate: il regalo è il giorno 0 della prova, il gate il
-// giorno 7. Stessa grammatica visiva (box in fila, calo % sulla freccia) ma
-// SENZA piani/tentativi/acquisti: qui non si vende niente, si misura solo dove
-// la sequenza perde le persone. Le fasi NON sono cablate: arrivano dai dati
-// (`metadata->phase`) — una fase nuova nel client compare da sola, con il suo
-// nome grezzo. Nessun box cliccabile: non esiste una RPC di lista (deliberato,
-// D3 della spec) e una classe cliccabile senza RPC aprirebbe modal vuoti — lo
-// stesso bug già pagato dal gate coi `premium-step-box`.
-
-// Etichette di RESA per le fasi note: chi manca cade sul nome grezzo dai dati.
-const TRIAL_GIFT_PHASE_LABELS = {
-  hello:   'Benvenuto',
-  gift:    'Il pacco',
-  opening: 'Apertura',
-  reveal:  'La carta',
-};
-const TRIAL_GIFT_PHASE_HINTS = {
-  opening: 'transizione automatica (1.5s): misura il timer, non l\'utente',
-};
-
-// ── LA VITA DELLA PROVA (D0 → D21) ────────────────────────────────────
-// Non è un imbuto: è una LINEA DEL TEMPO. Nell'imbuto le persone passano da uno
-// step al successivo perché fanno qualcosa; qui scorrono di una casella al giorno
-// anche se non aprono l'app — il giorno 7 arriva comunque, e con lui il gate.
-// Per questo la sezione ha tre pezzi che rispondono a tre domande diverse:
-//   A. la linea    → DOVE sta la gente adesso (fotografia, cambia ogni giorno)
-//   B. l'onda      → QUANDO arriva al gate (calendario, aritmetica sulla scadenza)
-//   C. le coorti   → COME si è comportato chi è partito insieme (memoria, non cambia)
-// Il giorno è sempre relativo alla singola persona: il "giorno 7" di chi è partito
-// il 3 agosto è il 10, quello di chi è partito il 5 è il 12.
-const TRIAL_LIFE_STATES = [
-  { k: 'in_trial',  label: 'in prova',  color: '#22d3ee' },
-  { k: 'at_gate',   label: 'al gate',   color: '#fbbf24' },
-  { k: 'free',      label: 'gratuito',  color: '#5a5a7a' },
-  { k: 'converted', label: 'convertito', color: '#4ade80' },
+// ── COACH SPOT · lo spot del coach ───────────────────────────────────
+// Sezione dedicata all'unico paywall post-workout in produzione (dal 23/08/2026,
+// spec app: monetizzazione/coach-spot-paywall). Risponde a: dove si fermano,
+// come chiudono, cosa cliccano, chi compra. Tutto dalla STESSA kpi_premium
+// (creatives / step_flow / step_close): nessuna RPC in più. I box scena sono
+// .premium-step-box → il click apre la lista utenti (kpi_premium_step_users,
+// p_idx disambigua le due scene col ruolo 'features').
+const COACH_SPOT_SCENES = [
+  { idx: 0, label: 'Saluto',    hint: '“Ciao, sono il tuo coach”' },
+  { idx: 1, label: 'Pasto',     hint: 'foto del piatto → kcal' },
+  { idx: 2, label: 'Chat',      hint: 'stanco → allungamento + elastico' },
+  { idx: 3, label: '“Ci sono”', hint: 'allagamento arancio · si sblocca la ×' },
+  { idx: 4, label: 'Piani',     hint: 'offerta e acquisto nella stessa scena' },
 ];
-const TRIAL_LIFE_BAR_H = 96;
+const COACH_SPOT_CLOSE_LABELS = { hero: 'Saluto', features: 'Pasto/Chat', offer: '“Ci sono”', plans: 'Piani' };
 
-function premiumTrialLifeCard() {
-  const wrap = (inner) => `
-    <div class="card" style="margin-bottom:16px">
-      <div style="margin-bottom:12px">
-        <div class="card-title" style="margin-bottom:3px">La vita della prova · giorno per giorno</div>
-        <div style="font-size:11px;color:var(--muted)">
-          dove si trova ogni persona lungo i suoi 7 giorni regalati, e cosa succede dopo ·
-          <code style="font-family:var(--mono)">users.trial_started_at</code>
-          ${state.trialLifeWindow ? `<br><span style="color:#5a5a7a">periodo interrogato: ${esc(state.trialLifeWindow)}</span>` : ''}
-          ${state.trialLifeAt ? ` · letto alle ${state.trialLifeAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
-        </div>
-      </div>
-      ${inner}
+function csKpi(label, value, sub, color) {
+  return `
+    <div style="background:#111120;border:1px solid #1f1f33;border-radius:8px;padding:10px 12px">
+      <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:.5px">${esc(label)}</div>
+      <div style="font-weight:800;font-size:20px;color:${color || 'var(--fg)'};margin-top:2px">${value}</div>
+      ${sub ? `<div style="font-size:9px;color:var(--muted);margin-top:2px">${esc(sub)}</div>` : ''}
     </div>`;
-
-  if (state.trialLifeLoading && !state.trialLifeData) {
-    return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico la linea della prova…</div>`);
-  }
-  if (state.trialLifeError) {
-    const scaduta = /jwt|expired|denied|forbidden|401|permission/i.test(state.trialLifeError);
-    if (scaduta) {
-      return wrap(`
-        <div style="background:#2b1114;border:1px solid #5a1f28;border-radius:8px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.5">
-          🔒 <strong>Sessione scaduta: questi numeri non sono stati letti.</strong>
-          Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
-          <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialLifeError)}</span>
-        </div>`);
-    }
-    if (state.trialLifeErrorTimeout) {
-      return wrap(sezioneTimeoutBox(state.trialLifeError, 'fetchTrialLife()'));
-    }
-    return wrap(`
-      <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
-        ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialLifeError)}<br>
-        La RPC <code style="font-family:var(--mono)">kpi_trial_life</code> va applicata in produzione.
-      </div>`);
-  }
-
-  const d = state.trialLifeData;
-  if (!d) return '';
-
-  const t       = d.totals || {};
-  const line    = d.line || [];
-  const wave    = d.gate_wave || [];
-  const cohorts = d.cohorts || [];
-  const maxDay  = d.max_day || 21;
-  const convByDay = {};
-  (d.conversions || []).forEach(c => { convByDay[c.day] = c.n; });
-
-  if (!t.started) {
-    return wrap(`
-      <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
-        Nessuna prova iniziata nel periodo selezionato.
-      </div>`);
-  }
-
-  // ── testa: i numeri che si guardano per primi ──
-  // Il tasso di conversione si calcola sui DECISI, non su tutti: chi è al giorno 1
-  // non ha ancora avuto modo di scegliere, e metterlo al denominatore fa sembrare
-  // un disastro una prova che deve ancora finire.
-  const decisi = t.decided || 0;
-  const tasso  = decisi > 0 ? Math.round((t.converted || 0) / decisi * 100) : null;
-  const dormPct = t.started > 0 ? Math.round((t.dormant || 0) / t.started * 100) : 0;
-  const testa = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">
-      ${[
-        { k: 'Prove iniziate', v: t.started, c: '#c4b5fd', s: 'nella finestra interrogata' },
-        { k: 'Ancora in prova', v: t.in_trial, c: '#22d3ee', s: 'non hanno ancora visto il gate' },
-        { k: 'Al gate, in sospeso', v: t.at_gate, c: '#fbbf24', s: 'prova finita, nessuna scelta fatta' },
-        { k: 'Convertiti', v: t.converted, c: '#4ade80', s: tasso === null ? 'nessuno ha ancora deciso' : `${tasso}% di ${decisi} decisi` },
-        {
-          k: 'Dormienti',
-          v: t.dormant,
-          c: dormPct >= 50 ? '#f87171' : dormPct >= 25 ? '#fbbf24' : '#4ade80',
-          s: `${dormPct}% · nessun evento da 48h`,
-        },
-      ].map(x => `
-        <div style="background:#111120;border:1px solid #1a1a2e;border-radius:8px;padding:11px 12px">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(x.k)}</div>
-          <div style="font-size:24px;font-weight:700;color:${x.c};line-height:1.2;margin-top:3px">${x.v ?? 0}</div>
-          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono);margin-top:2px">${esc(x.s)}</div>
-        </div>`).join('')}
-    </div>`;
-
-  // ── A. la linea: dove sta la gente ADESSO ──
-  // Le colonne oltre il giorno 7 esistono anche quando sono vuote: sono lo spazio
-  // che la popolazione percorrerà, e vederlo vuoto oggi è l'informazione (nessuno
-  // è ancora arrivato lì), non un buco nel grafico.
-  const maxPeople = Math.max(1, ...line.map(x => x.people || 0));
-  const colonne = line.map(row => {
-    const people = row.people || 0;
-    const hTot = people > 0 ? Math.max(3, Math.round(people / maxPeople * TRIAL_LIFE_BAR_H)) : 0;
-    const segmenti = TRIAL_LIFE_STATES
-      .filter(s => (row[s.k] || 0) > 0)
-      .map(s => `<div title="${row[s.k]} ${esc(s.label)} · giorno ${row.day}" style="height:${Math.max(2, Math.round((row[s.k] / people) * hTot))}px;background:${s.color};opacity:.85"></div>`)
-      .join('');
-    // Dormienti: velo a righe sopra la barra. Non è uno stato a sé (una persona è
-    // "in prova E dormiente"), quindi non può essere un segmento: è una trama.
-    const dormShare = people > 0 ? (row.dormant || 0) / people : 0;
-    const velo = dormShare > 0 ? `
-      <div title="${row.dormant} dormienti su ${people} al giorno ${row.day}" style="position:absolute;left:0;right:0;top:0;height:${Math.round(dormShare * hTot)}px;background:repeating-linear-gradient(45deg,rgba(10,10,20,.75) 0 3px,transparent 3px 6px)"></div>` : '';
-    const conv = convByDay[row.day] ? `
-      <div title="${convByDay[row.day]} conversioni avvenute al giorno ${row.day}" style="font-size:9px;font-weight:700;color:#4ade80;line-height:1;margin-bottom:2px">▲${convByDay[row.day]}</div>` : '';
-    const isGate = row.day === 7;
-    const oltre  = row.day > 7;
-    return `
-      <div style="display:flex;flex-direction:column;align-items:center;min-width:22px;flex:1">
-        <div style="height:12px;display:flex;align-items:flex-end">${conv}</div>
-        <div style="position:relative;width:100%;height:${TRIAL_LIFE_BAR_H}px;display:flex;flex-direction:column;justify-content:flex-end;
-                    ${isGate ? 'box-shadow:-1px 0 0 #fbbf24;' : ''}
-                    ${oltre ? 'background:linear-gradient(180deg,rgba(251,191,36,.04),transparent);' : ''}">
-          <div style="position:relative;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">
-            ${segmenti}${velo}
-          </div>
-        </div>
-        <div style="font-size:9px;color:${isGate ? '#fbbf24' : 'var(--muted)'};margin-top:4px;font-family:var(--mono)">${row.day}${row.day === maxDay ? '+' : ''}</div>
-        <div style="font-size:9px;font-weight:700;color:${people ? 'var(--fg)' : '#2a2a44'};line-height:1">${people || '·'}</div>
-      </div>`;
-  }).join('');
-
-  const linea = `
-    <div style="margin-bottom:20px">
-      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:10px;font-weight:700;color:#22d3ee;text-transform:uppercase;letter-spacing:.06em">
-          A · la linea <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· dove sta la gente adesso, per giorno di prova</span>
-        </div>
-        <div style="font-size:9px;color:#5a5a7a;display:flex;gap:9px;flex-wrap:wrap">
-          ${TRIAL_LIFE_STATES.map(s => `<span><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:${s.color};margin-right:3px"></span>${esc(s.label)}</span>`).join('')}
-          <span><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:repeating-linear-gradient(45deg,#5a5a7a 0 2px,transparent 2px 4px);margin-right:3px"></span>dormienti</span>
-        </div>
-      </div>
-      <div style="display:flex;align-items:flex-end;gap:2px;background:#0d0d18;border:1px solid #1a1a2e;border-radius:8px;padding:10px 8px 6px">
-        ${colonne}
-      </div>
-      <div style="margin-top:6px;font-size:10px;color:#5a5a7a;line-height:1.5">
-        La riga in ambra al giorno 7 è il gate: da lì in poi la prova è finita e lo stato non è più "in prova".
-        Il triangolo verde segna il giorno di vita in cui è avvenuta una conversione — non dove si trova adesso
-        chi ha convertito. Le colonne vuote a destra sono il futuro: nessuno ci è ancora arrivato.
-      </div>
-    </div>`;
-
-  // ── B. l'onda: quando arriva al gate ──
-  // Stesso dato di sopra, girato sul calendario. È l'unica parte che si può
-  // guardare per DECIDERE qualcosa oggi: chi arriva domani non si recupera dopo.
-  const oggi = new Date(); oggi.setHours(0, 0, 0, 0);
-  const onda = wave.length ? `
-    <div style="margin-bottom:20px">
-      <div style="font-size:10px;font-weight:700;color:#fbbf24;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
-        B · l'onda al gate <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· quante persone finiscono la prova, per data</span>
-      </div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${wave.map(w => {
-          const dt = new Date(w.date + 'T00:00:00');
-          const fra = Math.round((dt - oggi) / 86400000);
-          const quando = fra <= 0 ? 'oggi' : fra === 1 ? 'domani' : `fra ${fra} giorni`;
-          const urgente = fra <= 2;
-          return `
-            <div style="background:#111120;border:1px solid ${urgente ? '#5a4318' : '#1a1a2e'};border-radius:8px;padding:8px 12px;min-width:104px">
-              <div style="font-size:10px;color:var(--muted);font-family:var(--mono)">${esc(dt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }))}</div>
-              <div style="font-size:20px;font-weight:700;color:${urgente ? '#fbbf24' : '#c4b5fd'};line-height:1.2">${w.n}</div>
-              <div style="font-size:9px;color:#5a5a7a">${esc(quando)}</div>
-            </div>`;
-        }).join('')}
-      </div>
-    </div>` : '';
-
-  // ── C. le coorti: come si è comportato chi è partito insieme ──
-  // Questa NON è una fotografia: una cella scritta resta scritta. Serve a
-  // confrontare le partenze fra loro — se la coorte di domani tiene meglio di
-  // quella di ieri, qualcosa che abbiamo fatto in mezzo ha funzionato.
-  const testataGiorni = Array.from({ length: maxDay + 1 }, (_, i) => `
-    <th style="font-size:8px;color:${i === 7 ? '#fbbf24' : '#3a3a55'};font-weight:400;width:19px;padding:0;font-family:var(--mono)">${i}${i === maxDay ? '+' : ''}</th>`).join('');
-
-  const righeCoorti = cohorts.map(c => {
-    const byDay = {};
-    (c.cells || []).forEach(x => { byDay[x.day] = x; });
-    const celle = Array.from({ length: maxDay + 1 }, (_, i) => {
-      const cell = byDay[i];
-      if (!cell) {
-        return `<td style="width:19px;height:19px;background:#0d0d18;border:1px solid #12121f;border-radius:2px"></td>`;
-      }
-      const pct = c.size > 0 ? cell.active / c.size : 0;
-      const alpha = 0.12 + pct * 0.78;
-      const testo = pct >= 0.45 ? '#0b0b14' : '#8b8ba7';
-      return `
-        <td title="Coorte ${esc(c.coorte)} · giorno ${i}: ${cell.active} attivi su ${c.size} (${Math.round(pct * 100)}%)${cell.partial ? ' — giorno ancora in corso' : ''}"
-            style="width:19px;height:19px;text-align:center;font-size:8px;font-family:var(--mono);color:${testo};
-                   background:rgba(34,211,238,${alpha.toFixed(2)});border-radius:2px;
-                   border:1px ${cell.partial ? 'dashed #5a5a7a' : 'solid transparent'};${cell.partial ? 'opacity:.72' : ''}">${cell.active}</td>`;
-    }).join('');
-    const gateDt = c.gate_date ? new Date(c.gate_date + 'T00:00:00') : null;
-    return `
-      <tr>
-        <td style="font-size:10px;color:var(--fg);white-space:nowrap;padding-right:8px;font-family:var(--mono)">
-          ${esc(new Date(c.coorte + 'T00:00:00').toLocaleDateString('it-IT', { day: '2-digit', month: 'short' }))}
-          <span style="color:#5a5a7a">· ${c.size}</span>
-        </td>
-        ${celle}
-        <td style="font-size:9px;color:#5a5a7a;white-space:nowrap;padding-left:8px">
-          gate ${gateDt ? esc(gateDt.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })) : '—'}
-        </td>
-      </tr>`;
-  }).join('');
-
-  const griglia = cohorts.length ? `
-    <div>
-      <div style="font-size:10px;font-weight:700;color:#c4b5fd;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">
-        C · le coorti <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· quanti erano ancora attivi al loro giorno N</span>
-      </div>
-      <div style="overflow-x:auto">
-        <table style="border-collapse:separate;border-spacing:1px">
-          <thead><tr><th></th>${testataGiorni}<th></th></tr></thead>
-          <tbody>${righeCoorti}</tbody>
-        </table>
-      </div>
-      <div style="margin-top:8px;font-size:10px;color:#5a5a7a;line-height:1.5">
-        Riga = giorno in cui è partita la prova (con quante persone). Cella = quante di quelle
-        hanno aperto l'app al loro giorno N. <strong style="color:#7b7b9a">Il bordo tratteggiato
-        segna un giorno ancora in corso</strong>: quel numero salirà, non è un crollo.
-        Il colore è la quota sulla dimensione della coorte, non il numero assoluto — così due
-        coorti di taglia diversa si confrontano a occhio.
-      </div>
-    </div>` : '';
-
-  return wrap(`${testa}${linea}${onda}${griglia}`);
 }
 
-function premiumTrialGiftCard() {
-  const wrap = (inner) => `
-    <div class="card" style="margin-bottom:16px">
+function premiumCoachSpotCard(d) {
+  const row    = (d.creatives || []).find(r => r.variant === 'coach_spot') || null;
+  const steps  = mergeStepsByIdx((d.step_flow || []).filter(s => s.variant === 'coach_spot'));
+  const closes = (d.step_close || []).filter(c => c.variant === 'coach_spot');
+  const head = `
       <div style="margin-bottom:12px">
-        <div class="card-title" style="margin-bottom:3px">Il regalo · il D0 della prova</div>
+        <div class="card-title" style="margin-bottom:3px">Coach Spot · lo spot del coach</div>
         <div style="font-size:11px;color:var(--muted)">
-          la sequenza che annuncia i 7 giorni regalati, fra la registrazione e la Home ·
-          <code style="font-family:var(--mono)">trial_gift_step_view</code>
-          ${state.trialGiftWindow ? `<br><span style="color:#5a5a7a">periodo interrogato: ${esc(state.trialGiftWindow)}</span>` : ''}
-          ${state.trialGiftAt ? ` · letto alle ${state.trialGiftAt.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+          l'unico paywall post-workout in produzione (dal 23/08) · 5 scene, × bloccata ~17s, acquisto in scena ·
+          <code style="font-family:var(--mono)">variant = coach_spot</code>
         </div>
-      </div>
-      ${inner}
-    </div>`;
-
-  if (state.trialGiftLoading && !state.trialGiftData) {
-    return wrap(`<div style="color:var(--muted);font-size:12px;padding:12px 0">Carico il percorso del regalo…</div>`);
-  }
-  if (state.trialGiftError) {
-    // Sessione scaduta: il caso più insidioso — la pagina resta in piedi e
-    // sembra solo "senza dati". Stesso trattamento del gate.
-    const scaduta = /jwt|expired|denied|forbidden|401|permission/i.test(state.trialGiftError);
-    if (scaduta) {
-      return wrap(`
-        <div style="background:#2b1114;border:1px solid #5a1f28;border-radius:8px;padding:10px 12px;font-size:11px;color:#fca5a5;line-height:1.5">
-          🔒 <strong>Sessione scaduta: questi numeri non sono stati letti.</strong>
-          Rifai il login dal link via email e ricarica con Ctrl+F5.<br>
-          <span style="color:#8b6a6a">Dettaglio: ${esc(state.trialGiftError)}</span>
-        </div>`);
-    }
-    if (state.trialGiftErrorTimeout) {
-      return wrap(sezioneTimeoutBox(state.trialGiftError, 'fetchTrialGift()'));
-    }
-    return wrap(`
-      <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
-        ⏳ <strong>Dati non ancora disponibili.</strong> ${esc(state.trialGiftError)}<br>
-        La RPC <code style="font-family:var(--mono)">kpi_trial_gift</code> va applicata in produzione.
-      </div>`);
-  }
-
-  const d = state.trialGiftData;
-  if (!d) return '';
-
-  const granted   = d.granted || 0;
-  const entered   = d.entered || {};
-  const completed = d.completed || {};
-  const phases    = (d.phases || []).slice().sort((a, b) => a.idx - b.idx);
-
-  if (!granted && !(entered.users || 0) && !phases.length) {
-    return wrap(`
-      <div style="color:var(--muted);font-size:12px;padding:12px 0;line-height:1.6">
-        Nessuna prova concessa e nessun ingresso nella sequenza nel periodo selezionato.<br>
-        <span style="color:#5a5a7a">Gli eventi di fase esistono solo nelle build dal 03/08 in poi:
-        su periodi precedenti questa sezione mostra al massimo gli ingressi.</span>
-      </div>`);
-  }
-
-  // ── 1. la verità a terra, in cima: concessi (server) contro visti (eventi) ──
-  const gapConcessi = granted - (entered.users || 0);
-  const esito = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px">
-      ${[
-        { k: 'Prova concessa', v: granted, c: '#4ade80', s: 'users.trial_started_at nella finestra' },
-        { k: 'Hanno visto il regalo', v: entered.users || 0, c: '#22d3ee', s: `${entered.new || 0} nuovi · ${entered.returning || 0} storici` },
-        { k: 'Usciti col tap', v: completed.users || 0, c: '#c4b5fd', s: 'hanno visto tutta la sequenza' },
-        {
-          k: 'Concessi ma mai visto',
-          v: gapConcessi > 0 ? gapConcessi : (gapConcessi < 0 ? `+${-gapConcessi}` : 0),
-          c: gapConcessi > 0 ? '#f87171' : (gapConcessi < 0 ? '#fbbf24' : '#4ade80'),
-          s: gapConcessi > 0
-            ? 'ANOMALIA: prova attiva senza annuncio — da investigare'
-            : (gapConcessi < 0 ? 'visti > concessi: ingressi doppi o finestre sfalsate' : 'tutti i concessi hanno visto l\'annuncio'),
-        },
-      ].map(x => `
-        <div style="background:#111120;border:1px solid #1a1a2e;border-radius:8px;padding:11px 12px">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(x.k)}</div>
-          <div style="font-size:24px;font-weight:700;color:${x.c};line-height:1.2;margin-top:3px">${x.v}</div>
-          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono);margin-top:2px">${esc(x.s)}</div>
-        </div>`).join('')}
-    </div>`;
-
-  // ── 2. il percorso per fase, stessa grammatica del gate ma senza click ──
-  // DUE imbuti, non uno: nuovi iscritti e utenti storici arrivano qui da flussi
-  // diversi (registrazione appena finita vs secondo onboarding di chi si allena
-  // da mesi) e vedono un saluto diverso. Sommarli produce una media che non
-  // descrive nessuno dei due, e nasconde il calo di uno dietro la tenuta dell'altro.
-  const box = (label, views, people, prev, base, opts) => {
-    const o = opts || {};
-    const pct  = base > 0 ? Math.round(views / base * 100) : 0;
-    const drop = (prev && prev > 0) ? Math.round((1 - views / prev) * 100) : null;
-    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
-    const arrow = prev !== null && prev !== undefined ? `
-      <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 3px">
-        ${drop !== null && drop > 0 ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
-        <span style="font-size:13px;line-height:1">→</span>
-      </div>` : '';
-    return arrow + `
-      <div title="${esc(o.title || '')}" style="text-align:center;min-width:70px;background:#111120;border:1px solid ${o.border || '#1f1f33'};border-radius:6px;padding:6px 8px">
-        <div style="font-weight:700;color:${o.color || 'var(--fg)'};font-size:15px;line-height:1">${views}</div>
-        <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(label)}</div>
-        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${people} person${people === 1 ? 'a' : 'e'} · ${pct}%</div>
       </div>`;
-  };
-
-  // Un imbuto per pubblico. `pick` estrae i numeri della platea da una riga di
-  // fase: gli storici li porta la RPC, i nuovi sono il complemento — l'`audience`
-  // è fissata dal flusso, quindi nessuno può stare in entrambe le platee.
-  const funnel = (titolo, colore, sottotitolo, pick, exitEv, exitUsers) => {
-    const righe = phases.map(p => ({ p, ...pick(p) }));
-    const totale = righe.reduce((a, r) => a + r.events, 0) + exitEv;
-    if (!totale) {
-      return `
-        <div style="margin-bottom:14px">
-          <div style="font-size:10px;font-weight:700;color:${colore};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${esc(titolo)}</div>
-          <div style="background:#0d0d18;border:1px dashed #2a2a44;border-radius:8px;padding:9px 12px;font-size:10px;color:#3a3a55">
-            Nessun passaggio di questa platea nel periodo interrogato.
-          </div>
-        </div>`;
-    }
-
-    const base = righe.length ? righe[0].events : 0;
-    let prev = null;
-    const boxes = righe.map(r => {
-      const label = TRIAL_GIFT_PHASE_LABELS[r.p.phase] || r.p.phase;
-      const hint  = TRIAL_GIFT_PHASE_HINTS[r.p.phase] || '';
-      const b = box(label, r.events, r.users, prev, base, {
-        title: `${hint ? hint + ' · ' : ''}fase "${r.p.phase}" · ${esc(titolo)}`,
-        color: TRIAL_GIFT_PHASE_HINTS[r.p.phase] ? '#5a5a7a' : 'var(--fg)',
-      });
-      prev = r.events;
-      return b;
-    }).join('');
-
-    const exit = box('Uscita (tap)', exitEv, exitUsers, prev, base, {
-      border: '#1f5a36', color: '#4ade80',
-      title: 'trial_gift_completed: tap sulla carta, si atterra in Home',
-    });
-
-    // Il numero per cui questa sezione esiste: chi ha visto tutto il regalo e
-    // se n'è andato senza toccare la carta.
-    const ultima = righe.length ? righe[righe.length - 1] : null;
-    const chiusi = ultima ? Math.max(0, ultima.users - exitUsers) : 0;
-    const persi = chiusi > 0 ? `
-      <div style="margin-top:8px;font-size:10px;color:#fbbf24;line-height:1.5">
-        ⚠ <strong>${chiusi} ${chiusi === 1 ? 'ha' : 'hanno'} chiuso l'app su "${esc(TRIAL_GIFT_PHASE_LABELS[ultima.p.phase] || ultima.p.phase)}"</strong>
-        — ${chiusi === 1 ? 'ha' : 'hanno'} visto il regalo ma non ${chiusi === 1 ? 'è uscito' : 'sono usciti'} col tap.
-      </div>` : '';
-
+  if (!row && !steps.length) {
     return `
-      <div style="margin-bottom:14px">
-        <div style="font-size:10px;font-weight:700;color:${colore};text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
-          ${esc(titolo)} <span style="color:#3a3a55;font-weight:400;text-transform:none;letter-spacing:0">· ${esc(sottotitolo)}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:2px;flex-wrap:wrap">${boxes}${exit}</div>
-        ${persi}
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      <div style="color:var(--muted);font-size:12px;padding:10px 0">
+        Nessuna esposizione nel periodo selezionato. Lo spot si mostra ai workout dispari
+        (1°, 3°, 5°…) di chi non è premium e non è in prova: i primi numeri compaiono qui da soli.
+        Gli account di collaudo (<code style="font-family:var(--mono)">is_test</code>) sono esclusi come nel resto della pagina.
+      </div>
+    </div>`;
+  }
+  const shownUsers = row ? premiumNum(row.shown_users) : 0;
+  const firstUsers = steps.length ? (steps[0].viewed_users || 0) : 0;
+  const base = shownUsers || firstUsers;
+  const sceneBoxes = COACH_SPOT_SCENES.map((sc, i) => {
+    const st = steps.find(s => s.idx === sc.idx) || null;
+    const users = st ? (st.viewed_users || 0) : 0;
+    const pct = base > 0 ? Math.round(users / base * 100) : 0;
+    const prevSt = i > 0 ? steps.find(s => s.idx === COACH_SPOT_SCENES[i - 1].idx) : null;
+    const prev = prevSt ? (prevSt.viewed_users || 0) : null;
+    const drop = (prev && prev > 0) ? Math.round((1 - users / prev) * 100) : null;
+    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+    const arrow = i > 0 ? `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:#3a3a55;padding:0 3px">
+        ${drop !== null ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
+        <span style="font-size:14px;line-height:1">→</span>
+      </div>` : '';
+    const clickable = st ? ` class="premium-step-box" data-variant="coach_spot" data-step="${esc(st.step)}" data-steps="${esc((st.names || []).map(n => n.step).join(',') || st.step)}" data-idx="${st.idx}" title="Vedi chi è arrivato a ${esc(sc.label)}"` : '';
+    return arrow + `
+      <div${clickable} style="flex:1;min-width:86px;text-align:center;background:#111120;border:1px solid ${sc.idx === 4 ? '#1f5a3699' : '#1f1f33'};border-radius:8px;padding:9px 8px;${st ? 'cursor:pointer;' : ''}">
+        <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:.5px">scena ${sc.idx + 1}</div>
+        <div style="font-weight:700;color:var(--fg);font-size:12px;margin:2px 0">${esc(sc.label)}</div>
+        <div style="font-weight:800;font-size:18px;color:${users > 0 ? 'var(--fg)' : 'var(--muted)'}">${users || '—'}</div>
+        <div style="font-size:9px;color:#5a5a7a">${pct}% · ${st ? (st.viewed || 0) + ' viste' : 'mai raggiunta'}</div>
+        <div style="font-size:8.5px;color:var(--muted);margin-top:3px;line-height:1.25">${esc(sc.hint)}</div>
       </div>`;
-  };
-
-  const exitRetEv = completed.events_returning || 0;
-  const exitRetU  = completed.returning || 0;
-
-  // Nessuna fase nei dati NON vuol dire "nessuno è passato di qui": vuol dire che
-  // le build in circolazione non emettono ancora gli eventi di fase. Mostrare la
-  // fila con il solo box di uscita a zero si legge come un funnel rotto, quando
-  // invece è un funnel che non ha ancora cominciato a ricevere dati.
-  const sequenza = phases.length
-    ? `
-      ${funnel(
-        'Nuovi iscritti', '#22d3ee', 'appena registrati · saluto "Benvenuto"',
-        p => ({ events: (p.events || 0) - (p.events_returning || 0), users: (p.users || 0) - (p.users_returning || 0) }),
-        Math.max(0, (completed.events || 0) - exitRetEv),
-        Math.max(0, (completed.users || 0) - exitRetU),
-      )}
-      ${funnel(
-        'Utenti storici', '#f59e0b', 'già iscritti da mesi · saluto "Bentornato"',
-        p => ({ events: p.events_returning || 0, users: p.users_returning || 0 }),
-        exitRetEv, exitRetU,
-      )}
-      <div style="margin-top:12px;font-size:10px;color:#5a5a7a;line-height:1.5">
-        Numero grande = <strong>eventi</strong>, riga sotto = <strong>persone</strong>, come nel gate qui sotto.
-        I due percorsi restano separati apposta: stessa schermata, ma platee e momenti diversi —
-        un calo dei nuovi non va compensato dalla tenuta degli storici. Percentuali e cali sulla
-        prima fase <em>della propria platea</em>. Le fasi arrivano dai dati: se la sequenza cambia
-        nell'app, qui compare da sola.
-      </div>`
-    : `
-      <div style="background:#0d0d18;border:1px dashed #2a2a44;border-radius:8px;padding:12px 14px;font-size:11px;color:#5a5a7a;line-height:1.6">
-        Nessun evento di fase in questa finestra — <strong style="color:#7b7b9a">atteso finché le build
-        aggiornate non circolano</strong>. Il tracciamento per fase esiste dal 03/08/2026: gli utenti
-        con l'app precedente attraversano la sequenza senza lasciare traccia, e qui non compaiono.
-        I ${entered.users || 0} ingressi qui sopra li vedi lo stesso perché quell'evento c'era già prima.
-      </div>`;
-
-  return wrap(`
-    ${esito}
-    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">La sequenza, fase per fase</div>
-    ${sequenza}`);
+  }).join('');
+  const closesTot = closes.reduce((s, c) => s + (c.closed || 0), 0);
+  const closeRow = closesTot ? `
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+      Chiusure senza comprare (dov'erano arrivati): ${
+        Object.entries(closes.reduce((m, c) => { const k = COACH_SPOT_CLOSE_LABELS[c.step] || c.step; m[k] = (m[k] || 0) + (c.closed || 0); return m; }, {}))
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, n]) => `<span style="color:var(--fg)">${esc(k)}</span> ${n}`).join(' · ')
+      } · totale ${closesTot}
+    </div>` : '';
+  const plansUsers = (steps.find(s => s.idx === 4) || {}).viewed_users || 0;
+  const kpis = row ? `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:14px">
+      ${csKpi('Mostrato', `${row.shown}`, `${shownUsers} utenti`)}
+      ${csKpi('Ai piani', `${plansUsers}`, base > 0 ? `${Math.round(plansUsers / base * 100)}% dei mostrati` : '')}
+      ${csKpi('Piano scelto', `${row.plan_select || 0}`, 'plan_select')}
+      ${csKpi('Tocca il bottone', `${row.purchase_attempt || 0}`, 'purchase_attempt', row.purchase_attempt > 0 ? '#f59e0b' : null)}
+      ${csKpi('In prova', `${premiumNum(row.trials) || 0}`, 'stato attuale', premiumNum(row.trials) > 0 ? '#22d3ee' : null)}
+      ${csKpi('Paganti', `${premiumNum(row.purchases) || 0}`, 'stato attuale', premiumNum(row.purchases) > 0 ? '#4ade80' : null)}
+      ${csKpi('Errori billing', `${row.errors || 0}`, 'nel periodo', row.errors > 0 ? '#ef4444' : null)}
+    </div>` : '';
+  return `
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      <div style="display:flex;align-items:stretch;gap:2px;overflow-x:auto;padding-bottom:4px">${sceneBoxes}</div>
+      ${closeRow}
+      ${kpis}
+      <div style="font-size:10px;color:#5a5a7a;margin-top:10px">
+        Click su una scena = lista di chi c'è arrivato (nome, email, quando). Chi ha comprato è nella
+        tabella "Chi ha tentato / acquistato" qui sotto, attribuito a <code style="font-family:var(--mono)">coach_spot</code>.
+      </div>
+    </div>`;
 }
 
 // ── CREATIVITÀ PAYWALL ────────────────────────────────────────────────
 const CREATIVE_LABELS = {
+  coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
   coach_ai_chat:     'Coach AI · Chat',
   coach_ai_memory:   'Coach AI · Memoria',
@@ -12443,10 +11526,6 @@ function attachEvents() {
       const label   = premiumCreativeLabel(variant);
       fetchStepUsers(variant, steps, label, el.dataset.idx);
     }));
-  // click su un box-azione della biforcazione del gate → lista via RPC dedicata
-  document.querySelectorAll('.gate-bucket-box').forEach(el =>
-    el.addEventListener('click', () => fetchGateBucketUsers(
-      el.dataset.bucket, premiumCreativeLabel('trial_end_gate'), el.dataset.step, el.dataset.idx)));
   document.getElementById('step-users-close')?.addEventListener('click', () => {
     state.stepUsersModal = null; state.stepUsersData = null; render();
   });
