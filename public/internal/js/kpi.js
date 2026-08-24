@@ -7028,7 +7028,8 @@ function premiumCoachSpotCard(d) {
       <div style="color:var(--muted);font-size:12px;padding:10px 0">
         Nessuna esposizione nel periodo selezionato. Lo spot si mostra ai workout dispari
         (1°, 3°, 5°…) di chi non è premium e non è in prova: i primi numeri compaiono qui da soli.
-        Gli account di collaudo (<code style="font-family:var(--mono)">is_test</code>) sono esclusi come nel resto della pagina.
+        Esclusi solo gli account della lista "Account esclusi dalle metriche" (pagina Sprint):
+        per vederti durante una prova, togli il tuo con la × e ricalcola.
       </div>
     </div>`;
   }
