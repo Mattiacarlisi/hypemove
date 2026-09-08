@@ -17,7 +17,7 @@ async function walk(dir) {
     if (entry.isDirectory()) {
       if (entry.name === "internal" || entry.name === "legal" || entry.name === "auth" || entry.name === "assets") continue;
       out.push(...(await walk(full)));
-    } else if (entry.name.endsWith(".html") && !entry.name.startsWith("google")) out.push(full);
+    } else if (entry.name === "index.html" || entry.name === "404.html") out.push(full);
   }
   return out;
 }

@@ -78,6 +78,11 @@ for (const route of routes) {
   const out = outputPathFor(route);
   await fs.mkdir(path.dirname(out), { recursive: true });
   await fs.writeFile(out, html, "utf8");
+  // Copia gemella "prezzi.html" accanto a "prezzi/index.html": Netlify serve /prezzi da
+  // prezzi.html con 200, senza il 301 verso /prezzi/ che scatta sulle sole cartelle.
+  if (route.path !== "/" && !route.output) {
+    await fs.writeFile(path.join(dist, `${route.path.replace(/^\//, "")}.html`), html, "utf8");
+  }
   written.push(route.path);
 }
 console.log(`Pagine generate: ${written.length}`);
@@ -119,7 +124,7 @@ await fs.writeFile(path.join(dist, "llms.txt"), llms, "utf8");
 // rimandare a /prezzi/ con un 301 (che rompe canonical e link interni). In coda la 404 vera.
 const rewrites = routes
   .filter((route) => route.path !== "/" && !route.output)
-  .map((route) => `${route.path.padEnd(44)} ${route.path}/index.html   200`);
+  .map((route) => `${route.path.padEnd(44)} ${route.path}/index.html   200!`);
 const redirects = `# Generato da scripts/prerender.mjs: non modificare a mano.
 /auth/callback                               /auth/callback.html   200
 ${rewrites.join("\n")}
