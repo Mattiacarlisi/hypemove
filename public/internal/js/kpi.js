@@ -3915,13 +3915,17 @@ function pageAICoach() {
   return `${filterBar}${kpiCard}${aiConversationsCard(d)}${promptingSection(d)}`;
 }
 
-// Tab → superficie restituita da kpi_ai_sessions. La chat "Giorno zero" gira sullo stesso
-// contesto 'workout-feedback' del feedback post-workout ma è un'altra cosa: capita una volta
-// sola, dentro la proposta premium dopo il primo allenamento. La RPC la riconosce dal marker
-// `surface` sul turno (e, per lo storico, dall'evento paywall_chat_reply a ridosso).
+// Tab → superficie restituita da kpi_ai_sessions. La chat dentro la proposta premium gira
+// sullo stesso contesto 'workout-feedback' del feedback post-workout ma è un'altra cosa:
+// compare SOLO alla fine del primo allenamento e mai più — dal secondo in poi non si vede.
+// Il trigger è il primo workout, non l'iscrizione: chi si allena a una settimana dalla
+// registrazione la incontra allora (il componente si chiama PaywallGiornoZero, ma quel
+// nome descrive l'atto commerciale, non il giorno di calendario).
+// La RPC la riconosce dal marker `surface` sul turno (e, per lo storico, dall'evento
+// paywall_chat_reply a ridosso).
 const AI_CONV_SURFACE = { spontanee: 'spontanea', feedback: 'feedback', paywall: 'paywall' };
 
-// Card Conversazioni con tab Spontanee / Feedback post-workout / Giorno zero. Nel tab
+// Card Conversazioni con tab Spontanee / Feedback post-workout / Dopo il primo workout. Nel tab
 // Feedback compare il funnel 3-step compatto sopra il transcript. Limite noto: nel raro
 // overlap temporale fra due superfici dello stesso utente il transcript può interlacciarle
 // (solo l'evento 'start' porta ctx in ai_debug_log, split server-side impossibile).
@@ -3937,7 +3941,7 @@ function aiConversationsCard(d) {
       <div style="display:flex;gap:6px">
         ${tabBtn('spontanee', 'Spontanee')}
         ${tabBtn('feedback', 'Feedback post-workout')}
-        ${tabBtn('paywall', 'Giorno zero')}
+        ${tabBtn('paywall', 'Dopo il primo workout')}
       </div>
       ${transcriptHealthPill(d)}
       <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
@@ -11447,7 +11451,7 @@ function attachEvents() {
     fetchFeedbackFunnelEvents();
   });
 
-  // AI Coach — tab Conversazioni (Spontanee / Feedback post-workout / Giorno zero): reset
+  // AI Coach — tab Conversazioni (Spontanee / Feedback post-workout / Dopo il primo workout): reset
   // lista e refetch con filtro server-side p_surface.
   document.querySelectorAll('.ai-conv-tab').forEach(el =>
     el.addEventListener('click', () => {
