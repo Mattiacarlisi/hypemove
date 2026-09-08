@@ -1,126 +1,33 @@
 <!doctype html>
 <html lang="it">
   <head>
-    <!-- Meta base -->
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#FDFDFD" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#FFFCF7" />
     <meta name="application-name" content="Hypemove" />
     <meta name="format-detection" content="telephone=no" />
-    <link rel="canonical" href="https://www.hypemove.app/" />
 
-    <!-- SEO -->
-    <title>Hypemove | App fitness per allenarti a casa con workout brevi e guidati</title>
-    <meta
-      name="description"
-      content="Hypemove è l’app fitness per chi ha poco tempo e fatica a essere costante. Ti guida con workout a casa da 5, 10, 15 minuti o più, percorsi semplici e personalizzazioni utili per iniziare e continuare davvero."
-    />
-    <meta
-      name="robots"
-      content="index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1"
-    />
-    <meta name="author" content="Hypemove Team" />
+    <!-- Caratteri: gli stessi dell'app -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alumni+Sans:wght@700;800&family=Nunito:wght@400;700;800&display=swap" />
 
-    <!-- Favicons -->
+    <!-- Icone -->
+    <link rel="icon" href="/images/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/images/favicon.ico" sizes="any" />
-    <link rel="icon" type="image/svg+xml" href="/images/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 
-    <!-- Open Graph -->
-    <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Hypemove" />
-    <meta property="og:locale" content="it_IT" />
-    <meta property="og:url" content="https://www.hypemove.app/" />
-    <meta
-      property="og:title"
-      content="Hypemove | App per allenamento a casa da 5, 10 e 15 minuti"
-    />
-    <meta
-      property="og:description"
-      content="Workout guidati a casa da 5, 10, 15 minuti o più, pensati per chi ha poco tempo e vuole tornare a essere costante."
-    />
-    <meta property="og:image" content="https://www.hypemove.app/images/logo1.png" />
-    <meta
-      property="og:image:secure_url"
-      content="https://www.hypemove.app/images/logo1.png"
-    />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta
-      property="og:image:alt"
-      content="Hypemove - app per allenamento a casa guidato"
-    />
+    <!-- Titolo, descrizione, canonical, Open Graph e dati strutturati: li scrive
+         scripts/prerender.mjs per ogni pagina, partendo dal `meta` esportato dalla pagina. -->
+    <!--SEO-->
+    <title>Hypemove</title>
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta
-      name="twitter:title"
-      content="Hypemove – Workout Veloci a Casa | App Fitness per Principianti"
-    />
-    <meta
-      name="twitter:description"
-      content="App Fitness per Allenarti a Casa anche se Hai Poco Tempo"
-    />
-    <meta name="twitter:image" content="https://www.hypemove.app/images/logo1.png" />
-    <meta
-      name="twitter:image:alt"
-      content="Hypemove - app per allenamento a casa guidato"
-    />
-    <meta name="twitter:site" content="@hypemoveapp" />
-
-    <!-- JSON-LD -->
-    <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@graph": [
-          {
-            "@type": "Organization",
-            "@id": "https://www.hypemove.app/#organization",
-            "name": "Hypemove",
-            "url": "https://www.hypemove.app/",
-            "logo": {
-              "@type": "ImageObject",
-              "url": "https://www.hypemove.app/images/logo1.png"
-            },
-            "description": "Hypemove aiuta le persone con poco tempo e poca costanza a muoversi con workout guidati a casa.",
-            "sameAs": [
-              "https://www.instagram.com/hypemoveapp",
-              "https://www.linkedin.com/company/hypemove"
-            ]
-          },
-          {
-            "@type": "WebSite",
-            "@id": "https://www.hypemove.app/#website",
-            "url": "https://www.hypemove.app/",
-            "name": "Hypemove",
-            "inLanguage": "it-IT"
-          },
-          {
-            "@type": "WebPage",
-            "@id": "https://www.hypemove.app/#webpage",
-            "url": "https://www.hypemove.app/",
-            "name": "Hypemove | App per allenamento a casa da 5, 10 e 15 minuti",
-            "description": "App per workout a casa guidati da 5, 10, 15 minuti o più, pensata per chi ha poco tempo e vuole essere più costante.",
-            "isPartOf": {
-              "@id": "https://www.hypemove.app/#website"
-            },
-            "about": {
-              "@id": "https://www.hypemove.app/#organization"
-            },
-            "inLanguage": "it-IT"
-          }
-        ]
-      }
-    </script>
-
-    <!-- Google Analytics 4 con Consent Mode -->
+    <!-- Google Analytics 4 con Consent Mode: parte "negato", si accende solo dopo il consenso -->
     <script>
       window.dataLayer = window.dataLayer || [];
-      function gtag() {
-        dataLayer.push(arguments);
-      }
-
-      const hmConsent = localStorage.getItem('hmConsent');
-
+      function gtag() { dataLayer.push(arguments); }
+      var hmConsent = null;
+      try { hmConsent = localStorage.getItem('hmConsent'); } catch (e) {}
       gtag('consent', 'default', {
         ad_storage: 'denied',
         ad_user_data: 'denied',
@@ -129,8 +36,7 @@
         functionality_storage: 'granted',
         security_storage: 'granted'
       });
-
-      (function loadGA() {
+      (function () {
         var s = document.createElement('script');
         s.async = true;
         s.src = 'https://www.googletagmanager.com/gtag/js?id=G-VC77BXKJVM';
@@ -139,139 +45,87 @@
     </script>
   </head>
 
-  <body class="antialiased">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
 
-    <!-- Cookie Banner Hypemove -->
+    <!-- Banner cookie -->
     <style>
-      .hm-cookie {
-        position: fixed;
-        inset: auto 16px 16px 16px;
-        z-index: 9999;
-        margin: 0 auto;
-        max-width: 960px;
-        background: #0f172a;
-        color: #fff;
-        border-radius: 16px;
-        padding: 16px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-        display: none;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
-        justify-content: space-between;
-      }
-
-      .hm-cookie.show {
-        display: flex;
-      }
-
-      .hm-cookie p {
-        margin: 0;
-        line-height: 1.5;
-        font-size: 14px;
-        max-width: 70%;
-      }
-
-      .hm-cookie a {
-        color: #ffff33;
-        text-decoration: underline;
-      }
-
-      .hm-actions {
-        display: flex;
-        gap: 8px;
-      }
-
-      .hm-btn {
-        border: 0;
-        border-radius: 999px;
-        padding: 10px 16px;
-        font-weight: 600;
-        cursor: pointer;
-        font-size: 14px;
-      }
-
-      .hm-btn-accept {
-        background: #335dff;
-        color: #fff;
-      }
-
-      .hm-btn-decline {
-        background: #e5e7eb;
-        color: #111827;
-      }
-
-      @media (max-width: 768px) {
-        .hm-cookie {
-          inset: auto 12px 12px 12px;
-        }
-
-        .hm-cookie p {
-          max-width: 100%;
-        }
-
-        .hm-actions {
-          width: 100%;
-        }
-
-        .hm-btn {
-          flex: 1;
-        }
+      .hm-cookie { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 60; margin: 0 auto; max-width: 900px; background: #1E1B16; color: #F4EFE6; border-radius: 16px; padding: 14px 16px; box-shadow: 0 12px 30px rgba(0,0,0,.22); display: none; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; font-family: Nunito, system-ui, sans-serif; }
+      .hm-cookie.show { display: flex; }
+      .hm-cookie p { margin: 0; line-height: 1.5; font-size: 14px; max-width: 68%; }
+      .hm-cookie a { color: #FBD9B8; text-decoration: underline; }
+      .hm-actions { display: flex; gap: 8px; }
+      .hm-btn { border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 800; cursor: pointer; font-size: 14px; font-family: inherit; min-height: 44px; }
+      .hm-btn-accept { background: #F27B0C; color: #fff; }
+      .hm-btn-decline { background: #3A352D; color: #F4EFE6; }
+      @media (max-width: 767px) {
+        .hm-cookie p { max-width: 100%; }
+        .hm-actions { width: 100%; }
+        .hm-btn { flex: 1; }
+        body.has-mobile-bar .hm-cookie { bottom: 92px; }
       }
     </style>
-
-    <div
-      id="hm-cookie"
-      class="hm-cookie"
-      role="dialog"
-      aria-live="polite"
-      aria-label="Consenso cookie"
-    >
+    <div id="hm-cookie" class="hm-cookie" role="dialog" aria-live="polite" aria-label="Consenso cookie">
       <p>
-        Usiamo cookie per migliorare l’esperienza sul sito e misurare l’utilizzo della
-        pagina. Puoi accettare o rifiutare i cookie analytics. Leggi la
-        <a href="/legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
+        Usiamo cookie per capire come viene usato il sito. Puoi accettare o rifiutare quelli statistici.
+        Leggi la <a href="/legal/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.
       </p>
       <div class="hm-actions">
-        <button id="hm-decline" class="hm-btn hm-btn-decline">Rifiuta</button>
-        <button id="hm-accept" class="hm-btn hm-btn-accept">Accetta</button>
+        <button id="hm-decline" class="hm-btn hm-btn-decline" type="button">Rifiuta</button>
+        <button id="hm-accept" class="hm-btn hm-btn-accept" type="button">Accetta</button>
       </div>
     </div>
 
+    <!-- Comportamenti del sito, senza framework: consenso, menu, tracciamento download -->
     <script>
       (function () {
-        const banner = document.getElementById('hm-cookie');
-        const stored = localStorage.getItem('hmConsent');
-
-        if (!stored) banner.classList.add('show');
-
-        function hide() {
-          banner.classList.remove('show');
-        }
-
+        var banner = document.getElementById('hm-cookie');
+        var stored = null;
+        try { stored = localStorage.getItem('hmConsent'); } catch (e) {}
+        function save(v) { try { localStorage.setItem('hmConsent', v); } catch (e) {} }
+        function hide() { banner.classList.remove('show'); }
         function enableGA() {
           gtag('consent', 'update', { analytics_storage: 'granted' });
           gtag('js', new Date());
           gtag('config', 'G-VC77BXKJVM');
         }
+        if (!stored) banner.classList.add('show');
+        document.getElementById('hm-accept').addEventListener('click', function () { save('granted'); enableGA(); hide(); });
+        document.getElementById('hm-decline').addEventListener('click', function () { save('denied'); gtag('consent', 'update', { analytics_storage: 'denied' }); hide(); });
+        if (stored === 'granted') enableGA();
 
-        document.getElementById('hm-accept').addEventListener('click', function () {
-          localStorage.setItem('hmConsent', 'granted');
-          enableGA();
-          hide();
-        });
+        // Barra fissa su telefono: il banner cookie si sposta sopra
+        if (document.querySelector('.mobile-bar')) document.body.classList.add('has-mobile-bar');
 
-        document.getElementById('hm-decline').addEventListener('click', function () {
-          localStorage.setItem('hmConsent', 'denied');
-          gtag('consent', 'update', { analytics_storage: 'denied' });
-          hide();
-        });
-
-        if (stored === 'granted') {
-          enableGA();
+        // Menu su telefono
+        var toggle = document.querySelector('[data-menu-toggle]');
+        var menu = document.getElementById('menu-mobile');
+        if (toggle && menu) {
+          toggle.addEventListener('click', function () {
+            var open = menu.hidden;
+            menu.hidden = !open;
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            toggle.setAttribute('aria-label', open ? 'Chiudi il menu' : 'Apri il menu');
+          });
         }
+
+        // Click sui bottoni "Scarica": evento GA4 download_android_click, poi navigazione
+        document.addEventListener('click', function (event) {
+          var link = event.target.closest('a[data-track="android"]');
+          if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (typeof window.gtag !== 'function') return;
+          event.preventDefault();
+          var done = false;
+          function go() { if (done) return; done = true; window.location.assign(link.href); }
+          var timer = setTimeout(go, 600);
+          gtag('event', 'download_android_click', {
+            button_text: (link.textContent || '').trim(),
+            location: link.getAttribute('data-location') || document.body.dataset.page || location.pathname,
+            event_callback: function () { clearTimeout(timer); go(); },
+            event_timeout: 600
+          });
+        });
       })();
     </script>
   </body>

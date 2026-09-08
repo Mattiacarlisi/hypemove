@@ -1,19 +1,20 @@
 import React, { useEffect } from "react";
 import { ArrowRight, CheckCircle2, Compass, Download, Map, Sparkles, TimerReset } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
+import { SiteHeader } from "../components/Layout.jsx";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
-const ARTICLE_URL = "https://www.hypemove.app/app-fitness-principianti";
+const ARTICLE_URL = "https://hypemove.app/app-fitness-principianti";
 const ARTICLE_SEO_TITLE = "App fitness per principianti: percorso guidato per chi parte da zero | Hypemove";
 const ARTICLE_DESCRIPTION =
   "Cerchi un'app fitness per principianti? Scopri Hypemove: percorso guidato, workout brevi da 5, 7 e 10 minuti, progressione graduale e allenamento a casa più semplice da seguire.";
-const ARTICLE_IMAGE_PATH = "/images/homeworkout.png";
-const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/homeworkout.png";
+const ARTICLE_IMAGE_PATH = "/images/opt/homeworkout-1200.webp";
+const ARTICLE_IMAGE_URL = "https://hypemove.app/images/opt/homeworkout-1200.webp";
 const ARTICLE_IMAGE_ALT = "Donna che si allena a casa con workout per principianti";
 const ARTICLE_PUBLISHED_DATE = "2026-04-19";
 const ARTICLE_MODIFIED_DATE = "2026-04-23";
-const ORGANIZATION_URL = "https://www.hypemove.app/";
-const ORGANIZATION_LOGO_URL = "https://www.hypemove.app/images/logo1.png";
+const ORGANIZATION_URL = "https://hypemove.app/";
+const ORGANIZATION_LOGO_URL = "https://hypemove.app/images/logo1.png";
 
 const beginnerCards = [
   {
@@ -128,7 +129,7 @@ function useSeoMeta() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black tracking-[-0.06em]">H</span>
+      <span className="text-lg font-black">H</span>
     </div>
   );
 }
@@ -149,7 +150,7 @@ function TextBlock({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/72" : "text-black/65"}`}>
@@ -162,6 +163,7 @@ function TextBlock({ eyebrow, title, children, dark = false }) {
 function CtaButton({ children = "Scarica Hypemove", location }) {
   return (
     <a
+      data-track="android"
       href={PLAY_STORE_URL}
       onClick={(event) => handleAndroidDownloadClick(event, {
         buttonText: children,
@@ -236,7 +238,7 @@ function SeoJsonLd() {
             "@type": "ListItem",
             position: 2,
             name: "Guide",
-            item: "https://www.hypemove.app/guide",
+            item: "https://hypemove.app/guide",
           },
           {
             "@type": "ListItem",
@@ -301,23 +303,7 @@ export default function AppFitnessPrincipianti() {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3">
-            <LogoMark />
-            <div>
-              <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">App fitness per principianti</div>
-            </div>
-          </a>
-          <a
-            href="/guide"
-            className="hidden rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black/70 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black sm:inline-flex"
-          >
-            Guide
-          </a>
-        </div>
-      </header>
+      <SiteHeader current="guide" />
 
       <main>
         <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
@@ -328,7 +314,7 @@ export default function AppFitnessPrincipianti() {
             <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
               <div className="max-w-[42rem]">
                 <Kicker>Per chi parte da zero</Kicker>
-                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] tracking-[-0.06em] text-black sm:text-5xl lg:text-[4rem]">
+                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
                   Un’app fitness pensata davvero per chi parte da zero
                 </h1>
                 <div className="mt-6 hidden max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:block lg:text-[1.12rem] lg:leading-9">
@@ -346,8 +332,7 @@ export default function AppFitnessPrincipianti() {
                 <img
                   src={ARTICLE_IMAGE_PATH}
                   alt={ARTICLE_IMAGE_ALT}
-                  width="1024"
-                  height="1536"
+                  width="1200" height="800"
                   loading="eager"
                   fetchpriority="high"
                   decoding="async"
@@ -379,7 +364,7 @@ export default function AppFitnessPrincipianti() {
                 return (
                   <article key={item.title} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
                     <div className="flex items-center justify-between gap-4">
-                      <div className="text-2xl font-black tracking-[-0.04em] text-black sm:text-3xl">
+                      <div className="text-2xl font-black text-black sm:text-3xl">
                         {item.title}
                       </div>
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-black text-white">
@@ -435,7 +420,7 @@ export default function AppFitnessPrincipianti() {
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white">
                       <Icon className="h-5 w-5" />
                     </div>
-                    <h3 className="mt-5 text-2xl font-black tracking-[-0.04em] text-black">{item.title}</h3>
+                    <h3 className="mt-5 text-2xl font-black text-black">{item.title}</h3>
                     <p className="mt-4 text-base leading-8 text-black/62">{item.text}</p>
                   </article>
                 );
@@ -467,3 +452,14 @@ export default function AppFitnessPrincipianti() {
     </div>
   );
 }
+// Testa SEO della pagina, letta da scripts/prerender.mjs.
+export const meta = {
+  title: ARTICLE_SEO_TITLE,
+  description: ARTICLE_DESCRIPTION,
+  ogImage: ARTICLE_IMAGE_URL,
+  ogImageAlt: ARTICLE_IMAGE_ALT,
+  type: "article",
+  published: ARTICLE_PUBLISHED_DATE,
+  modified: "2026-09-08",
+  jsonld: [],
+};

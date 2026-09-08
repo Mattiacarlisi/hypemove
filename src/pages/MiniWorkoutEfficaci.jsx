@@ -1,19 +1,20 @@
 import React, { useEffect } from "react";
 import { ArrowRight, CheckCircle2, Download, MinusCircle } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
+import { SiteHeader } from "../components/Layout.jsx";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
-const ARTICLE_URL = "https://www.hypemove.app/mini-workout-efficaci";
+const ARTICLE_URL = "https://hypemove.app/mini-workout-efficaci";
 const ARTICLE_SEO_TITLE = "Mini workout efficaci: 5 o 10 minuti servono davvero? | Hypemove";
 const ARTICLE_DESCRIPTION =
   "I mini workout sono davvero efficaci? Scopri quando funzionano, quando potrebbero non bastare e perché possono aiutarti a iniziare, muoverti di più e creare continuità.";
-const ARTICLE_IMAGE_PATH = "/images/WOD3.png";
-const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/WOD3.png";
+const ARTICLE_IMAGE_PATH = "/images/opt/wod3-1200.webp";
+const ARTICLE_IMAGE_URL = "https://hypemove.app/images/opt/wod3-1200.webp";
 const ARTICLE_IMAGE_ALT = "Persona che si allena a casa con un mini workout breve e guidato";
 const ARTICLE_PUBLISHED_DATE = "2026-04-24";
 const ARTICLE_MODIFIED_DATE = "2026-04-24";
-const ORGANIZATION_URL = "https://www.hypemove.app/";
-const ORGANIZATION_LOGO_URL = "https://www.hypemove.app/images/logo1.png";
+const ORGANIZATION_URL = "https://hypemove.app/";
+const ORGANIZATION_LOGO_URL = "https://hypemove.app/images/logo1.png";
 
 const effectiveWhen = [
   "Quando parti da zero",
@@ -198,7 +199,7 @@ function SeoJsonLd() {
             "@type": "ListItem",
             position: 2,
             name: "Guide",
-            item: "https://www.hypemove.app/guide",
+            item: "https://hypemove.app/guide",
           },
           {
             "@type": "ListItem",
@@ -276,7 +277,7 @@ function SeoJsonLd() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black tracking-[-0.06em]">H</span>
+      <span className="text-lg font-black">H</span>
     </div>
   );
 }
@@ -284,6 +285,7 @@ function LogoMark() {
 function CtaButton({ children = "Prova Hypemove gratis", location }) {
   return (
     <a
+      data-track="android"
       href={PLAY_STORE_URL}
       onClick={(event) => handleAndroidDownloadClick(event, {
         buttonText: children,
@@ -315,7 +317,7 @@ function TextSection({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/70" : "text-black/65"}`}>
@@ -330,28 +332,7 @@ export default function MiniWorkoutEfficaci() {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3" aria-label="Vai alla home di Hypemove">
-            <LogoMark />
-            <div>
-              <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">Mini workout efficaci</div>
-            </div>
-          </a>
-          <a
-            href={PLAY_STORE_URL}
-            onClick={(event) => handleAndroidDownloadClick(event, {
-              buttonText: "Prova gratis",
-              location: "guide_mini_workout_navbar",
-            })}
-            className="hidden rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex"
-            aria-label="Prova Hypemove gratis"
-          >
-            Prova gratis
-          </a>
-        </div>
-      </header>
+      <SiteHeader current="guide" />
 
       <main>
         <article>
@@ -362,7 +343,7 @@ export default function MiniWorkoutEfficaci() {
             <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)]">
               <div>
                 <Kicker>5 o 10 minuti</Kicker>
-                <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] tracking-[-0.06em] text-black sm:text-6xl lg:text-7xl">
+                <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] text-black sm:text-6xl lg:text-7xl">
                   I mini workout sono davvero efficaci?
                 </h1>
                 <p className="mt-6 max-w-2xl text-base leading-8 text-black/65 sm:text-xl sm:leading-9">
@@ -380,10 +361,9 @@ export default function MiniWorkoutEfficaci() {
                 <img
                   src={ARTICLE_IMAGE_PATH}
                   alt={ARTICLE_IMAGE_ALT}
-                  width="1536"
-                  height="1024"
+                  width="1200" height="800"
                   loading="eager"
-                  fetchPriority="high"
+                  fetchpriority="high"
                   decoding="async"
                   className="aspect-[4/3] h-full w-full object-cover object-center"
                 />
@@ -395,7 +375,7 @@ export default function MiniWorkoutEfficaci() {
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-2">
               <div>
                 <Kicker>Quando funzionano</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
                   Quando i mini workout funzionano molto bene
                 </h2>
                 <ul className="mt-8 grid gap-4">
@@ -410,7 +390,7 @@ export default function MiniWorkoutEfficaci() {
 
               <div className="rounded-[30px] border border-black/10 bg-white p-6 shadow-[0_24px_80px_rgba(0,0,0,0.06)] sm:p-8">
                 <Kicker>Quando non bastano</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
                   Quando da soli potrebbero non bastare
                 </h2>
                 <ul className="mt-8 grid gap-4">
@@ -467,12 +447,12 @@ export default function MiniWorkoutEfficaci() {
             <div className="mx-auto max-w-4xl">
               <div className="text-center">
                 <Kicker>FAQ</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">Domande frequenti</h2>
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
               </div>
               <div className="mt-10 space-y-4">
                 {faqs.map((faq) => (
                   <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                    <h3 className="text-xl font-black tracking-[-0.03em] text-black">{faq.q}</h3>
+                    <h3 className="text-xl font-black text-black">{faq.q}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                   </article>
                 ))}
@@ -482,7 +462,7 @@ export default function MiniWorkoutEfficaci() {
 
           <section className="px-4 py-24 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-7xl rounded-[32px] bg-[#FB8B04] p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
-              <h2 className="max-w-4xl text-3xl font-black leading-[0.98] tracking-[-0.05em] sm:text-5xl">
+              <h2 className="max-w-4xl text-3xl font-black leading-[0.98] sm:text-5xl">
                 Non chiederti solo se è abbastanza.
               </h2>
               <p className="mt-5 max-w-2xl text-base leading-8 text-black/70 sm:text-lg">
@@ -502,3 +482,14 @@ export default function MiniWorkoutEfficaci() {
     </div>
   );
 }
+// Testa SEO della pagina, letta da scripts/prerender.mjs.
+export const meta = {
+  title: ARTICLE_SEO_TITLE,
+  description: ARTICLE_DESCRIPTION,
+  ogImage: ARTICLE_IMAGE_URL,
+  ogImageAlt: ARTICLE_IMAGE_ALT,
+  type: "article",
+  published: ARTICLE_PUBLISHED_DATE,
+  modified: "2026-09-08",
+  jsonld: [],
+};

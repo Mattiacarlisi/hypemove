@@ -2,28 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
-.btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 font-semibold shadow-lg text-white bg-primary;
-}
-.btn-outline {
-  @apply inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 font-semibold border border-primary;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+  h1, h2, h3, .display {
+    @apply font-display font-extrabold leading-[0.95];
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 3px solid #f27b0c;
+    outline-offset: 3px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
 }
 
-.hero-flip {
-  transform-style: preserve-3d;
-  will-change: transform;
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3.5 text-base font-extrabold leading-none transition;
+    min-height: 52px;
+  }
+  .btn-primary { @apply btn bg-orange text-white hover:bg-orange-dark; }
+  .btn-dark { @apply btn bg-ink text-white hover:bg-deep; }
+  .btn-ghost { @apply btn border-[1.5px] border-rule bg-transparent text-ink hover:border-ink; }
+  .kicker { @apply text-xs font-extrabold uppercase tracking-[0.12em] text-orange; }
+  .h-section { @apply text-4xl sm:text-5xl lg:text-6xl; }
+  .sub { @apply text-lg text-ink-2; }
+  .prose-site p { @apply mb-4 text-[1.05rem] leading-relaxed text-ink; }
+  .prose-site h2 { @apply mb-3 mt-10 text-3xl sm:text-4xl; }
+  .prose-site h3 { @apply mb-2 mt-7 text-2xl; }
+  .prose-site ul { @apply mb-4 list-disc pl-6 text-[1.05rem] leading-relaxed; }
+  .prose-site li { @apply mb-1; }
+  .prose-site a { @apply font-bold underline decoration-orange decoration-2 underline-offset-2; }
 }
 
-.hero-flip-face {
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  transform-style: preserve-3d;
+/* FAQ native: niente JavaScript */
+details.faq > summary { list-style: none; cursor: pointer; }
+details.faq > summary::-webkit-details-marker { display: none; }
+details.faq > summary::after {
+  content: "+";
+  font-family: "Alumni Sans", sans-serif;
+  font-weight: 800;
+  font-size: 1.75rem;
+  line-height: 1;
+  color: #f27b0c;
+  margin-left: 1rem;
+  flex: none;
 }
+details.faq[open] > summary::after { content: "–"; }
 
-.hero-flip-front {
-  transform: rotateY(0deg) translateZ(1px);
-}
-
-.hero-flip-back {
-  transform: rotateY(180deg) translateZ(1px);
-}
+/* Barra fissa in basso solo su telefono, sopra la safe area */
+.mobile-bar { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+body.has-mobile-bar { padding-bottom: 84px; }
+@media (min-width: 768px) { body.has-mobile-bar { padding-bottom: 0; } }

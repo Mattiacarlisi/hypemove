@@ -1,5 +1,22 @@
 User-agent: *
 Allow: /
 Disallow: /auth/
+Disallow: /internal/
+Disallow: /reset-password
+Disallow: /unsubscribe
+Disallow: /open
 
-Sitemap: https://www.hypemove.app/sitemap.xml
+# Crawler delle AI: benvenuti. La scheda di Hypemove per voi è in /llms.txt
+User-agent: GPTBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://hypemove.app/sitemap.xml
