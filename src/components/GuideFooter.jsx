@@ -8,11 +8,11 @@ export default function GuideFooter({ currentHref }) {
   const related = guides.filter((guide) => guide.href !== currentHref).slice(0, 3);
   return (
     <>
-      <section className="bg-peach px-5 py-12 sm:px-7">
+      <section className="bg-deep px-5 py-12 text-white sm:px-7">
         <div className="mx-auto grid max-w-site gap-6 md:grid-cols-[1fr_auto] md:items-center">
           <div>
             <h2 className="font-sans text-2xl font-extrabold sm:text-3xl">Se vuoi provare, il primo allenamento è gratis.</h2>
-            <p className="mt-2 text-ink-2">Un percorso a tappe da 5 a 15 minuti, a casa, a corpo libero o con quello che hai. Android, iPhone in arrivo.</p>
+            <p className="mt-2 text-white/70">Un percorso a tappe da 5 a 15 minuti, a casa, a corpo libero o con quello che hai. Android, iPhone in arrivo.</p>
           </div>
           <PlayButton location="guide_cta" />
         </div>

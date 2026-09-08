@@ -58,25 +58,25 @@ const examples = [
 export default function CoachAI() {
   return (
     <Layout current="coach">
-      <section className="px-5 pb-10 pt-8 sm:px-7 sm:pt-14">
-        <div className="mx-auto grid max-w-site items-center gap-8 md:grid-cols-[1.1fr_0.9fr]">
+      <section className="px-5 pb-10 pt-8 sm:px-7 sm:pt-12 lg:pb-8 lg:pt-10">
+        <div className="mx-auto grid max-w-site items-center gap-8 md:grid-cols-[1.2fr_0.8fr]">
           <div>
             <div className="kicker">Coach AI</div>
-            <h1 className="mt-3 text-5xl sm:text-6xl lg:text-7xl">Un coach che ti ascolta e cambia il programma.</h1>
+            <h1 className="mt-3 max-w-[16ch] text-5xl sm:text-6xl lg:text-[4.5rem]">Un coach che ti ascolta e cambia il programma.</h1>
             <p className="mt-5 max-w-[52ch] text-lg text-ink-2 sm:text-xl">Gli scrivi come stai, quanto tempo hai, cosa hai in casa. Lui sistema l'allenamento di oggi, ti spiega gli esercizi che non conosci, e si ricorda quello che gli hai detto.</p>
             <div className="mt-7"><PlayButton location="coach_hero" /></div>
           </div>
-          <div className="mx-auto w-[min(280px,70vw)]">
+          <div className="mx-auto w-[min(260px,70vw)]">
             <div className="drop-shadow-[0_24px_32px_rgba(60,35,10,0.16)]"><AppShot name="coach-kettlebell" alt="Chat con il Coach AI: un allenamento di 5 minuti con il kettlebell creato su richiesta" priority radius="rounded-[38px]" /></div>
           </div>
         </div>
       </section>
 
-      <Section tone="peach">
-        <SectionHead kicker="Cosa gli scrivi" title="Chiedi una cosa precisa. Lui la fa." sub="Non è un motivatore. È uno che sistema l'allenamento. Tre conversazioni vere di come si usa." />
+      <Section tone="deep">
+        <SectionHead light kicker="Cosa gli scrivi" title="Chiedi una cosa precisa. Lui la fa." sub="Non è un motivatore. È uno che sistema l'allenamento. Tre conversazioni vere di come si usa." />
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           {examples.map((item) => (
-            <div key={item.you} className="flex flex-col gap-3 rounded-2xl bg-deep p-4 text-[0.95rem]">
+            <div key={item.you} className="flex flex-col gap-3 rounded-2xl bg-white/[0.06] p-4 text-[0.95rem] ring-1 ring-white/10">
               <div className="max-w-[92%] self-end rounded-2xl rounded-br-md bg-orange px-3.5 py-2.5 text-white">
                 <div className="mb-1 text-[0.65rem] font-extrabold uppercase tracking-[0.1em] opacity-80">Tu</div>
                 {item.you}
@@ -103,7 +103,7 @@ export default function CoachAI() {
         </div>
       </Section>
 
-      <Section tone="peach">
+      <Section tone="deep">
         <div className="grid gap-8 md:grid-cols-3">
           {[
             ["Conosce il tuo percorso", "Sa a che tappa sei, quale obiettivo hai scelto, quanto tempo hai detto di avere e quali attrezzi hai in casa. Non parte mai da zero."],
@@ -111,16 +111,18 @@ export default function CoachAI() {
             ["Non è un medico", "Se hai un dolore che dura, una patologia o una gravidanza, chiedi prima a chi ti segue. Il coach adatta un allenamento, non fa diagnosi."],
           ].map(([title, text]) => (
             <div key={title}>
-              <h2 className="font-sans text-xl font-extrabold">{title}</h2>
-              <p className="mt-2 text-ink-2">{text}</p>
+              <h2 className="font-sans text-xl font-extrabold text-white">{title}</h2>
+              <p className="mt-2 text-white/70">{text}</p>
             </div>
           ))}
         </div>
       </Section>
 
       <Section>
-        <SectionHead kicker="Domande sul coach" title="Quello che chiedono tutti." />
-        <Faq items={faqs} />
+        <div className="grid gap-8 lg:grid-cols-12">
+          <div className="lg:col-span-4"><SectionHead variant="stack" kicker="Domande sul coach" title="Quello che chiedono tutti." /></div>
+          <div className="lg:col-span-8"><Faq items={faqs} className="max-w-none" /></div>
+        </div>
       </Section>
     </Layout>
   );

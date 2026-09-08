@@ -21,13 +21,13 @@ export default function ChiSiamo() {
     <Layout current="chi-siamo">
       <Section>
         <SectionHead as="h1" kicker="Chi siamo" title="Due persone, un'app che stiamo costruendo in pubblico." sub="Hypemove non è fatta da una palestra né da un'azienda di fitness. È fatta da due persone in Italia che hanno visto lo stesso problema da vicino: la voglia di muoversi c'è, la costanza no." />
-        <div className="mt-10 grid max-w-[820px] gap-4 md:grid-cols-2">
+        <div className="mt-10 grid gap-4 md:grid-cols-2">
           {[
             ["M", "Mattia Carlisi", "Founder. Prodotto e marketing.", "Decide cosa entra nell'app e come ne parliamo. Racconta ogni settimana su LinkedIn cosa funziona e cosa no, numeri compresi.", LINKEDIN_URL, "Hypemove su LinkedIn"],
             ["D", "Danilo", "Sviluppo.", "Scrive l'app: i workout, il percorso, il coach, i premi. Tutto quello che vedi sullo schermo passa dalle sue mani.", null, null],
           ].map(([initial, name, role, text, link, linkLabel]) => (
             <div key={name} className="rounded-2xl border-[1.5px] border-rule p-6">
-              <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-peach font-display text-3xl font-extrabold text-orange" aria-hidden="true">{initial}</span>
+              <span className="inline-flex h-16 w-16 items-center justify-center rounded-full bg-surface font-display text-3xl font-extrabold text-orange" aria-hidden="true">{initial}</span>
               <h2 className="mt-4 font-sans text-2xl font-extrabold">{name}</h2>
               <div className="text-sm font-bold text-orange">{role}</div>
               <p className="mt-3 text-ink-2">{text}</p>
@@ -37,8 +37,8 @@ export default function ChiSiamo() {
         </div>
       </Section>
 
-      <Section tone="peach">
-        <div className="prose-site max-w-prose">
+      <Section className="border-t border-rule">
+        <div className="prose-site mx-auto max-w-prose">
           <h2 className="!mt-0">Perché esiste</h2>
           <p>Quasi tutte le app di fitness sono fatte per chi è già motivato. Funzionano benissimo per due settimane, poi arriva la settimana pesante e salta tutto. Non perché manchi la volontà: perché chiedono troppo rispetto a quello che una persona riesce a dare in una giornata normale.</p>
           <p>Hypemove parte dal lato opposto. Allenamenti così brevi da starci dentro anche nelle giornate peggiori, un percorso a tappe che ti dice cosa fare oggi senza farti scegliere, e un coach che si adatta invece di spingere. L'obiettivo non è il workout perfetto: è che tu ci sia anche domani.</p>

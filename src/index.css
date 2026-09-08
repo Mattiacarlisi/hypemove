@@ -33,7 +33,7 @@
   .btn-dark { @apply btn bg-ink text-white hover:bg-deep; }
   .btn-ghost { @apply btn border-[1.5px] border-rule bg-transparent text-ink hover:border-ink; }
   .kicker { @apply text-xs font-extrabold uppercase tracking-[0.12em] text-orange; }
-  .h-section { @apply text-4xl sm:text-5xl lg:text-6xl; }
+  .h-section { @apply text-4xl sm:text-5xl lg:text-[3.5rem]; }
   .sub { @apply text-lg text-ink-2; }
   .prose-site p { @apply mb-4 text-[1.05rem] leading-relaxed text-ink; }
   .prose-site h2 { @apply mb-3 mt-10 text-3xl sm:text-4xl; }

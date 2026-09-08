@@ -87,7 +87,7 @@ export default function Confronto({ item }) {
         <nav className="text-sm text-ink-2" aria-label="Percorso">
           <a href="/" className="hover:text-ink">Home</a> › <a href="/confronti" className="hover:text-ink">Confronti</a> › <span>{item.competitor}</span>
         </nav>
-        <h1 className="mt-4 max-w-[22ch] text-5xl sm:text-6xl lg:text-7xl">{item.title}</h1>
+        <h1 className="mt-4 max-w-[26ch] text-5xl sm:text-6xl lg:text-[4.5rem]">{item.title}</h1>
         <p className="mt-5 max-w-prose text-xl leading-relaxed text-ink">{item.summary}</p>
         <p className="mt-3 max-w-prose text-sm text-ink-2">Aggiornato l'8 settembre 2026. Le informazioni sulle altre app vengono dalle loro pagine pubbliche e possono cambiare: se trovi un errore, scrivici e correggiamo.</p>
       </Section>
@@ -96,7 +96,7 @@ export default function Confronto({ item }) {
         <div className="overflow-x-auto rounded-2xl border-[1.5px] border-rule">
           <table className="w-full min-w-[640px] border-collapse text-[0.95rem]">
             <thead>
-              <tr className="bg-peach text-left">
+              <tr className="bg-surface text-left">
                 <th className="px-4 py-3 text-xs font-extrabold uppercase tracking-[0.1em] text-ink-2"> </th>
                 <th className="px-4 py-3 font-display text-2xl font-extrabold">{item.competitor}</th>
                 <th className="px-4 py-3 font-display text-2xl font-extrabold text-orange">Hypemove</th>
@@ -115,19 +115,19 @@ export default function Confronto({ item }) {
         </div>
       </Section>
 
-      <Section tone="peach">
+      <Section tone="deep">
         <div className="grid gap-8 md:grid-cols-2">
           <div>
-            <h2 className="font-sans text-2xl font-extrabold">Scegli {item.competitor} se…</h2>
-            <ul className="mt-4 grid gap-2 text-ink-2">
+            <h2 className="font-sans text-2xl font-extrabold text-white">Scegli {item.competitor} se…</h2>
+            <ul className="mt-4 grid gap-2 text-white/70">
               {item.them.map((line) => (
-                <li key={line} className="flex gap-2.5"><span className="mt-2 h-2 w-2 flex-none rounded-full bg-ink-3" aria-hidden="true" />{line}</li>
+                <li key={line} className="flex gap-2.5"><span className="mt-2 h-2 w-2 flex-none rounded-full bg-white/40" aria-hidden="true" />{line}</li>
               ))}
             </ul>
           </div>
           <div>
-            <h2 className="font-sans text-2xl font-extrabold">Scegli Hypemove se…</h2>
-            <ul className="mt-4 grid gap-2">
+            <h2 className="font-sans text-2xl font-extrabold text-white">Scegli Hypemove se…</h2>
+            <ul className="mt-4 grid gap-2 text-white">
               {item.us.map((line) => (
                 <li key={line} className="flex gap-2.5"><span className="mt-2 h-2 w-2 flex-none rounded-full bg-orange" aria-hidden="true" />{line}</li>
               ))}
@@ -138,8 +138,10 @@ export default function Confronto({ item }) {
       </Section>
 
       <Section>
-        <SectionHead kicker="Domande" title="Le due che fanno tutti." />
-        <Faq items={item.faq} />
+        <div className="grid gap-8 lg:grid-cols-12">
+          <div className="lg:col-span-4"><SectionHead variant="stack" kicker="Domande" title="Le due che fanno tutti." /></div>
+          <div className="lg:col-span-8"><Faq items={item.faq} className="max-w-none" /></div>
+        </div>
         <p className="mt-8 text-ink-2">Altri confronti: {confronti.filter((other) => other.slug !== item.slug).map((other, index) => (
           <React.Fragment key={other.slug}>{index > 0 ? " · " : ""}<a href={`/confronti/${other.slug}`} className="font-bold underline decoration-orange decoration-2 underline-offset-4">Hypemove vs {other.competitor}</a></React.Fragment>
         ))}</p>

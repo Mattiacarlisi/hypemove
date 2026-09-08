@@ -79,11 +79,11 @@ export default function Home() {
   return (
     <Layout current="home">
       {/* Hero: la promessa, il prodotto vero, la CTA. Su telefono il telefono sta sotto il testo ma entra nella prima schermata. */}
-      <section className="px-5 pb-10 pt-8 sm:px-7 sm:pt-14">
-        <div className="mx-auto grid max-w-site items-center gap-8 md:grid-cols-[1.15fr_0.85fr] md:gap-12">
+      <section className="px-5 pb-10 pt-8 sm:px-7 sm:pt-12 lg:pb-8 lg:pt-10">
+        <div className="mx-auto grid max-w-site items-center gap-8 md:grid-cols-[1.2fr_0.8fr] md:gap-12">
           <div>
             <div className="kicker">App fitness per Android · Gratis</div>
-            <h1 className="mt-3 text-[3.4rem] leading-[0.9] sm:text-7xl lg:text-[5.6rem]">
+            <h1 className="mt-3 text-[3.4rem] leading-[0.9] sm:text-7xl lg:text-[4.75rem]">
               Torna a muoverti.
               <br />
               <span className="text-orange">Questa volta per davvero.</span>
@@ -96,13 +96,13 @@ export default function Home() {
               <a href="/iphone" className="btn-ghost">Hai un iPhone? Avvisami</a>
             </div>
           </div>
-          <div className="relative mx-auto w-[min(300px,72vw)] md:w-full md:max-w-[340px]">
+          <div className="relative mx-auto w-[min(280px,70vw)] md:w-full md:max-w-[280px] lg:max-w-[300px]">
             <div className="drop-shadow-[0_28px_36px_rgba(60,35,10,0.18)]"><AppShot name="esercizio" alt="Schermata di Hypemove durante un esercizio: video, cerchio del tempo e conto alla rovescia" priority /></div>
-            <div className="absolute -left-2 top-[16%] rounded-xl border border-rule bg-white px-3.5 py-2.5 shadow-lg sm:-left-6">
+            <div className="absolute -left-3 top-[36%] rounded-xl border border-rule bg-white px-3.5 py-2.5 shadow-lg sm:-left-10">
               <div className="font-display text-2xl font-extrabold leading-none text-orange">5 min</div>
               <div className="text-xs font-extrabold text-ink">tappa di oggi</div>
             </div>
-            <div className="absolute -right-2 bottom-[14%] rounded-xl border border-rule bg-white px-3.5 py-2.5 shadow-lg sm:-right-6">
+            <div className="absolute -right-3 bottom-[18%] rounded-xl border border-rule bg-white px-3.5 py-2.5 shadow-lg sm:-right-10">
               <div className="font-display text-2xl font-extrabold leading-none text-orange">12</div>
               <div className="text-xs font-extrabold text-ink">giorni di fila</div>
             </div>
@@ -130,29 +130,29 @@ export default function Home() {
         </dl>
       </div>
 
-      <Section id="perche">
-        <SectionHead kicker="Perché di solito si molla" title="Non è un problema di volontà. È che tutto chiede troppo." sub="Palestre, programmi, app: funzionano per chi è già costante. Hypemove è fatta per le giornate normali, quelle piene, quelle in cui rimandi." />
+      <Section id="perche" tone="deep">
+        <SectionHead light kicker="Perché di solito si molla" title="Non è un problema di volontà. È che tutto chiede troppo." sub="Palestre, programmi, app: funzionano per chi è già costante. Hypemove è fatta per le giornate normali, quelle piene, quelle in cui rimandi." />
         <div className="mt-9 grid gap-4 md:grid-cols-3">
           {objections.map((item) => (
-            <article key={item.q} className="rounded-2xl bg-peach p-6">
+            <article key={item.q} className="rounded-2xl bg-white/[0.06] p-6 ring-1 ring-white/10">
               <div className="font-display text-3xl font-extrabold leading-none text-orange">“{item.q}”</div>
-              <h3 className="mt-3 font-sans text-lg font-extrabold leading-snug">{item.title}</h3>
-              <p className="mt-2 text-ink-2">{item.text}</p>
+              <h3 className="mt-3 font-sans text-lg font-extrabold leading-snug text-white">{item.title}</h3>
+              <p className="mt-2 text-white/70">{item.text}</p>
             </article>
           ))}
         </div>
       </Section>
 
-      <Section id="come-funziona" className="!pt-0">
-        <SectionHead kicker="Come funziona" title="Tre cose, sempre le stesse." />
+      <Section id="come-funziona">
+        <SectionHead kicker="Come funziona" title="Dici l'obiettivo. Fai la tappa di oggi. Vedi che avanzi." sub="Niente programmi da leggere, niente schede da capire. Tre passi, e il terzo è quello che ti fa tornare." />
         <ol className="mt-9 grid gap-6 md:grid-cols-3">
           <li>
-            <div className="flex h-[300px] items-center justify-center rounded-2xl bg-peach p-6">
+            <div className="flex h-[300px] items-center justify-center rounded-2xl bg-surface p-6">
               <div className="w-full max-w-[260px] rounded-2xl bg-white p-5 shadow-sm">
                 <div className="text-xs font-extrabold uppercase tracking-[0.1em] text-ink-3">Qual è il tuo obiettivo?</div>
                 <ul className="mt-3 grid gap-2">
                   {goals.map((goal, index) => (
-                    <li key={goal} className={`rounded-lg border px-3 py-2 text-sm font-bold ${index === 0 ? "border-orange bg-peach text-ink" : "border-rule text-ink-2"}`}>{goal}</li>
+                    <li key={goal} className={`rounded-lg border px-3 py-2 text-sm font-bold ${index === 0 ? "border-orange bg-orange/10 text-ink" : "border-rule text-ink-2"}`}>{goal}</li>
                   ))}
                 </ul>
               </div>
@@ -162,7 +162,7 @@ export default function Home() {
             <p className="mt-1 text-ink-2">Rimetterti in forma, tonificare, avere più energia. Due minuti, una volta sola.</p>
           </li>
           <li>
-            <div className="flex h-[300px] items-start justify-center overflow-hidden rounded-2xl bg-peach px-6 pt-6">
+            <div className="flex h-[300px] items-start justify-center overflow-hidden rounded-2xl bg-surface px-6 pt-6">
               <AppShot name="percorso" alt="Il percorso a tappe di Hypemove" className="w-[170px]" sizes="170px" radius="rounded-[24px]" />
             </div>
             <div className="mt-4 font-display text-lg font-extrabold uppercase tracking-wide text-orange">Ogni giorno</div>
@@ -170,7 +170,7 @@ export default function Home() {
             <p className="mt-1 text-ink-2">Un percorso a tappe, una al giorno, con il video di ogni esercizio e una voce che ti guida.</p>
           </li>
           <li>
-            <div className="flex h-[300px] items-start justify-center overflow-hidden rounded-2xl bg-peach px-6 pt-6">
+            <div className="flex h-[300px] items-start justify-center overflow-hidden rounded-2xl bg-surface px-6 pt-6">
               <AppShot name="progressi" alt="La schermata dei progressi di Hypemove" className="w-[170px]" sizes="170px" radius="rounded-[24px]" />
             </div>
             <div className="mt-4 font-display text-lg font-extrabold uppercase tracking-wide text-orange">Dopo</div>
@@ -214,13 +214,13 @@ export default function Home() {
         </div>
       </Section>
 
-      <Section id="prezzi" tone="peach">
-        <SectionHead kicker="Prezzi" title="Gratis per iniziare. Premium se vuoi di più." />
-        <div className="mt-8 grid max-w-[820px] gap-4 sm:grid-cols-2">
-          <div className="rounded-2xl border-[1.5px] border-rule bg-paper p-6">
+      <Section id="prezzi" tone="deep">
+        <SectionHead center light kicker="Prezzi" title="Gratis per iniziare. Premium se vuoi di più." />
+        <div className="mx-auto mt-8 grid max-w-[860px] gap-4 sm:grid-cols-2">
+          <div className="rounded-2xl border-[1.5px] border-white/10 bg-white/[0.06] p-6 text-white">
             <div className="font-display text-4xl font-extrabold leading-none">Gratis</div>
-            <div className="mt-3 text-ink-2"><span className="font-display text-4xl font-extrabold text-ink">0 €</span> per sempre</div>
-            <ul className="mt-4 grid gap-1.5 pl-5 text-ink-2" style={{ listStyle: "disc" }}>
+            <div className="mt-3 text-white/70"><span className="font-display text-4xl font-extrabold text-white">0 €</span> per sempre</div>
+            <ul className="mt-4 grid gap-1.5 pl-5 text-white/70" style={{ listStyle: "disc" }}>
               <li>Il percorso a tappe e gli allenamenti</li>
               <li>Tutti gli esercizi con video</li>
               <li>Punti, premi e classifica</li>
@@ -228,32 +228,32 @@ export default function Home() {
               <li>Con pubblicità</li>
             </ul>
           </div>
-          <div className="rounded-2xl border-[1.5px] border-orange bg-paper p-6">
+          <div className="rounded-2xl border-[1.5px] border-orange bg-white/[0.06] p-6 text-white">
             <div className="font-display text-4xl font-extrabold leading-none">Premium</div>
-            <div className="mt-3 text-ink-2">
-              <span className="font-display text-4xl font-extrabold text-ink">{PRICES.monthly} €</span> al mese, o <span className="font-display text-4xl font-extrabold text-ink">{PRICES.yearly} €</span> l'anno
+            <div className="mt-3 text-white/70">
+              <span className="font-display text-4xl font-extrabold text-white">{PRICES.monthly} €</span> al mese, o <span className="font-display text-4xl font-extrabold text-white">{PRICES.yearly} €</span> l'anno
             </div>
-            <ul className="mt-4 grid gap-1.5 pl-5 text-ink-2" style={{ listStyle: "disc" }}>
+            <ul className="mt-4 grid gap-1.5 pl-5 text-white/70" style={{ listStyle: "disc" }}>
               <li>Un percorso che si adatta mentre avanzi</li>
               <li>Coach AI senza limiti</li>
               <li>Niente pubblicità</li>
             </ul>
-            <p className="mt-4 text-sm text-ink-2">Si disdice quando vuoi da Google Play.</p>
+            <p className="mt-4 text-sm text-white/70">Si disdice quando vuoi da Google Play.</p>
           </div>
         </div>
-        <a href="/prezzi" className="mt-6 inline-block font-bold underline decoration-orange decoration-2 underline-offset-4">Tutti i dettagli sui prezzi</a>
+        <p className="mt-6 text-center"><a href="/prezzi" className="font-bold text-white underline decoration-orange decoration-2 underline-offset-4">Tutti i dettagli sui prezzi</a></p>
       </Section>
 
       <Section id="chi-siamo">
         <div className="grid gap-8 md:grid-cols-[1fr_1fr] md:items-center">
-          <SectionHead kicker="Chi c'è dietro" title="Due persone, un'app che stiamo costruendo in pubblico." sub="Hypemove nasce in Italia da un'idea semplice: il movimento deve stare dentro la vita vera, non il contrario." />
+          <SectionHead variant="stack" kicker="Chi c'è dietro" title="Due persone, un'app che stiamo costruendo in pubblico." sub="Hypemove nasce in Italia da un'idea semplice: il movimento deve stare dentro la vita vera, non il contrario." />
           <div className="grid gap-3">
             {[
               ["M", "Mattia Carlisi", "Founder. Prodotto e marketing. Racconta il percorso su LinkedIn."],
               ["D", "Danilo", "Sviluppo. Tutto quello che vedi nell'app passa dalle sue mani."],
             ].map(([initial, name, role]) => (
               <div key={name} className="flex items-center gap-4 rounded-2xl border-[1.5px] border-rule p-4">
-                <span className="inline-flex h-14 w-14 flex-none items-center justify-center rounded-full bg-peach font-display text-2xl font-extrabold text-orange" aria-hidden="true">{initial}</span>
+                <span className="inline-flex h-14 w-14 flex-none items-center justify-center rounded-full bg-surface font-display text-2xl font-extrabold text-orange" aria-hidden="true">{initial}</span>
                 <div>
                   <div className="font-extrabold">{name}</div>
                   <div className="text-sm text-ink-2">{role}</div>
@@ -266,27 +266,29 @@ export default function Home() {
       </Section>
 
       <Section id="domande" className="!pt-0">
-        <SectionHead kicker="Domande" title="Le cose che chiedono tutti." />
-        <Faq items={homeFaqs} />
+        <div className="grid gap-8 lg:grid-cols-12">
+          <div className="lg:col-span-4"><SectionHead variant="stack" kicker="Domande" title="Le cose che chiedono tutti." sub="Se ne hai un'altra, scrivici: rispondiamo noi, non un robot." /></div>
+          <div className="lg:col-span-8"><Faq items={homeFaqs} className="max-w-none" /></div>
+        </div>
       </Section>
 
-      <Section id="guide" tone="peach">
-        <SectionHead kicker="Guide" title="Per chi vuole capire prima di iniziare." />
+      <Section id="guide" tone="deep">
+        <SectionHead light kicker="Guide" title="Per chi vuole capire prima di iniziare." sub="Testi brevi e concreti, scritti da chi fa l'app. Per chi parte da zero, ha poco tempo o fatica a essere costante." />
         <div className="mt-8 grid gap-4 md:grid-cols-3">
           {homeGuideCards.map((guide) => (
-            <a key={guide.href} href={guide.href} className="block rounded-2xl border-[1.5px] border-rule bg-paper p-5 transition hover:border-ink">
+            <a key={guide.href} href={guide.href} className="block rounded-2xl border-[1.5px] border-white/10 bg-white/[0.06] p-5 text-white transition hover:border-white/40">
               <div className="kicker">{guide.category}</div>
               <h3 className="mt-2 font-sans text-xl font-extrabold leading-snug">{guide.title}</h3>
-              <p className="mt-2 text-[0.95rem] text-ink-2">{guide.description}</p>
+              <p className="mt-2 text-[0.95rem] text-white/70">{guide.description}</p>
               <span className="mt-4 inline-block text-sm font-extrabold">Leggi la guida →</span>
             </a>
           ))}
         </div>
-        <a href="/guide" className="mt-6 inline-block font-bold underline decoration-orange decoration-2 underline-offset-4">Tutte le guide</a>
+        <p className="mt-6 text-center"><a href="/guide" className="font-bold text-white underline decoration-orange decoration-2 underline-offset-4">Tutte le guide</a></p>
       </Section>
 
       <Section id="scarica">
-        <div className="rounded-3xl bg-peach px-6 py-12 text-center sm:px-10 sm:py-16">
+        <div className="rounded-3xl bg-surface px-6 py-12 text-center sm:px-10 sm:py-16">
           <h2 className="h-section mx-auto max-w-[20ch]">Il primo allenamento lo fai oggi.</h2>
           <p className="mx-auto mt-4 max-w-[46ch] text-lg text-ink-2">Scarichi, dici il tuo obiettivo, e la prima tappa è lì. Gratis, senza carta.</p>
           <div className="mt-7 flex justify-center">

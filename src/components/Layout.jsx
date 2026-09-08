@@ -189,26 +189,51 @@ export function AppShot({ name, alt, className = "", sizes = "(min-width: 768px)
 export function Section({ id, className = "", children, tone = "paper" }) {
   const bg = tone === "peach" ? "bg-peach" : tone === "deep" ? "bg-deep text-white" : "bg-paper";
   return (
-    <section id={id} className={`${bg} px-5 py-14 sm:px-7 sm:py-20 ${className}`}>
+    <section id={id} className={`${bg} scroll-mt-16 px-5 py-14 sm:px-7 sm:py-20 ${className}`}>
       <div className="mx-auto max-w-site">{children}</div>
     </section>
   );
 }
 
-export function SectionHead({ kicker, title, sub, center = false, light = false, as = "h2" }) {
+// Testa di sezione. variant: "split" (titolo a sinistra, sottotitolo a destra, su desktop),
+// "center" (tutto centrato) o "stack" (impilato, per colonne strette).
+export function SectionHead({ kicker, title, sub, variant = "split", center = false, light = false, as = "h2" }) {
   const Heading = as;
+  const mode = center ? "center" : variant;
+  const titleClass = `h-section ${light ? "text-white" : "text-ink"}`;
+  const subClass = `text-lg ${light ? "text-white/75" : "text-ink-2"}`;
+  if (mode === "center") {
+    return (
+      <div className="mx-auto max-w-3xl text-center">
+        {kicker ? <div className="kicker mb-3">{kicker}</div> : null}
+        <Heading className={`${titleClass} mx-auto max-w-[22ch]`}>{title}</Heading>
+        {sub ? <p className={`${subClass} mx-auto mt-4 max-w-[52ch]`}>{sub}</p> : null}
+      </div>
+    );
+  }
+  if (mode === "stack") {
+    return (
+      <div>
+        {kicker ? <div className="kicker mb-3">{kicker}</div> : null}
+        <Heading className={`${titleClass} max-w-[20ch]`}>{title}</Heading>
+        {sub ? <p className={`${subClass} mt-4 max-w-[48ch]`}>{sub}</p> : null}
+      </div>
+    );
+  }
   return (
-    <div className={`max-w-[34ch] ${center ? "mx-auto text-center" : ""}`}>
-      {kicker ? <div className="kicker mb-3">{kicker}</div> : null}
-      <Heading className={`h-section ${light ? "text-white" : "text-ink"}`}>{title}</Heading>
-      {sub ? <p className={`mt-4 text-lg ${light ? "text-white/75" : "text-ink-2"}`}>{sub}</p> : null}
+    <div className="grid gap-4 lg:grid-cols-12 lg:items-end lg:gap-10">
+      <div className="lg:col-span-7">
+        {kicker ? <div className="kicker mb-3">{kicker}</div> : null}
+        <Heading className={`${titleClass} max-w-[22ch]`}>{title}</Heading>
+      </div>
+      {sub ? <p className={`${subClass} max-w-[48ch] lg:col-span-5 lg:pb-1`}>{sub}</p> : null}
     </div>
   );
 }
 
-export function Faq({ items, id = "faq" }) {
+export function Faq({ items, id = "faq", className = "mt-8 max-w-[760px]" }) {
   return (
-    <div id={id} className="mt-8 max-w-[760px] border-t border-rule">
+    <div id={id} className={`border-t border-rule ${className}`}>
       {items.map((item) => (
         <details key={item.q} className="faq border-b border-rule py-4">
           <summary className="flex items-start justify-between text-lg font-extrabold text-ink">{item.q}</summary>

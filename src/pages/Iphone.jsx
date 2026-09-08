@@ -31,7 +31,7 @@ export default function Iphone() {
     <Layout mobileBar={false}>
       <Section>
         <div className="mx-auto max-w-[560px]">
-          <SectionHead as="h1" kicker="iPhone" title="Non ancora. Ma ti avvisiamo noi." sub="Hypemove oggi è su Android. La versione per iPhone è in lavorazione: lascia la tua email e ti scriviamo il giorno in cui è pronta. Solo quello, niente altro." />
+          <SectionHead variant="stack" as="h1" kicker="iPhone" title="Non ancora. Ma ti avvisiamo noi." sub="Hypemove oggi è su Android. La versione per iPhone è in lavorazione: lascia la tua email e ti scriviamo il giorno in cui è pronta. Solo quello, niente altro." />
           <form name="iphone-waitlist" method="POST" action="/iphone/grazie" data-netlify="true" netlify-honeypot="sito-web" className="mt-8 grid gap-4">
             <input type="hidden" name="form-name" value="iphone-waitlist" />
             <p className="hidden" aria-hidden="true">

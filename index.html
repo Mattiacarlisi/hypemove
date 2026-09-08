@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#FFFCF7" />
+    <meta name="theme-color" content="#FFFFFF" />
     <meta name="application-name" content="Hypemove" />
     <meta name="format-detection" content="telephone=no" />
 
@@ -51,18 +51,18 @@
 
     <!-- Banner cookie -->
     <style>
-      .hm-cookie { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 60; margin: 0 auto; max-width: 900px; background: #1E1B16; color: #F4EFE6; border-radius: 16px; padding: 14px 16px; box-shadow: 0 12px 30px rgba(0,0,0,.22); display: none; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: space-between; font-family: Nunito, system-ui, sans-serif; }
+      .hm-cookie { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 60; max-width: 380px; margin-left: auto; background: #16140F; color: #F4EFE6; border-radius: 16px; padding: 14px 16px; box-shadow: 0 12px 30px rgba(0,0,0,.22); display: none; flex-direction: column; gap: 12px; font-family: Nunito, system-ui, sans-serif; }
       .hm-cookie.show { display: flex; }
-      .hm-cookie p { margin: 0; line-height: 1.5; font-size: 14px; max-width: 68%; }
+      .hm-cookie p { margin: 0; line-height: 1.5; font-size: 13.5px; }
       .hm-cookie a { color: #FBD9B8; text-decoration: underline; }
-      .hm-actions { display: flex; gap: 8px; }
+      .hm-actions { display: flex; gap: 8px; width: 100%; }
+      .hm-actions .hm-btn { flex: 1; }
       .hm-btn { border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 800; cursor: pointer; font-size: 14px; font-family: inherit; min-height: 44px; }
       .hm-btn-accept { background: #F27B0C; color: #fff; }
       .hm-btn-decline { background: #3A352D; color: #F4EFE6; }
       @media (max-width: 767px) {
         .hm-cookie p { max-width: 100%; }
-        .hm-actions { width: 100%; }
-        .hm-btn { flex: 1; }
+        .hm-cookie { max-width: none; margin-left: 0; }
         body.has-mobile-bar .hm-cookie { bottom: 92px; }
       }
     </style>

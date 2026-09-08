@@ -59,8 +59,8 @@ export default function Prezzi() {
   return (
     <Layout current="prezzi">
       <Section>
-        <SectionHead as="h1" kicker="Prezzi" title="Gratis per iniziare. Premium se vuoi di più." sub="Nessuna carta per scaricare. Nessuna prova che si trasforma in abbonamento a tua insaputa. Il Premium lo scegli tu, e lo disdici da Google Play quando vuoi." />
-        <div className="mt-10 grid max-w-[900px] gap-4 md:grid-cols-2">
+        <SectionHead center as="h1" kicker="Prezzi" title="Gratis per iniziare. Premium se vuoi di più." sub="Nessuna carta per scaricare. Nessuna prova che si trasforma in abbonamento a tua insaputa. Il Premium lo scegli tu, e lo disdici da Google Play quando vuoi." />
+        <div className="mx-auto mt-10 grid max-w-[900px] gap-4 md:grid-cols-2">
           <div className="rounded-2xl border-[1.5px] border-rule p-6 sm:p-8">
             <div className="font-display text-4xl font-extrabold leading-none">Gratis</div>
             <div className="mt-4"><span className="font-display text-5xl font-extrabold">0 €</span> <span className="text-ink-2">per sempre</span></div>
@@ -71,7 +71,7 @@ export default function Prezzi() {
             </ul>
             <div className="mt-8"><PlayButton className="btn-dark w-full" location="prezzi_free" /></div>
           </div>
-          <div className="rounded-2xl border-[1.5px] border-orange bg-peach p-6 sm:p-8">
+          <div className="rounded-2xl border-[1.5px] border-orange bg-surface p-6 sm:p-8">
             <div className="font-display text-4xl font-extrabold leading-none">Premium</div>
             <div className="mt-4 grid gap-1">
               <div><span className="font-display text-5xl font-extrabold">{PRICES.monthly} €</span> <span className="text-ink-2">al mese</span></div>
@@ -85,10 +85,10 @@ export default function Prezzi() {
             <p className="mt-6 text-sm text-ink-2">Si attiva dentro l'app, si paga con Google Play, si disdice in due tocchi. Resti Premium fino alla fine del periodo pagato.</p>
           </div>
         </div>
-        <p className="mt-6 max-w-prose text-sm text-ink-2">I prezzi sono in euro, IVA inclusa, e sono quelli mostrati dentro l'app su Google Play in Italia. Se cambiano, cambiano prima lì.</p>
+        <p className="mx-auto mt-6 max-w-prose text-center text-sm text-ink-2">I prezzi sono in euro, IVA inclusa, e sono quelli mostrati dentro l'app su Google Play in Italia. Se cambiano, cambiano prima lì.</p>
       </Section>
 
-      <Section tone="peach" className="!py-12">
+      <Section tone="deep" className="!py-14">
         <div className="grid gap-8 md:grid-cols-3">
           {[
             ["Perché il Premium esiste", "Il piano gratuito ha già tutto quello che serve per iniziare e continuare. Il Premium serve a chi vuole che il percorso cambi con lei: un esercizio che non sopporti sparisce, uno che ami torna più spesso, la settimana pesante viene alleggerita."],
@@ -96,16 +96,18 @@ export default function Prezzi() {
             ["Se non ti convince", "Disdici da Google Play. Nessuna mail da scrivere, nessuna domanda. Il percorso gratuito continua da dove eri."],
           ].map(([title, text]) => (
             <div key={title}>
-              <h2 className="font-sans text-xl font-extrabold">{title}</h2>
-              <p className="mt-2 text-ink-2">{text}</p>
+              <h2 className="font-sans text-xl font-extrabold text-white">{title}</h2>
+              <p className="mt-2 text-white/70">{text}</p>
             </div>
           ))}
         </div>
       </Section>
 
       <Section>
-        <SectionHead kicker="Domande sui prezzi" title="Chiaro, prima di scaricare." />
-        <Faq items={faqs} />
+        <div className="grid gap-8 lg:grid-cols-12">
+          <div className="lg:col-span-4"><SectionHead variant="stack" kicker="Domande sui prezzi" title="Chiaro, prima di scaricare." /></div>
+          <div className="lg:col-span-8"><Faq items={faqs} className="max-w-none" /></div>
+        </div>
       </Section>
     </Layout>
   );

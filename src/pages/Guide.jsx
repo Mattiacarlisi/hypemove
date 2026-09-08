@@ -32,7 +32,7 @@ export function GuideCard({ guide, heading = "h2" }) {
   const Heading = heading;
   return (
     <a href={guide.href} className="group block overflow-hidden rounded-2xl border-[1.5px] border-rule bg-paper transition hover:border-ink">
-      <div className="aspect-[3/2] overflow-hidden bg-peach">
+      <div className="aspect-[3/2] overflow-hidden bg-surface">
         <Picture name={guide.image} widths={[480, 800]} alt={guide.imageAlt} sizes="(min-width: 768px) 360px, 92vw" className="h-full w-full object-cover" width={800} height={533} />
       </div>
       <div className="p-5">
@@ -60,13 +60,13 @@ export default function Guide() {
           ))}
         </div>
       </Section>
-      <Section tone="peach" className="!py-12">
+      <Section tone="deep" className="!py-14">
         <div className="grid gap-6 md:grid-cols-[1fr_auto] md:items-center">
           <div>
-            <h2 className="font-sans text-2xl font-extrabold">Vuoi sapere com'è Hypemove rispetto alle app che conosci?</h2>
-            <p className="mt-2 text-ink-2">Nike Training Club, Seven, Freeletics: per chi è meglio l'una e per chi l'altra.</p>
+            <h2 className="font-sans text-2xl font-extrabold text-white">Vuoi sapere com'è Hypemove rispetto alle app che conosci?</h2>
+            <p className="mt-2 text-white/70">Nike Training Club, Seven, Freeletics: per chi è meglio l'una e per chi l'altra.</p>
           </div>
-          <a href="/confronti" className="btn-dark">Leggi i confronti</a>
+          <a href="/confronti" className="btn-primary">Leggi i confronti</a>
         </div>
       </Section>
     </Layout>
