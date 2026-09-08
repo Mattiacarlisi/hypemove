@@ -129,7 +129,7 @@ function useSeoMeta() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black">H</span>
+      <span className="text-lg font-extrabold">H</span>
     </div>
   );
 }
@@ -137,9 +137,7 @@ function LogoMark() {
 function Kicker({ children, dark = false }) {
   return (
     <div
-      className={`inline-flex rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${
-        dark ? "border-white/10 bg-white/10 text-white/65" : "border-black/10 bg-white text-black/60"
-      }`}
+      className={`kicker ${dark ? "!text-orange" : ""}`}
     >
       {children}
     </div>
@@ -150,7 +148,7 @@ function TextBlock({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-extrabold sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/72" : "text-black/65"}`}>
@@ -302,19 +300,19 @@ export default function AppFitnessPrincipianti() {
   useSeoMeta();
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-black">
+    <div className="min-h-screen bg-paper text-black">
       <SiteHeader current="guide" />
 
       <main>
         <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-          <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:48px_48px]" />
-          <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
+          <div className="absolute inset-0 opacity-[0.05]" />
+          <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-orange/12 blur-3xl" />
 
           <div className="relative mx-auto max-w-7xl">
             <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
               <div className="max-w-[42rem]">
                 <Kicker>Per chi parte da zero</Kicker>
-                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
+                <h1 className="mt-5 max-w-[36rem] text-4xl font-extrabold leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
                   Un’app fitness pensata davvero per chi parte da zero
                 </h1>
                 <div className="mt-6 hidden max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:block lg:text-[1.12rem] lg:leading-9">
@@ -364,7 +362,7 @@ export default function AppFitnessPrincipianti() {
                 return (
                   <article key={item.title} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
                     <div className="flex items-center justify-between gap-4">
-                      <div className="text-2xl font-black text-black sm:text-3xl">
+                      <div className="text-2xl font-extrabold text-black sm:text-3xl">
                         {item.title}
                       </div>
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-black text-white">
@@ -383,7 +381,7 @@ export default function AppFitnessPrincipianti() {
           <div className="mx-auto max-w-7xl">
             <TextBlock 
   eyebrow="Il punto importante" 
-  title={<span className="text-[#FB8B04]">Breve non vuol dire casuale</span>} 
+  title={<span className="text-orange">Breve non vuol dire casuale</span>} 
   dark
 >
               <p>
@@ -416,11 +414,11 @@ export default function AppFitnessPrincipianti() {
                 const Icon = item.icon;
 
                 return (
-                  <article key={item.title} className="rounded-[26px] border border-black/10 bg-[#FCFBF8] p-6">
+                  <article key={item.title} className="rounded-[26px] border border-black/10 bg-surface p-6">
                     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white">
                       <Icon className="h-5 w-5" />
                     </div>
-                    <h3 className="mt-5 text-2xl font-black text-black">{item.title}</h3>
+                    <h3 className="mt-5 text-2xl font-extrabold text-black">{item.title}</h3>
                     <p className="mt-4 text-base leading-8 text-black/62">{item.text}</p>
                   </article>
                 );

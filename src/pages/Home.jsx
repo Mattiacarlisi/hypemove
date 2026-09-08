@@ -147,7 +147,7 @@ export default function Home() {
         <SectionHead kicker="Come funziona" title="Dici l'obiettivo. Fai la tappa di oggi. Vedi che avanzi." sub="Niente programmi da leggere, niente schede da capire. Tre passi, e il terzo è quello che ti fa tornare." />
         <ol className="mt-9 grid gap-6 md:grid-cols-3">
           <li>
-            <div className="flex h-[300px] items-center justify-center rounded-2xl bg-surface p-6">
+            <div className="flex h-[320px] items-center justify-center rounded-2xl bg-surface p-6 ring-1 ring-rule">
               <div className="w-full max-w-[260px] rounded-2xl bg-white p-5 shadow-sm">
                 <div className="text-xs font-extrabold uppercase tracking-[0.1em] text-ink-3">Qual è il tuo obiettivo?</div>
                 <ul className="mt-3 grid gap-2">
@@ -162,16 +162,16 @@ export default function Home() {
             <p className="mt-1 text-ink-2">Rimetterti in forma, tonificare, avere più energia. Due minuti, una volta sola.</p>
           </li>
           <li>
-            <div className="flex h-[300px] items-start justify-center overflow-hidden rounded-2xl bg-surface px-6 pt-6">
-              <AppShot name="percorso" alt="Il percorso a tappe di Hypemove" className="w-[170px]" sizes="170px" radius="rounded-[24px]" />
+            <div className="flex h-[320px] items-start justify-center overflow-hidden rounded-2xl bg-surface px-6 pt-7 ring-1 ring-rule">
+              <AppShot name="percorso" alt="Il percorso a tappe di Hypemove" className="w-[190px] drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]" sizes="190px" />
             </div>
             <div className="mt-4 font-display text-lg font-extrabold uppercase tracking-wide text-orange">Ogni giorno</div>
             <h3 className="mt-1 font-sans text-xl font-extrabold">Fai la tappa di oggi</h3>
             <p className="mt-1 text-ink-2">Un percorso a tappe, una al giorno, con il video di ogni esercizio e una voce che ti guida.</p>
           </li>
           <li>
-            <div className="flex h-[300px] items-start justify-center overflow-hidden rounded-2xl bg-surface px-6 pt-6">
-              <AppShot name="progressi" alt="La schermata dei progressi di Hypemove" className="w-[170px]" sizes="170px" radius="rounded-[24px]" />
+            <div className="flex h-[320px] items-start justify-center overflow-hidden rounded-2xl bg-surface px-6 pt-7 ring-1 ring-rule">
+              <AppShot name="progressi" alt="La schermata dei progressi di Hypemove" className="w-[190px] drop-shadow-[0_18px_24px_rgba(0,0,0,0.14)]" sizes="190px" />
             </div>
             <div className="mt-4 font-display text-lg font-extrabold uppercase tracking-wide text-orange">Dopo</div>
             <h3 className="mt-1 font-sans text-xl font-extrabold">Vedi che stai andando avanti</h3>
@@ -186,11 +186,16 @@ export default function Home() {
             <div className="kicker !text-orange-soft">Coach AI</div>
             <h2 className="h-section mt-3 text-white">Un coach che ti ascolta e cambia il programma.</h2>
             <p className="mt-4 text-lg text-white/75">Gli scrivi come stai, cosa hai in casa, su cosa vuoi lavorare. Lui sistema l'allenamento di oggi e se lo ricorda per domani.</p>
-            <p className="mt-4 text-sm text-white/60">Nel piano gratuito il coach risponde a un numero limitato di messaggi a settimana. Con Premium, senza limiti.</p>
+            <ul className="mt-6 flex flex-wrap gap-2" aria-label="Esempi di cose che puoi scrivergli">
+              {["Ho 10 minuti e un elastico, voglio fare gambe", "Il plank mi fa male ai polsi", "Oggi solo allungamento, sono stanca"].map((text) => (
+                <li key={text} className="rounded-full border border-white/15 bg-white/[0.06] px-3.5 py-2 text-sm font-bold text-white/85">“{text}”</li>
+              ))}
+            </ul>
+            <p className="mt-5 text-sm text-white/60">Nel piano gratuito il coach risponde a un numero limitato di messaggi a settimana. Con Premium, senza limiti.</p>
             <a href="/coach-ai" className="btn-primary mt-6">Scopri il coach</a>
           </div>
           <div className="mx-auto w-[min(280px,70vw)]">
-            <AppShot name="coach-kettlebell" alt="Chat con il Coach AI di Hypemove: un allenamento con il kettlebell creato su richiesta" radius="rounded-[38px]" />
+            <AppShot name="coach-kettlebell" alt="Chat con il Coach AI di Hypemove: un allenamento con il kettlebell creato su richiesta" className="drop-shadow-[0_28px_40px_rgba(0,0,0,0.5)]" />
           </div>
         </div>
       </Section>
@@ -288,8 +293,9 @@ export default function Home() {
       </Section>
 
       <Section id="scarica">
-        <div className="rounded-3xl bg-surface px-6 py-12 text-center sm:px-10 sm:py-16">
-          <h2 className="h-section mx-auto max-w-[20ch]">Il primo allenamento lo fai oggi.</h2>
+        <div className="rounded-3xl bg-surface px-6 py-12 text-center ring-1 ring-rule sm:px-10 sm:py-16">
+          <div className="kicker">Scarica gratis</div>
+          <h2 className="h-section mx-auto mt-3 max-w-[20ch]">Il primo allenamento lo fai oggi.</h2>
           <p className="mx-auto mt-4 max-w-[46ch] text-lg text-ink-2">Scarichi, dici il tuo obiettivo, e la prima tappa è lì. Gratis, senza carta.</p>
           <div className="mt-7 flex justify-center">
             <PlayButton location="final_cta" />

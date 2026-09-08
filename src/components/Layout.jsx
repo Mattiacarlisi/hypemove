@@ -177,10 +177,10 @@ const APP_SHOT_DIMS = {
 };
 // `radius` taglia gli angoli bianchi residui intorno alla cornice del telefono: va in proporzione
 // alla larghezza a cui viene mostrato (circa il 14% della larghezza).
-export function AppShot({ name, alt, className = "", sizes = "(min-width: 768px) 320px, 70vw", priority = false, radius = "rounded-[42px]" }) {
+export function AppShot({ name, alt, className = "", sizes = "(min-width: 768px) 320px, 70vw", priority = false, radius = "" }) {
   const [w, h] = APP_SHOT_DIMS[name] ?? [750, 1480];
   return (
-    <span className={`block overflow-hidden ${radius} ${className}`}>
+    <span className={`block ${radius} ${className}`}>
       <Picture name={`app-${name}`} widths={[360, 720]} alt={alt} sizes={sizes} className="block h-auto w-full" width={w} height={h} priority={priority} />
     </span>
   );
@@ -221,12 +221,12 @@ export function SectionHead({ kicker, title, sub, variant = "split", center = fa
     );
   }
   return (
-    <div className="grid gap-4 lg:grid-cols-12 lg:items-end lg:gap-10">
+    <div className="grid gap-4 lg:grid-cols-12 lg:items-start lg:gap-10">
       <div className="lg:col-span-7">
         {kicker ? <div className="kicker mb-3">{kicker}</div> : null}
         <Heading className={`${titleClass} max-w-[22ch]`}>{title}</Heading>
       </div>
-      {sub ? <p className={`${subClass} max-w-[48ch] lg:col-span-5 lg:pb-1`}>{sub}</p> : null}
+      {sub ? <p className={`${subClass} max-w-[44ch] lg:col-span-5 ${kicker ? "lg:mt-9" : "lg:mt-2"}`}>{sub}</p> : null}
     </div>
   );
 }

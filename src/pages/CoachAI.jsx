@@ -67,7 +67,7 @@ export default function CoachAI() {
             <div className="mt-7"><PlayButton location="coach_hero" /></div>
           </div>
           <div className="mx-auto w-[min(260px,70vw)]">
-            <div className="drop-shadow-[0_24px_32px_rgba(60,35,10,0.16)]"><AppShot name="coach-kettlebell" alt="Chat con il Coach AI: un allenamento di 5 minuti con il kettlebell creato su richiesta" priority radius="rounded-[38px]" /></div>
+            <div className="drop-shadow-[0_24px_32px_rgba(60,35,10,0.16)]"><AppShot name="coach-kettlebell" alt="Chat con il Coach AI: un allenamento di 5 minuti con il kettlebell creato su richiesta" priority /></div>
           </div>
         </div>
       </section>
@@ -93,7 +93,7 @@ export default function CoachAI() {
       <Section>
         <div className="grid items-center gap-10 md:grid-cols-2">
           <div className="mx-auto w-[min(280px,70vw)] md:order-2">
-            <AppShot name="coach-calorie" alt="Il Coach AI riconosce un piatto da una foto e segna proteine, carboidrati, grassi e calorie" radius="rounded-[38px]" />
+            <AppShot name="coach-calorie" alt="Il Coach AI riconosce un piatto da una foto e segna proteine, carboidrati, grassi e calorie" className="drop-shadow-[0_24px_32px_rgba(0,0,0,0.16)]" />
           </div>
           <div>
             <div className="kicker">Anche a tavola</div>

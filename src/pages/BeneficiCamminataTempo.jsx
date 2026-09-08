@@ -115,7 +115,7 @@ const sources = [
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black">H</span>
+      <span className="text-lg font-extrabold">H</span>
     </div>
   );
 }
@@ -159,9 +159,7 @@ function CtaButton({ children = "Scarica Hypemove per Android", href = PLAY_STOR
 function Kicker({ children, dark = false }) {
   return (
     <div
-      className={`inline-flex rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${
-        dark ? "border-white/10 bg-white/10 text-white/65" : "border-black/10 bg-white text-black/60"
-      }`}
+      className={`kicker ${dark ? "!text-orange" : ""}`}
     >
       {children}
     </div>
@@ -172,7 +170,7 @@ function TextBlock({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-extrabold sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/70" : "text-black/65"}`}>
@@ -316,19 +314,19 @@ function SeoJsonLd() {
 
 export default function BeneficiCamminataTempo() {
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-black">
+    <div className="min-h-screen bg-paper text-black">
       <SiteHeader current="guide" />
 
       <main>
         <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-          <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:48px_48px]" />
-          <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
+          <div className="absolute inset-0 opacity-[0.05]" />
+          <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-orange/12 blur-3xl" />
 
           <div className="relative mx-auto max-w-7xl">
             <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
               <div className="max-w-[42rem]">
                 <Kicker>Guida pratica</Kicker>
-                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
+                <h1 className="mt-5 max-w-[36rem] text-4xl font-extrabold leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
                   {ARTICLE_TITLE}
                 </h1>
                 <p className="mt-4 max-w-[34rem] text-lg font-semibold leading-8 text-black/72 sm:text-[1.75rem] sm:leading-8">
@@ -367,11 +365,11 @@ export default function BeneficiCamminataTempo() {
           </div>
         </section>
 
-        <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+        <section className="bg-surface px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
           <div className="mx-auto max-w-7xl">
             <div className="max-w-3xl">
               <Kicker>Cosa succede al corpo mentre cammini</Kicker>
-              <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
+              <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">
                 Cosa cambia se cammini 10, 20, 30 o 60 minuti
               </h2>
               <p className="mt-5 text-base leading-8 text-black/62 sm:text-lg">
@@ -383,7 +381,7 @@ export default function BeneficiCamminataTempo() {
               {walkingStages.map((item) => (
                 <article key={item.time} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
                   <div className="flex items-center justify-between gap-4">
-                    <div className="text-2xl font-black text-black sm:text-3xl">
+                    <div className="text-2xl font-extrabold text-black sm:text-3xl">
                       {item.title}
                     </div>
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-black text-white">
@@ -405,9 +403,9 @@ export default function BeneficiCamminataTempo() {
           <div className="mx-auto max-w-7xl">
             <div className="max-w-4xl">
               <Kicker dark>Amplificare i benefici</Kicker>
-              <h2 className="mt-5 text-3xl font-black text-white sm:text-5xl">
+              <h2 className="mt-5 text-3xl font-extrabold text-white sm:text-5xl">
                 <span className="block">E se volessi rendere la</span>
-                <span className="block text-[#FB8B04]">camminata più efficace?</span>
+                <span className="block text-orange">camminata più efficace?</span>
               </h2>
             </div>
 
@@ -440,7 +438,7 @@ export default function BeneficiCamminataTempo() {
               <div className="grid gap-4">
                 {workoutSlots.map((slot) => (
                   <article key={slot.title} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)]">
-                    <h3 className="text-xl font-black text-black">{slot.title}</h3>
+                    <h3 className="text-xl font-extrabold text-black">{slot.title}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{slot.text}</p>
                   </article>
                 ))}
@@ -449,7 +447,7 @@ export default function BeneficiCamminataTempo() {
           </div>
         </section>
 
-        <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+        <section className="bg-surface px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
           <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.82fr)_minmax(320px,0.75fr)]">
             <TextBlock eyebrow="Camminata + mini workout" title="Perché questa combinazione funziona così bene">
               <p>
@@ -466,7 +464,7 @@ export default function BeneficiCamminataTempo() {
             <ul className="grid gap-3">
               {comboBenefits.map((item) => (
                 <li key={item} className="flex gap-3 rounded-[22px] border border-black/10 bg-white p-4 text-base leading-7 text-black/68 shadow-[0_16px_50px_rgba(0,0,0,0.04)]">
-                  <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
+                  <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-orange" />
                   <span>{item}</span>
                 </li>
               ))}
@@ -495,12 +493,12 @@ export default function BeneficiCamminataTempo() {
           <div className="mx-auto max-w-4xl">
             <div className="text-center">
               <Kicker>FAQ</Kicker>
-              <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
+              <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">Domande frequenti</h2>
             </div>
             <div className="mt-10 space-y-4">
               {faqs.map((faq) => (
                 <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                  <h3 className="text-xl font-black text-black">{faq.q}</h3>
+                  <h3 className="text-xl font-extrabold text-black">{faq.q}</h3>
                   <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                 </article>
               ))}
@@ -513,15 +511,15 @@ export default function BeneficiCamminataTempo() {
         <section className="px-4 pb-24 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
             <div className="flex items-start gap-3">
-              <ListChecks className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
+              <ListChecks className="mt-1 h-5 w-5 shrink-0 text-orange" />
               <div>
-                <h2 className="text-xl font-black text-black">Fonti consultate</h2>
+                <h2 className="text-xl font-extrabold text-black">Fonti consultate</h2>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {sources.map((source) => (
                     <a
                       key={source.href}
                       href={source.href}
-                      className="inline-flex rounded-full border border-black/10 bg-[#FCFBF8] px-4 py-2 text-sm font-semibold text-black/62 transition hover:border-black/20 hover:text-black"
+                      className="inline-flex rounded-full border border-black/10 bg-surface px-4 py-2 text-sm font-semibold text-black/62 transition hover:border-black/20 hover:text-black"
                     >
                       {source.label}
                     </a>

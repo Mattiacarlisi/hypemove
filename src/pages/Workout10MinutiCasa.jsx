@@ -284,7 +284,7 @@ function SeoJsonLd() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black">H</span>
+      <span className="text-lg font-extrabold">H</span>
     </div>
   );
 }
@@ -311,9 +311,7 @@ function CtaButton({ children = "Prova Hypemove gratis", location }) {
 function Kicker({ children, dark = false }) {
   return (
     <div
-      className={`inline-flex rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${
-        dark ? "border-white/10 bg-white/10 text-white/65" : "border-black/10 bg-white text-black/60"
-      }`}
+      className={`kicker ${dark ? "!text-orange" : ""}`}
     >
       {children}
     </div>
@@ -324,7 +322,7 @@ function TextSection({ eyebrow, title, children }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker>{eyebrow}</Kicker> : null}
-      <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">{title}</h2>
+      <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">{title}</h2>
       <div className="mt-5 space-y-5 text-base leading-8 text-black/65 sm:text-lg">{children}</div>
     </div>
   );
@@ -334,20 +332,20 @@ export default function Workout10MinutiCasa() {
   useSeoMeta();
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-black">
+    <div className="min-h-screen bg-paper text-black">
       <SiteHeader current="guide" />
 
       <main>
         <article>
           <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
-            <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:48px_48px]" />
-            <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
+            <div className="absolute inset-0 opacity-[0.05]" />
+            <div className="pointer-events-none absolute right-[-10%] top-10 h-72 w-72 rounded-full bg-orange/12 blur-3xl" />
 
             <div className="relative mx-auto max-w-7xl">
               <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
                 <div className="max-w-[42rem]">
                   <Kicker>Allenamento breve</Kicker>
-                  <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
+                  <h1 className="mt-5 max-w-[36rem] text-4xl font-extrabold leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
                     Workout di 10 minuti a casa: semplice, utile e fattibile davvero
                   </h1>
                   <div className="mt-6 hidden max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:block lg:text-[1.12rem] lg:leading-9">
@@ -383,7 +381,7 @@ export default function Workout10MinutiCasa() {
             </div>
           </section>
 
-          <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+          <section className="bg-surface px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
             <div className="mx-auto max-w-7xl">
               <TextSection eyebrow="Perché 10 minuti funzionano" title="Perché un workout di 10 minuti può funzionare davvero">
                 <p>
@@ -402,13 +400,13 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker>A chi è utile</Kicker>
-                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">
                   Questo tipo di allenamento è ideale se...
                 </h2>
                 <ul className="mt-8 grid gap-4">
                   {idealFor.map((item) => (
                     <li key={item} className="flex gap-3 text-base leading-7 text-black/68">
-                      <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
+                      <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-orange" />
                       <span>{item}</span>
                     </li>
                   ))}
@@ -421,7 +419,7 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker dark>Esempio pratico</Kicker>
-                <h2 className="mt-5 text-3xl font-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-extrabold sm:text-5xl">
                   Esempio di workout da 10 minuti a casa
                 </h2>
                 <p className="mt-5 text-base leading-8 text-white/70 sm:text-lg">Allenamento base a corpo libero:</p>
@@ -432,7 +430,7 @@ export default function Workout10MinutiCasa() {
               <ol className="grid gap-3">
                 {workoutExample.map((item, index) => (
                   <li key={item} className="flex items-center gap-4 rounded-[22px] border border-white/10 bg-white/[0.05] p-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#FB8B04] text-sm font-black text-black">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-orange text-sm font-extrabold text-black">
                       {index + 1}
                     </div>
                     <span className="text-base font-semibold text-white/82">{item}</span>
@@ -456,18 +454,18 @@ export default function Workout10MinutiCasa() {
             </div>
           </section>
 
-          <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+          <section className="bg-surface px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker>Dove entra Hypemove</Kicker>
-                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">
                   Come Hypemove ti aiuta con workout da 10 minuti
                 </h2>
               </div>
               <ul className="grid gap-3">
                 {hypemoveHelps.map((item) => (
                   <li key={item} className="flex gap-3 rounded-[22px] border border-black/10 bg-white p-4 text-base leading-7 text-black/68 shadow-[0_16px_50px_rgba(0,0,0,0.04)]">
-                    <Home className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
+                    <Home className="mt-1 h-5 w-5 shrink-0 text-orange" />
                     <span>{item}</span>
                   </li>
                 ))}
@@ -479,12 +477,12 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto max-w-4xl">
               <div className="text-center">
                 <Kicker>FAQ</Kicker>
-                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
+                <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">Domande frequenti</h2>
               </div>
               <div className="mt-10 space-y-4">
                 {faqs.map((faq) => (
                   <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                    <h3 className="text-xl font-black text-black">{faq.q}</h3>
+                    <h3 className="text-xl font-extrabold text-black">{faq.q}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                   </article>
                 ))}
@@ -493,9 +491,9 @@ export default function Workout10MinutiCasa() {
           </section>
 
           <section className="px-4 pb-24 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-7xl rounded-[32px] bg-[#FB8B04] p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
+            <div className="mx-auto max-w-7xl rounded-[32px] bg-orange p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
               <Timer className="h-10 w-10" />
-              <h2 className="mt-5 max-w-4xl text-3xl font-black leading-[0.98] sm:text-5xl">
+              <h2 className="mt-5 max-w-4xl text-3xl font-extrabold leading-[0.98] sm:text-5xl">
                 Se aspetti il momento perfetto, rischi di non iniziare mai.
               </h2>
               <p className="mt-5 max-w-2xl text-base leading-8 text-black/70 sm:text-lg">

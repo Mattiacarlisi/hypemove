@@ -355,7 +355,7 @@ function SeoJsonLd() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black">H</span>
+      <span className="text-lg font-extrabold">H</span>
     </div>
   );
 }
@@ -390,9 +390,7 @@ function CtaButton({ children = "Scopri Hypemove", href = PLAY_STORE_URL, locati
 function Kicker({ children, dark = false }) {
   return (
     <div
-      className={`inline-flex rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] ${
-        dark ? "border-white/10 bg-white/10 text-white/65" : "border-black/10 bg-white text-black/60"
-      }`}
+      className={`kicker ${dark ? "!text-orange" : ""}`}
     >
       {children}
     </div>
@@ -403,7 +401,7 @@ function TextSection({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-extrabold sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/70" : "text-black/65"}`}>
@@ -417,19 +415,19 @@ export default function CostanzaAllenamento() {
   useSeoMeta();
 
   return (
-    <div className="min-h-screen bg-[#FDFDFD] text-black">
+    <div className="min-h-screen bg-paper text-black">
       <SiteHeader current="guide" />
 
       <main>
         <article>
           <section className="relative overflow-hidden px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
-            <div className="absolute inset-0 opacity-[0.05] [background-image:linear-gradient(rgba(0,0,0,0.9)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.9)_1px,transparent_1px)] [background-size:48px_48px]" />
-            <div className="pointer-events-none absolute right-[-12%] top-10 h-72 w-72 rounded-full bg-[#FB8B04]/12 blur-3xl" />
+            <div className="absolute inset-0 opacity-[0.05]" />
+            <div className="pointer-events-none absolute right-[-12%] top-10 h-72 w-72 rounded-full bg-orange/12 blur-3xl" />
 
             <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)]">
               <div>
                 <Kicker>Guida pratica</Kicker>
-                <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] text-black sm:text-6xl lg:text-7xl">
+                <h1 className="mt-6 max-w-4xl text-4xl font-extrabold leading-[0.95] text-black sm:text-6xl lg:text-7xl">
                   Come essere costanti nell’allenamento, senza dipendere dalla motivazione
                 </h1>
                 <p className="mt-6 max-w-2xl text-base leading-8 text-black/65 sm:text-xl sm:leading-9">
@@ -454,16 +452,16 @@ export default function CostanzaAllenamento() {
             </div>
           </section>
 
-          <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+          <section className="bg-surface px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
             <div className="mx-auto max-w-7xl">
               <Kicker>Perché molliamo</Kicker>
-              <h2 className="mt-5 max-w-3xl text-3xl font-black text-black sm:text-5xl">
+              <h2 className="mt-5 max-w-3xl text-3xl font-extrabold text-black sm:text-5xl">
                 Perché tante persone iniziano e poi mollano
               </h2>
               <ul className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {reasons.map((item) => (
                   <li key={item} className="rounded-[24px] border border-black/10 bg-white p-5 text-base font-semibold leading-7 text-black/70 shadow-[0_16px_50px_rgba(0,0,0,0.04)]">
-                    <CheckCircle2 className="mb-4 h-5 w-5 text-[#FB8B04]" />
+                    <CheckCircle2 className="mb-4 h-5 w-5 text-orange" />
                     {item}
                   </li>
                 ))}
@@ -495,7 +493,7 @@ export default function CostanzaAllenamento() {
               <ol className="grid gap-3">
                 {strategies.map((item, index) => (
                   <li key={item} className="flex items-center gap-4 rounded-[22px] border border-white/10 bg-white/[0.05] p-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#FB8B04] text-sm font-black text-black">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-orange text-sm font-extrabold text-black">
                       {index + 1}
                     </div>
                     <span className="text-base font-semibold text-white/82">{item}</span>
@@ -516,18 +514,18 @@ export default function CostanzaAllenamento() {
             </div>
           </section>
 
-          <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
+          <section className="bg-surface px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker>Hypemove</Kicker>
-                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">
                   Perché Hypemove è pensata per la costanza
                 </h2>
               </div>
               <ul className="grid gap-3">
                 {hypemoveHelps.map((item) => (
                   <li key={item} className="flex gap-3 rounded-[22px] border border-black/10 bg-white p-4 text-base leading-7 text-black/68 shadow-[0_16px_50px_rgba(0,0,0,0.04)]">
-                    <ListChecks className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
+                    <ListChecks className="mt-1 h-5 w-5 shrink-0 text-orange" />
                     <span>{item}</span>
                   </li>
                 ))}
@@ -539,12 +537,12 @@ export default function CostanzaAllenamento() {
             <div className="mx-auto max-w-4xl">
               <div className="text-center">
                 <Kicker>FAQ</Kicker>
-                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
+                <h2 className="mt-5 text-3xl font-extrabold text-black sm:text-5xl">Domande frequenti</h2>
               </div>
               <div className="mt-10 space-y-4">
                 {faqs.map((faq) => (
                   <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                    <h3 className="text-xl font-black text-black">{faq.q}</h3>
+                    <h3 className="text-xl font-extrabold text-black">{faq.q}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                   </article>
                 ))}
@@ -553,8 +551,8 @@ export default function CostanzaAllenamento() {
           </section>
 
           <section className="px-4 pb-24 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-7xl rounded-[32px] bg-[#FB8B04] p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
-              <h2 className="max-w-4xl text-3xl font-black leading-[0.98] sm:text-5xl">
+            <div className="mx-auto max-w-7xl rounded-[32px] bg-orange p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
+              <h2 className="max-w-4xl text-3xl font-extrabold leading-[0.98] sm:text-5xl">
                 Forse non ti serve più motivazione.
               </h2>
               <p className="mt-5 max-w-2xl text-base leading-8 text-black/70 sm:text-lg">
