@@ -517,7 +517,7 @@ let state = {
   aiConvOpen: false,
   aiSessions: null,
   aiSessionsLoading: false,
-  aiSessionsFilter: null,   // filtro p_feedback con cui è stata caricata aiSessions (null = tutte)
+  aiSessionsFilter: null,   // filtro p_surface con cui è stata caricata aiSessions (null = tutte)
   aiSelectedSession: null,
   aiSessionMessages: null,
   aiSessionMessagesLoading: false,
@@ -529,7 +529,7 @@ let state = {
   aiStatsUsersOpen: false,
   aiStatsFrom: new Date(Date.now()-30*864e5).toISOString().slice(0,10),
   aiStatsTo: TODAY,
-  // Tab del browser conversazioni AI Coach: 'spontanee' | 'feedback' (feedback post-workout).
+  // Tab del browser conversazioni AI Coach: 'spontanee' | 'feedback' | 'paywall'.
   aiConvTab: 'spontanee',
   feedbackFunnelEvents: null, feedbackFunnelLoading: false, feedbackFunnelError: null,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
@@ -1975,15 +1975,15 @@ async function fetchRecentAISessions() {
   } catch (e) { console.error('fetchRecentAISessions', e); }
 }
 
-// p_feedback: null = tutte (modal Overview), true/false = filtro server-side per i tab
-// Spontanee/Feedback della pagina AI Coach (filtrare client-side affamerebbe il tab Feedback,
-// perché lim è un cap secco applicato prima del filtro).
-async function fetchAISessionsFull(feedbackFilter = null) {
+// p_surface: null = tutte (modal Overview), altrimenti la superficie di un tab della
+// pagina AI Coach. Il filtro è server-side perché lim è un cap secco applicato prima:
+// filtrare client-side affamerebbe i tab magri (paywall su tutti).
+async function fetchAISessionsFull(surfaceFilter = null) {
   state.aiSessionsLoading = true;
-  state.aiSessionsFilter  = feedbackFilter; // con quale filtro è stata caricata la lista corrente
+  state.aiSessionsFilter  = surfaceFilter; // con quale filtro è stata caricata la lista corrente
   render();
   try {
-    const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 50, p_feedback: feedbackFilter });
+    const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 50, p_surface: surfaceFilter });
     if (error) throw error;
     state.aiSessions = data || [];
     if (!state.aiSelectedSession && state.aiSessions.length) {
@@ -3915,9 +3915,15 @@ function pageAICoach() {
   return `${filterBar}${kpiCard}${aiConversationsCard(d)}${promptingSection(d)}`;
 }
 
-// Card Conversazioni con tab Spontanee / Feedback post-workout. Nel tab Feedback compare il
-// funnel 3-step compatto sopra il transcript. Limite noto: nel raro overlap temporale
-// feedback+spontanea dello stesso utente il transcript può interlacciare i due contesti
+// Tab → superficie restituita da kpi_ai_sessions. La chat "Giorno zero" gira sullo stesso
+// contesto 'workout-feedback' del feedback post-workout ma è un'altra cosa: capita una volta
+// sola, dentro la proposta premium dopo il primo allenamento. La RPC la riconosce dal marker
+// `surface` sul turno (e, per lo storico, dall'evento paywall_chat_reply a ridosso).
+const AI_CONV_SURFACE = { spontanee: 'spontanea', feedback: 'feedback', paywall: 'paywall' };
+
+// Card Conversazioni con tab Spontanee / Feedback post-workout / Giorno zero. Nel tab
+// Feedback compare il funnel 3-step compatto sopra il transcript. Limite noto: nel raro
+// overlap temporale fra due superfici dello stesso utente il transcript può interlacciarle
 // (solo l'evento 'start' porta ctx in ai_debug_log, split server-side impossibile).
 function aiConversationsCard(d) {
   const tab = state.aiConvTab;
@@ -3931,6 +3937,7 @@ function aiConversationsCard(d) {
       <div style="display:flex;gap:6px">
         ${tabBtn('spontanee', 'Spontanee')}
         ${tabBtn('feedback', 'Feedback post-workout')}
+        ${tabBtn('paywall', 'Giorno zero')}
       </div>
       ${transcriptHealthPill(d)}
       <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
@@ -9855,7 +9862,7 @@ function attachEvents() {
         if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
         // Refetch anche se la lista esiste ma è stata caricata con un altro filtro
         // (es. il modal Overview carica senza filtro, la pagina è per-tab).
-        const wantFilter = state.aiConvTab === 'feedback';
+        const wantFilter = AI_CONV_SURFACE[state.aiConvTab];
         if ((!state.aiSessions || state.aiSessionsFilter !== wantFilter) && !state.aiSessionsLoading) fetchAISessionsFull(wantFilter);
         if (!state.promptAI             && !state.promptAILoading)      fetchPromptAI();
         if (!state.promptOverrides      && !state.promptOverridesLoading) fetchActiveOverrides();
@@ -11391,7 +11398,7 @@ function attachEvents() {
     if (!state.aiStatsData          && !state.aiStatsLoading)        fetchAIStats();
     if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
     if (!state.promptAI             && !state.promptAILoading)       fetchPromptAI();
-    fetchAISessionsFull(state.aiConvTab === 'feedback');
+    fetchAISessionsFull(AI_CONV_SURFACE[state.aiConvTab]);
     render();
   });
 
@@ -11440,8 +11447,8 @@ function attachEvents() {
     fetchFeedbackFunnelEvents();
   });
 
-  // AI Coach — tab Conversazioni (Spontanee / Feedback post-workout): reset lista e refetch
-  // con filtro server-side p_feedback.
+  // AI Coach — tab Conversazioni (Spontanee / Feedback post-workout / Giorno zero): reset
+  // lista e refetch con filtro server-side p_surface.
   document.querySelectorAll('.ai-conv-tab').forEach(el =>
     el.addEventListener('click', () => {
       const t = el.dataset.tab;
@@ -11451,7 +11458,7 @@ function attachEvents() {
       state.aiSelectedSession = null;
       state.aiSessionMessages = null;
       render();
-      fetchAISessionsFull(t === 'feedback');
+      fetchAISessionsFull(AI_CONV_SURFACE[t]);
     }));
 
   // AI stats — utenti unici card click
