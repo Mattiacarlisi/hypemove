@@ -1,6 +1,7 @@
 import React from "react";
 import { Apple, ArrowRight, CheckCircle2, Clock3, Download, ListChecks } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
+import { SiteHeader } from "../components/Layout.jsx";
 import {
   PLAY_STORE_URL,
   handleAndroidDownloadClick,
@@ -8,13 +9,13 @@ import {
 } from "../lib/analytics.js";
 
 const IPHONE_DOWNLOAD_URL = "#download";
-const ARTICLE_URL = "https://www.hypemove.app/benefici-camminata-tempo";
+const ARTICLE_URL = "https://hypemove.app/benefici-camminata-tempo";
 const ARTICLE_TITLE = "I benefici della camminata";
 const ARTICLE_SUBTITLE = "Cosa succede al corpo dopo 10, 20, 30 e 60 minuti";
 const ARTICLE_SEO_TITLE = "Benefici della camminata: cosa succede al corpo dopo 10, 20, 30 e 60 minuti";
 const ARTICLE_DESCRIPTION = "Scopri i benefici della camminata e cosa succede al corpo dopo 10, 20, 30 e 60 minuti. Una guida pratica per capire come camminare meglio e rendere la passeggiata più efficace.";
-const ARTICLE_IMAGE_PATH = "/images/benefici-camminata-bosco.png";
-const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/benefici-camminata-bosco.png";
+const ARTICLE_IMAGE_PATH = "/images/opt/benefici-camminata-bosco-1200.webp";
+const ARTICLE_IMAGE_URL = "https://hypemove.app/images/opt/benefici-camminata-bosco-1200.webp";
 const ARTICLE_IMAGE_ALT = "Donna che cammina su un sentiero nel bosco durante una passeggiata all'aperto";
 const ARTICLE_PUBLISHED_DATE = "2026-04-19";
 const ARTICLE_MODIFIED_DATE = "2026-04-23";
@@ -114,7 +115,7 @@ const sources = [
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black tracking-[-0.06em]">H</span>
+      <span className="text-lg font-black">H</span>
     </div>
   );
 }
@@ -125,6 +126,7 @@ function CtaButton({ children = "Scarica Hypemove per Android", href = PLAY_STOR
 
   return (
     <a
+      data-track={isAndroidDownload ? "android" : undefined}
       href={href}
       onClick={
         isAndroidDownload
@@ -170,7 +172,7 @@ function TextBlock({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/70" : "text-black/65"}`}>
@@ -192,7 +194,7 @@ function SeoJsonLd() {
         description: ARTICLE_DESCRIPTION,
         inLanguage: "it-IT",
         isPartOf: {
-          "@id": "https://www.hypemove.app/#website",
+          "@id": "https://hypemove.app/#website",
         },
         about: {
           "@id": `${ARTICLE_URL}#article`,
@@ -213,13 +215,13 @@ function SeoJsonLd() {
             "@type": "ListItem",
             position: 1,
             name: "Home",
-            item: "https://www.hypemove.app/",
+            item: "https://hypemove.app/",
           },
           {
             "@type": "ListItem",
             position: 2,
             name: "Guide",
-            item: "https://www.hypemove.app/guide",
+            item: "https://hypemove.app/guide",
           },
           {
             "@type": "ListItem",
@@ -248,17 +250,17 @@ function SeoJsonLd() {
         dateModified: ARTICLE_MODIFIED_DATE,
         author: {
           "@type": "Organization",
-          "@id": "https://www.hypemove.app/#organization",
+          "@id": "https://hypemove.app/#organization",
           name: "Hypemove",
-          url: "https://www.hypemove.app/",
+          url: "https://hypemove.app/",
         },
         publisher: {
           "@type": "Organization",
-          "@id": "https://www.hypemove.app/#organization",
+          "@id": "https://hypemove.app/#organization",
           name: "Hypemove",
           logo: {
             "@type": "ImageObject",
-            url: "https://www.hypemove.app/images/logo1.png",
+            url: "https://hypemove.app/images/logo1.png",
           },
         },
         mainEntityOfPage: {
@@ -315,23 +317,7 @@ function SeoJsonLd() {
 export default function BeneficiCamminataTempo() {
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3">
-            <LogoMark />
-            <div>
-              <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">Camminata e mini workout</div>
-            </div>
-          </a>
-          <a
-            href="/guide"
-            className="hidden rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black/70 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black sm:inline-flex"
-          >
-            Guide
-          </a>
-        </div>
-      </header>
+      <SiteHeader current="guide" />
 
       <main>
         <section className="relative overflow-hidden px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
@@ -342,7 +328,7 @@ export default function BeneficiCamminataTempo() {
             <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
               <div className="max-w-[42rem]">
                 <Kicker>Guida pratica</Kicker>
-                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] tracking-[-0.06em] text-black sm:text-5xl lg:text-[4rem]">
+                <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
                   {ARTICLE_TITLE}
                 </h1>
                 <p className="mt-4 max-w-[34rem] text-lg font-semibold leading-8 text-black/72 sm:text-[1.75rem] sm:leading-8">
@@ -362,8 +348,7 @@ export default function BeneficiCamminataTempo() {
                 <img
                   src={ARTICLE_IMAGE_PATH}
                   alt={ARTICLE_IMAGE_ALT}
-                  width="1536"
-                  height="1024"
+                  width="1200" height="800"
                   loading="eager"
                   fetchpriority="high"
                   className="aspect-[4/3] h-full w-full object-cover object-center"
@@ -386,7 +371,7 @@ export default function BeneficiCamminataTempo() {
           <div className="mx-auto max-w-7xl">
             <div className="max-w-3xl">
               <Kicker>Cosa succede al corpo mentre cammini</Kicker>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+              <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
                 Cosa cambia se cammini 10, 20, 30 o 60 minuti
               </h2>
               <p className="mt-5 text-base leading-8 text-black/62 sm:text-lg">
@@ -398,7 +383,7 @@ export default function BeneficiCamminataTempo() {
               {walkingStages.map((item) => (
                 <article key={item.time} className="rounded-[28px] border border-black/10 bg-white p-6 shadow-[0_18px_54px_rgba(0,0,0,0.045)]">
                   <div className="flex items-center justify-between gap-4">
-                    <div className="text-2xl font-black tracking-[-0.04em] text-black sm:text-3xl">
+                    <div className="text-2xl font-black text-black sm:text-3xl">
                       {item.title}
                     </div>
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-black text-white">
@@ -420,7 +405,7 @@ export default function BeneficiCamminataTempo() {
           <div className="mx-auto max-w-7xl">
             <div className="max-w-4xl">
               <Kicker dark>Amplificare i benefici</Kicker>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-white sm:text-5xl">
+              <h2 className="mt-5 text-3xl font-black text-white sm:text-5xl">
                 <span className="block">E se volessi rendere la</span>
                 <span className="block text-[#FB8B04]">camminata più efficace?</span>
               </h2>
@@ -455,7 +440,7 @@ export default function BeneficiCamminataTempo() {
               <div className="grid gap-4">
                 {workoutSlots.map((slot) => (
                   <article key={slot.title} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)]">
-                    <h3 className="text-xl font-black tracking-[-0.03em] text-black">{slot.title}</h3>
+                    <h3 className="text-xl font-black text-black">{slot.title}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{slot.text}</p>
                   </article>
                 ))}
@@ -500,7 +485,7 @@ export default function BeneficiCamminataTempo() {
 
               <div className="grid gap-3">
                 <CtaButton location="guide_benefici_camminata_android">Scarica Hypemove per Android</CtaButton>
-                <CtaButton href={IPHONE_DOWNLOAD_URL} location="guide_benefici_camminata_iphone">Scarica Hypemove per iPhone</CtaButton>
+                <a href="/iphone" className="btn-ghost">Hai un iPhone? Avvisami</a>
               </div>
             </div>
           </div>
@@ -510,12 +495,12 @@ export default function BeneficiCamminataTempo() {
           <div className="mx-auto max-w-4xl">
             <div className="text-center">
               <Kicker>FAQ</Kicker>
-              <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">Domande frequenti</h2>
+              <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
             </div>
             <div className="mt-10 space-y-4">
               {faqs.map((faq) => (
                 <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                  <h3 className="text-xl font-black tracking-[-0.03em] text-black">{faq.q}</h3>
+                  <h3 className="text-xl font-black text-black">{faq.q}</h3>
                   <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                 </article>
               ))}
@@ -530,7 +515,7 @@ export default function BeneficiCamminataTempo() {
             <div className="flex items-start gap-3">
               <ListChecks className="mt-1 h-5 w-5 shrink-0 text-[#FB8B04]" />
               <div>
-                <h2 className="text-xl font-black tracking-[-0.03em] text-black">Fonti consultate</h2>
+                <h2 className="text-xl font-black text-black">Fonti consultate</h2>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {sources.map((source) => (
                     <a
@@ -552,3 +537,15 @@ export default function BeneficiCamminataTempo() {
     </div>
   );
 }
+
+// Testa SEO della pagina, letta da scripts/prerender.mjs.
+export const meta = {
+  title: ARTICLE_SEO_TITLE,
+  description: ARTICLE_DESCRIPTION,
+  ogImage: ARTICLE_IMAGE_URL,
+  ogImageAlt: ARTICLE_IMAGE_ALT,
+  type: "article",
+  published: ARTICLE_PUBLISHED_DATE,
+  modified: "2026-09-08",
+  jsonld: [],
+};

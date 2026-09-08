@@ -1,51 +1,30 @@
-import React, { Suspense, lazy } from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+import React from "react";
+import { hydrateRoot, createRoot } from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import App from "./App.jsx";
-import AllenamentoACasa from "./pages/AllenamentoACasa.jsx";
-import AppFitnessPrincipianti from "./pages/AppFitnessPrincipianti.jsx";
-import BeneficiCamminataTempo from "./pages/BeneficiCamminataTempo.jsx";
-import CostanzaAllenamento from "./pages/CostanzaAllenamento.jsx";
-import Guide from "./pages/Guide.jsx";
-import MiniWorkoutEfficaci from "./pages/MiniWorkoutEfficaci.jsx";
-import Workout10MinutiCasa from "./pages/Workout10MinutiCasa.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
+import Unsubscribe from "./pages/Unsubscribe.jsx";
+import Open from "./pages/Open.jsx";
 import "./index.css";
 
-const ResetPassword = lazy(() => import("./pages/ResetPassword.jsx"));
-const Unsubscribe = lazy(() => import("./pages/Unsubscribe.jsx"));
-const Open = lazy(() => import("./pages/Open.jsx"));
-
-function RouteFallback() {
-  return <div className="min-h-screen bg-white" aria-hidden="true" />;
-}
-
+// Questo bundle viene caricato SOLO dalle pagine che hanno bisogno di JavaScript
+// (reset password, disiscrizione, redirect /open). Le pagine pubbliche sono HTML statico
+// generato da scripts/prerender.mjs e non lo includono.
+// Niente lazy(): un componente che "sospende" durante l'idratazione fa buttare via
+// l'HTML pre-generato (errori React 418/423) e la pagina lampeggia.
 const rootElement = document.getElementById("root");
 const app = (
   <React.StrictMode>
     <BrowserRouter>
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route path="/app-fitness-principianti" element={<AppFitnessPrincipianti />} />
-          <Route path="/benefici-camminata-tempo" element={<BeneficiCamminataTempo />} />
-          <Route path="/come-essere-costanti-nell-allenamento" element={<CostanzaAllenamento />} />
-          <Route path="/guide" element={<Guide />} />
-          <Route path="/mini-workout-efficaci" element={<MiniWorkoutEfficaci />} />
-          <Route path="/workout-10-minuti-casa" element={<Workout10MinutiCasa />} />
-          <Route path="/allenamento-a-casa" element={<AllenamentoACasa />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/unsubscribe" element={<Unsubscribe />} />
-          <Route path="/open" element={<Open />} />
-        </Routes>
-      </Suspense>
+      <Routes>
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/unsubscribe" element={<Unsubscribe />} />
+        <Route path="/open" element={<Open />} />
+      </Routes>
     </BrowserRouter>
   </React.StrictMode>
 );
 
-const shouldHydrate =
-  rootElement.hasChildNodes();
-
-if (shouldHydrate) {
+if (rootElement.hasChildNodes()) {
   hydrateRoot(rootElement, app);
 } else {
   createRoot(rootElement).render(app);

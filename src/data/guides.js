@@ -1,4 +1,33 @@
+// Elenco delle guide: alimenta la pagina /guide, il footer, la home, la sitemap e llms.txt.
+// `image` è il nome base in /images/opt (versioni 480/800/1200). Le date sono quelle vere
+// dell'ultima modifica sostanziale: aggiornarle quando si tocca il testo.
 export const guides = [
+  {
+    title: "Come essere costanti nell'allenamento",
+    href: "/come-essere-costanti-nell-allenamento",
+    category: "Costanza",
+    readTime: "5 min",
+    description: "Strategie realistiche per continuare senza vivere di motivazione.",
+    tags: ["costanza", "motivazione", "abitudine", "non mollare"],
+    image: "workout",
+    imageAlt: "Persona che si allena a casa con costanza",
+    published: "2026-04-24",
+    modified: "2026-09-08",
+    featuredHome: true,
+  },
+  {
+    title: "I mini workout sono efficaci?",
+    href: "/mini-workout-efficaci",
+    category: "Poco tempo",
+    readTime: "5 min",
+    description: "Quando 5 o 10 minuti bastano davvero a creare continuità, e quando no.",
+    tags: ["workout brevi", "mini workout", "10 minuti", "poco tempo"],
+    image: "wod3",
+    imageAlt: "Persona che si allena a casa con un mini workout breve e guidato",
+    published: "2026-04-24",
+    modified: "2026-09-08",
+    featuredHome: true,
+  },
   {
     title: "App fitness per principianti",
     href: "/app-fitness-principianti",
@@ -6,15 +35,10 @@ export const guides = [
     readTime: "4 min",
     description: "Per partire da zero con workout semplici, guidati e sostenibili.",
     tags: ["principianti", "iniziare", "ripartire", "zero"],
-    featuredHome: true,
-  },
-  {
-    title: "Mini workout efficaci",
-    href: "/mini-workout-efficaci",
-    category: "Poco tempo",
-    readTime: "5 min",
-    description: "Quando 5 o 10 minuti possono aiutarti davvero a creare continuità.",
-    tags: ["workout brevi", "mini workout", "10 minuti", "poco tempo"],
+    image: "homeworkout",
+    imageAlt: "Donna che si allena a casa con workout per principianti",
+    published: "2026-04-19",
+    modified: "2026-09-08",
     featuredHome: true,
   },
   {
@@ -24,7 +48,11 @@ export const guides = [
     readTime: "4 min",
     description: "Un allenamento semplice e realistico per chi ha poco tempo.",
     tags: ["10 minuti", "casa", "poco tempo", "workout"],
-    featuredHome: true,
+    image: "wod2",
+    imageAlt: "Workout di 10 minuti a casa nell'app Hypemove",
+    published: "2026-04-24",
+    modified: "2026-09-08",
+    featuredHome: false,
   },
   {
     title: "Allenamento a casa",
@@ -33,6 +61,10 @@ export const guides = [
     readTime: "5 min",
     description: "Come iniziare ad allenarti a casa senza complicarti la vita.",
     tags: ["allenamento a casa", "home workout", "casa", "iniziare"],
+    image: "wod1",
+    imageAlt: "Persona che si allena a casa",
+    published: "2026-04-24",
+    modified: "2026-09-08",
     featuredHome: false,
   },
   {
@@ -40,25 +72,16 @@ export const guides = [
     href: "/benefici-camminata-tempo",
     category: "Benessere",
     readTime: "7 min",
-    description: "Cosa succede al corpo mentre cammini e come rendere la passeggiata più completa con mini workout guidati.",
+    description: "Cosa succede al corpo mentre cammini e come rendere la passeggiata più completa.",
     tags: ["benefici camminata", "camminare 30 minuti", "camminata veloce", "mini workout"],
-    featuredHome: false,
-  },
-  {
-    title: "Come essere costanti nell'allenamento",
-    href: "/come-essere-costanti-nell-allenamento",
-    category: "Costanza",
-    readTime: "5 min",
-    description: "Strategie realistiche per continuare senza vivere di motivazione.",
-    tags: ["costanza", "motivazione", "abitudine", "non mollare"],
+    image: "benefici-camminata-bosco",
+    imageAlt: "Donna che cammina su un sentiero nel bosco",
+    published: "2026-04-19",
+    modified: "2026-09-08",
     featuredHome: false,
   },
 ];
 
 export const guideCategories = Array.from(new Set(guides.map((guide) => guide.category)));
-
 export const guideFooterLinks = guides.map(({ title, href }) => ({ title, href }));
-
-export const homeGuideCards = guides
-  .filter((guide) => guide.featuredHome)
-  .slice(0, 3);
+export const homeGuideCards = guides.filter((guide) => guide.featuredHome).slice(0, 3);

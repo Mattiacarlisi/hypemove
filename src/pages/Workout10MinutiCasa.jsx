@@ -1,20 +1,21 @@
 import React, { useEffect } from "react";
 import { ArrowRight, CheckCircle2, Download, Home, Timer } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
+import { SiteHeader } from "../components/Layout.jsx";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
-const ARTICLE_URL = "https://www.hypemove.app/workout-10-minuti-casa";
+const ARTICLE_URL = "https://hypemove.app/workout-10-minuti-casa";
 const ARTICLE_SEO_TITLE =
   "Workout 10 minuti a casa: allenamento breve, semplice e utile | Hypemove";
 const ARTICLE_DESCRIPTION =
   "Scopri come iniziare con un workout di 10 minuti a casa: semplice, utile e realistico per chi ha poco tempo, poca energia o fa fatica a essere costante.";
-const ARTICLE_IMAGE_PATH = "/images/WOD2.png";
-const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/WOD2.png";
+const ARTICLE_IMAGE_PATH = "/images/opt/wod2-1200.webp";
+const ARTICLE_IMAGE_URL = "https://hypemove.app/images/opt/wod2-1200.webp";
 const ARTICLE_IMAGE_ALT = "Workout di 10 minuti a casa nell'app Hypemove";
 const ARTICLE_PUBLISHED_DATE = "2026-04-24";
 const ARTICLE_MODIFIED_DATE = "2026-04-24";
-const ORGANIZATION_URL = "https://www.hypemove.app/";
-const ORGANIZATION_LOGO_URL = "https://www.hypemove.app/images/logo1.png";
+const ORGANIZATION_URL = "https://hypemove.app/";
+const ORGANIZATION_LOGO_URL = "https://hypemove.app/images/logo1.png";
 
 const idealFor = [
   "Hai poco tempo durante la giornata",
@@ -54,7 +55,7 @@ const faqs = [
   },
   {
     q: "Serve attrezzatura?",
-    a: "No, puoi iniziare anche senza attrezzi.",
+    a: "No. Puoi fare tutto a corpo libero. Se hai un elastico, due manubri o una sedia, l'app li usa.",
   },
   {
     q: "Meglio 10 minuti o niente?",
@@ -207,7 +208,7 @@ function SeoJsonLd() {
             "@type": "ListItem",
             position: 2,
             name: "Guide",
-            item: "https://www.hypemove.app/guide",
+            item: "https://hypemove.app/guide",
           },
           {
             "@type": "ListItem",
@@ -283,7 +284,7 @@ function SeoJsonLd() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black tracking-[-0.06em]">H</span>
+      <span className="text-lg font-black">H</span>
     </div>
   );
 }
@@ -291,6 +292,7 @@ function LogoMark() {
 function CtaButton({ children = "Prova Hypemove gratis", location }) {
   return (
     <a
+      data-track="android"
       href={PLAY_STORE_URL}
       onClick={(event) => handleAndroidDownloadClick(event, {
         buttonText: children,
@@ -322,7 +324,7 @@ function TextSection({ eyebrow, title, children }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker>{eyebrow}</Kicker> : null}
-      <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">{title}</h2>
+      <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">{title}</h2>
       <div className="mt-5 space-y-5 text-base leading-8 text-black/65 sm:text-lg">{children}</div>
     </div>
   );
@@ -333,28 +335,7 @@ export default function Workout10MinutiCasa() {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3" aria-label="Vai alla home di Hypemove">
-            <LogoMark />
-            <div>
-              <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">Workout 10 minuti a casa</div>
-            </div>
-          </a>
-          <a
-            href={PLAY_STORE_URL}
-            onClick={(event) => handleAndroidDownloadClick(event, {
-              buttonText: "Prova gratis",
-              location: "guide_workout_10_minuti_navbar",
-            })}
-            className="hidden rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:-translate-y-0.5 sm:inline-flex"
-            aria-label="Prova Hypemove gratis"
-          >
-            Prova gratis
-          </a>
-        </div>
-      </header>
+      <SiteHeader current="guide" />
 
       <main>
         <article>
@@ -366,7 +347,7 @@ export default function Workout10MinutiCasa() {
               <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,0.88fr)_minmax(360px,0.8fr)] lg:gap-12">
                 <div className="max-w-[42rem]">
                   <Kicker>Allenamento breve</Kicker>
-                  <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] tracking-[-0.06em] text-black sm:text-5xl lg:text-[4rem]">
+                  <h1 className="mt-5 max-w-[36rem] text-4xl font-black leading-[0.98] text-black sm:text-5xl lg:text-[4rem]">
                     Workout di 10 minuti a casa: semplice, utile e fattibile davvero
                   </h1>
                   <div className="mt-6 hidden max-w-[40rem] space-y-4 text-base leading-8 text-black/65 lg:block lg:text-[1.12rem] lg:leading-9">
@@ -384,10 +365,9 @@ export default function Workout10MinutiCasa() {
                   <img
                     src={ARTICLE_IMAGE_PATH}
                     alt={ARTICLE_IMAGE_ALT}
-                    width="1536"
-                    height="1024"
+                    width="1200" height="800"
                     loading="eager"
-                    fetchPriority="high"
+                    fetchpriority="high"
                     decoding="async"
                     className="aspect-[4/3] h-full w-full object-cover object-center"
                   />
@@ -422,7 +402,7 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker>A chi è utile</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
                   Questo tipo di allenamento è ideale se...
                 </h2>
                 <ul className="mt-8 grid gap-4">
@@ -441,10 +421,10 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker dark>Esempio pratico</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-black sm:text-5xl">
                   Esempio di workout da 10 minuti a casa
                 </h2>
-                <p className="mt-5 text-base leading-8 text-white/70 sm:text-lg">Allenamento base senza attrezzatura:</p>
+                <p className="mt-5 text-base leading-8 text-white/70 sm:text-lg">Allenamento base a corpo libero:</p>
                 <p className="mt-6 max-w-2xl text-base leading-8 text-white/70 sm:text-lg">
                   È solo un esempio. La cosa importante non è fare il workout perfetto, ma iniziare con qualcosa che riesci a mantenere.
                 </p>
@@ -480,7 +460,7 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker>Dove entra Hypemove</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
                   Come Hypemove ti aiuta con workout da 10 minuti
                 </h2>
               </div>
@@ -499,12 +479,12 @@ export default function Workout10MinutiCasa() {
             <div className="mx-auto max-w-4xl">
               <div className="text-center">
                 <Kicker>FAQ</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">Domande frequenti</h2>
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
               </div>
               <div className="mt-10 space-y-4">
                 {faqs.map((faq) => (
                   <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                    <h3 className="text-xl font-black tracking-[-0.03em] text-black">{faq.q}</h3>
+                    <h3 className="text-xl font-black text-black">{faq.q}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                   </article>
                 ))}
@@ -515,7 +495,7 @@ export default function Workout10MinutiCasa() {
           <section className="px-4 pb-24 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-7xl rounded-[32px] bg-[#FB8B04] p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
               <Timer className="h-10 w-10" />
-              <h2 className="mt-5 max-w-4xl text-3xl font-black leading-[0.98] tracking-[-0.05em] sm:text-5xl">
+              <h2 className="mt-5 max-w-4xl text-3xl font-black leading-[0.98] sm:text-5xl">
                 Se aspetti il momento perfetto, rischi di non iniziare mai.
               </h2>
               <p className="mt-5 max-w-2xl text-base leading-8 text-black/70 sm:text-lg">
@@ -535,3 +515,14 @@ export default function Workout10MinutiCasa() {
     </div>
   );
 }
+// Testa SEO della pagina, letta da scripts/prerender.mjs.
+export const meta = {
+  title: ARTICLE_SEO_TITLE,
+  description: ARTICLE_DESCRIPTION,
+  ogImage: ARTICLE_IMAGE_URL,
+  ogImageAlt: ARTICLE_IMAGE_ALT,
+  type: "article",
+  published: ARTICLE_PUBLISHED_DATE,
+  modified: "2026-09-08",
+  jsonld: [],
+};

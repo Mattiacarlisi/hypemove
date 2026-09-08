@@ -1,250 +1,139 @@
-﻿import fs from "node:fs/promises";
+// Genera il sito statico: per ogni pagina in src/entry-server.jsx scrive l'HTML completo
+// (testa SEO + dati strutturati + corpo), e in più sitemap.xml e llms.txt.
+// Le pagine senza `hydrate` non includono JavaScript: sono HTML puro.
+// Uso: parte da `npm run build`, dopo vite build (client) e vite build --ssr (server).
+import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const projectRoot = process.cwd();
-const distIndexPath = path.join(projectRoot, "dist", "index.html");
-const distServerEntryPath = path.join(projectRoot, "dist-server", "entry-server.js");
-const INDEXABLE_ROBOTS = "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
-const PRIVATE_ROBOTS = "noindex, nofollow";
+const dist = path.join(projectRoot, "dist");
+const templatePath = path.join(dist, "index.html");
+const serverEntry = path.join(projectRoot, "dist-server", "entry-server.js");
 
-const routes = [
-  {
-    path: "/",
-    outputPath: distIndexPath,
-    title: "Hypemove | App per allenamento a casa da 5, 10 e 15 minuti",
-    description:
-      "Hypemove ? l'app fitness per allenarti a casa con workout guidati da 5, 10 e 15 minuti. Ideale per dimagrire, tonificare e restare costante.",
-    canonical: "https://www.hypemove.app/",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "website",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - app per allenamento a casa guidato",
-  },
-  {
-    path: "/app-fitness-principianti",
-    outputPath: path.join(projectRoot, "dist", "app-fitness-principianti", "index.html"),
-    title: "App fitness per principianti: una guida semplice per chi parte da zero | Hypemove",
-    description:
-      "Scopri perché Hypemove è un’app fitness adatta ai principianti: percorso guidato, workout brevi, progressione graduale e meno attrito per iniziare davvero.",
-    canonical: "https://www.hypemove.app/app-fitness-principianti",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "article",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - app fitness per principianti",
-  },
-  {
-    path: "/allenamento-a-casa",
-    outputPath: path.join(projectRoot, "dist", "allenamento-a-casa", "index.html"),
-    title: "Allenamento a casa: guida semplice per iniziare davvero | Hypemove",
-    description:
-      "Vuoi iniziare ad allenarti a casa? Scopri come farlo in modo semplice, realistico e sostenibile, anche se hai poco tempo o parti da zero.",
-    canonical: "https://www.hypemove.app/allenamento-a-casa",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "article",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - guida allenamento a casa",
-  },
-  {
-    path: "/benefici-camminata-tempo",
-    outputPath: path.join(projectRoot, "dist", "benefici-camminata-tempo", "index.html"),
-    title: "Benefici della camminata: cosa succede al corpo dopo 10, 20, 30 e 60 minuti | Hypemove",
-    description:
-      "Scopri i benefici della camminata e cosa succede al corpo dopo 10, 20, 30 e 60 minuti. Una guida pratica per capire come camminare meglio e rendere la passeggiata più efficace.",
-    canonical: "https://www.hypemove.app/benefici-camminata-tempo",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "article",
-    ogImage: "https://www.hypemove.app/images/benefici-camminata-bosco.png",
-    ogImageAlt: "Donna che cammina nel bosco durante una passeggiata",
-  },
-  {
-    path: "/come-essere-costanti-nell-allenamento",
-    outputPath: path.join(projectRoot, "dist", "come-essere-costanti-nell-allenamento", "index.html"),
-    title: "Come essere costanti nell?allenamento (senza vivere di motivazione) | Hypemove",
-    description:
-      "Fai fatica a essere costante con l?allenamento? Scopri strategie realistiche per smettere di iniziare e mollare dopo pochi giorni.",
-    canonical: "https://www.hypemove.app/come-essere-costanti-nell-allenamento",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "article",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - costanza nell'allenamento",
-  },
-  {
-    path: "/guide",
-    outputPath: path.join(projectRoot, "dist", "guide", "index.html"),
-    title: "Guide utili per allenarti a casa | Hypemove",
-    description:
-      "Guide semplici e realistiche per iniziare ad allenarti a casa, creare costanza e scegliere workout brevi adatti al tuo obiettivo.",
-    canonical: "https://www.hypemove.app/guide",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "website",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - guide utili per allenarti a casa",
-  },
-  {
-    path: "/workout-10-minuti-casa",
-    outputPath: path.join(projectRoot, "dist", "workout-10-minuti-casa", "index.html"),
-    title: "Workout 10 minuti a casa | Allenamento semplice per chi ha poco tempo | Hypemove",
-    description:
-      "Cerchi un workout di 10 minuti a casa? Scopri un allenamento semplice, guidato e realistico per chi ha poco tempo e vuole rimettersi in moto.",
-    canonical: "https://www.hypemove.app/workout-10-minuti-casa",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "article",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - workout 10 minuti a casa",
-  },
-  {
-    path: "/mini-workout-efficaci",
-    outputPath: path.join(projectRoot, "dist", "mini-workout-efficaci", "index.html"),
-    title: "I mini workout sono efficaci? Cosa dice davvero la realt? | Hypemove",
-    description:
-      "I mini workout da 5 o 10 minuti funzionano davvero? Scopri quando sono efficaci, per chi lo sono e perch? spesso battono i programmi perfetti mai iniziati.",
-    canonical: "https://www.hypemove.app/mini-workout-efficaci",
-    robots: INDEXABLE_ROBOTS,
-    ogType: "article",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - mini workout efficaci",
-  },
-  {
-    path: "/unsubscribe",
-    outputPath: path.join(projectRoot, "dist", "unsubscribe", "index.html"),
-    title: "Disiscrizione email | Hypemove",
-    description:
-      "Gestisci la disiscrizione dalle email automatiche di promemoria e recupero abitudine di Hypemove.",
-    canonical: "https://www.hypemove.app/unsubscribe",
-    robots: PRIVATE_ROBOTS,
-    ogType: "website",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - disiscrizione email",
-  },
-  {
-    path: "/reset-password",
-    outputPath: path.join(projectRoot, "dist", "reset-password", "index.html"),
-    title: "Reimposta password | Hypemove",
-    description: "Reimposta la password del tuo account Hypemove.",
-    canonical: "https://www.hypemove.app/reset-password",
-    robots: PRIVATE_ROBOTS,
-    ogType: "website",
-    ogImage: "https://www.hypemove.app/images/logo1.png",
-    ogImageAlt: "Hypemove - reimposta password",
-  },
-];
+const SITE_URL = "https://hypemove.app";
+const SITE_NAME = "Hypemove";
+const INDEXABLE = "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
 
-const { render } = await import(pathToFileURL(distServerEntryPath).href);
+const { render, routes, baseGraph, DEFINITION, PRICES, PLAY_STORE_URL } = await import(pathToFileURL(serverEntry).href);
 
-const templateHtml = await fs.readFile(distIndexPath, "utf8");
-
-if (!templateHtml.includes('<div id="root"></div>')) {
-  throw new Error('Impossibile trovare <div id="root"></div> in dist/index.html');
+const template = await fs.readFile(templatePath, "utf8");
+if (!template.includes("<!--SEO-->") || !template.includes('<div id="root"></div>')) {
+  throw new Error("index.html deve contenere <!--SEO--> e <div id=\"root\"></div>");
 }
 
-function applySeo(html, route) {
-  const htmlWithMeta = html
-    .replace(/<title>.*?<\/title>/, `<title>${route.title}</title>`)
-    .replace(/<link rel="canonical" href=".*?" \/>/, `<link rel="canonical" href="${route.canonical}" />`)
-    .replace(
-      /<meta\s+name="description"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      name="description"\n      content="${route.description}"\n    />`
-    )
-    .replace(
-      /<meta\s+name="robots"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      name="robots"\n      content="${route.robots ?? INDEXABLE_ROBOTS}"\n    />`
-    )
-    .replace(
-      /<meta\s+property="og:type"\s+content="[^"]*"\s*\/>/,
-      `<meta property="og:type" content="${route.ogType ?? "website"}" />`
-    )
-    .replace(
-      /<meta\s+property="og:url"\s+content="[^"]*"\s*\/>/,
-      `<meta property="og:url" content="${route.canonical}" />`
-    )
-    .replace(
-      /<meta\s+property="og:title"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      property="og:title"\n      content="${route.title}"\n    />`
-    )
-    .replace(
-      /<meta\s+property="og:description"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      property="og:description"\n      content="${route.description}"\n    />`
-    )
-    .replace(
-      /<meta\s+property="og:image"\s+content="[^"]*"\s*\/>/,
-      `<meta property="og:image" content="${route.ogImage}" />`
-    )
-    .replace(
-      /<meta\s+property="og:image:secure_url"\s+content="[^"]*"\s*\/>/,
-      `<meta property="og:image:secure_url" content="${route.ogImage}" />`
-    )
-    .replace(
-      /<meta\s+property="og:image:alt"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      property="og:image:alt"\n      content="${route.ogImageAlt}"\n    />`
-    )
-    .replace(
-      /<meta\s+name="twitter:title"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      name="twitter:title"\n      content="${route.title}"\n    />`
-    )
-    .replace(
-      /<meta\s+name="twitter:description"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      name="twitter:description"\n      content="${route.description}"\n    />`
-    )
-    .replace(
-      /<meta\s+name="twitter:image"\s+content="[^"]*"\s*\/>/,
-      `<meta name="twitter:image" content="${route.ogImage}" />`
-    )
-    .replace(
-      /<meta\s+name="twitter:image:alt"[\s\S]*?content="[^"]*"[\s\S]*?\/>/,
-      `<meta\n      name="twitter:image:alt"\n      content="${route.ogImageAlt}"\n    />`
-    );
+const esc = (value = "") => String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  return htmlWithMeta.replace(
-    /<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/,
-    (match, jsonText) => {
-      const data = JSON.parse(jsonText);
-      const webPage = data["@graph"]?.find((item) => item["@type"] === "WebPage");
-
-      if (!webPage) return match;
-
-      webPage["@id"] = `${route.canonical}#webpage`;
-      webPage.url = route.canonical;
-      webPage.name = route.title;
-      webPage.description = route.description;
-
-      return `<script type="application/ld+json">\n      ${JSON.stringify(data, null, 8)}\n    </script>`;
-    }
-  );
+function headFor(route) {
+  const { meta } = route;
+  const url = `${SITE_URL}${route.path === "/" ? "/" : route.path}`;
+  const title = meta.title.includes(SITE_NAME) ? meta.title : `${meta.title} | ${SITE_NAME}`;
+  const robots = meta.robots ?? INDEXABLE;
+  const image = meta.ogImage ?? `${SITE_URL}/images/og/home.jpg`;
+  const graph = [...(baseGraph ? baseGraph() : []), ...(meta.jsonld ?? [])];
+  const lines = [
+    `<title>${esc(title)}</title>`,
+    `<meta name="description" content="${esc(meta.description)}" />`,
+    `<meta name="robots" content="${esc(robots)}" />`,
+    `<link rel="canonical" href="${url}" />`,
+    `<meta property="og:type" content="${meta.type ?? "website"}" />`,
+    `<meta property="og:site_name" content="${SITE_NAME}" />`,
+    `<meta property="og:locale" content="it_IT" />`,
+    `<meta property="og:url" content="${url}" />`,
+    `<meta property="og:title" content="${esc(meta.title)}" />`,
+    `<meta property="og:description" content="${esc(meta.description)}" />`,
+    `<meta property="og:image" content="${image}" />`,
+    `<meta property="og:image:width" content="1200" />`,
+    `<meta property="og:image:height" content="630" />`,
+    `<meta property="og:image:alt" content="${esc(meta.ogImageAlt ?? meta.title)}" />`,
+    meta.published ? `<meta property="article:published_time" content="${meta.published}" />` : "",
+    meta.modified ? `<meta property="article:modified_time" content="${meta.modified}" />` : "",
+    `<meta name="twitter:card" content="summary_large_image" />`,
+    `<meta name="twitter:title" content="${esc(meta.title)}" />`,
+    `<meta name="twitter:description" content="${esc(meta.description)}" />`,
+    `<meta name="twitter:image" content="${image}" />`,
+    graph.length ? `<script type="application/ld+json">${JSON.stringify({ "@context": "https://schema.org", "@graph": graph })}</script>` : "",
+  ];
+  return lines.filter(Boolean).join("\n    ");
 }
 
-async function removeWithRetry(targetPath, attempts = 5) {
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      await fs.rm(targetPath, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      if (attempt === attempts || !["ENOTEMPTY", "EPERM", "EBUSY"].includes(error.code)) {
-        throw error;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, attempt * 200));
-    }
-  }
+function outputPathFor(route) {
+  if (route.output) return path.join(dist, route.output);
+  if (route.path === "/") return path.join(dist, "index.html");
+  return path.join(dist, route.path.replace(/^\//, ""), "index.html");
 }
 
-async function cleanupBuildServer() {
-  const targetPath = path.join(projectRoot, "dist-server");
-
-  try {
-    await removeWithRetry(targetPath);
-  } catch (error) {
-    console.warn(`Cleanup saltato per ${targetPath}: ${error.code ?? error.message}`);
-  }
-}
-
+const written = [];
 for (const route of routes) {
-  const appHtml = render(route.path);
-  const rootMarkup = `<div id="root">${appHtml}</div>`;
-  const prerenderedHtml = applySeo(templateHtml.replace('<div id="root"></div>', rootMarkup), route);
-
-  await fs.mkdir(path.dirname(route.outputPath), { recursive: true });
-  await fs.writeFile(route.outputPath, prerenderedHtml, "utf8");
-  console.log(`Prerender completato per ${route.path}`);
+  const body = render(route.path);
+  let html = template
+    .replace("<!--SEO-->", headFor(route))
+    .replace(/\n\s*<title>Hypemove<\/title>/, "")
+    .replace('<div id="root"></div>', `<div id="root">${body}</div>`)
+    .replace("<body>", `<body data-page="${esc(route.path)}">`);
+  if (!route.hydrate) {
+    // Pagina statica: via il bundle e i preload, resta solo il CSS.
+    html = html.replace(/\s*<script type="module"[^>]*><\/script>/g, "").replace(/\s*<link rel="modulepreload"[^>]*>/g, "");
+  }
+  const out = outputPathFor(route);
+  await fs.mkdir(path.dirname(out), { recursive: true });
+  await fs.writeFile(out, html, "utf8");
+  // Copia gemella "prezzi.html" accanto a "prezzi/index.html": Netlify serve /prezzi da
+  // prezzi.html con 200, senza il 301 verso /prezzi/ che scatta sulle sole cartelle.
+  if (route.path !== "/" && !route.output) {
+    await fs.writeFile(path.join(dist, `${route.path.replace(/^\//, "")}.html`), html, "utf8");
+  }
+  written.push(route.path);
 }
-await cleanupBuildServer();
+console.log(`Pagine generate: ${written.length}`);
+
+// Sitemap: solo le pagine indicizzabili, con la data vera dell'ultima modifica.
+const indexable = routes.filter((route) => !route.output && !(route.meta.robots ?? "").includes("noindex"));
+const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${indexable
+  .map((route) => `  <url>\n    <loc>${SITE_URL}${route.path === "/" ? "/" : route.path}</loc>\n    <lastmod>${route.meta.modified ?? "2026-09-08"}</lastmod>\n  </url>`)
+  .join("\n")}\n</urlset>\n`;
+await fs.writeFile(path.join(dist, "sitemap.xml"), sitemap, "utf8");
+
+// llms.txt: la scheda di Hypemove per i crawler delle AI.
+const guides = indexable.filter((route) => route.meta.type === "article" && !route.path.startsWith("/confronti"));
+const comparisons = indexable.filter((route) => route.path.startsWith("/confronti/"));
+const llms = `# Hypemove
+
+> ${DEFINITION ?? "Hypemove è un'app di fitness per Android con allenamenti guidati brevi da fare a casa."}
+> Premium facoltativo: ${PRICES?.monthly ?? "6,99"} €/mese o ${PRICES?.yearly ?? "29,99"} €/anno, si disdice da Google Play.
+
+Lingua: italiano. Sviluppata in Italia da Mattia Carlisi (founder) e Danilo (sviluppo).
+Non è per atleti, bodybuilder o chi cerca schede avanzate.
+
+## Pagine principali
+- [Home](${SITE_URL}/): cos'è, come funziona, prezzi, domande frequenti
+- [Coach AI](${SITE_URL}/coach-ai): cosa fa il coach in chat, esempi, limiti del gratuito
+- [Prezzi](${SITE_URL}/prezzi): gratis vs Premium, come si disdice
+- [Chi siamo](${SITE_URL}/chi-siamo): chi la fa e perché
+- [Google Play](${PLAY_STORE_URL ?? "https://play.google.com/store/apps/details?id=pt.app"}): scheda ufficiale dell'app
+
+## Confronti con altre app
+${comparisons.map((route) => `- [${route.meta.title}](${SITE_URL}${route.path})`).join("\n")}
+
+## Guide
+${guides.map((route) => `- [${route.meta.title.replace(/ \| Hypemove$/, "")}](${SITE_URL}${route.path})`).join("\n")}
+`;
+await fs.writeFile(path.join(dist, "llms.txt"), llms, "utf8");
+
+// _redirects: una riga per ogni pagina, così Netlify serve /prezzi con 200 invece di
+// rimandare a /prezzi/ con un 301 (che rompe canonical e link interni). In coda la 404 vera.
+const rewrites = routes
+  .filter((route) => route.path !== "/" && !route.output)
+  .map((route) => `${route.path.padEnd(44)} ${route.path}/index.html   200!`);
+const redirects = `# Generato da scripts/prerender.mjs: non modificare a mano.
+/auth/callback                               /auth/callback.html   200
+${rewrites.join("\n")}
+
+# Tutto il resto: pagina 404 vera, con codice 404.
+/*                                           /404.html             404
+`;
+await fs.writeFile(path.join(dist, "_redirects"), redirects, "utf8");
+
+// Pulizia della build server
+await fs.rm(path.join(projectRoot, "dist-server"), { recursive: true, force: true }).catch(() => {});
+console.log("Sitemap e llms.txt scritti.");

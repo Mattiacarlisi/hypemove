@@ -1,19 +1,20 @@
 import React, { useEffect } from "react";
 import { ArrowRight, CheckCircle2, Download, Home, ListChecks } from "lucide-react";
 import GuideFooter from "../components/GuideFooter.jsx";
+import { SiteHeader } from "../components/Layout.jsx";
 import { PLAY_STORE_URL, handleAndroidDownloadClick } from "../lib/analytics.js";
 
-const ARTICLE_URL = "https://www.hypemove.app/allenamento-a-casa";
+const ARTICLE_URL = "https://hypemove.app/allenamento-a-casa";
 const ARTICLE_SEO_TITLE = "Allenamento a casa: come iniziare in modo semplice e sostenibile | Hypemove";
 const ARTICLE_DESCRIPTION =
   "Guida pratica all'allenamento a casa: come iniziare in modo semplice e sostenibile, quanto tempo serve, se serve attrezzatura e come Hypemove può aiutarti a essere costante.";
-const ARTICLE_IMAGE_PATH = "/images/workout.png";
-const ARTICLE_IMAGE_URL = "https://www.hypemove.app/images/workout.png";
+const ARTICLE_IMAGE_PATH = "/images/opt/workout-1200.webp";
+const ARTICLE_IMAGE_URL = "https://hypemove.app/images/opt/workout-1200.webp";
 const ARTICLE_IMAGE_ALT = "Donna che si allena a casa in un ambiente luminoso";
 const ARTICLE_PUBLISHED_DATE = "2026-04-24";
 const ARTICLE_MODIFIED_DATE = "2026-04-24";
-const ORGANIZATION_URL = "https://www.hypemove.app/";
-const ORGANIZATION_LOGO_URL = "https://www.hypemove.app/images/logo1.png";
+const ORGANIZATION_URL = "https://hypemove.app/";
+const ORGANIZATION_LOGO_URL = "https://hypemove.app/images/logo1.png";
 
 const homeReasons = [
   "Zero spostamenti",
@@ -125,7 +126,7 @@ function useSeoMeta() {
 function LogoMark() {
   return (
     <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-black text-white shadow-[0_12px_30px_rgba(0,0,0,0.12)]">
-      <span className="text-lg font-black tracking-[-0.06em]">H</span>
+      <span className="text-lg font-black">H</span>
     </div>
   );
 }
@@ -135,6 +136,7 @@ function CtaButton({ children = "Scopri Hypemove", href = PLAY_STORE_URL, locati
 
   return (
     <a
+      data-track={isAndroidDownload ? "android" : undefined}
       href={href}
       onClick={
         isAndroidDownload
@@ -172,7 +174,7 @@ function TextSection({ eyebrow, title, children, dark = false }) {
   return (
     <div className="max-w-3xl">
       {eyebrow ? <Kicker dark={dark}>{eyebrow}</Kicker> : null}
-      <h2 className={`mt-5 text-3xl font-black tracking-[-0.05em] sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
+      <h2 className={`mt-5 text-3xl font-black sm:text-5xl ${dark ? "text-white" : "text-black"}`}>
         {title}
       </h2>
       <div className={`mt-5 space-y-5 text-base leading-8 sm:text-lg ${dark ? "text-white/70" : "text-black/65"}`}>
@@ -241,7 +243,7 @@ function SeoJsonLd() {
             "@type": "ListItem",
             position: 2,
             name: "Guide",
-            item: "https://www.hypemove.app/guide",
+            item: "https://hypemove.app/guide",
           },
           {
             "@type": "ListItem",
@@ -318,24 +320,7 @@ export default function AllenamentoACasa() {
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] text-black">
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-[#FDFDFD]/88 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <a href="/" className="flex items-center gap-3" aria-label="Vai alla home di Hypemove">
-            <LogoMark />
-            <div>
-              <div className="text-base font-black tracking-[-0.03em]">Hypemove</div>
-              <div className="text-xs text-black/45">Allenamento a casa</div>
-            </div>
-          </a>
-          <a
-            href="/guide"
-            className="hidden rounded-full border border-black/10 bg-white px-5 py-3 text-sm font-semibold text-black/70 transition hover:-translate-y-0.5 hover:border-black/20 hover:text-black sm:inline-flex"
-            aria-label="Vai alla sezione guide"
-          >
-            Guide
-          </a>
-        </div>
-      </header>
+      <SiteHeader current="guide" />
 
       <main>
         <article>
@@ -346,7 +331,7 @@ export default function AllenamentoACasa() {
             <div className="relative mx-auto grid max-w-7xl items-center gap-12 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.55fr)]">
               <div>
                 <Kicker>Guida pratica</Kicker>
-                <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] tracking-[-0.06em] text-black sm:text-6xl lg:text-7xl">
+                <h1 className="mt-6 max-w-4xl text-4xl font-black leading-[0.95] text-black sm:text-6xl lg:text-7xl">
                   Allenamento a casa: come iniziare in modo semplice e sostenibile
                 </h1>
                 <p className="mt-6 max-w-2xl text-base leading-8 text-black/65 sm:text-xl sm:leading-9">
@@ -362,8 +347,7 @@ export default function AllenamentoACasa() {
                 <img
                   src={ARTICLE_IMAGE_PATH}
                   alt={ARTICLE_IMAGE_ALT}
-                  width="1024"
-                  height="1536"
+                  width="1200" height="800"
                   loading="eager"
                   fetchpriority="high"
                   decoding="async"
@@ -376,7 +360,7 @@ export default function AllenamentoACasa() {
           <section className="bg-[#FCFBF8] px-4 py-20 sm:px-6 sm:py-24 lg:px-8">
             <div className="mx-auto max-w-7xl">
               <Kicker>Perché casa</Kicker>
-              <h2 className="mt-5 max-w-3xl text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+              <h2 className="mt-5 max-w-3xl text-3xl font-black text-black sm:text-5xl">
                 Perché sempre più persone scelgono l'allenamento a casa
               </h2>
               <ul className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
@@ -455,7 +439,7 @@ export default function AllenamentoACasa() {
             <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.85fr)_minmax(320px,0.7fr)]">
               <div>
                 <Kicker>Hypemove</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">
                   Come Hypemove semplifica l'allenamento a casa
                 </h2>
               </div>
@@ -474,12 +458,12 @@ export default function AllenamentoACasa() {
             <div className="mx-auto max-w-4xl">
               <div className="text-center">
                 <Kicker>FAQ</Kicker>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.05em] text-black sm:text-5xl">Domande frequenti</h2>
+                <h2 className="mt-5 text-3xl font-black text-black sm:text-5xl">Domande frequenti</h2>
               </div>
               <div className="mt-10 space-y-4">
                 {faqs.map((faq) => (
                   <article key={faq.q} className="rounded-[24px] border border-black/10 bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.04)] sm:p-6">
-                    <h3 className="text-xl font-black tracking-[-0.03em] text-black">{faq.q}</h3>
+                    <h3 className="text-xl font-black text-black">{faq.q}</h3>
                     <p className="mt-3 text-base leading-7 text-black/65">{faq.a}</p>
                   </article>
                 ))}
@@ -489,7 +473,7 @@ export default function AllenamentoACasa() {
 
           <section className="px-4 pb-24 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-7xl rounded-[32px] bg-[#FB8B04] p-6 text-black shadow-[0_35px_100px_rgba(251,139,4,0.22)] sm:p-10 lg:p-14">
-              <h2 className="max-w-4xl text-3xl font-black leading-[0.98] tracking-[-0.05em] sm:text-5xl">
+              <h2 className="max-w-4xl text-3xl font-black leading-[0.98] sm:text-5xl">
                 Non ti serve il setup perfetto. Ti serve iniziare.
               </h2>
               <p className="mt-5 max-w-2xl text-base leading-8 text-black/70 sm:text-lg">
@@ -509,3 +493,14 @@ export default function AllenamentoACasa() {
     </div>
   );
 }
+// Testa SEO della pagina, letta da scripts/prerender.mjs.
+export const meta = {
+  title: ARTICLE_SEO_TITLE,
+  description: ARTICLE_DESCRIPTION,
+  ogImage: ARTICLE_IMAGE_URL,
+  ogImageAlt: ARTICLE_IMAGE_ALT,
+  type: "article",
+  published: ARTICLE_PUBLISHED_DATE,
+  modified: "2026-09-08",
+  jsonld: [],
+};
