@@ -115,6 +115,20 @@ ${guides.map((route) => `- [${route.meta.title.replace(/ \| Hypemove$/, "")}](${
 `;
 await fs.writeFile(path.join(dist, "llms.txt"), llms, "utf8");
 
+// _redirects: una riga per ogni pagina, così Netlify serve /prezzi con 200 invece di
+// rimandare a /prezzi/ con un 301 (che rompe canonical e link interni). In coda la 404 vera.
+const rewrites = routes
+  .filter((route) => route.path !== "/" && !route.output)
+  .map((route) => `${route.path.padEnd(44)} ${route.path}/index.html   200`);
+const redirects = `# Generato da scripts/prerender.mjs: non modificare a mano.
+/auth/callback                               /auth/callback.html   200
+${rewrites.join("\n")}
+
+# Tutto il resto: pagina 404 vera, con codice 404.
+/*                                           /404.html             404
+`;
+await fs.writeFile(path.join(dist, "_redirects"), redirects, "utf8");
+
 // Pulizia della build server
 await fs.rm(path.join(projectRoot, "dist-server"), { recursive: true, force: true }).catch(() => {});
 console.log("Sitemap e llms.txt scritti.");

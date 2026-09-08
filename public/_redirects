@@ -1,7 +1,0 @@
-# Le pagine pubbliche sono file HTML statici in dist/ e Netlify li serve direttamente.
-# Qui restano solo le eccezioni.
-/auth/callback    /auth/callback.html   200
-/open             /open/index.html      200
-
-# Tutto il resto: pagina 404 vera, con codice 404 (niente più home spacciata per pagina trovata).
-/*                /404.html             404
