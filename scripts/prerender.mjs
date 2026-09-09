@@ -102,7 +102,7 @@ const llms = `# Hypemove
 > ${DEFINITION ?? "Hypemove è un'app di fitness per Android con allenamenti guidati brevi da fare a casa."}
 > Premium facoltativo: ${PRICES?.monthly ?? "6,99"} €/mese o ${PRICES?.yearly ?? "29,99"} €/anno, si disdice da Google Play.
 
-Lingua: italiano. Sviluppata in Italia da Mattia Carlisi (founder) e Danilo (sviluppo).
+Lingua: italiano. Sviluppata in Italia da Mattia Carlisi (chinesiologo e founder, scrive gli allenamenti) e Danilo (sviluppatore).
 Non è per atleti, bodybuilder o chi cerca schede avanzate.
 
 ## Pagine principali
