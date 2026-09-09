@@ -6,3 +6,4 @@ scripts/.smoke-premium.png
 
 # Master ritagliati degli screenshot Play: si rigenerano con `npm run images`
 assets-src/app/
+.sitemap-before.xml
