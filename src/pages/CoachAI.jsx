@@ -99,6 +99,7 @@ export default function CoachAI() {
             <div className="kicker">Anche a tavola</div>
             <h2 className="h-section mt-3">Fotografi il piatto, lui segna le calorie.</h2>
             <p className="mt-4 text-lg text-ink-2">Nessuna tabella da compilare. Scatti una foto, il coach riconosce cosa c'è nel piatto e ti dice proteine, carboidrati, grassi e calorie. Serve a chi vuole avere un'idea, senza trasformare ogni pasto in un compito.</p>
+            <a href="/calorie" className="mt-5 inline-block font-bold underline decoration-orange decoration-2 underline-offset-4">Come funziona il conteggio da foto</a>
           </div>
         </div>
       </Section>

@@ -111,7 +111,7 @@ export function SiteFooter() {
             <a href={LINKEDIN_URL} rel="noopener" className="text-ink-2 hover:text-ink">LinkedIn</a>
           </div>
         </div>
-        <FooterCol title="Prodotto" links={[["Come funziona", "/#come-funziona"], ["Coach AI", "/coach-ai"], ["Prezzi", "/prezzi"], ["Chi siamo", "/chi-siamo"], ["Hai un iPhone?", "/iphone"]]} />
+        <FooterCol title="Prodotto" links={[["Come funziona", "/#come-funziona"], ["Coach AI", "/coach-ai"], ["Calorie da una foto", "/calorie"], ["Prezzi", "/prezzi"], ["Chi siamo", "/chi-siamo"], ["Hai un iPhone?", "/iphone"]]} />
         <FooterCol
           title="Guide e confronti"
           links={[

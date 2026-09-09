@@ -1,5 +1,5 @@
 import React from "react";
-import { Layout, Picture, Section, SectionHead } from "../components/Layout.jsx";
+import { AppShot, Layout, Picture, Section, SectionHead } from "../components/Layout.jsx";
 import { guideCategories, guides } from "../data/guides.js";
 import { SITE_URL, breadcrumb } from "../site.js";
 
@@ -33,7 +33,11 @@ export function GuideCard({ guide, heading = "h2" }) {
   return (
     <a href={guide.href} className="group block overflow-hidden rounded-2xl border-[1.5px] border-rule bg-paper transition hover:border-ink">
       <div className="aspect-[3/2] overflow-hidden bg-surface">
-        <Picture name={guide.image} widths={[480, 800]} alt={guide.imageAlt} sizes="(min-width: 768px) 360px, 92vw" className="h-full w-full object-cover" width={800} height={533} />
+        {guide.imageKind === "app" ? (
+          <div className="flex h-full items-start justify-center px-6 pt-5"><AppShot name={guide.image.replace(/^app-/, "")} alt={guide.imageAlt} className="w-[120px] drop-shadow-[0_14px_20px_rgba(0,0,0,0.14)]" sizes="120px" /></div>
+        ) : (
+          <Picture name={guide.image} widths={[480, 800]} alt={guide.imageAlt} sizes="(min-width: 768px) 360px, 92vw" className="h-full w-full object-cover" width={800} height={533} />
+        )}
       </div>
       <div className="p-5">
         <div className="flex items-center justify-between">

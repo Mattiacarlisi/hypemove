@@ -71,6 +71,7 @@ const facts = [
   ["Oltre 400 esercizi con video", "a corpo libero o con manubri, elastici, sedia, kettlebell"],
   ["Percorso a tappe", "una al giorno, senza pianificare niente"],
   ["Coach AI in chat", "spiega gli esercizi e adatta il programma"],
+  ["Calorie da una foto", "fotografi il piatto, lui segna proteine, carboidrati, grassi e calorie"],
   ["Punti, giorni di fila, baule dei premi, classifica", "il progresso si vede"],
   ["Android, gratis", "iPhone in arrivo"],
 ];
@@ -192,7 +193,10 @@ export default function Home() {
               ))}
             </ul>
             <p className="mt-5 text-sm text-white/60">Nel piano gratuito il coach risponde a un numero limitato di messaggi a settimana. Con Premium, senza limiti.</p>
-            <a href="/coach-ai" className="btn-primary mt-6">Scopri il coach</a>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href="/coach-ai" className="btn-primary">Scopri il coach</a>
+              <a href="/calorie" className="btn border-[1.5px] border-white/25 text-white hover:border-white">Calorie da una foto</a>
+            </div>
           </div>
           <div className="mx-auto w-[min(280px,70vw)]">
             <AppShot name="coach-kettlebell" alt="Chat con il Coach AI di Hypemove: un allenamento con il kettlebell creato su richiesta" className="drop-shadow-[0_28px_40px_rgba(0,0,0,0.5)]" />
