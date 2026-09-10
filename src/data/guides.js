@@ -1,7 +1,26 @@
 // Elenco delle guide: alimenta la pagina /guide, il footer, la home, la sitemap e llms.txt.
 // `image` è il nome base in /images/opt (versioni 480/800/1200). Le date sono quelle vere
 // dell'ultima modifica sostanziale: aggiornarle quando si tocca il testo.
+import { articoli } from "./articoli.js";
+
+// Le guide "a dati" (src/data/articoli.js) entrano qui in automatico.
+const daArticoli = articoli.map((a) => ({
+  title: a.title,
+  href: `/${a.slug}`,
+  category: a.category,
+  readTime: a.readTime,
+  description: a.description,
+  tags: [],
+  image: a.image,
+  imageKind: a.imageKind,
+  imageAlt: a.imageAlt,
+  published: a.published,
+  modified: a.modified,
+  featuredHome: ["quanti-minuti-di-esercizio-al-giorno", "allenamento-e-alimentazione-da-dove-iniziare"].includes(a.slug),
+}));
+
 export const guides = [
+  ...daArticoli,
   {
     title: "Come essere costanti nell'allenamento",
     href: "/come-essere-costanti-nell-allenamento",
@@ -39,7 +58,7 @@ export const guides = [
     imageAlt: "Donna che si allena a casa con workout per principianti",
     published: "2026-04-19",
     modified: "2026-09-08",
-    featuredHome: true,
+    featuredHome: false,
   },
   {
     title: "Workout 10 minuti a casa",
@@ -84,4 +103,6 @@ export const guides = [
 
 export const guideCategories = Array.from(new Set(guides.map((guide) => guide.category)));
 export const guideFooterLinks = guides.map(({ title, href }) => ({ title, href }));
-export const homeGuideCards = guides.filter((guide) => guide.featuredHome).slice(0, 3);
+// In home: costanza, mini workout, quanti minuti (ordine voluto).
+const homeOrder = ["/come-essere-costanti-nell-allenamento", "/quanti-minuti-di-esercizio-al-giorno", "/allenamento-e-alimentazione-da-dove-iniziare"];
+export const homeGuideCards = homeOrder.map((href) => guides.find((guide) => guide.href === href)).filter(Boolean);

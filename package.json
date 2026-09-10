@@ -12,7 +12,8 @@
     "check": "node scripts/check-site.mjs",
     "images": "node scripts/optimize-images.mjs && node scripts/crop-play-screenshots.mjs",
     "og": "node scripts/og-images.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "indexnow": "node scripts/indexnow.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.79.0",

@@ -34,7 +34,7 @@ export const homeFaqs = [
 export const meta = {
   title: "Hypemove: app fitness per tornare a muoverti, a casa",
   description:
-    "App fitness gratuita per Android: allenamenti guidati da 5 a 15 minuti a casa, percorso a tappe, 400+ esercizi con video e Coach AI. Per chi fatica a essere costante.",
+    "App fitness gratuita: allenamenti guidati da 5 a 15 minuti a casa, percorso a tappe scritto da un chinesiologo, 400+ esercizi con video e Coach AI. Per chi fatica a essere costante.",
   ogImage: `${SITE_URL}/images/og/home.jpg`,
   ogImageAlt: "Hypemove: torna a muoverti, questa volta per davvero",
   type: "website",
@@ -49,18 +49,18 @@ export const meta = {
 const objections = [
   {
     q: "Non ho tempo",
-    title: "Una tappa dura quanto un caffè",
-    text: "Scegli tu tra 5, 10 e 15 minuti. Nei giorni pieni fai la versione corta, e conta lo stesso.",
+    title: "Bastano 5 minuti",
+    text: "Scegli tu tra 5, 10 e 15 minuti. Nei giorni pieni fai la versione corta: conta lo stesso.",
   },
   {
     q: "Ho sempre mollato",
-    title: "Niente da decidere, niente da perdere",
-    text: "Apri l'app e trovi la tappa di oggi. Se salti un giorno non ricominci da zero: conta la settimana, non la perfezione.",
+    title: "Apri l'app e sai cosa fare",
+    text: "Trovi la tappa di oggi, non un catalogo da sfogliare. Se salti un giorno non ricominci da zero: conta la settimana, non la perfezione.",
   },
   {
     q: "Non sono da palestra",
-    title: "Si fa in salotto, come sei",
-    text: "A corpo libero o con quello che hai in casa. Ogni esercizio ha il video, e se hai un dubbio lo chiedi al coach.",
+    title: "Niente palestra, niente da comprare",
+    text: "Ti alleni in salotto, a corpo libero o con quello che hai in casa. Ogni esercizio ha il video, e se hai un dubbio lo chiedi al coach.",
   },
 ];
 
@@ -71,6 +71,7 @@ const facts = [
   ["Oltre 400 esercizi con video", "a corpo libero o con manubri, elastici, sedia, kettlebell"],
   ["Percorso a tappe", "una al giorno, senza pianificare niente"],
   ["Coach AI in chat", "spiega gli esercizi e adatta il programma"],
+  ["Calorie da una foto", "fotografi il piatto, lui segna proteine, carboidrati, grassi e calorie"],
   ["Punti, giorni di fila, baule dei premi, classifica", "il progresso si vede"],
   ["Android, gratis", "iPhone in arrivo"],
 ];
@@ -82,7 +83,7 @@ export default function Home() {
       <section className="px-5 pb-10 pt-8 sm:px-7 sm:pt-12 lg:pb-8 lg:pt-10">
         <div className="mx-auto grid max-w-site items-center gap-8 md:grid-cols-[1.2fr_0.8fr] md:gap-12">
           <div>
-            <div className="kicker">App fitness per Android · Gratis</div>
+            <div className="kicker">App fitness gratuita</div>
             <h1 className="mt-3 text-[3.4rem] leading-[0.9] sm:text-7xl lg:text-[4.75rem]">
               Torna a muoverti.
               <br />
@@ -192,7 +193,10 @@ export default function Home() {
               ))}
             </ul>
             <p className="mt-5 text-sm text-white/60">Nel piano gratuito il coach risponde a un numero limitato di messaggi a settimana. Con Premium, senza limiti.</p>
-            <a href="/coach-ai" className="btn-primary mt-6">Scopri il coach</a>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href="/coach-ai" className="btn-primary">Scopri il coach</a>
+              <a href="/calorie" className="btn border-[1.5px] border-white/25 text-white hover:border-white">Calorie da una foto</a>
+            </div>
           </div>
           <div className="mx-auto w-[min(280px,70vw)]">
             <AppShot name="coach-kettlebell" alt="Chat con il Coach AI di Hypemove: un allenamento con il kettlebell creato su richiesta" className="drop-shadow-[0_28px_40px_rgba(0,0,0,0.5)]" />
@@ -254,8 +258,8 @@ export default function Home() {
           <SectionHead variant="stack" kicker="Chi c'è dietro" title="Due persone, un'app che stiamo costruendo in pubblico." sub="Hypemove nasce in Italia da un'idea semplice: il movimento deve stare dentro la vita vera, non il contrario." />
           <div className="grid gap-3">
             {[
-              ["M", "Mattia Carlisi", "Founder. Prodotto e marketing. Racconta il percorso su LinkedIn."],
-              ["D", "Danilo", "Sviluppo. Tutto quello che vedi nell'app passa dalle sue mani."],
+              ["M", "Mattia Carlisi", "Chinesiologo. Gli allenamenti e il percorso li scrive lui."],
+              ["D", "Danilo", "Sviluppatore. Costruisce l'app, dal percorso al coach."],
             ].map(([initial, name, role]) => (
               <div key={name} className="flex items-center gap-4 rounded-2xl border-[1.5px] border-rule p-4">
                 <span className="inline-flex h-14 w-14 flex-none items-center justify-center rounded-full bg-surface font-display text-2xl font-extrabold text-orange" aria-hidden="true">{initial}</span>

@@ -8,6 +8,9 @@ import Confronto, { ConfrontiIndex, confrontoMeta, indexMeta as confrontiIndexMe
 import Iphone, { IphoneGrazie, meta as iphoneMeta, grazieMeta } from "./pages/Iphone.jsx";
 import NotFound, { meta as notFoundMeta } from "./pages/NotFound.jsx";
 import Guide, { meta as guideMeta } from "./pages/Guide.jsx";
+import Articolo, { articoloMeta } from "./pages/Articolo.jsx";
+import Calorie, { meta as calorieMeta } from "./pages/Calorie.jsx";
+import { articoli } from "./data/articoli.js";
 import AllenamentoACasa, { meta as allenamentoMeta } from "./pages/AllenamentoACasa.jsx";
 import AppFitnessPrincipianti, { meta as principiantiMeta } from "./pages/AppFitnessPrincipianti.jsx";
 import BeneficiCamminataTempo, { meta as camminataMeta } from "./pages/BeneficiCamminataTempo.jsx";
@@ -34,7 +37,9 @@ export const routes = [
   { path: "/chi-siamo", Component: ChiSiamo, meta: chiSiamoMeta },
   { path: "/confronti", Component: ConfrontiIndex, meta: confrontiIndexMeta },
   ...confronti.map((item) => ({ path: `/confronti/${item.slug}`, Component: Confronto, props: { item }, meta: confrontoMeta(item) })),
+  { path: "/calorie", Component: Calorie, meta: calorieMeta },
   { path: "/guide", Component: Guide, meta: guideMeta },
+  ...articoli.map((article) => ({ path: `/${article.slug}`, Component: Articolo, props: { article }, meta: articoloMeta(article) })),
   { path: "/come-essere-costanti-nell-allenamento", Component: CostanzaAllenamento, meta: costanzaMeta },
   { path: "/mini-workout-efficaci", Component: MiniWorkoutEfficaci, meta: miniMeta },
   { path: "/app-fitness-principianti", Component: AppFitnessPrincipianti, meta: principiantiMeta },

@@ -9,6 +9,7 @@ export const PLAY_APP_ID = "pt.app";
 export const SUPPORT_EMAIL = "ciao@hypemove.app";
 export const INSTAGRAM_URL = "https://www.instagram.com/hypemoveapp";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/hypemove";
+export const MATTIA_LINKEDIN_URL = "https://www.linkedin.com/in/mattia-carlisi-095036239/";
 
 // Fatti da tenere identici su sito, scheda Play, ads e social (le AI confrontano le fonti).
 export const FACTS = {
@@ -28,7 +29,7 @@ export const PRICES = {
 
 // La frase che descrive Hypemove: la stessa in home, llms.txt e dati strutturati.
 export const DEFINITION =
-  "Hypemove è un'app di fitness per Android, gratuita, con allenamenti guidati da 5 a 15 minuti da fare a casa, a corpo libero o con quello che hai in casa. Ha un percorso a tappe che avanza con te, un catalogo di oltre 400 esercizi con video, un Coach AI in chat e un sistema di punti, giorni di fila e classifica mensile. È pensata per chi parte da zero o ricomincia dopo tanto tempo e fatica a essere costante, non per atleti o per chi cerca schede avanzate.";
+  "Hypemove è un'app di fitness gratuita (Android, iPhone in arrivo) con allenamenti guidati da 5 a 15 minuti da fare a casa, a corpo libero o con quello che hai in casa. Ha un percorso a tappe che avanza con te, un catalogo di oltre 400 esercizi con video, un Coach AI in chat e un sistema di punti, giorni di fila e classifica mensile. Gli allenamenti li scrive un chinesiologo. È pensata per chi parte da zero o ricomincia dopo tanto tempo e fatica a essere costante, non per atleti o per chi cerca schede avanzate.";
 
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/images/og/home.jpg`;
 
@@ -48,8 +49,8 @@ export function baseGraph() {
       logo: { "@type": "ImageObject", url: `${SITE_URL}/images/logo1.png`, width: 512, height: 512 },
       email: SUPPORT_EMAIL,
       founder: [
-        { "@type": "Person", name: "Mattia Carlisi", jobTitle: "Founder, prodotto e marketing" },
-        { "@type": "Person", name: "Danilo", jobTitle: "Sviluppo" },
+        { "@type": "Person", name: "Mattia Carlisi", jobTitle: "Chinesiologo e founder", sameAs: [MATTIA_LINKEDIN_URL] },
+        { "@type": "Person", name: "Danilo", jobTitle: "Sviluppatore" },
       ],
       areaServed: "IT",
       sameAs: [PLAY_STORE_URL, INSTAGRAM_URL, LINKEDIN_URL],

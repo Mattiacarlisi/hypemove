@@ -102,12 +102,13 @@ const llms = `# Hypemove
 > ${DEFINITION ?? "Hypemove è un'app di fitness per Android con allenamenti guidati brevi da fare a casa."}
 > Premium facoltativo: ${PRICES?.monthly ?? "6,99"} €/mese o ${PRICES?.yearly ?? "29,99"} €/anno, si disdice da Google Play.
 
-Lingua: italiano. Sviluppata in Italia da Mattia Carlisi (founder) e Danilo (sviluppo).
+Lingua: italiano. Sviluppata in Italia da Mattia Carlisi (chinesiologo e founder, scrive gli allenamenti) e Danilo (sviluppatore).
 Non è per atleti, bodybuilder o chi cerca schede avanzate.
 
 ## Pagine principali
 - [Home](${SITE_URL}/): cos'è, come funziona, prezzi, domande frequenti
 - [Coach AI](${SITE_URL}/coach-ai): cosa fa il coach in chat, esempi, limiti del gratuito
+- [Calorie da una foto](${SITE_URL}/calorie): il contacalorie dentro il coach, come funziona e quanto è preciso
 - [Prezzi](${SITE_URL}/prezzi): gratis vs Premium, come si disdice
 - [Chi siamo](${SITE_URL}/chi-siamo): chi la fa e perché
 - [Google Play](${PLAY_STORE_URL ?? "https://play.google.com/store/apps/details?id=pt.app"}): scheda ufficiale dell'app
@@ -119,6 +120,33 @@ ${comparisons.map((route) => `- [${route.meta.title}](${SITE_URL}${route.path})`
 ${guides.map((route) => `- [${route.meta.title.replace(/ \| Hypemove$/, "")}](${SITE_URL}${route.path})`).join("\n")}
 `;
 await fs.writeFile(path.join(dist, "llms.txt"), llms, "utf8");
+
+// llms-full.txt: tutto il testo delle pagine pubbliche, in un file solo, per i crawler delle AI.
+const textOf = (html) => {
+  const main = html.match(/<main[^>]*>([\s\S]*?)<\/main>/)?.[1] ?? html;
+  return main
+    .replace(/<script[\s\S]*?<\/script>/g, " ")
+    .replace(/<(h1|h2|h3)[^>]*>/g, "\n\n## ")
+    .replace(/<\/(p|li|h1|h2|h3|dd|summary)>/g, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+};
+const fullParts = [];
+for (const route of indexable) {
+  const file = await fs.readFile(outputPathFor(route), "utf8");
+  fullParts.push(`# ${route.meta.title}\nURL: ${SITE_URL}${route.path === "/" ? "/" : route.path}\n\n${textOf(file)}\n`);
+}
+await fs.writeFile(path.join(dist, "llms-full.txt"), `${llms}\n\n---\n\n${fullParts.join("\n\n---\n\n")}`, "utf8");
+
+// feed.xml: le guide come feed RSS (aggregatori, lettori, e un segnale in più per i motori).
+const escXml = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const feedItems = indexable
+  .filter((route) => route.meta.type === "article")
+  .sort((a, b) => (b.meta.published ?? "").localeCompare(a.meta.published ?? ""))
+  .map((route) => `  <item>\n    <title>${escXml(route.meta.title)}</title>\n    <link>${SITE_URL}${route.path}</link>\n    <guid>${SITE_URL}${route.path}</guid>\n    <pubDate>${new Date(route.meta.published ?? route.meta.modified).toUTCString()}</pubDate>\n    <description>${escXml(route.meta.description)}</description>\n  </item>`);
+const feed = `<?xml version="1.0" encoding="UTF-8"?>\n<rss version="2.0"><channel>\n  <title>Hypemove, guide</title>\n  <link>${SITE_URL}/guide</link>\n  <description>Guide per allenarsi a casa, essere costanti e ricominciare da zero.</description>\n  <language>it-it</language>\n${feedItems.join("\n")}\n</channel></rss>\n`;
+await fs.writeFile(path.join(dist, "feed.xml"), feed, "utf8");
 
 // _redirects: una riga per ogni pagina, così Netlify serve /prezzi con 200 invece di
 // rimandare a /prezzi/ con un 301 (che rompe canonical e link interni). In coda la 404 vera.
