@@ -483,7 +483,7 @@ export default function BeneficiCamminataTempo() {
 
               <div className="grid gap-3">
                 <CtaButton location="guide_benefici_camminata_android">Scarica Hypemove per Android</CtaButton>
-                <a href="/iphone" className="btn-ghost">Hai un iPhone? Avvisami</a>
+                <a href="/iphone" className="btn-ghost">Hai un iPhone? Installa la prova</a>
               </div>
             </div>
           </div>

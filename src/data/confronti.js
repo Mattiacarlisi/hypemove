@@ -17,12 +17,12 @@ export const confronti = [
       ["Coach", "Video con trainer, nessun dialogo", "Coach AI in chat: cambia gli esercizi e la durata su richiesta"],
       ["Motivazione", "Traguardi e badge", "Punti, giorni di fila, baule dei premi, classifica mensile"],
       ["Prezzo", "Gratuita", "Gratuita, Premium facoltativo"],
-      ["Piattaforme", "Android e iPhone", "Android (iPhone in arrivo)"],
+      ["Piattaforme", "Android e iPhone", "Android e iPhone, su iPhone la versione di prova con TestFlight"],
     ],
     them: [
       "Ti alleni già e vuoi varietà: yoga, forza, mobilità, cardio, lunghi e corti.",
       "Ti piace scegliere tu cosa fare ogni giorno.",
-      "Hai un iPhone e vuoi un'app oggi.",
+      "Preferisci scaricare dall'App Store invece che da una versione di prova.",
     ],
     us: [
       "Hai già scaricato app piene di allenamenti e non le hai mai aperte una seconda volta.",
@@ -49,12 +49,12 @@ export const confronti = [
       ["Attrezzi", "A corpo libero", "A corpo libero o con quello che hai in casa"],
       ["Coach", "Nessuno", "Coach AI in chat"],
       ["Prezzo", "Base gratuita, abbonamento a pagamento per tutto il resto", "Gratuita, Premium facoltativo"],
-      ["Piattaforme", "Android e iPhone", "Android (iPhone in arrivo)"],
+      ["Piattaforme", "Android e iPhone", "Android e iPhone, su iPhone la versione di prova con TestFlight"],
     ],
     them: [
       "Vuoi esattamente sette minuti, sempre gli stessi, con un timer e basta.",
       "Ti motivano le sfide a giorni consecutivi senza eccezioni.",
-      "Hai un iPhone.",
+      "Vuoi un'app già pubblicata sull'App Store, senza passare da TestFlight.",
     ],
     us: [
       "Vuoi vedere come si fa un esercizio, non solo un disegno.",
@@ -81,7 +81,7 @@ export const confronti = [
       ["Per chi parte da zero", "Si può, ma il tono è da atleta", "È il pubblico per cui è nata"],
       ["Motivazione", "Community e classifiche competitive", "Punti, giorni di fila, baule dei premi, classifica mensile leggera"],
       ["Prezzo", "Funzioni base gratuite, il coach è a pagamento", "Gratuita, Premium facoltativo"],
-      ["Piattaforme", "Android e iPhone", "Android (iPhone in arrivo)"],
+      ["Piattaforme", "Android e iPhone", "Android e iPhone, su iPhone la versione di prova con TestFlight"],
     ],
     them: [
       "Ti alleni già e vuoi spingere: sudore, risultati misurabili, sfide.",

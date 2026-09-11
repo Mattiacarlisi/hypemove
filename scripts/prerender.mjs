@@ -15,7 +15,7 @@ const SITE_URL = "https://hypemove.app";
 const SITE_NAME = "Hypemove";
 const INDEXABLE = "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
 
-const { render, routes, baseGraph, DEFINITION, PRICES, PLAY_STORE_URL } = await import(pathToFileURL(serverEntry).href);
+const { render, routes, baseGraph, DEFINITION, PRICES, PLAY_STORE_URL, TESTFLIGHT_URL } = await import(pathToFileURL(serverEntry).href);
 
 const template = await fs.readFile(templatePath, "utf8");
 if (!template.includes("<!--SEO-->") || !template.includes('<div id="root"></div>')) {
@@ -111,7 +111,9 @@ Non è per atleti, bodybuilder o chi cerca schede avanzate.
 - [Calorie da una foto](${SITE_URL}/calorie): il contacalorie dentro il coach, come funziona e quanto è preciso
 - [Prezzi](${SITE_URL}/prezzi): gratis vs Premium, come si disdice
 - [Chi siamo](${SITE_URL}/chi-siamo): chi la fa e perché
-- [Google Play](${PLAY_STORE_URL ?? "https://play.google.com/store/apps/details?id=pt.app"}): scheda ufficiale dell'app
+- [iPhone](${SITE_URL}/iphone): come si installa la versione di prova su iPhone
+- [Google Play](${PLAY_STORE_URL ?? "https://play.google.com/store/apps/details?id=pt.app"}): scheda ufficiale dell'app, Android
+- [TestFlight](${TESTFLIGHT_URL ?? "https://testflight.apple.com/join/S6ZexeTD"}): versione di prova per iPhone, non è ancora sull'App Store
 
 ## Confronti con altre app
 ${comparisons.map((route) => `- [${route.meta.title}](${SITE_URL}${route.path})`).join("\n")}

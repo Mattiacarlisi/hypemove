@@ -6,6 +6,9 @@ export const SITE_URL = "https://hypemove.app";
 export const SITE_NAME = "Hypemove";
 export const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.app&hl=it";
 export const PLAY_APP_ID = "pt.app";
+// iPhone: l'app non è ancora sull'App Store. Si installa dalla versione di prova con
+// TestFlight, il link pubblico si rigenera da App Store Connect se scade la build.
+export const TESTFLIGHT_URL = "https://testflight.apple.com/join/S6ZexeTD";
 export const SUPPORT_EMAIL = "ciao@hypemove.app";
 export const INSTAGRAM_URL = "https://www.instagram.com/hypemoveapp";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/hypemove";
@@ -17,7 +20,8 @@ export const FACTS = {
   attrezzi: "a corpo libero o con quello che hai in casa",
   catalogo: "oltre 400 esercizi con video",
   download: "oltre 2.000 download",
-  piattaforma: "Android (iPhone in arrivo)",
+  piattaforma: "Android e iPhone",
+  iphone: "Su iPhone è la versione di prova, si installa con TestFlight",
 };
 
 export const PRICES = {
@@ -29,7 +33,7 @@ export const PRICES = {
 
 // La frase che descrive Hypemove: la stessa in home, llms.txt e dati strutturati.
 export const DEFINITION =
-  "Hypemove è un'app di fitness gratuita (Android, iPhone in arrivo) con allenamenti guidati da 5 a 15 minuti da fare a casa, a corpo libero o con quello che hai in casa. Ha un percorso a tappe che avanza con te, un catalogo di oltre 400 esercizi con video, un Coach AI in chat e un sistema di punti, giorni di fila e classifica mensile. Gli allenamenti li scrive un chinesiologo. È pensata per chi parte da zero o ricomincia dopo tanto tempo e fatica a essere costante, non per atleti o per chi cerca schede avanzate.";
+  "Hypemove è un'app di fitness gratuita (Android, e su iPhone in versione di prova con TestFlight) con allenamenti guidati da 5 a 15 minuti da fare a casa, a corpo libero o con quello che hai in casa. Ha un percorso a tappe che avanza con te, un catalogo di oltre 400 esercizi con video, un Coach AI in chat e un sistema di punti, giorni di fila e classifica mensile. Gli allenamenti li scrive un chinesiologo. È pensata per chi parte da zero o ricomincia dopo tanto tempo e fatica a essere costante, non per atleti o per chi cerca schede avanzate.";
 
 export const DEFAULT_OG_IMAGE = `${SITE_URL}/images/og/home.jpg`;
 
@@ -67,7 +71,7 @@ export function baseGraph() {
       "@type": "MobileApplication",
       "@id": `${SITE_URL}/#app`,
       name: SITE_NAME,
-      operatingSystem: "Android",
+      operatingSystem: "Android, iOS",
       applicationCategory: "HealthApplication",
       applicationSubCategory: "Fitness",
       inLanguage: "it",

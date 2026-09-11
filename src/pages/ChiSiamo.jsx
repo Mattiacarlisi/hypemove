@@ -46,7 +46,7 @@ export default function ChiSiamo() {
           <h2>Come lavoriamo</h2>
           <p>Piccoli, con budget limitato, con le persone che usano l'app come prima fonte di verità. Facciamo interviste, leggiamo ogni messaggio che arriva a <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>, e cambiamo l'app in base a quello che vediamo, non a quello che ci piacerebbe vedere. Se qualcosa non funziona lo diciamo, anche in pubblico.</p>
           <h2>Dove siamo</h2>
-          <p>Hypemove è sviluppata in Italia ed è disponibile su Google Play. La versione per iPhone è in lavorazione: se ne hai uno, <a href="/iphone">lasciaci la mail</a> e ti avvisiamo.</p>
+          <p>Hypemove è sviluppata in Italia ed è disponibile su Google Play. Su iPhone c'è la versione di prova: si installa con TestFlight dalla <a href="/iphone">pagina iPhone</a>.</p>
         </div>
       </Section>
 

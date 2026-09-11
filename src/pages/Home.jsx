@@ -1,5 +1,5 @@
 import React from "react";
-import { AppShot, Faq, Layout, PlayButton, Section, SectionHead } from "../components/Layout.jsx";
+import { AppShot, Faq, IphoneButton, Layout, PlayButton, Section, SectionHead } from "../components/Layout.jsx";
 import { homeGuideCards } from "../data/guides.js";
 import { DEFINITION, FACTS, PRICES, SITE_URL, breadcrumb, faqSchema } from "../site.js";
 
@@ -27,7 +27,7 @@ export const homeFaqs = [
   },
   {
     q: "C'è per iPhone?",
-    a: "Non ancora. Oggi Hypemove è su Android. Lasciaci la mail nella pagina iPhone e ti avvisiamo quando arriva.",
+    a: "Sì, nella versione di prova. Non è ancora sull'App Store: si installa gratis con TestFlight, ci vogliono due minuti. Il link e i passaggi sono nella pagina iPhone.",
   },
 ];
 
@@ -73,7 +73,7 @@ const facts = [
   ["Coach AI in chat", "spiega gli esercizi e adatta il programma"],
   ["Calorie da una foto", "fotografi il piatto, lui segna proteine, carboidrati, grassi e calorie"],
   ["Punti, giorni di fila, baule dei premi, classifica", "il progresso si vede"],
-  ["Android, gratis", "iPhone in arrivo"],
+  ["Android e iPhone, gratis", "su iPhone è la versione di prova, si installa con TestFlight"],
 ];
 
 export default function Home() {
@@ -94,7 +94,7 @@ export default function Home() {
             </p>
             <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
               <PlayButton location="hero" />
-              <a href="/iphone" className="btn-ghost">Hai un iPhone? Avvisami</a>
+              <a href="/iphone" className="btn-ghost">Hai un iPhone? Installa la prova</a>
             </div>
           </div>
           <div className="relative mx-auto w-[min(280px,70vw)] md:w-full md:max-w-[280px] lg:max-w-[300px]">
@@ -301,10 +301,11 @@ export default function Home() {
           <div className="kicker">Scarica gratis</div>
           <h2 className="h-section mx-auto mt-3 max-w-[20ch]">Il primo allenamento lo fai oggi.</h2>
           <p className="mx-auto mt-4 max-w-[46ch] text-lg text-ink-2">Scarichi, dici il tuo obiettivo, e la prima tappa è lì. Gratis, senza carta.</p>
-          <div className="mt-7 flex justify-center">
+          <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
             <PlayButton location="final_cta" />
+            <IphoneButton location="final_cta" />
           </div>
-          <p className="mt-4 text-sm text-ink-2">{FACTS.piattaforma}. <a href="/iphone" className="font-bold underline underline-offset-2">Avvisami per iPhone</a></p>
+          <p className="mt-4 text-sm text-ink-2">{FACTS.iphone}. <a href="/iphone" className="font-bold underline underline-offset-2">Come si fa</a></p>
         </div>
       </Section>
     </Layout>

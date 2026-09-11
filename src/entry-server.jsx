@@ -23,7 +23,7 @@ import Open from "./pages/Open.jsx";
 import { confronti } from "./data/confronti.js";
 
 // Esportati per scripts/prerender.mjs (che legge solo questo modulo compilato).
-export { baseGraph, DEFINITION, PRICES, PLAY_STORE_URL } from "./site.js";
+export { baseGraph, DEFINITION, PRICES, PLAY_STORE_URL, TESTFLIGHT_URL } from "./site.js";
 
 // Registro di tutte le pagine del sito. `hydrate: true` solo per le pagine che hanno bisogno
 // di JavaScript nel browser (reset password, disiscrizione, redirect /open): tutte le altre

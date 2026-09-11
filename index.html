@@ -110,16 +110,17 @@
           });
         }
 
-        // Click sui bottoni "Scarica": evento GA4 download_android_click, poi navigazione
+        // Click sui bottoni "Scarica": evento GA4 download_android_click o download_iphone_click,
+        // poi navigazione (Play Store per Android, TestFlight per iPhone)
         document.addEventListener('click', function (event) {
-          var link = event.target.closest('a[data-track="android"]');
+          var link = event.target.closest('a[data-track="android"], a[data-track="iphone"]');
           if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           if (typeof window.gtag !== 'function') return;
           event.preventDefault();
           var done = false;
           function go() { if (done) return; done = true; window.location.assign(link.href); }
           var timer = setTimeout(go, 600);
-          gtag('event', 'download_android_click', {
+          gtag('event', 'download_' + link.getAttribute('data-track') + '_click', {
             button_text: (link.textContent || '').trim(),
             location: link.getAttribute('data-location') || document.body.dataset.page || location.pathname,
             event_callback: function () { clearTimeout(timer); go(); },

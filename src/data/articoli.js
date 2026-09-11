@@ -442,7 +442,7 @@ export const articoli = [
       {
         h2: "Hypemove",
         p: [
-          "Gratis: il percorso a tappe, tutti gli allenamenti da 5 a 15 minuti con i video degli esercizi, punti, giorni di fila e premi, e il Coach AI con un numero limitato di messaggi a settimana. Premium facoltativo per il percorso che si adatta e il coach senza limiti. Oggi su Android, iPhone in arrivo.",
+          "Gratis: il percorso a tappe, tutti gli allenamenti da 5 a 15 minuti con i video degli esercizi, punti, giorni di fila e premi, e il Coach AI con un numero limitato di messaggi a settimana. Premium facoltativo per il percorso che si adatta e il coach senza limiti. Oggi su Android, e su iPhone nella versione di prova con TestFlight.",
           "Per chi: parti da zero o riparti dopo tanto, hai poco tempo, hai già mollato altre app e non vuoi decidere niente. Per chi no: atleti, chi cerca schede avanzate, chi ama le sessioni da un'ora. Gli allenamenti li scrive un chinesiologo.",
         ],
       },

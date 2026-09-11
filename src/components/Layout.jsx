@@ -1,5 +1,5 @@
 import React from "react";
-import { PLAY_STORE_URL, SUPPORT_EMAIL, INSTAGRAM_URL, LINKEDIN_URL } from "../site.js";
+import { PLAY_STORE_URL, TESTFLIGHT_URL, SUPPORT_EMAIL, INSTAGRAM_URL, LINKEDIN_URL } from "../site.js";
 import { guides } from "../data/guides.js";
 
 // Componenti condivisi da tutte le pagine pubbliche. Nessuno stato React: le pagine
@@ -19,6 +19,20 @@ export function PlayButton({ className = "btn-primary", location, children = "Sc
     <a href={PLAY_STORE_URL} className={className} data-track="android" data-location={location} rel="noopener">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
         <path d="M3.6 2.4 13.3 12 3.6 21.6c-.4-.2-.6-.7-.6-1.2V3.6c0-.5.2-1 .6-1.2zm11.1 11 2.6 2.6-9.9 5.7c-.5.3-1 .3-1.5.1l8.8-8.4zm0-2.8L5.9 2.2c.5-.2 1-.2 1.5.1l9.9 5.7-2.6 2.6zm4.1 1.4c.6.3 1 .8 1 1.4 0 .6-.4 1.1-1 1.4l-2.3 1.3-2.9-2.7 2.9-2.7 2.3 1.3z" />
+      </svg>
+      {children}
+    </a>
+  );
+}
+
+// iPhone: porta alla versione di prova su TestFlight. Niente logo Apple, solo la sagoma
+// di un telefono: il marchio non è nostro e non serve a far capire il bottone.
+export function IphoneButton({ className = "btn-ghost", location, children = "Installa su iPhone con TestFlight" }) {
+  return (
+    <a href={TESTFLIGHT_URL} className={className} data-track="iphone" data-location={location} rel="noopener">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+        <rect x="6.5" y="2" width="11" height="20" rx="3" />
+        <path d="M10.5 18.6h3" strokeLinecap="round" />
       </svg>
       {children}
     </a>
@@ -111,7 +125,7 @@ export function SiteFooter() {
             <a href={LINKEDIN_URL} rel="noopener" className="text-ink-2 hover:text-ink">LinkedIn</a>
           </div>
         </div>
-        <FooterCol title="Prodotto" links={[["Come funziona", "/#come-funziona"], ["Coach AI", "/coach-ai"], ["Calorie da una foto", "/calorie"], ["Prezzi", "/prezzi"], ["Chi siamo", "/chi-siamo"], ["Hai un iPhone?", "/iphone"]]} />
+        <FooterCol title="Prodotto" links={[["Come funziona", "/#come-funziona"], ["Coach AI", "/coach-ai"], ["Calorie da una foto", "/calorie"], ["Prezzi", "/prezzi"], ["Chi siamo", "/chi-siamo"], ["Hypemove per iPhone", "/iphone"]]} />
         <FooterCol
           title="Guide e confronti"
           links={[
@@ -124,7 +138,7 @@ export function SiteFooter() {
       </div>
       <div className="mx-auto flex max-w-site flex-col gap-2 px-5 pb-8 text-xs text-ink-3 sm:flex-row sm:justify-between sm:px-7">
         <span>© {new Date().getFullYear()} Hypemove. Tutti i diritti riservati.</span>
-        <span>Google Play e il logo di Google Play sono marchi di Google LLC.</span>
+        <span>Google Play e il logo di Google Play sono marchi di Google LLC. TestFlight e App Store sono marchi di Apple Inc.</span>
       </div>
     </footer>
   );
