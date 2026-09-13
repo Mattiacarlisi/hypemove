@@ -109,6 +109,11 @@ const FUNNEL_LABELS = [
   'Inizio questionario (anonimo)',       // 19 · prima domanda vista dall'identità nel periodo
   'Onboarding completato (registrato)',  // 20 · di quelli, chi ha onboarding_complete (= mail confermata)
   'Regalo prova ricevuto',               // 21 · di quelli, chi ha visto la schermata dei 7 giorni
+  // 2026-09-13 — Il paywall di fine onboarding non esiste più (lo step 11, filtrato su
+  // source=onboarding_end, vale 0 su ogni sprint recente). Questo conta gli utenti UNICI che
+  // hanno visto un paywall, da qualsiasi punto: post-workout, fine trial, coach, shop. Chi lo
+  // rivede resta uno. Lo step 11 resta al suo posto per rileggere gli sprint chiusi.
+  'Vede il paywall (qualsiasi)',         // 22 · paywall_step_view · qualsiasi source · utenti unici
 ];
 
 // Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_v2, UNION user_events+anonymous_events).
