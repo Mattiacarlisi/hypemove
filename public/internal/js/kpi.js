@@ -7759,7 +7759,11 @@ function creativeAuditRow(reg, live, win) {
   return `
     <tr style="border-bottom:1px solid #111120;${warn ? 'background:#17130a' : ''}">
       <td style="padding:10px 12px;vertical-align:top;border-left:2px solid ${warn ? '#5a4318' : 'transparent'}">
-        <div class="creative-open" data-variant="${esc(reg.variant)}" title="Apri la scheda: quando compare, in che punto dell'app, cosa mostra" style="cursor:pointer">
+        <div class="creative-open" data-variant="${esc(reg.variant)}" title="Apri la scheda: quando compare, in che punto dell'app, cosa mostra" style="cursor:pointer;display:flex;gap:10px">
+          <img src="/internal/paywalls/${esc(reg.variant)}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png" alt="" loading="lazy"
+               onerror="this.style.display='none'"
+               style="width:42px;border-radius:6px;border:1px solid #1f1f33;flex-shrink:0;align-self:flex-start">
+        <div>
           <div style="font-weight:600;color:var(--fg);white-space:nowrap;display:flex;align-items:center;gap:7px">
             ${esc(reg.name)}
             <span title="${esc(win.current ? 'stato del codice oggi' : 'stato del codice OGGI, non di quei giorni')}" style="font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 5px">${win.current ? '' : 'oggi '}${rot.label}</span>
@@ -7768,7 +7772,8 @@ function creativeAuditRow(reg, live, win) {
           <div style="font-size:10px;color:var(--muted);margin-top:4px">${users || '—'} utent${users === 1 ? 'e' : 'i'}${srcs ? ` · <span style="font-family:var(--mono);font-size:9.5px">${srcs}</span>` : ''}</div>
           ${muta   ? `<div style="font-size:9.5px;color:#fbbf24;margin-top:3px">⚠️ il codice la dà viva, ma nessuno la vede da ${giorni === null ? 'sempre' : giorni + ' giorni'}</div>` : ''}
           ${zombie ? `<div style="font-size:9.5px;color:#fbbf24;margin-top:3px">⚠️ data per ritirata, ma esce ancora</div>` : ''}
-          <div style="font-size:9.5px;color:#60a5fa;margin-top:4px">quando e dove compare ›</div>
+          <div style="font-size:9.5px;color:#60a5fa;margin-top:4px">guarda le schermate ›</div>
+        </div>
         </div>
       </td>
       <td style="padding:8px 12px;vertical-align:middle">${creativeStepPath(reg, live)}</td>
@@ -7905,8 +7910,13 @@ function creativeModal() {
 
   const screensHtml = (reg.screens || []).map((s, i) => {
     const n = s.idx === undefined || s.idx === null ? null : usersByIdx[String(s.idx)];
+    const shot = `/internal/paywalls/${reg.variant}-${s.idx ?? i}.png`;
     return `
-      <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #15151f">
+      <div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #15151f">
+        <a href="${shot}" target="_blank" rel="noopener" title="Apri a schermo intero" style="flex-shrink:0;line-height:0">
+          <img src="${shot}" alt="" loading="lazy" onerror="this.parentElement.style.display='none'"
+               style="width:118px;border-radius:9px;border:1px solid #1f1f33;display:block">
+        </a>
         <div style="flex:1;min-width:0">
           <div style="font-size:12.5px;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
             ${s.idx === undefined || s.idx === null ? '' : `<span style="font-family:var(--mono);font-size:10px;color:#5a5a7a">step ${esc(s.idx)}</span>`}
@@ -7956,8 +7966,10 @@ function creativeModal() {
             ${screensHtml}` : ''}
 
           <div style="font-size:10px;color:#5a5a7a;margin-top:14px;line-height:1.6">
-            Per vederla davvero: menu Dev dell'app → <code style="font-family:var(--mono)">/dev/premium</code>, che monta ogni proposta
-            in anteprima senza emettere eventi e senza far pagare niente.
+            Le schermate qui sopra sono i componenti VERI dell'app, fotografati dal banco di posa
+            (<code style="font-family:var(--mono)">app/src/_gallery</code>): non sono mockup, e si riallineano da sole rilanciando
+            <code style="font-family:var(--mono)">node scripts/paywall-shots.mjs</code>. Dal vivo, col dito: menu Dev dell'app →
+            <code style="font-family:var(--mono)">/dev/premium</code>, che monta ogni proposta senza emettere eventi e senza far pagare niente.
           </div>
 
           <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:18px">
