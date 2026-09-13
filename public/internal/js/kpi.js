@@ -502,6 +502,8 @@ let state = {
   creativeModal: null,
   // Foto caricate a mano, per creatività: { [variant]: [{id, path, url, position}] }.
   shots: {}, shotsLoading: false, shotsError: null, shotsUploading: 0,
+  // Acquisti veri del periodo + attribuzione per ultimo tocco (kpi_paywall_purchases).
+  purchases: null, purchasesLoading: false, purchasesError: null, purchasesErrorTimeout: false,
   stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
   premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
   funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
@@ -7052,6 +7054,9 @@ function pagePremium() {
     <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
     ${premiumCreativesAuditCard()}
 
+    <!-- Chi ha pagato davvero nel periodo, e da quale proposta arriva -->
+    ${premiumPaywallPurchasesCard()}
+
     <!-- Coach Spot: il secondo atto del Giorno Zero, letto anche come creatività a sé -->
     ${premiumCoachSpotCard(d)}
     <!-- Creatività: quale paywall converte di più, col percorso step inline -->
@@ -7777,6 +7782,15 @@ function creativeAuditRow(reg, live, win) {
   const srcs = (live && live.sources || []).slice(0, 3)
     .map(s => `${esc(s.source)} <span style="color:#5a5a7a">${s.users}</span>`).join(' · ');
 
+  // Prova e incasso non vengono dagli eventi ma dai soldi, attribuiti per ultimo tocco: per
+  // questo stanno in due colonne a parte e non si cliccano — il dettaglio, nome per nome, è
+  // nella tabella degli acquisti qui sotto.
+  const conv = ((state.purchases && state.purchases.per_variant) || {})[reg.variant] || null;
+  const convCols = [
+    { v: conv ? conv.in_prova : 0, c: '#22d3ee', t: 'Prove in corso attribuite a questa proposta (ultimo tocco prima del pagamento)' },
+    { v: conv ? conv.paganti : 0,  c: '#4ade80', t: 'Paganti veri attribuiti a questa proposta (ultimo tocco prima del pagamento)' },
+  ].map(x => `<td title="${esc(x.t)}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${x.v > 0 ? x.c : 'var(--muted)'}">${x.v || '—'}</td>`).join('');
+
   const cols = CREATIVE_ACT_COLS.map(c => {
     const v = live && live.marks ? Number(live.marks[c.k] || 0) : 0;
     const open = v > 0
@@ -7806,7 +7820,7 @@ function creativeAuditRow(reg, live, win) {
         </div>
       </td>
       <td style="padding:8px 12px;vertical-align:middle">${creativeStepPath(reg, live)}</td>
-      ${cols}
+      ${cols}${convCols}
     </tr>`;
 }
 
@@ -7880,6 +7894,8 @@ function premiumCreativesAuditCard() {
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Cosa vede, schermata per schermata → dove si ferma</th>
               ${headerCols}
+              <th title="Prove in corso attribuite a questa proposta, per ultimo tocco prima del pagamento" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:#22d3ee">In prova</th>
+              <th title="Paganti veri attribuiti a questa proposta, per ultimo tocco prima del pagamento" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:#4ade80">Pagante</th>
             </tr>
           </thead>
           <tbody>${rows.map(r => creativeAuditRow(r, byVariant[r.variant], win)).join('')}</tbody>
@@ -8083,6 +8099,136 @@ function paywallShotsStrip(variant) {
                <strong style="color:var(--muted)">+ Aggiungi foto</strong>: puoi sceglierne più d'uno in una volta e riordinarli con le frecce.
                Sono la prova di cosa vede davvero l'utente — gli scatti automatici qui sotto vengono da un browser, non da un telefono.
              </div>`}
+    </div>`;
+}
+
+// ── GLI ACQUISTI DEL PERIODO, E DA DOVE ARRIVANO ─────────────────────────────
+// «Rolando è in prova da ieri, ma dove ha comprato?» — nel catalogo non compariva da nessuna
+// parte, perché l'evento dell'acquisto non porta il nome della creatività. La risposta però
+// esiste: il tocco sulla CTA ce l'ha, e succede pochi secondi prima del pagamento. Questa
+// tabella parte dai SOLDI (play_purchases, la stessa fonte dei riquadri in cima) e a ogni
+// acquisto attacca l'ultimo gesto su un paywall che dichiari una creatività.
+//
+// La forza dell'attribuzione si dichiara, invece di nasconderla: «forte» = il gesto che apre il
+// pagamento (tentativo, CTA, scelta piano), «debole» = solo l'ultima schermata che aveva davanti.
+// Un numero attribuito per indizio e uno per prova non sono la stessa cosa, e chi legge deve
+// poterlo sapere senza aprire il database.
+const PURCHASE_STATE_COLOR = {
+  'in prova': '#22d3ee',
+  'pagante':  '#4ade80',
+  'a rischio':'#f59e0b',
+  'finito':   'var(--muted)',
+};
+
+async function fetchPaywallPurchases() {
+  state.purchasesLoading = true; state.purchasesError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_paywall_purchases', {
+      inizio:  state.premiumFrom,
+      fine:    state.premiumTo,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.purchases = data || { acquisti: [], per_variant: {} };
+  } catch (e) {
+    state.purchasesError = e.message || 'Errore caricamento acquisti';
+    state.purchasesErrorTimeout = isRpcTimeout(e);
+  }
+  state.purchasesLoading = false;
+  render();
+}
+
+/** Nome umano di una creatività, dal catalogo; la chiave tecnica se non è in elenco. */
+function creativeName(variant) {
+  if (!variant) return '—';
+  if (variant === 'senza_attribuzione') return 'non attribuito';
+  const c = CREATIVE_REGISTRY.find(x => x.variant === variant);
+  return c ? c.name : variant;
+}
+
+function premiumPaywallPurchasesCard() {
+  const head = `
+    <div style="margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:3px">Gli acquisti del periodo · chi ha pagato, e da quale paywall</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        Si parte dai soldi — <code style="font-family:var(--mono)">play_purchases</code>, la stessa fonte dei riquadri in cima —
+        e a ogni acquisto si attacca l'ultimo gesto su un paywall che dichiari una creatività.
+        <strong style="color:var(--fg)">forte</strong> = il gesto che apre il pagamento (tentativo, CTA, scelta del piano) ·
+        <strong style="color:var(--fg)">debole</strong> = solo l'ultima schermata che aveva davanti, quindi un indizio ·
+        oltre le 24 ore non si attribuisce niente.
+      </div>
+    </div>`;
+
+  if (state.purchasesLoading && !state.purchases) {
+    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:22px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Cerco gli acquisti…</div></div>`;
+  }
+  if (state.purchasesError && !state.purchases) {
+    const box = state.purchasesErrorTimeout
+      ? sezioneTimeoutBox(state.purchasesError, 'fetchPaywallPurchases()')
+      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.purchasesError)}</div>`;
+    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
+  }
+
+  const rows = (state.purchases && state.purchases.acquisti) || [];
+  if (!rows.length) {
+    return `<div class="card" style="margin-bottom:16px">${head}
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun acquisto in questo periodo.</div></div>`;
+  }
+
+  const body = rows.map(r => {
+    const col = PURCHASE_STATE_COLOR[r.stato] || 'var(--fg)';
+    // Il ritardo si legge meglio a parole: «2 min prima» convince, «6 ore prima» molto meno, e
+    // un numero negativo vuol dire che l'evento è arrivato DOPO la riga del pagamento.
+    const min = r.minuti_prima;
+    const quando = min === null || min === undefined ? '—'
+      : min > 90  ? `${Math.round(min / 60)} h prima`
+      : min >= 0  ? `${min} min prima`
+      : `${Math.abs(min)} min dopo`;
+    const forzaCol = r.forza === 'forte' ? '#4ade80' : r.forza === 'debole' ? '#f59e0b' : '#ef4444';
+    return `
+      <tr style="border-bottom:1px solid #15151f">
+        <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.nome)}</td>
+        <td style="padding:9px 12px"><a href="mailto:${esc(r.email)}" style="color:#a78bfa;text-decoration:none">${esc(r.email)}</a></td>
+        <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.piano)}</td>
+        <td style="padding:9px 12px;font-family:var(--mono);color:var(--fg);white-space:nowrap">${r.prezzo != null ? '€ ' + r.prezzo : '—'}</td>
+        <td style="padding:9px 12px;font-weight:700;color:${col};white-space:nowrap">${esc(r.stato)}</td>
+        <td style="padding:9px 12px;color:var(--muted);white-space:nowrap;font-size:11px">${esc(r.quando)}</td>
+        <td style="padding:9px 12px;color:var(--muted);white-space:nowrap;font-size:11px">${esc(r.scadenza || '—')}</td>
+        <td style="padding:9px 12px;white-space:nowrap">
+          <span style="color:var(--fg);font-weight:600">${esc(creativeName(r.variant))}</span>
+          ${r.variant ? `<div style="font-size:9.5px;color:#5a5a7a;font-family:var(--mono)">${esc(r.variant)}</div>` : ''}
+        </td>
+        <td style="padding:9px 12px;white-space:nowrap" title="${esc((r.evento || 'nessun evento con creatività nelle 24 ore prima') + ' · ' + quando)}">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:${forzaCol};border:1px solid ${forzaCol}55;border-radius:4px;padding:1px 6px">${esc(r.forza)}</span>
+          <div style="font-size:9.5px;color:#5a5a7a;margin-top:2px">${esc(quando)}</div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:900px">
+          <thead>
+            <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Nome</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Email</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Piano</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Prezzo</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Dove si trova ADESSO: in prova = settimana gratis in corso · pagante = incasso vero">Stato</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Quando</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Scadenza</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Da quale paywall</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Quanto è solida l'attribuzione, e quanto tempo è passato fra il gesto e il pagamento">Attribuzione</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 
@@ -11075,6 +11221,7 @@ function attachEvents() {
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
       if (state.page === 'premium'    && !state.journeyData   && !state.journeyLoading)   fetchPaywallJourney();
       if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
+      if (state.page === 'premium'    && !state.purchases      && !state.purchasesLoading)      fetchPaywallPurchases();
       if (state.page === 'ai-coach') {
         if (!state.aiStatsData          && !state.aiStatsLoading)       fetchAIStats();
         if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
@@ -12704,6 +12851,7 @@ function attachEvents() {
     fetchPremium();
     fetchPaywallJourney();
     fetchCreativesAudit();
+    fetchPaywallPurchases();
   });
   document.getElementById('premium-apply')?.addEventListener('click', () => {
     const from   = document.getElementById('premium-from')?.value;
@@ -12719,12 +12867,14 @@ function attachEvents() {
     fetchPremium();
     fetchPaywallJourney();
     fetchCreativesAudit();
+    fetchPaywallPurchases();
   });
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
     state.premiumData = null;
     fetchPremium();
     fetchPaywallJourney();
     fetchCreativesAudit();
+    fetchPaywallPurchases();
   });
   // Percorso del paywall: cambio proposta (1° allenamento / dal 2° in poi) e click su un passo.
   document.querySelectorAll('.journey-chip').forEach(el =>
