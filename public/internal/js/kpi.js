@@ -7736,15 +7736,17 @@ function creativeStepPath(reg, live) {
   }).join('') + `</div>`;
 }
 
-function creativeAuditRow(reg, live) {
+function creativeAuditRow(reg, live, win) {
   const rot    = CREATIVE_ROTATION_META[reg.rotation] || CREATIVE_ROTATION_META.retired;
   const users  = live ? Number(live.users || 0) : 0;
   const lastAt = live && live.last_at ? new Date(live.last_at) : null;
-  const giorni = lastAt ? Math.floor((Date.now() - lastAt.getTime()) / 86400000) : null;
-  // Il disaccordo fra codice e dati è la cosa che vale la pena vedere: viva ma muta da più di
-  // una settimana, oppure ritirata ma ancora in giro.
-  const muta   = reg.rotation === 'live' && (giorni === null || giorni > 7);
-  const zombie = reg.rotation !== 'live' && giorni !== null && giorni <= 7;
+  // I giorni si contano dalla FINE del periodo scelto, non da oggi.
+  const giorni = lastAt ? Math.max(0, Math.floor((win.end - lastAt.getTime()) / 86400000)) : null;
+  // Il disaccordo fra codice e dati vale la pena vederlo solo mentre si guarda l'oggi: su uno
+  // sprint chiuso il `rotation` del registro descrive il codice di ADESSO, non quello di allora,
+  // e accendere d'ambra mezza tabella direbbe una cosa falsa sul passato.
+  const muta   = win.current && reg.rotation === 'live' && (giorni === null || giorni > 7);
+  const zombie = win.current && reg.rotation !== 'live' && giorni !== null && giorni <= 7;
   const warn   = muta || zombie;
   const srcs = (live && live.sources || []).slice(0, 3)
     .map(s => `${esc(s.source)} <span style="color:#5a5a7a">${s.users}</span>`).join(' · ');
@@ -7760,7 +7762,7 @@ function creativeAuditRow(reg, live) {
         <div class="creative-open" data-variant="${esc(reg.variant)}" title="Apri la scheda: quando compare, in che punto dell'app, cosa mostra" style="cursor:pointer">
           <div style="font-weight:600;color:var(--fg);white-space:nowrap;display:flex;align-items:center;gap:7px">
             ${esc(reg.name)}
-            <span style="font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 5px">${rot.label}</span>
+            <span title="${esc(win.current ? 'stato del codice oggi' : 'stato del codice OGGI, non di quei giorni')}" style="font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 5px">${win.current ? '' : 'oggi '}${rot.label}</span>
           </div>
           <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono)">${esc(reg.variant)}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:4px">${users || '—'} utent${users === 1 ? 'e' : 'i'}${srcs ? ` · <span style="font-family:var(--mono);font-size:9.5px">${srcs}</span>` : ''}</div>
@@ -7777,8 +7779,9 @@ function creativeAuditRow(reg, live) {
 function premiumCreativesAuditCard() {
   const head = `
     <div style="margin-bottom:12px">
-      <div class="card-title" style="margin-bottom:3px">Creatività paywall · cosa mostrano, e cosa è ancora vivo</div>
+      <div class="card-title" style="margin-bottom:3px">Creatività paywall · cosa ha visto la gente, in questo periodo</div>
       <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        Solo i paywall usciti a qualcuno <strong style="color:var(--fg)">nel periodo selezionato qui sopra</strong>, coi numeri di quei giorni soltanto.<br>
         Le caselle sono le schermate vere, col loro nome, e il numero è <strong style="color:var(--fg)">quante persone diverse</strong>
         ci sono arrivate (chi rivede la stessa schermata vale uno) · clicca una casella per la lista ·
         clicca il nome per la scheda: quando compare, dove, e cosa mostra ·
@@ -7800,18 +7803,31 @@ function premiumCreativesAuditCard() {
   const byVariant = {};
   live.forEach(r => { byVariant[r.variant] = r; });
 
+  // Finestra scelta in alto nella pagina (sprint o periodo libero). Serve a due cose: contare
+  // i giorni di silenzio dalla sua fine, e sapere se stiamo guardando l'oggi o un periodo chiuso.
+  const selSprint = state.sprints.find(x => x.id === state.premiumSprintId);
+  const endStr = selSprint ? selSprint.fine : state.premiumTo;
+  const endTs  = endStr ? new Date(endStr + 'T23:59:59').getTime() : Date.now();
+  const win = { end: endTs, current: (Date.now() - endTs) < 2 * 86400000 };
+
   // Ordine: prima quelle che il codice dà per vive, per utenti. La pagina deve aprire su quello
   // che sta succedendo, non sull'archeologia.
-  const rank = r => (r.rotation === 'live' ? 0 : r.rotation === 'dormant' ? 1 : 2);
-  const rows = CREATIVE_REGISTRY.slice().sort((a, b) => {
-    const d = rank(a) - rank(b);
-    if (d !== 0) return d;
-    return Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0);
-  });
+  // Si mostra SOLO quello che è uscito nel periodo scelto: una creatività senza utenti in quei
+  // giorni non è una riga vuota da leggere, è rumore — e per giunta rumore che invita a
+  // confrontare numeri di date diverse. Restano nominate in fondo, senza numeri.
+  const shown  = CREATIVE_REGISTRY.filter(r => Number((byVariant[r.variant] || {}).users || 0) > 0);
+  const hidden = CREATIVE_REGISTRY.filter(r => !Number((byVariant[r.variant] || {}).users || 0));
+  const rows = shown.sort((a, b) =>
+    Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0));
 
   // Varianti che i dati conoscono e il registro no: non devono sparire, sono la prova che
   // qualcosa di nuovo (o di rinominato) sta uscendo in app.
   const unknown = live.filter(r => !CREATIVE_REGISTRY.some(c => c.variant === r.variant));
+
+  if (!rows.length) {
+    return `<div class="card" style="margin-bottom:16px">${head}
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun paywall mostrato a nessuno in questo periodo.</div></div>`;
+  }
 
   const headerCols = CREATIVE_ACT_COLS.map(c =>
     `<th title="${esc(c.t)}" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap">${esc(c.l)}</th>`).join('');
@@ -7828,9 +7844,13 @@ function premiumCreativesAuditCard() {
               ${headerCols}
             </tr>
           </thead>
-          <tbody>${rows.map(r => creativeAuditRow(r, byVariant[r.variant])).join('')}</tbody>
+          <tbody>${rows.map(r => creativeAuditRow(r, byVariant[r.variant], win)).join('')}</tbody>
         </table>
       </div>
+      ${hidden.length ? `
+        <div style="margin-top:12px;font-size:10.5px;color:#5a5a7a;line-height:1.6">
+          Non uscite a nessuno in questo periodo: ${hidden.map(h => `<span style="color:var(--muted)">${esc(h.name)}</span>`).join(' · ')}.
+        </div>` : ''}
       ${unknown.length ? `
         <div style="margin-top:12px;background:#2b210f;border:1px solid #5a4318;border-radius:9px;padding:10px 12px;font-size:11px;color:#d9c48a;line-height:1.6">
           <strong style="color:#fbbf24">Creatività senza scheda:</strong>
