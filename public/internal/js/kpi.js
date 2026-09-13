@@ -500,6 +500,8 @@ let state = {
   // scheda aperta, se ce n'è una.
   creativesAudit: null, creativesAuditLoading: false, creativesAuditError: null, creativesAuditErrorTimeout: false,
   creativeModal: null,
+  // Foto caricate a mano, per creatività: { [variant]: [{id, path, url, position}] }.
+  shots: {}, shotsLoading: false, shotsError: null, shotsUploading: 0,
   stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
   premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
   funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
@@ -7877,6 +7879,158 @@ const CREATIVE_MARKS = [
   { k: 'attempt', l: 'pagamento',  d: 'paywall_purchase_attempt · lo store ha preso in carico', soft: true },
   { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · fino al 13/09/2026 arrivava senza variant e una volta per riavvio: corretto in app, in dashboard si vedrà dal prossimo rilascio', soft: true },
 ];
+// ── LE FOTO CARICATE A MANO ──────────────────────────────────────────────────
+// Gli scatti automatici (banco di posa) fotografano i componenti in un browser con dati finti:
+// fedeli, ma non sono la PROVA. Chi apre l'app, verifica col dito quale proposta è uscita e fa
+// lo screenshot, ha in mano l'unica versione che toglie ogni dubbio — e quelle foto vanno messe
+// dove serve guardarle, cioè qui dentro.
+//
+// Stanno nel bucket `paywall-shots` (lettura pubblica: sono le stesse schermate che l'app mostra
+// a chiunque) con l'elenco e l'ordine in `internal_paywall_shots`, scrivibile solo dagli
+// operatori. L'ordine lo decide chi carica: `position` è il posto nella fila, non l'indice della
+// schermata.
+const SHOTS_BUCKET = 'paywall-shots';
+
+function shotPublicUrl(path) {
+  try { return sb.storage.from(SHOTS_BUCKET).getPublicUrl(path).data.publicUrl; }
+  catch { return ''; }
+}
+
+async function fetchPaywallShots(variant) {
+  state.shotsLoading = true; state.shotsError = null;
+  render();
+  try {
+    const { data, error } = await sb
+      .from('internal_paywall_shots')
+      .select('id, variant, path, position, caption, created_at')
+      .eq('variant', variant)
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    state.shots[variant] = (data || []).map(r => ({ ...r, url: shotPublicUrl(r.path) }));
+  } catch (e) { state.shotsError = e.message || 'Errore caricamento foto'; }
+  state.shotsLoading = false;
+  render();
+}
+
+/**
+ * Carica i file scelti. Uno per volta e non in parallelo: sono screenshot di telefono da un paio
+ * di mega, e mandarne otto insieme da una rete lenta fa scadere il primo mentre parte l'ultimo.
+ * La posizione parte dalla coda, così l'ordine di scelta è quello che si vede.
+ */
+async function uploadPaywallShots(variant, files) {
+  const list = Array.from(files || []).filter(f => f.type.startsWith('image/'));
+  if (!list.length) return;
+  state.shotsUploading = list.length; state.shotsError = null;
+  render();
+  const already = state.shots[variant] || [];
+  let pos = already.length ? Math.max(...already.map(s => s.position || 0)) + 1 : 0;
+  try {
+    for (const file of list) {
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const path = `${variant}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const up = await sb.storage.from(SHOTS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+      if (up.error) throw up.error;
+      const ins = await sb.from('internal_paywall_shots').insert({ variant, path, position: pos++ });
+      if (ins.error) throw ins.error;
+      state.shotsUploading--;
+      render();
+    }
+  } catch (e) {
+    state.shotsError = e.message || 'Errore durante il caricamento';
+  }
+  state.shotsUploading = 0;
+  await fetchPaywallShots(variant);
+}
+
+/** Scambia una foto col vicino. Due UPDATE, e lo scambio si vede subito: la fila è corta. */
+async function movePaywallShot(variant, id, dir) {
+  const list = (state.shots[variant] || []).slice();
+  const i = list.findIndex(s => s.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const a = list[i], b = list[j];
+  [list[i], list[j]] = [list[j], list[i]];
+  state.shots[variant] = list;
+  render();
+  try {
+    // Le posizioni si riscrivono su TUTTA la fila, non solo sulle due scambiate: dopo qualche
+    // cancellazione i numeri hanno buchi, e scambiare solo due valori bucati non riordina niente.
+    await Promise.all(list.map((s, k) =>
+      sb.from('internal_paywall_shots').update({ position: k }).eq('id', s.id)));
+    list.forEach((s, k) => { s.position = k; });
+  } catch (e) {
+    state.shotsError = e.message || 'Errore nel riordino';
+    await fetchPaywallShots(variant);
+  }
+  render();
+}
+
+async function deletePaywallShot(variant, id, path) {
+  if (!confirm('Tolgo questa foto?')) return;
+  try {
+    const del = await sb.from('internal_paywall_shots').delete().eq('id', id);
+    if (del.error) throw del.error;
+    // Il file dopo la riga: se cade la rimozione dell'oggetto resta un file orfano nel bucket,
+    // che non si vede da nessuna parte. L'ordine opposto lascerebbe invece una riga che punta a
+    // un'immagine che non c'è, cioè un buco visibile nella scheda.
+    await sb.storage.from(SHOTS_BUCKET).remove([path]);
+  } catch (e) { state.shotsError = e.message || 'Errore nella rimozione'; }
+  await fetchPaywallShots(variant);
+}
+
+function paywallShotsStrip(variant) {
+  const list = state.shots[variant] || null;
+  const loading = state.shotsLoading && !list;
+  const cards = (list || []).map((s, i) => `
+    <div style="flex-shrink:0;width:132px">
+      <a href="${esc(s.url)}" target="_blank" rel="noopener" title="Apri a schermo intero" style="line-height:0;display:block">
+        <img src="${esc(s.url)}" alt="" loading="lazy"
+             style="width:132px;border-radius:9px;border:1px solid #2a2a3d;display:block;background:#111120">
+      </a>
+      <div style="display:flex;align-items:center;gap:4px;margin-top:5px">
+        <button class="shot-move" data-variant="${esc(variant)}" data-id="${esc(s.id)}" data-dir="-1"
+          title="Sposta a sinistra" ${i === 0 ? 'disabled' : ''}
+          style="flex:1;background:#14141f;border:1px solid #2a2a3d;color:${i === 0 ? '#33334a' : 'var(--muted)'};border-radius:6px;padding:2px 0;font-size:11px;cursor:${i === 0 ? 'default' : 'pointer'};font-family:inherit">◀</button>
+        <button class="shot-move" data-variant="${esc(variant)}" data-id="${esc(s.id)}" data-dir="1"
+          title="Sposta a destra" ${i === (list.length - 1) ? 'disabled' : ''}
+          style="flex:1;background:#14141f;border:1px solid #2a2a3d;color:${i === (list.length - 1) ? '#33334a' : 'var(--muted)'};border-radius:6px;padding:2px 0;font-size:11px;cursor:${i === (list.length - 1) ? 'default' : 'pointer'};font-family:inherit">▶</button>
+        <button class="shot-del" data-variant="${esc(variant)}" data-id="${esc(s.id)}" data-path="${esc(s.path)}"
+          title="Togli questa foto"
+          style="background:#1c1010;border:1px solid #4a2020;color:#ef4444;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;font-family:inherit">✕</button>
+      </div>
+      <div style="font-size:9px;color:#5a5a7a;text-align:center;margin-top:3px">${i + 1}</div>
+    </div>`).join('');
+
+  return `
+    <div style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a">Le tue foto di questo paywall</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:2px">
+            quelle che fai tu dall'app, nell'ordine che decidi tu · restano qui per tutti
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${state.shotsUploading ? `<span style="font-size:11px;color:var(--muted)" class="pulse">carico ${state.shotsUploading}…</span>` : ''}
+          <button id="shot-add" data-variant="${esc(variant)}" style="background:var(--accent-lo);border:1px solid var(--accent);color:#a78bfa;
+            border-radius:8px;padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">+ Aggiungi foto</button>
+        </div>
+      </div>
+      <input type="file" id="shot-file" accept="image/*" multiple style="display:none">
+      ${state.shotsError ? `<div style="font-size:11px;color:var(--red);margin-bottom:8px">${esc(state.shotsError)}</div>` : ''}
+      ${loading
+        ? `<div style="font-size:11px;color:var(--muted);padding:10px 0" class="pulse">Carico le foto…</div>`
+        : cards
+          ? `<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px">${cards}</div>`
+          : `<div style="font-size:11px;color:#5a5a7a;background:#111120;border:1px dashed #2a2a3d;border-radius:9px;padding:12px 14px;line-height:1.6">
+               Nessuna foto ancora. Apri l'app, arriva a questo paywall, fai gli screenshot e caricali qui con
+               <strong style="color:var(--muted)">+ Aggiungi foto</strong>: puoi sceglierne più d'uno in una volta e riordinarli con le frecce.
+               Sono la prova di cosa vede davvero l'utente — gli scatti automatici qui sotto vengono da un browser, non da un telefono.
+             </div>`}
+    </div>`;
+}
+
 // Scheda della singola creatività: quando compare, in che punto dell'app, come se ne esce, le
 // schermate una per una con quanti utenti le hanno viste, gli eventi e il file che la disegna.
 // Niente screenshot: sarebbero copie che invecchiano da sole: per vedere le schermate vere c'è
@@ -7961,8 +8115,10 @@ function creativeModal() {
           </div>
 
 
+          ${paywallShotsStrip(reg.variant)}
+
           ${screensHtml ? `
-            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:16px 0 4px">Le schermate, nell'ordine</div>
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:16px 0 4px">Le schermate, una per una <span style="text-transform:none;letter-spacing:0;color:#5a5a7a">· scatti automatici dal banco di posa</span></div>
             ${screensHtml}` : ''}
 
           <div style="font-size:10px;color:#5a5a7a;margin-top:14px;line-height:1.6">
@@ -12529,7 +12685,29 @@ function attachEvents() {
 
   // Catalogo creatività: la riga apre la scheda (cos'è, le schermate, gli eventi).
   document.querySelectorAll('.creative-open').forEach(el =>
-    el.addEventListener('click', () => { state.creativeModal = el.dataset.variant; render(); }));
+    el.addEventListener('click', () => {
+      state.creativeModal = el.dataset.variant;
+      state.shotsError = null;
+      // Le foto si rileggono a ogni apertura: le carica anche l'altro, e una scheda che
+      // mostra la fila di ieri è peggio di una che ci mette mezzo secondo.
+      fetchPaywallShots(el.dataset.variant);
+    }));
+
+  // Foto caricate a mano: aggiungi, sposta, togli.
+  document.getElementById('shot-add')?.addEventListener('click', () => {
+    document.getElementById('shot-file')?.click();
+  });
+  document.getElementById('shot-file')?.addEventListener('change', e => {
+    const variant = document.getElementById('shot-add')?.dataset.variant;
+    if (variant && e.target.files?.length) uploadPaywallShots(variant, e.target.files);
+  });
+  document.querySelectorAll('.shot-move').forEach(el =>
+    el.addEventListener('click', () => {
+      if (el.hasAttribute('disabled')) return;
+      movePaywallShot(el.dataset.variant, el.dataset.id, Number(el.dataset.dir));
+    }));
+  document.querySelectorAll('.shot-del').forEach(el =>
+    el.addEventListener('click', () => deletePaywallShot(el.dataset.variant, el.dataset.id, el.dataset.path)));
   document.getElementById('creative-close')?.addEventListener('click', () => { state.creativeModal = null; render(); });
   document.getElementById('creative-overlay')?.addEventListener('click', e => {
     if (e.target === e.currentTarget) { state.creativeModal = null; render(); }
