@@ -1271,6 +1271,36 @@ async function fetchJourneyUsers(key, label, desc) {
 }
 
 // Stato di salute di tutte le creatività nel periodo: alimenta il catalogo e le sue schede.
+// Chi è in prova (o pagante) grazie a una certa proposta. I dati sono già quelli della
+// tabella degli acquisti: una sola fonte, quindi la riga e la lista non possono divergere.
+function showCreativeConvUsers(variant, stato, label) {
+  const righe = ((state.purchases && state.purchases.acquisti) || [])
+    .filter(r => (r.variant || 'senza_attribuzione') === variant && r.stato === stato);
+  state.stepUsersModal = {
+    variant, step: stato, label,
+    desc: 'attribuito all\'ultimo paywall toccato prima del pagamento',
+  };
+  state.stepUsersError = null; state.stepUsersLoading = false;
+  state.stepUsersData = {
+    total_users: righe.length,
+    total_views: righe.length,
+    users: righe.map(r => {
+      const min = r.minuti_prima;
+      const quando = min === null || min === undefined ? 'senza traccia'
+        : min > 90 ? Math.round(min / 60) + ' h prima'
+        : min >= 0 ? min + ' min prima'
+        : Math.abs(min) + ' min dopo';
+      const parti = String(r.quando || "").split(" ");
+      return {
+        nome: r.nome, email: r.email, views: 1,
+        dettaglio: `${r.piano} · ${r.prezzo != null ? '€ ' + r.prezzo : '—'} · attribuzione ${r.forza} (${quando})`,
+        giorno: parti[0] || '—', ora: parti[1] || '—', ts: r.quando,
+      };
+    }),
+  };
+  render();
+}
+
 // Chi ha fatto un gesto d'acquisto su una creatività. Riempie la STESSA modale delle caselle
 // del percorso: una sola lista da guardare, comunque ci si arrivi.
 async function fetchCreativeActUsers(variant, event, label, desc) {
@@ -7787,9 +7817,14 @@ function creativeAuditRow(reg, live, win) {
   // nella tabella degli acquisti qui sotto.
   const conv = ((state.purchases && state.purchases.per_variant) || {})[reg.variant] || null;
   const convCols = [
-    { v: conv ? conv.in_prova : 0, c: '#22d3ee', t: 'Prove in corso attribuite a questa proposta (ultimo tocco prima del pagamento)' },
-    { v: conv ? conv.paganti : 0,  c: '#4ade80', t: 'Paganti veri attribuiti a questa proposta (ultimo tocco prima del pagamento)' },
-  ].map(x => `<td title="${esc(x.t)}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${x.v > 0 ? x.c : 'var(--muted)'}">${x.v || '—'}</td>`).join('');
+    { v: conv ? conv.in_prova : 0, stato: 'in prova', l: 'In prova', c: '#22d3ee', t: 'Prove in corso attribuite a questa proposta (ultimo tocco prima del pagamento)' },
+    { v: conv ? conv.paganti : 0,  stato: 'pagante',  l: 'Pagante',  c: '#4ade80', t: 'Paganti veri attribuiti a questa proposta (ultimo tocco prima del pagamento)' },
+  ].map(x => {
+    const open = x.v > 0
+      ? ` class="creative-conv" data-variant="${esc(reg.variant)}" data-stato="${esc(x.stato)}" data-label="${esc(reg.name + ' · ' + x.l)}" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"`
+      : '';
+    return `<td title="${esc(x.t + (x.v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${x.v > 0 ? x.c : 'var(--muted)'}"><span${open}>${x.v || '—'}</span></td>`;
+  }).join('');
 
   const cols = CREATIVE_ACT_COLS.map(c => {
     const v = live && live.marks ? Number(live.marks[c.k] || 0) : 0;
@@ -12889,6 +12924,11 @@ function attachEvents() {
       fetchJourneyUsers(el.dataset.key, el.dataset.label, el.dataset.hint)));
 
   // Catalogo creatività: il numero di una colonna apre la lista di chi ha fatto quel gesto.
+  document.querySelectorAll('.creative-conv').forEach(el =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showCreativeConvUsers(el.dataset.variant, el.dataset.stato, el.dataset.label);
+    }));
   document.querySelectorAll('.creative-act').forEach(el =>
     el.addEventListener('click', (e) => {
       e.stopPropagation();
