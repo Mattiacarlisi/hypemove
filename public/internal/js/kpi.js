@@ -7833,7 +7833,11 @@ function premiumCreativesAuditCard() {
     return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
   }
 
-  const live = state.creativesAudit || [];
+  const all = state.creativesAudit || [];
+  // `senza_attribuzione` non è una creatività: è il mucchio degli eventi che non dicono da
+  // quale paywall arrivano. Fuori dalla tabella, e in fondo con la sua spiegazione.
+  const orfani = all.find(r => r.variant === 'senza_attribuzione') || null;
+  const live = all.filter(r => r.variant !== 'senza_attribuzione');
   const byVariant = {};
   live.forEach(r => { byVariant[r.variant] = r; });
 
@@ -7881,6 +7885,30 @@ function premiumCreativesAuditCard() {
           <tbody>${rows.map(r => creativeAuditRow(r, byVariant[r.variant], win)).join('')}</tbody>
         </table>
       </div>
+      ${orfani ? `
+        <div style="margin-top:14px;background:#2b210f;border:1px solid #5a4318;border-radius:9px;padding:11px 13px">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:5px">
+            ⚠️ Azioni che non dicono da quale paywall arrivano
+          </div>
+          <div style="font-size:11px;color:#d9c48a;line-height:1.65">
+            ${orfani.users} utent${orfani.users === 1 ? "e" : "i"} nel periodo. Non sono di nessuna creatività: l'evento arriva senza il nome
+            della proposta, e fino al 13/09/2026 finiva silenziosamente dentro <strong>Funnel standard</strong> — che per questo
+            sembrava convertire meglio di tutti. Sono quasi tutti <code style="font-family:var(--mono)">paywall_purchase_success</code>,
+            che <code style="font-family:var(--mono)">PurchaseService</code> emette quando l'esito dell'acquisto arriva a pagamento già chiuso.
+            Corretto in app lo stesso giorno: gli acquisti nuovi porteranno di nuovo il nome della creatività, questi no.
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:9px">
+            ${CREATIVE_ACT_COLS.map(c => {
+              const v = Number((orfani.marks || {})[c.k] || 0);
+              if (!v) return "";
+              return `<span class="creative-act" data-variant="senza_attribuzione" data-event="${esc(c.ev)}"
+                       data-label="Senza attribuzione · ${esc(c.l)}" data-desc="${esc(c.t)}"
+                       style="font-size:11.5px;color:#fbbf24;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">
+                       ${esc(c.l)}: <strong>${v}</strong></span>`;
+            }).join("")}
+          </div>
+        </div>` : ''}
+
       ${hidden.length ? `
         <div style="margin-top:12px;font-size:10.5px;color:#5a5a7a;line-height:1.6">
           Non uscite a nessuno in questo periodo: ${hidden.map(h => `<span style="color:var(--muted)">${esc(h.name)}</span>`).join(' · ')}.
