@@ -7341,7 +7341,7 @@ function paywallJourneyCard() {
   if (journeyNum(diag.senza_uscita) > 0) gaps.push(
     `<strong>${diag.senza_uscita} aperture su ${diag.esposizioni} (${noExitPct}%) finiscono senza nessuna traccia di uscita</strong>: né chiusura né acquisto. Il ripiego che chiude l'esposizione gira allo smontaggio della schermata, e un'app uccisa dal sistema non lo esegue. Non è gente che resta: è gente che se ne va senza dirlo.`);
   if (journeyNum(diag.success_orfani) > 0) gaps.push(
-    `<strong>${diag.success_orfani} acquisti riusciti su ${diag.success_totali} nel periodo non sono attribuibili a nessun paywall</strong>: <code style="font-family:var(--mono)">paywall_purchase_success</code> arriva senza <code style="font-family:var(--mono)">exposure_id</code> perché lo emette <code style="font-family:var(--mono)">PurchaseService</code> quando le dimensioni dell'esposizione sono già state azzerate (ricevuta che arriva tardi, o sblocco letto dal database). Finché non si aggiusta, l'ultimo gradino del blocco acquisto resta a zero anche quando qualcuno compra davvero.`);
+    `<strong>${diag.success_orfani} acquisti riusciti su ${diag.success_totali} nel periodo non sono attribuibili a nessun paywall</strong>: <code style="font-family:var(--mono)">paywall_purchase_success</code> arriva senza <code style="font-family:var(--mono)">exposure_id</code> perché lo emette <code style="font-family:var(--mono)">PurchaseService</code> quando le dimensioni dell'esposizione sono già state azzerate (ricevuta che arriva tardi, o sblocco letto dal database). Corretto in app il 13/09/2026 (l'esito in ritardo eredita l'ultimo tentativo su quel prodotto e porta il marchio dims_late), ma il numero qui sopra resta com'è finché la correzione non è in mano agli utenti: gli eventi già scritti non si riscrivono.`);
 
   return `
     <div class="card" style="margin-bottom:16px">
@@ -7656,7 +7656,7 @@ const CREATIVE_MARKS = [
   { k: 'plan',    l: 'piano',      d: 'paywall_plan_select · scatta solo se CAMBIA piano, uno zero può essere vero', soft: true },
   { k: 'cta',     l: 'CTA',        d: 'paywall_cta_tap · ha premuto il bottone che compra', soft: true },
   { k: 'attempt', l: 'pagamento',  d: 'paywall_purchase_attempt · lo store ha preso in carico', soft: true },
-  { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · quasi sempre arriva senza variant: vedi la nota in fondo', soft: true },
+  { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · fino al 13/09/2026 arrivava senza variant e una volta per riavvio: corretto in app, in dashboard si vedrà dal prossimo rilascio', soft: true },
 ];
 
 function creativeAuditRow(reg, live) {
