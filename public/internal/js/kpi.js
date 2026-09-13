@@ -1269,6 +1269,29 @@ async function fetchJourneyUsers(key, label, desc) {
 }
 
 // Stato di salute di tutte le creatività nel periodo: alimenta il catalogo e le sue schede.
+// Chi ha fatto un gesto d'acquisto su una creatività. Riempie la STESSA modale delle caselle
+// del percorso: una sola lista da guardare, comunque ci si arrivi.
+async function fetchCreativeActUsers(variant, event, label, desc) {
+  state.stepUsersModal = { variant, step: event, label, desc };
+  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_paywall_event_users', {
+      p_variant: variant,
+      p_event:   event,
+      inizio:    state.premiumFrom,
+      fine:      state.premiumTo,
+      p_start:   selSprint ? sprintStartTs(selSprint) : null,
+      p_end:     selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.stepUsersData = data;
+  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti'; }
+  state.stepUsersLoading = false;
+  render();
+}
+
 async function fetchCreativesAudit() {
   state.creativesAuditLoading = true; state.creativesAuditError = null; state.creativesAuditErrorTimeout = false;
   render();
@@ -7688,13 +7711,14 @@ const CREATIVE_ROTATION_META = {
 
 // I gesti d'acquisto, nell'ordine in cui succedono. Sono le colonne di destra: è lì che si
 // guarda per sapere se una creatività ha prodotto qualcosa o solo visualizzazioni.
+// `ev` = l'evento da interrogare quando si clicca il numero.
 const CREATIVE_ACT_COLS = [
-  { k: 'plan',      l: 'Piano toccato', c: '#a78bfa', t: 'paywall_plan_select · ha cambiato la selezione fra mensile e annuale (scatta solo sul CAMBIO)' },
-  { k: 'cta',       l: 'Bottone',       c: '#f59e0b', t: 'paywall_cta_tap · ha premuto il bottone che compra' },
-  { k: 'attempt',   l: 'Pagamento',     c: '#f59e0b', t: 'paywall_purchase_attempt · si è aperto il foglio di pagamento Google' },
-  { k: 'cancelled', l: 'Annullato',     c: '#8b8ba7', t: 'paywall_purchase_cancelled · ha aperto il pagamento e si è tirato indietro' },
-  { k: 'error',     l: 'Errore',        c: '#ef4444', t: 'paywall_purchase_error · lo store ha risposto con un errore' },
-  { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · fino al 13/09/2026 arrivava quasi sempre senza il nome della creatività: qui è sottostimato finché il nuovo build non è in mano agli utenti' },
+  { k: 'plan',      l: 'Piano toccato', c: '#a78bfa', t: 'paywall_plan_select · ha cambiato la selezione fra mensile e annuale (scatta solo sul CAMBIO)', ev: 'paywall_plan_select' },
+  { k: 'cta',       l: 'Bottone',       c: '#f59e0b', t: 'paywall_cta_tap · ha premuto il bottone che compra', ev: 'paywall_cta_tap' },
+  { k: 'attempt',   l: 'Pagamento',     c: '#f59e0b', t: 'paywall_purchase_attempt · si è aperto il foglio di pagamento Google', ev: 'paywall_purchase_attempt' },
+  { k: 'cancelled', l: 'Annullato',     c: '#8b8ba7', t: 'paywall_purchase_cancelled · ha aperto il pagamento e si è tirato indietro', ev: 'paywall_purchase_cancelled' },
+  { k: 'error',     l: 'Errore',        c: '#ef4444', t: 'paywall_purchase_error · lo store ha risposto con un errore', ev: 'paywall_purchase_error' },
+  { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · fino al 13/09/2026 arrivava quasi sempre senza il nome della creatività: qui è sottostimato finché il nuovo build non è in mano agli utenti', ev: 'paywall_purchase_success' },
 ];
 
 // Etichetta di una casella: il nome della schermata dal registro, se quell'indice lo ha; il
@@ -7755,7 +7779,10 @@ function creativeAuditRow(reg, live, win) {
 
   const cols = CREATIVE_ACT_COLS.map(c => {
     const v = live && live.marks ? Number(live.marks[c.k] || 0) : 0;
-    return `<td title="${esc(c.t)}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${v > 0 ? c.c : 'var(--muted)'}">${v || '—'}</td>`;
+    const open = v > 0
+      ? ` class="creative-act" data-variant="${esc(reg.variant)}" data-event="${esc(c.ev)}" data-label="${esc(reg.name + ' · ' + c.l)}" data-desc="${esc(c.t)}" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"`
+      : '';
+    return `<td title="${esc(c.t + (v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${v > 0 ? c.c : 'var(--muted)'}"><span${open}>${v || '—'}</span></td>`;
   }).join('');
 
   return `
@@ -7790,7 +7817,7 @@ function premiumCreativesAuditCard() {
       <div style="font-size:11px;color:var(--muted);line-height:1.55">
         Solo i paywall usciti a qualcuno <strong style="color:var(--fg)">nel periodo selezionato qui sopra</strong>, coi numeri di quei giorni soltanto.<br>
         Le caselle sono le schermate vere, col loro nome, e il numero è <strong style="color:var(--fg)">quante persone diverse</strong>
-        ci sono arrivate (chi rivede la stessa schermata vale uno) · clicca una casella per la lista ·
+        ci sono arrivate (chi rivede la stessa schermata vale uno) · clicca una casella o un numero a destra per la lista di chi c'è dentro ·
         clicca il nome per la scheda: quando compare, dove, e cosa mostra ·
         riga ambra = il codice e i dati non vanno d'accordo
       </div>
@@ -12682,6 +12709,13 @@ function attachEvents() {
   document.querySelectorAll('.journey-step').forEach(el =>
     el.addEventListener('click', () =>
       fetchJourneyUsers(el.dataset.key, el.dataset.label, el.dataset.hint)));
+
+  // Catalogo creatività: il numero di una colonna apre la lista di chi ha fatto quel gesto.
+  document.querySelectorAll('.creative-act').forEach(el =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchCreativeActUsers(el.dataset.variant, el.dataset.event, el.dataset.label, el.dataset.desc);
+    }));
 
   // Catalogo creatività: la riga apre la scheda (cos'è, le schermate, gli eventi).
   document.querySelectorAll('.creative-open').forEach(el =>
