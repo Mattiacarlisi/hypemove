@@ -496,6 +496,10 @@ let state = {
   // guardando e il percorso ricostruito. Segue lo stesso periodo/sprint della pagina Premium.
   journeyVariant: 'paywall_giorno_zero',
   journeyData: null, journeyLoading: false, journeyError: null, journeyErrorTimeout: false,
+  // Catalogo creatività (kpi_paywall_creatives_audit): stato di salute per variant + la
+  // scheda aperta, se ce n'è una.
+  creativesAudit: null, creativesAuditLoading: false, creativesAuditError: null, creativesAuditErrorTimeout: false,
+  creativeModal: null,
   stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
   premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
   funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
@@ -1259,6 +1263,28 @@ async function fetchJourneyUsers(key, label, desc) {
     state.stepUsersData = data;
   } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti'; }
   state.stepUsersLoading = false;
+  render();
+}
+
+// Stato di salute di tutte le creatività nel periodo: alimenta il catalogo e le sue schede.
+async function fetchCreativesAudit() {
+  state.creativesAuditLoading = true; state.creativesAuditError = null; state.creativesAuditErrorTimeout = false;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_paywall_creatives_audit', {
+      inizio:  state.premiumFrom,
+      fine:    state.premiumTo,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.creativesAudit = data || [];
+  } catch (e) {
+    state.creativesAuditError = e.message || 'Errore caricamento creatività';
+    state.creativesAuditErrorTimeout = isRpcTimeout(e);
+  }
+  state.creativesAuditLoading = false;
   render();
 }
 
@@ -2332,6 +2358,7 @@ function layout() {
     ${aiConversationsModal()}
     ${userActivityModal()}
     ${stepUsersModal()}
+    ${creativeModal()}
     ${premiumBucketModal()}
     ${funnelStepUsersModal()}
     ${eventBrowserModal()}`;
@@ -6997,6 +7024,9 @@ function pagePremium() {
     <!-- Il percorso completo della proposta post-workout, atto per atto, in utenti unici -->
     ${paywallJourneyCard()}
 
+    <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
+    ${premiumCreativesAuditCard()}
+
     <!-- Coach Spot: il secondo atto del Giorno Zero, letto anche come creatività a sé -->
     ${premiumCoachSpotCard(d)}
     <!-- Creatività: quale paywall converte di più, col percorso step inline -->
@@ -7356,6 +7386,472 @@ function paywallJourneyCard() {
           <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:6px">⚠️ Buchi di tracciamento in questo percorso</div>
           ${gaps.map(g => `<div style="font-size:11px;color:#d9c48a;line-height:1.6;margin-bottom:6px">${g}</div>`).join('')}
         </div>` : ''}
+    </div>`;
+}
+
+// ── CATALOGO DELLE CREATIVITÀ PAYWALL ────────────────────────────────────────
+// A cosa serve: i nomi tecnici (`ad_paywall`, `paywall_giorno_zero`, `coach_ai_memory`…) non
+// dicono niente a chi non ha scritto quel componente, e sopra ci si prendono decisioni. Qui ogni
+// creatività ha un nome umano, cosa mostra schermata per schermata, da dove esce, e il confronto
+// fra quello che il CODICE dice (è in rotazione? è rimasta solo nell'anteprima Dev?) e quello che
+// i DATI dicono (l'ha vista qualcuno negli ultimi giorni?).
+//
+// Le due fonti devono coincidere: quando non coincidono la riga si accende d'ambra. È l'unico
+// modo per accorgersi di una creatività che si dà per viva e invece non la vede più nessuno da
+// due settimane, o di una che si dà per ritirata e continua a uscire su una build vecchia.
+//
+// Il registro è scritto a mano perché descrive INTENZIONI (dove dovrebbe uscire, cosa racconta),
+// che nel database non ci sono. I numeri invece arrivano tutti da kpi_paywall_creatives_audit:
+// nessun dato di prodotto è cablato qui dentro.
+//
+// `rotation`: 'live' = il codice la monta oggi in un punto raggiungibile · 'dormant' = il
+// componente c'è ed è raggiungibile solo da un ramo che non si pesca più · 'retired' = resta
+// solo l'anteprima /dev/premium, in app non la monta nessuno.
+const CREATIVE_REGISTRY = [
+  {
+    variant: 'paywall_giorno_zero',
+    name: 'Giorno Zero',
+    rotation: 'live',
+    where: 'Fine del PRIMO allenamento in assoluto, a chi non è premium né in prova.',
+    what: 'La proposta più curata che abbiamo: prima l\'utente PROVA il coach (chat vera, risposte pronte, nessuna vendita), poi parte lo spot che aggancia quello che è appena successo e finisce sui prezzi. È in due atti sulla stessa apertura, e il secondo atto è il Coach Spot: per questo nei dati compaiono due variant per una proposta sola.',
+    file: 'app/src/components/PremiumProposals/PaywallGiornoZero/PaywallGiornoZeroFlow.tsx',
+    screens: [
+      { n: 'Atto 1', t: 'La chat col coach', d: 'Il coach scrive, l\'utente risponde toccando le risposte pronte. Alla fine, «continua».' },
+      { n: 'Atto 2', t: 'Lo spot a 5 scene', d: 'Saluto → il piatto fotografato che diventa kcal → la chat che risolve un problema → «ci sono» (allagamento arancio) → i piani. La × si sblocca solo sull\'ultima scena.' },
+    ],
+    note: 'Il percorso completo, passo per passo, è nella sezione qui sopra.',
+  },
+  {
+    variant: 'coach_spot',
+    name: 'Coach Spot',
+    rotation: 'live',
+    where: 'Secondo atto del Giorno Zero. Da solo non esce più: era in rotazione fino al 31/08/2026.',
+    what: 'Lo spot lungo del coach: 5 scene doppiate, la × bloccata per ~17 secondi, e i piani che salgono DENTRO l\'ultima scena invece di essere una schermata a parte (il 90-98% moriva sul cambio schermata). È qui che avvengono l\'acquisto e la micro-survey del rifiuto, anche quando l\'apertura è del Giorno Zero.',
+    file: 'app/src/components/PremiumProposals/CoachSpotPaywall/CoachSpotFlow.tsx',
+    // L'apertura la dichiara la proposta che lo ospita: qui uno zero è giusto, non un buco.
+    soft: ['open'],
+    screens: [
+      { n: '1', t: 'Saluto', d: '«Ciao, sono il tuo coach»' },
+      { n: '2', t: 'Pasto', d: 'la foto del piatto che diventa un numero di calorie' },
+      { n: '3', t: 'Chat', d: '«sono stanco» → allungamento + elastico' },
+      { n: '4', t: '«Ci sono»', d: 'allagamento arancio, si sblocca la ×' },
+      { n: '5', t: 'Piani', d: 'offerta e acquisto nella stessa scena' },
+    ],
+  },
+  {
+    variant: 'ad_paywall',
+    name: 'Annuncio + prezzi',
+    rotation: 'live',
+    where: 'Fine di OGNI allenamento dal secondo in poi, a chi non è premium né in prova.',
+    what: 'Un interstitial AdMob a schermo intero (l\'annuncio vero, quello che paga), poi UNA sola schermata che vende e fa pagare. Niente hero illustrata e niente secondo passaggio prima dei prezzi: dopo un annuncio a schermo pieno un altro racconto è un ostacolo. È la proposta che la stessa persona rivede decine di volte, quindi le aperture sono molte più degli utenti.',
+    file: 'app/src/components/PremiumProposals/AdPaywall/AdThenPaywallFlow.tsx',
+    screens: [
+      { n: '1', t: 'L\'annuncio', d: 'interstitial AdMob a schermo pieno · l\'esito (mostrato/saltato/fallito) è tracciato' },
+      { n: '2', t: 'I prezzi', d: 'titolo, i due piani, la CTA. Chi esce può toccare «continua gratis» invece della ×' },
+    ],
+  },
+  {
+    variant: 'trial_end_gate',
+    name: 'Gate di fine prova · «Il film della settimana»',
+    rotation: 'live',
+    where: 'Primo ingresso nell\'app dopo la scadenza dei 7 giorni regalati. Non si può saltare.',
+    what: 'Quattro momenti: il film (battute che avanzano a tocco, costruite sui numeri veri della sua settimana — una battuta senza sostanza non viene proprio montata), l\'offerta, «cosa cambia» se sceglie il gratuito, e il successo se paga. È l\'unico punto in cui l\'app chiede una decisione a chi il prodotto l\'ha già vissuto per una settimana.',
+    file: 'app/src/pages/TrialEndGate/TrialEndGate.tsx',
+    screens: [
+      { n: '1', t: 'Il film', d: 'le battute sui suoi numeri, una a tocco' },
+      { n: '2', t: 'L\'offerta', d: 'cosa continua ad avere, e la scelta' },
+      { n: '3', t: 'Cosa cambia', d: 'solo per chi sceglie il gratuito: cosa si chiude, detto in faccia' },
+      { n: '4', t: 'Il successo', d: 'se ha pagato: il prossimo allenamento è già pronto' },
+    ],
+    note: 'L\'esito vero non sta negli eventi ma in `users.trial_choice`: qui le chiusure sono poche perché dal gate si esce scegliendo, non chiudendo.',
+  },
+  {
+    variant: 'coach_ai_memory',
+    name: 'Coach AI · memoria',
+    rotation: 'live',
+    where: 'Hub del coach: la memoria personale e l\'anteprima gratuita. Anche dalla chat.',
+    what: 'Tre schermate: il core di memoria con le chip che ruotano, i vantaggi della memoria personale, i piani (che riusano il paywall vero con la skin arancione). Vende la cosa che più distingue il coach: si ricorda di te.',
+    file: 'app/src/components/PremiumProposals/CoachMemoryPaywall/CoachMemoryFlow.tsx',
+    screens: [
+      { n: '1', t: 'Hero memoria', d: 'core animato + chip che ruotano' },
+      { n: '2', t: 'Vantaggi', d: 'cosa si ricorda di te e cosa ci fa' },
+      { n: '3', t: 'Piani', d: 'la schermata piani standard, skin arancione' },
+    ],
+  },
+  {
+    variant: 'coach_ai_chat',
+    name: 'Coach AI · chat',
+    rotation: 'live',
+    where: 'Crediti AI finiti: nella chat col coach, o sul tasto «Modifica» del dettaglio allenamento.',
+    what: 'Hero con la chat che si anima, poi la lista di cosa fa il coach, poi i piani. È la proposta che arriva nel momento in cui l\'utente ha appena sbattuto contro un muro: aveva una domanda e non può farla.',
+    file: 'app/src/components/PremiumProposals/CoachAiChatPaywall/CoachAiChatFlow.tsx',
+    screens: [
+      { n: '1', t: 'Hero chat', d: 'la conversazione che scorre da sola' },
+      { n: '2', t: 'Feature', d: 'la lista di cosa sblocca' },
+      { n: '3', t: 'Piani', d: 'schermata piani standard, skin arancione' },
+    ],
+  },
+  {
+    variant: 'coach_ai_visual',
+    name: 'Coach AI · visual (orb)',
+    rotation: 'live',
+    where: 'Shop (card del Coach AI) e popup delle chiavi.',
+    what: 'Gemella della «memoria», ma la prima schermata è l\'orb animato e la seconda è il confronto GRATIS vs HypeMove+ riga per riga.',
+    file: 'app/src/components/PremiumProposals/CoachAiVisualPaywall/CoachAiVisualFlow.tsx',
+    screens: [
+      { n: '1', t: 'Hero orb', d: 'l\'orb del coach che pulsa' },
+      { n: '2', t: 'Confronto', d: 'tabella GRATIS vs HypeMove+' },
+      { n: '3', t: 'Piani', d: 'schermata piani standard, skin arancione' },
+    ],
+  },
+  {
+    variant: 'coach_personalization',
+    name: 'Aumenta la personalizzazione',
+    rotation: 'live',
+    where: 'Tastino «Aumenta la personalizzazione» nell\'hub del coach, solo per utenti free. In produzione dal 12/09/2026.',
+    what: 'Tre slide disegnate per questa proposta: la mascotte con la promessa e i tre pilastri, due curve che corrono da settimana 1 a settimana 12, e i piani. Non monta il componente Paywall (nove schermate) ma ne riusa gli hook: prezzi, prova, acquisto e legale restano quelli veri.',
+    file: 'app/src/components/PremiumProposals/CoachCheckinPaywall/CoachCheckinFlow.tsx',
+    screens: [
+      { n: '1', t: 'Cosa ottieni', d: 'mascotte, promessa, tre pilastri' },
+      { n: '2', t: 'Dove ti porta', d: 'due curve, settimana 1 → settimana 12' },
+      { n: '3', t: 'I piani', d: 'disegno proprio, numeri del paywall vero' },
+    ],
+  },
+  {
+    variant: 'meal_scan',
+    name: 'Contacalorie',
+    rotation: 'live',
+    where: 'Crediti AI finiti mentre l\'utente fotografa un piatto. In produzione dal 12/09/2026.',
+    what: 'Tre schermate che parlano di CIBO, non di allenamenti: la card del risultato come la vedrebbe, il diario che si riempie, i piani. Prima quel momento finiva nel funnel della chat, e chi stava contando le calorie si trovava a leggere di allenamenti da cinque minuti.',
+    file: 'app/src/components/PremiumProposals/MealScanPaywall/MealScanPaywallFlow.tsx',
+    screens: [
+      { n: '1', t: 'Cosa ottieni', d: 'la card del piatto analizzato' },
+      { n: '2', t: 'Dove ti porta', d: 'il diario che si riempie, la domanda al coach' },
+      { n: '3', t: 'I piani', d: 'disegno di questa proposta' },
+    ],
+  },
+  {
+    variant: 'onboarding_funnel',
+    name: 'Funnel standard',
+    rotation: 'live',
+    where: 'La pagina `/paywall`. Oggi ci arriva soprattutto chi tocca il check-in settimanale del coach da utente free; resta il ripiego di diversi entry-point.',
+    what: 'Il funnel storico «feature-first»: parte dalla funzione legata al punto da cui è stato aperto (post-workout → niente pubblicità, shop → coach AI, roadmap → su misura), mostra due schermate feature, poi il confronto, poi il promemoria, poi i piani. È il componente che le altre creatività riusano come ultima schermata.',
+    file: 'app/src/pages/OnboardingPaywall/OnboardingPaywall.tsx',
+    screens: [
+      { n: '1-2', t: 'Feature', d: 'la funzione correlata all\'ingresso + la successiva' },
+      { n: '3', t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { n: '4', t: 'Promemoria', d: 'cosa succede se non fa niente' },
+      { n: '5', t: 'Piani', d: 'la schermata piani vera' },
+    ],
+    note: 'Il source `coach_checkin` copre DUE gate diversi: la pagina del check-in (che manda qui) e il tastino dell\'hub (che apre «Aumenta la personalizzazione»). Confrontare le due creatività per source non funziona finché il nome è lo stesso.',
+  },
+  {
+    variant: 'change_goal_premium',
+    name: 'Cambio obiettivo',
+    rotation: 'live',
+    where: 'Gate che compare quando un utente free prova a cambiare obiettivo.',
+    what: 'Non è una creatività a sé: è il funnel standard aperto direttamente sulla schermata dei piani, con la skin arancione. Per questo nei dati ha gli step ma quasi nessuna impression: la superficie dichiara di NON essere un\'impression e emette solo lo step.',
+    file: 'app/src/pages/OnboardingPaywall/OnboardingPaywall.tsx',
+    // Il gate passa `impression: false` al tracker: l'assenza di view_Paywall è voluta.
+    soft: ['view'],
+    screens: [
+      { n: '1', t: 'Piani', d: 'skin arancione, si entra direttamente qui' },
+    ],
+  },
+  {
+    variant: 'subscription_page',
+    name: 'Pagina Abbonamento',
+    rotation: 'live',
+    where: 'Tap sul cartellino della prova quando è «ghost»: ha finito i 7 giorni ed è tornato al gratuito.',
+    what: 'L\'unica superficie premium che l\'utente apre DA SOLO. Non rispiega il prodotto (lo conosce già): dice cosa succede se riattiva e quanto costa. Niente vocabolario di prova gratuita, perché Play non concede un secondo trial sullo stesso account.',
+    file: 'app/src/components/PremiumProposals/SubscriptionPage/SubscriptionPage.tsx',
+    screens: [
+      { n: '1', t: 'Abbonamento', d: 'cosa torna, quanto costa, i due piani' },
+    ],
+    note: 'Numeri piccolissimi per definizione: la vede solo chi ha finito la prova e torna a cercarla.',
+  },
+  {
+    variant: 'coach_ai_chart',
+    name: 'Coach AI · grafico',
+    rotation: 'dormant',
+    where: 'Era la proposta post-workout con il grafico dinamico. Il componente esiste ancora ed è montato dall\'hero «programma pronto» di fine onboarding, che oggi non si mostra.',
+    what: 'Gemella della «visual»: cambia solo la prima schermata, un grafico che si disegna da solo invece dell\'orb.',
+    file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/CoachAiChartFlow.tsx',
+    screens: [
+      { n: '1', t: 'Hero grafico', d: 'la curva che si disegna' },
+      { n: '2', t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { n: '3', t: 'Piani', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'onboarding_results_chart',
+    name: 'Fine onboarding · risultati',
+    rotation: 'retired',
+    where: 'Era il paywall alla fine dell\'onboarding (hero «programma pronto»). Quel paywall non esiste più nel flusso.',
+    what: 'Gemella della «grafico», montata a fine onboarding. È la ragione per cui lo step «Vede il paywall (fine onboarding)» del funnel sprint vale zero da settimane.',
+    file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/ProgramReadyHero.tsx',
+    screens: [],
+  },
+  {
+    variant: 'video_ad',
+    name: 'Video annuncio',
+    rotation: 'retired',
+    where: 'Era nella rotazione post-workout. Oggi la monta solo l\'anteprima /dev/premium.',
+    what: 'Uno spot forzato (video interno, non AdMob) con la × che si sblocca a video finito, poi i piani.',
+    file: 'app/src/components/PremiumProposals/VideoAdPaywall/VideoAdFlow.tsx',
+    screens: [
+      { n: '1', t: 'Lo spot', d: 'video forzato, × bloccata fino alla fine' },
+      { n: '2', t: 'Piani', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'progress_video',
+    name: 'Video progressi',
+    rotation: 'retired',
+    where: 'Era nella rotazione post-workout. Oggi la monta solo l\'anteprima /dev/premium.',
+    what: 'Spot cinematografico sui progressi, poi i piani.',
+    file: 'app/src/components/PremiumProposals/ProgressVideoPaywall/ProgressVideoFlow.tsx',
+    screens: [
+      { n: '1', t: 'Lo spot', d: 'video cinematografico, × a fine video' },
+      { n: '2', t: 'Piani', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'coach_call',
+    name: 'Coach Call (v1)',
+    rotation: 'retired',
+    where: 'Prima versione del concept «chiamata dal coach», sostituita da coach_call_v2 a luglio 2026.',
+    what: 'Stessa idea della v2 ma con lo script del pitch variabile per segmento (nome, numero di allenamenti). La v2 ha una voce registrata sola, uguale per tutti. Resta nei dati storici, in app non la monta più nessuno.',
+    file: 'app/src/components/PremiumProposals/CoachCallPaywall/CoachCallFlow.tsx',
+    screens: [],
+  },
+  {
+    variant: 'coach_call_v2',
+    name: 'Coach Call',
+    rotation: 'retired',
+    where: 'Concept «chiamata dal coach». Oggi la monta solo l\'anteprima /dev/premium.',
+    what: 'Il coach «chiama» con una voce registrata (script unico per tutti), e l\'acquisto avviene dentro la sheet stessa invece che su una schermata piani separata.',
+    file: 'app/src/components/PremiumProposals/CoachCallPaywall/CoachCallFlow.tsx',
+    screens: [
+      { n: '1', t: 'La chiamata', d: 'voce registrata + trascrizione' },
+      { n: '2', t: 'L\'offerta', d: 'cosa ottieni' },
+      { n: '3', t: 'Piani', d: 'scelta e pagamento dentro la sheet' },
+    ],
+  },
+];
+
+const CREATIVE_ROTATION_META = {
+  live:    { label: 'in rotazione',   color: '#4ade80', bg: '#0f2a1a', bd: '#1f5a36' },
+  dormant: { label: 'ramo non pescato', color: '#8b8ba7', bd: '#2a2a3d', bg: '#14141f' },
+  retired: { label: 'solo anteprima Dev', color: '#6b6b85', bd: '#24243a', bg: '#111120' },
+};
+
+// Gli eventi che ci si aspetta da una creatività viva, con la spiegazione del perché uno zero
+// è (o non è) un problema. `soft` = uno zero può essere legittimo, niente allarme.
+const CREATIVE_MARKS = [
+  { k: 'open',    l: 'apertura',   d: 'paywall_open · lo emette il punto che apre la proposta' },
+  { k: 'view',    l: 'impression', d: 'view_Paywall · la schermata è a video' },
+  { k: 'step',    l: 'step',       d: 'paywall_step_view · una riga per schermata mostrata' },
+  { k: 'close',   l: 'uscita',     d: 'paywall_close · come e da dove è uscito' },
+  { k: 'plan',    l: 'piano',      d: 'paywall_plan_select · scatta solo se CAMBIA piano, uno zero può essere vero', soft: true },
+  { k: 'cta',     l: 'CTA',        d: 'paywall_cta_tap · ha premuto il bottone che compra', soft: true },
+  { k: 'attempt', l: 'pagamento',  d: 'paywall_purchase_attempt · lo store ha preso in carico', soft: true },
+  { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · quasi sempre arriva senza variant: vedi la nota in fondo', soft: true },
+];
+
+function creativeAuditRow(reg, live) {
+  const rot = CREATIVE_ROTATION_META[reg.rotation] || CREATIVE_ROTATION_META.retired;
+  const users = live ? Number(live.users || 0) : 0;
+  const lastAt = live && live.last_at ? new Date(live.last_at) : null;
+  const giorni = lastAt ? Math.floor((Date.now() - lastAt.getTime()) / 86400000) : null;
+  // Il disaccordo fra codice e dati è la cosa che vale la pena vedere: viva ma muta da più di
+  // una settimana, oppure ritirata ma ancora in giro.
+  const muta   = reg.rotation === 'live' && (giorni === null || giorni > 7);
+  const zombie = reg.rotation !== 'live' && giorni !== null && giorni <= 7;
+  const warn   = muta || zombie;
+  const srcs = (live && live.sources || []).slice(0, 4)
+    .map(s => `${esc(s.source)} <span style="color:#5a5a7a">${s.users}</span>`).join(' · ');
+  const soft = k => reg.rotation !== 'live' || (reg.soft || []).includes(k);
+  const marks = CREATIVE_MARKS.map(m => {
+    const v = live && live.marks ? Number(live.marks[m.k] || 0) : 0;
+    const col = v > 0 ? '#4ade80' : (m.soft || soft(m.k) || !live ? '#3a3a55' : '#ef4444');
+    return `<span title="${esc(m.l + ' — ' + m.d)}" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${col};margin-right:3px"></span>`;
+  }).join('');
+  return `
+    <div class="creative-row" data-variant="${esc(reg.variant)}" title="Clicca: la scheda completa"
+         style="display:flex;align-items:center;gap:14px;padding:10px 12px;border-radius:9px;cursor:pointer;
+                background:${warn ? '#1c1710' : '#111120'};border:1px solid ${warn ? '#5a4318' : '#1f1f33'};margin-bottom:6px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:13px;font-weight:700;color:var(--fg)">${esc(reg.name)}</span>
+          <span style="font-family:var(--mono);font-size:10px;color:#5a5a7a">${esc(reg.variant)}</span>
+          <span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 6px">${rot.label}</span>
+          ${muta   ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#fbbf24;border:1px solid #5a4318;border-radius:4px;padding:1px 6px">nessuno la vede da ${giorni === null ? 'sempre' : giorni + 'g'}</span>` : ''}
+          ${zombie ? `<span style="font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#fbbf24;border:1px solid #5a4318;border-radius:4px;padding:1px 6px">ma esce ancora</span>` : ''}
+        </div>
+        <div style="font-size:10.5px;color:var(--muted);margin-top:3px">${esc(reg.where)}</div>
+        ${srcs ? `<div style="font-size:10px;color:#5a5a7a;margin-top:3px;font-family:var(--mono)">${srcs}</div>` : ''}
+      </div>
+      <div style="flex-shrink:0;text-align:right;min-width:86px">
+        <div style="font-size:17px;font-weight:800;color:${users > 0 ? 'var(--fg)' : '#3a3a55'}">${users || '—'}</div>
+        <div style="font-size:9px;color:var(--muted)">utenti nel periodo</div>
+        <div style="margin-top:5px">${marks}</div>
+      </div>
+    </div>`;
+}
+
+function premiumCreativesAuditCard() {
+  const head = `
+    <div style="margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:3px">Le creatività dei paywall · cosa è ancora vivo</div>
+      <div style="font-size:11.5px;color:var(--muted);line-height:1.55">
+        Ogni proposta premium dell'app: cosa mostra, da dove esce, e il confronto fra quello che dice il
+        <strong style="color:var(--fg)">codice</strong> (è in rotazione oggi?) e quello che dicono i
+        <strong style="color:var(--fg)">dati</strong> (l'ha vista qualcuno?). Le righe ambra sono i disaccordi
+        fra le due. I pallini a destra sono gli eventi del ciclo di vita: verde = arriva, rosso = manca,
+        grigio = uno zero che può essere legittimo. <strong style="color:var(--fg)">Clicca una riga</strong> per la scheda completa.
+      </div>
+    </div>`;
+
+  if (state.creativesAuditLoading && !state.creativesAudit) {
+    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Controllo le creatività…</div></div>`;
+  }
+  if (state.creativesAuditError && !state.creativesAudit) {
+    const box = state.creativesAuditErrorTimeout
+      ? sezioneTimeoutBox(state.creativesAuditError, 'fetchCreativesAudit()')
+      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.creativesAuditError)}</div>`;
+    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
+  }
+
+  const live = state.creativesAudit || [];
+  const byVariant = {};
+  live.forEach(r => { byVariant[r.variant] = r; });
+
+  // Ordine: prima quelle che il codice dà per vive (per utenti), poi le altre. Dentro ogni
+  // gruppo, chi ha numeri sta sopra: la pagina deve aprire su quello che sta succedendo.
+  const rank = r => (r.rotation === 'live' ? 0 : r.rotation === 'dormant' ? 1 : 2);
+  const rows = CREATIVE_REGISTRY.slice().sort((a, b) => {
+    const d = rank(a) - rank(b);
+    if (d !== 0) return d;
+    return Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0);
+  });
+
+  // Varianti che i dati conoscono e il registro no: non devono sparire, sono la prova che
+  // qualcosa di nuovo (o di dimenticato) sta uscendo in app.
+  const unknown = live.filter(r => !CREATIVE_REGISTRY.some(c => c.variant === r.variant));
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      ${rows.map(r => creativeAuditRow(r, byVariant[r.variant])).join('')}
+      ${unknown.length ? `
+        <div style="margin-top:12px;background:#2b210f;border:1px solid #5a4318;border-radius:9px;padding:10px 12px;font-size:11px;color:#d9c48a;line-height:1.6">
+          <strong style="color:#fbbf24">Creatività senza scheda:</strong>
+          ${unknown.map(u => `<code style="font-family:var(--mono)">${esc(u.variant)}</code> (${u.users} utenti)`).join(' · ')}.
+          Compaiono nei dati ma non sono nel catalogo qui sopra: o sono nuove, o qualcuno ha cambiato il nome della variant.
+        </div>` : ''}
+    </div>`;
+}
+
+// Scheda della singola creatività: cos'è, le schermate, dove esce davvero, il file che la
+// disegna. Lo screenshot compare da solo se esiste `/internal/paywalls/<variant>.png` — così
+// basta lasciarcelo cadere dentro perché la scheda lo mostri, senza toccare il codice.
+function creativeModal() {
+  if (!state.creativeModal) return '';
+  const reg = CREATIVE_REGISTRY.find(c => c.variant === state.creativeModal);
+  if (!reg) return '';
+  const live = (state.creativesAudit || []).find(r => r.variant === reg.variant) || null;
+  const rot = CREATIVE_ROTATION_META[reg.rotation] || CREATIVE_ROTATION_META.retired;
+  const lastAt = live && live.last_at ? new Date(live.last_at) : null;
+
+  const soft = k => reg.rotation !== 'live' || (reg.soft || []).includes(k);
+  const marksHtml = CREATIVE_MARKS.map(m => {
+    const v = live && live.marks ? Number(live.marks[m.k] || 0) : 0;
+    const col = v > 0 ? '#4ade80' : (m.soft || soft(m.k) || !live ? '#5a5a7a' : '#ef4444');
+    return `
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:5px 0;border-bottom:1px solid #15151f">
+        <span style="color:var(--fg)">${esc(m.l)} <span style="color:#5a5a7a;font-size:10px">${esc(m.d)}</span></span>
+        <span style="font-family:var(--mono);font-weight:700;color:${col}">${v}</span>
+      </div>`;
+  }).join('');
+
+  const stepsHtml = (live && live.steps || []).map(s => `
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:4px 0;border-bottom:1px solid #15151f">
+      <span style="color:var(--fg)">step ${esc(s.idx)} <span style="color:#5a5a7a">· ruolo ${esc(s.step)}</span></span>
+      <span style="font-family:var(--mono);font-weight:700">${s.users}</span>
+    </div>`).join('');
+
+  const srcHtml = (live && live.sources || []).map(s => `
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:4px 0;border-bottom:1px solid #15151f">
+      <span style="color:var(--fg);font-family:var(--mono);font-size:11px">${esc(s.source)}</span>
+      <span style="font-family:var(--mono);font-weight:700">${s.users}</span>
+    </div>`).join('');
+
+  return `
+    <div id="creative-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;width:100%;max-width:760px;
+        height:min(86vh,720px);display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:var(--fg);display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+              ${esc(reg.name)}
+              <span style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 6px">${rot.label}</span>
+            </div>
+            <div style="font-size:11px;color:#5a5a7a;margin-top:3px;font-family:var(--mono)">variant = ${esc(reg.variant)}</div>
+          </div>
+          <button id="creative-close" style="background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;min-height:0;padding:18px 20px">
+          <div style="font-size:12.5px;color:var(--fg);line-height:1.65;margin-bottom:14px">${esc(reg.what)}</div>
+          <div style="font-size:11.5px;color:var(--muted);line-height:1.6;margin-bottom:16px">
+            <strong style="color:var(--fg)">Dove esce:</strong> ${esc(reg.where)}
+            ${lastAt ? `<br><strong style="color:var(--fg)">Ultima volta vista:</strong> ${lastAt.toLocaleString('it-IT')}` : ''}
+          </div>
+
+          <img src="/internal/paywalls/${esc(reg.variant)}.png" alt=""
+               onerror="this.style.display='none';this.nextElementSibling.style.display='block'"
+               style="width:100%;border-radius:10px;border:1px solid #1f1f33;margin-bottom:6px">
+          <div style="display:none;font-size:10.5px;color:#5a5a7a;background:#111120;border:1px dashed #2a2a3d;border-radius:9px;padding:10px 12px;margin-bottom:14px">
+            Nessuno screenshot per questa creatività. Per vederla qui dentro basta salvare l'immagine come
+            <code style="font-family:var(--mono)">www/public/internal/paywalls/${esc(reg.variant)}.png</code> nel repo del sito:
+            la scheda la mostra da sola. In app la si guarda dal menu Dev → <code style="font-family:var(--mono)">/dev/premium</code>,
+            che monta ogni proposta in anteprima senza emettere eventi e senza far pagare niente.
+          </div>
+
+          ${reg.screens && reg.screens.length ? `
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:14px 0 7px">Le schermate, nell'ordine</div>
+            ${reg.screens.map(s => `
+              <div style="display:flex;gap:11px;padding:7px 0;border-bottom:1px solid #15151f">
+                <div style="width:40px;flex-shrink:0;font-family:var(--mono);font-size:11px;color:#5a5a7a">${esc(s.n)}</div>
+                <div style="flex:1">
+                  <div style="font-size:12px;font-weight:600;color:var(--fg)">${esc(s.t)}</div>
+                  <div style="font-size:10.5px;color:var(--muted);margin-top:2px">${esc(s.d)}</div>
+                </div>
+              </div>`).join('')}` : ''}
+
+          <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:18px">
+            <div style="flex:1;min-width:250px">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Eventi nel periodo · utenti unici</div>
+              ${marksHtml}
+              ${live ? `<div style="font-size:10px;color:#5a5a7a;margin-top:7px">${live.pct_exposure}% degli eventi porta l'exposure_id${live.pct_exposure < 100 ? ' — per il resto il percorso non è ricostruibile (build vecchie)' : ''}</div>` : ''}
+            </div>
+            <div style="flex:1;min-width:230px">
+              ${stepsHtml ? `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Schermate emesse davvero</div>${stepsHtml}` : ''}
+              ${srcHtml ? `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:14px 0 6px">Da dove è uscita</div>${srcHtml}` : ''}
+            </div>
+          </div>
+
+          ${reg.note ? `<div style="margin-top:16px;font-size:11px;color:#d9c48a;background:#1c1710;border:1px solid #5a4318;border-radius:9px;padding:10px 12px;line-height:1.6">${esc(reg.note)}</div>` : ''}
+
+          <div style="margin-top:16px;font-size:10.5px;color:#5a5a7a;line-height:1.6">
+            Il codice che la disegna: <code style="font-family:var(--mono);color:var(--muted)">${esc(reg.file)}</code>
+          </div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -10229,6 +10725,7 @@ function attachEvents() {
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
       if (state.page === 'premium'    && !state.journeyData   && !state.journeyLoading)   fetchPaywallJourney();
+      if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
       if (state.page === 'ai-coach') {
         if (!state.aiStatsData          && !state.aiStatsLoading)       fetchAIStats();
         if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
@@ -11857,6 +12354,7 @@ function attachEvents() {
     state.premiumData = null;
     fetchPremium();
     fetchPaywallJourney();
+    fetchCreativesAudit();
   });
   document.getElementById('premium-apply')?.addEventListener('click', () => {
     const from   = document.getElementById('premium-from')?.value;
@@ -11871,11 +12369,13 @@ function attachEvents() {
     state.premiumData = null;
     fetchPremium();
     fetchPaywallJourney();
+    fetchCreativesAudit();
   });
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
     state.premiumData = null;
     fetchPremium();
     fetchPaywallJourney();
+    fetchCreativesAudit();
   });
   // Percorso del paywall: cambio proposta (1° allenamento / dal 2° in poi) e click su un passo.
   document.querySelectorAll('.journey-chip').forEach(el =>
@@ -11888,6 +12388,14 @@ function attachEvents() {
   document.querySelectorAll('.journey-step').forEach(el =>
     el.addEventListener('click', () =>
       fetchJourneyUsers(el.dataset.key, el.dataset.label, el.dataset.hint)));
+
+  // Catalogo creatività: la riga apre la scheda (cos'è, le schermate, gli eventi).
+  document.querySelectorAll('.creative-row').forEach(el =>
+    el.addEventListener('click', () => { state.creativeModal = el.dataset.variant; render(); }));
+  document.getElementById('creative-close')?.addEventListener('click', () => { state.creativeModal = null; render(); });
+  document.getElementById('creative-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.creativeModal = null; render(); }
+  });
 
   // Click su un KPI cliccabile (paganti / in prova / a rischio / in disdetta) → modale lista utenti.
   document.querySelectorAll('[data-premium-bucket]').forEach(el =>
@@ -12017,6 +12525,7 @@ function attachEvents() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
+    if (state.creativeModal)     { state.creativeModal = null; render(); return; }
     if (state.stepUsersModal)    { state.stepUsersModal = null; state.stepUsersData = null; render(); return; }
     if (state.premiumBucketModal){ state.premiumBucketModal = null; render(); return; }
     if (state.funnelStepUsersModal){ state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render(); return; }
