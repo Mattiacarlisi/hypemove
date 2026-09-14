@@ -595,10 +595,10 @@ let state = {
   promptEditOpen: false, promptEditFragmentId: null, promptEditContent: '',
   promptEditNote: '', promptEditSaving: false, promptEditError: null,
   promptEditVersions: null, promptEditVersionsLoading: false, promptEditRestoredFromId: null,
-  // Sessione ops per l'edit (magic link Supabase Auth). Anon-only nella dashboard,
+  // Sessione ops per l'edit (email+password Supabase Auth). Anon-only nella dashboard,
   // ma per scrivere override serve JWT + gate PROMPT_EDIT_USER_IDS lato edge.
   opsSession: null, opsSessionCheckedOnce: false,
-  opsEmailPending: false, opsEmailInput: '', opsAuthError: null,
+  opsEmailInput: '', opsPasswordInput: '', opsAuthError: null,
 };
 
 let refreshTimer = null, countdownTimer = null, secondsLeft = 300;
@@ -1714,18 +1714,15 @@ async function refreshOpsSession() {
   render();
 }
 
-async function opsLoginMagicLink(email) {
+async function opsLoginPassword(email, password) {
   state.opsAuthError = null;
   try {
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: location.href },
-    });
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    state.opsEmailPending = true;
+    state.opsSession = data.session || null;
     render();
   } catch (e) {
-    console.error('opsLoginMagicLink', e);
+    console.error('opsLoginPassword', e);
     state.opsAuthError = e.message || String(e);
     render();
   }
@@ -10965,11 +10962,8 @@ function promptingOpsToolbar() {
       <button data-purge-cache class="btn-outline" style="font-size:12px;padding:6px 12px" title="Invalida la cache override sull'istanza corrente (best-effort)">Purga cache</button>
       <button data-ops-logout class="btn-outline" style="font-size:12px;padding:6px 12px">Logout ops</button>`;
   }
-  if (state.opsEmailPending) {
-    return `<span style="font-size:11px;color:var(--green)">📧 Magic link inviato — controlla la mail</span>`;
-  }
   return `
-    <button data-ops-login-open class="btn-outline" style="font-size:12px;padding:6px 12px" title="Login ops per editare i prompt (magic link Supabase Auth)">🔑 Login ops</button>`;
+    <button data-ops-login-open class="btn-outline" style="font-size:12px;padding:6px 12px" title="Login ops per editare i prompt (Supabase Auth)">🔑 Login ops</button>`;
 }
 
 function promptingOverridesBanner() {
@@ -11054,7 +11048,7 @@ function promptEditModal() {
 }
 
 function opsLoginModal() {
-  if (!state.opsEmailPending && state.opsAuthError === null && state.opsEmailInput === '' && !state._opsLoginOpen) return '';
+  if (state.opsAuthError === null && state.opsEmailInput === '' && !state._opsLoginOpen) return '';
   if (!state._opsLoginOpen) return '';
   return `
     <div class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px">
@@ -11063,12 +11057,12 @@ function opsLoginModal() {
           <div style="font-size:15px;font-weight:700">Login ops</div>
           <button data-ops-login-close style="background:transparent;border:none;cursor:pointer;color:var(--muted);padding:4px 8px;font-size:16px">✕</button>
         </div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">Inserisci la tua email ops. Ti mando un magic link Supabase Auth — cliccando torni qui autenticato.</div>
-        <input data-ops-email type="email" placeholder="tuo.email@example.com" value="${esc(state.opsEmailInput || '')}" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:10px" />
+        <input data-ops-email type="email" placeholder="tuo.email@example.com" autocomplete="email" value="${esc(state.opsEmailInput || '')}" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:10px" />
+        <input data-ops-password type="password" placeholder="password" autocomplete="current-password" value="${esc(state.opsPasswordInput || '')}" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:10px" />
         ${state.opsAuthError ? `<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠️ ${esc(state.opsAuthError)}</div>` : ''}
         <div style="display:flex;justify-content:flex-end;gap:8px">
           <button data-ops-login-close class="btn-outline" style="font-size:13px;padding:8px 14px">Annulla</button>
-          <button data-ops-login-send style="font-size:13px;padding:8px 14px;border:none;border-radius:6px;background:var(--green);color:#fff;font-weight:600;cursor:pointer">Invia magic link</button>
+          <button data-ops-login-send style="font-size:13px;padding:8px 14px;border:none;border-radius:6px;background:var(--green);color:#fff;font-weight:600;cursor:pointer">Entra</button>
         </div>
       </div>
     </div>`;
@@ -11319,16 +11313,20 @@ function attachEvents() {
     el.addEventListener('click', () => {
       state._opsLoginOpen = false;
       state.opsEmailInput = '';
+      state.opsPasswordInput = '';
       state.opsAuthError = null;
       render();
     }));
   document.querySelectorAll('[data-ops-email]').forEach(el =>
     el.addEventListener('input', () => { state.opsEmailInput = el.value; }));
+  document.querySelectorAll('[data-ops-password]').forEach(el =>
+    el.addEventListener('input', () => { state.opsPasswordInput = el.value; }));
   document.querySelectorAll('[data-ops-login-send]').forEach(el =>
     el.addEventListener('click', () => {
       const email = (state.opsEmailInput || '').trim();
-      if (!email) { state.opsAuthError = 'Email richiesta'; render(); return; }
-      opsLoginMagicLink(email);
+      const password = state.opsPasswordInput || '';
+      if (!email || !password) { state.opsAuthError = 'Email e password richieste'; render(); return; }
+      opsLoginPassword(email, password);
     }));
   document.querySelectorAll('[data-ops-logout]').forEach(el =>
     el.addEventListener('click', () => opsLogout()));
@@ -13112,7 +13110,7 @@ document.addEventListener('keydown', e => {
 // Dal 31/07/2026 (tolto il 03/08, rimesso il 07/09/2026 per la campagna con utenti
 // veri) il DB pretende un operatore in `public.internal_operators`, quindi
 // la dashboard deve presentarsi con un JWT vero prima di chiedere qualsiasi dato.
-// Il login è lo stesso magic link già usato dal pannello prompt (opsLoginMagicLink).
+// Il login è lo stesso email+password già usato dal pannello prompt (opsLoginPassword).
 function renderOpsGate(message) {
   document.body.innerHTML =
     '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;' +
@@ -13120,30 +13118,36 @@ function renderOpsGate(message) {
       '<div style="max-width:420px;width:100%">' +
         '<div style="font-size:20px;font-weight:600;margin-bottom:6px">Dashboard interna</div>' +
         '<div id="ops-gate-msg" style="font-size:13px;color:#9a9ab0;margin-bottom:18px;line-height:1.5">' +
-          (message || 'Accesso riservato agli operatori. Entra col magic link.') +
+          (message || 'Accesso riservato agli operatori.') +
         '</div>' +
         '<input id="ops-gate-email" type="email" placeholder="you@example.com" autocomplete="email" ' +
           'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
           'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
+        '<input id="ops-gate-password" type="password" placeholder="password" autocomplete="current-password" ' +
+          'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
+          'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
         '<button id="ops-gate-send" style="width:100%;background:#5b4bff;border:0;color:#fff;border-radius:6px;' +
-          'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Mandami il link</button>' +
+          'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Entra</button>' +
       '</div>' +
     '</div>';
 
   const emailEl = document.getElementById('ops-gate-email');
+  const passEl  = document.getElementById('ops-gate-password');
   const msgEl   = document.getElementById('ops-gate-msg');
   const send    = async () => {
     const email = (emailEl.value || '').trim();
-    if (!email) return;
-    msgEl.textContent = 'Invio in corso…';
-    // `emailRedirectTo` riporta qui: supabase-js legge la sessione dall'URL al ritorno.
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.href } });
-    msgEl.textContent = error
-      ? ('Non ha funzionato: ' + (error.message || String(error)))
-      : 'Link inviato. Aprilo dalla casella di ' + email + ' e torna qui.';
+    const password = passEl.value || '';
+    if (!email || !password) return;
+    msgEl.textContent = 'Accesso in corso…';
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      msgEl.textContent = 'Non ha funzionato: ' + (error.message || String(error));
+      return;
+    }
+    location.reload();
   };
   document.getElementById('ops-gate-send').addEventListener('click', send);
-  emailEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 }
 
 (async () => {
@@ -13151,9 +13155,24 @@ function renderOpsGate(message) {
   // dashboard mostrerebbe una griglia di errori invece di dire che manca il login.
   // Qui si legge la sessione a mano invece di usare refreshOpsSession(): quella
   // chiude con un render(), e a questo punto del boot loadSettings() non è ancora passata.
+  let sessionExpired = false;
   try {
     const { data: bootSession } = await sb.auth.getSession();
     state.opsSession = bootSession?.session || null;
+    // getSession() legge solo lo storage locale: se il token è scaduto e il
+    // refresh automatico non è passato, torna comunque una sessione "fantasma"
+    // che supererebbe il controllo qui sotto e farebbe fallire ogni RPC con
+    // 403, mostrando una griglia di errori invece del login. getUser() invece
+    // fa un giro reale sul server e la smaschera.
+    if (state.opsSession) {
+      const { error: userErr } = await sb.auth.getUser();
+      if (userErr) {
+        console.error('boot getUser (sessione scaduta)', userErr);
+        await sb.auth.signOut();
+        state.opsSession = null;
+        sessionExpired = true;
+      }
+    }
   } catch (e) {
     console.error('boot getSession', e);
     state.opsSession = null;
@@ -13161,7 +13180,7 @@ function renderOpsGate(message) {
   state.opsSessionCheckedOnce = true;
 
   if (!state.opsSession) {
-    renderOpsGate();
+    renderOpsGate(sessionExpired ? 'La sessione è scaduta. Rifai il login.' : undefined);
     return;
   }
 
