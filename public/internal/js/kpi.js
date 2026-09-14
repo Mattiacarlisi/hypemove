@@ -13177,6 +13177,15 @@ function renderSetPasswordForm() {
     const password = pwEl.value || '';
     if (password.length < 6) { msgEl.textContent = 'Almeno 6 caratteri.'; return; }
     msgEl.textContent = 'Salvataggio…';
+    // Col token_hash del template la sessione non esiste ancora: va aperta qui.
+    const tokenHash = new URLSearchParams(location.search).get('token_hash');
+    if (tokenHash) {
+      const { error: otpErr } = await sb.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+      if (otpErr) {
+        msgEl.textContent = 'Link scaduto o già usato: ' + (otpErr.message || String(otpErr));
+        return;
+      }
+    }
     const { error } = await sb.auth.updateUser({ password });
     if (error) {
       msgEl.textContent = 'Non ha funzionato: ' + (error.message || String(error));
@@ -13190,7 +13199,10 @@ function renderSetPasswordForm() {
 }
 
 (async () => {
-  if (location.hash.includes('type=recovery')) {
+  // Due forme possibili: l'hash con la sessione già aperta da supabase-js, oppure
+  // il token_hash in query string quando il template punta direttamente qui.
+  if (location.hash.includes('type=recovery') ||
+      new URLSearchParams(location.search).get('type') === 'recovery') {
     renderSetPasswordForm();
     return;
   }
