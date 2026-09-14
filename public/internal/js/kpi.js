@@ -8205,6 +8205,7 @@ function premiumPaywallPurchasesCard() {
   }
 
   const rows = (state.purchases && state.purchases.acquisti) || [];
+  const orfani = rows.filter(r => r.orfano).length;
   if (!rows.length) {
     return `<div class="card" style="margin-bottom:16px">${head}
       <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun acquisto in questo periodo.</div></div>`;
@@ -8222,8 +8223,10 @@ function premiumPaywallPurchasesCard() {
     const forzaCol = r.forza === 'forte' ? '#4ade80' : r.forza === 'debole' ? '#f59e0b' : '#ef4444';
     return `
       <tr style="border-bottom:1px solid #15151f">
-        <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.nome)}</td>
-        <td style="padding:9px 12px"><a href="mailto:${esc(r.email)}" style="color:#a78bfa;text-decoration:none">${esc(r.email)}</a></td>
+        <td style="padding:9px 12px;color:${r.orfano ? '#f59e0b' : 'var(--fg)'};white-space:nowrap">${esc(r.nome)}</td>
+        <td style="padding:9px 12px">${r.email
+          ? `<a href="mailto:${esc(r.email)}" style="color:#a78bfa;text-decoration:none">${esc(r.email)}</a>`
+          : `<span style="color:#f59e0b;font-size:11px" title="La riga di play_purchases non porta user_id: Google ha confermato l'abbonamento ma il collegamento all'account non è mai arrivato. L'acquisto è vero, l'utente non si può ancora nominare.">acquisto senza account collegato</span>`}</td>
         <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.piano)}</td>
         <td style="padding:9px 12px;font-family:var(--mono);color:var(--fg);white-space:nowrap">${r.prezzo != null ? '€ ' + r.prezzo : '—'}</td>
         <td style="padding:9px 12px;font-weight:700;color:${col};white-space:nowrap">${esc(r.stato)}</td>
@@ -8240,9 +8243,21 @@ function premiumPaywallPurchasesCard() {
       </tr>`;
   }).join('');
 
+  // Un acquisto senza `user_id` è un abbonamento pagato di cui non sappiamo il proprietario:
+  // niente eventi da attribuire, e in app quella persona probabilmente NON ha il premium.
+  const notaOrfani = orfani ? `
+    <div style="background:#f59e0b12;border:1px solid #f59e0b40;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;line-height:1.6;color:var(--fg)">
+      <strong style="color:#f59e0b">${orfani} acquist${orfani === 1 ? 'o' : 'i'} senza account collegato.</strong>
+      Google ha confermato l'abbonamento ma la riga di <code style="font-family:var(--mono)">play_purchases</code>
+      non porta <code style="font-family:var(--mono)">user_id</code>: l'incasso è vero, la persona no.
+      Senza utente non ci sono eventi da attribuire — l'attribuzione resta «nessuna» per forza, non per mancanza di dati —
+      e va controllato a mano se in app ha davvero il premium.
+    </div>` : '';
+
   return `
     <div class="card" style="margin-bottom:16px">
       ${head}
+      ${notaOrfani}
       <div style="overflow-x:auto">
         <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:900px">
           <thead>
