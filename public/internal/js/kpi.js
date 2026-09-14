@@ -13150,7 +13150,51 @@ function renderOpsGate(message) {
   passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 }
 
+// Il link "Send password recovery" di Supabase riporta qui con type=recovery
+// nell'hash dell'URL: supabase-js apre da solo una sessione temporanea, ma
+// senza questa schermata non c'era nessun modulo per scegliere la password
+// e il link sembrava "non funzionare". updateUser la fissa sull'account.
+function renderSetPasswordForm() {
+  document.body.innerHTML =
+    '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;' +
+    'font-family:system-ui,-apple-system,sans-serif;background:#08080f;color:#e8e8f0">' +
+      '<div style="max-width:420px;width:100%">' +
+        '<div style="font-size:20px;font-weight:600;margin-bottom:6px">Imposta la password</div>' +
+        '<div id="set-pw-msg" style="font-size:13px;color:#9a9ab0;margin-bottom:18px;line-height:1.5">' +
+          'Scegli la password per accedere alla dashboard.' +
+        '</div>' +
+        '<input id="set-pw-input" type="password" placeholder="nuova password" autocomplete="new-password" ' +
+          'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
+          'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
+        '<button id="set-pw-send" style="width:100%;background:#5b4bff;border:0;color:#fff;border-radius:6px;' +
+          'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Salva password</button>' +
+      '</div>' +
+    '</div>';
+
+  const pwEl  = document.getElementById('set-pw-input');
+  const msgEl = document.getElementById('set-pw-msg');
+  const send  = async () => {
+    const password = pwEl.value || '';
+    if (password.length < 6) { msgEl.textContent = 'Almeno 6 caratteri.'; return; }
+    msgEl.textContent = 'Salvataggio…';
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) {
+      msgEl.textContent = 'Non ha funzionato: ' + (error.message || String(error));
+      return;
+    }
+    history.replaceState(null, '', location.pathname + location.search);
+    location.reload();
+  };
+  document.getElementById('set-pw-send').addEventListener('click', send);
+  pwEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+}
+
 (async () => {
+  if (location.hash.includes('type=recovery')) {
+    renderSetPasswordForm();
+    return;
+  }
+
   // La sessione va risolta PRIMA di ogni fetch: senza, ogni RPC tornerebbe 403 e la
   // dashboard mostrerebbe una griglia di errori invece di dire che manca il login.
   // Qui si legge la sessione a mano invece di usare refreshOpsSession(): quella
