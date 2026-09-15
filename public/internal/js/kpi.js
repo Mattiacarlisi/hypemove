@@ -7553,13 +7553,13 @@ const CREATIVE_REGISTRY = [
     where: 'Overlay dentro il flusso della scansione del pasto, al posto della card del risultato.',
     when: 'Quando l\'utente fotografa un piatto con i crediti AI già finiti: il paywall prende il posto del risultato che si aspettava.',
     exit: 'La × dell\'overlay, e si torna alla fotocamera.',
-    what: 'Tre schermate che parlano di CIBO, non di allenamenti: la card del risultato come la vedrebbe, il diario che si riempie, i piani. Prima quel momento finiva nel funnel della chat, e chi stava contando le calorie si trovava a leggere di allenamenti da cinque minuti.',
+    what: 'Due schermate che parlano di CIBO, non di allenamenti: il telefono disegnato col gesto per intero — il piatto inquadrato, lo scatto, la scheda del pasto che sale — e subito i piani. Prima quel momento finiva nel funnel della chat, e chi stava contando le calorie si trovava a leggere di allenamenti da cinque minuti.',
     file: 'app/src/components/PremiumProposals/MealScanPaywall/MealScanPaywallFlow.tsx',
     screens: [
-      { idx: 0, t: 'Cosa ottieni', d: 'la card del piatto analizzato' },
-      { idx: 1, t: 'Dove ti porta', d: 'il diario che si riempie, la domanda al coach' },
-      { idx: 2, t: 'I prezzi', d: 'disegno di questa proposta' },
+      { idx: 0, t: 'La dimostrazione', d: 'il gesto per intero dentro il telefono disegnato' },
+      { idx: 1, t: 'I prezzi', d: 'disegno di questa proposta' },
     ],
+    note: 'Dal 15/09/2026 le schermate sono DUE. In mezzo c\'era «Dove ti porta», il diario che si riempie: tolta perché chi arriva qui ha appena sbattuto contro i crediti finiti e l\'app la sta già usando — ogni schermata prima del prezzo è gente che se ne va. Negli sprint chiusi prima di quella data le caselle sono tre, ed è giusto così.',
   },
   {
     variant: 'onboarding_funnel',
