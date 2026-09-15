@@ -492,10 +492,6 @@ let state = {
   sprintPremiumFunnelLoading: false, sprintPremiumFunnelError: null,
   // dettaglio utenti che hanno raggiunto uno step di una creatività (modal su click step box)
   stepUsersModal: null, // { variant, step, label } quando aperto
-  // Percorso del paywall per esposizione (kpi_paywall_journey): quale proposta si sta
-  // guardando e il percorso ricostruito. Segue lo stesso periodo/sprint della pagina Premium.
-  journeyVariant: 'paywall_giorno_zero',
-  journeyData: null, journeyLoading: false, journeyError: null, journeyErrorTimeout: false,
   // Catalogo creatività (kpi_paywall_creatives_audit): stato di salute per variant + la
   // scheda aperta, se ce n'è una.
   creativesAudit: null, creativesAuditLoading: false, creativesAuditError: null, creativesAuditErrorTimeout: false,
@@ -1218,54 +1214,6 @@ async function fetchStepUsers(variant, step, label, idx) {
       state.stepUsersData = { variant, step: stepLabel, total_users: users.length, total_views: totalViews, users };
     }
   } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti step'; }
-  state.stepUsersLoading = false;
-  render();
-}
-
-// Percorso completo di una proposta post-workout (kpi_paywall_journey). Stesso periodo e
-// stesso sprint della pagina Premium: i numeri devono poter essere confrontati con le altre
-// sezioni senza chiedersi su che finestra girano.
-async function fetchPaywallJourney() {
-  state.journeyLoading = true; state.journeyError = null; state.journeyErrorTimeout = false;
-  render();
-  try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_paywall_journey', {
-      p_variant: state.journeyVariant,
-      inizio:    state.premiumFrom,
-      fine:      state.premiumTo,
-      p_start:   selSprint ? sprintStartTs(selSprint) : null,
-      p_end:     selSprint ? sprintEndTs(selSprint) : null,
-    });
-    if (error) throw error;
-    state.journeyData = data;
-  } catch (e) {
-    state.journeyError = e.message || 'Errore caricamento percorso paywall';
-    state.journeyErrorTimeout = isRpcTimeout(e);
-  }
-  state.journeyLoading = false;
-  render();
-}
-
-// Chi è passato da un punto preciso del percorso. La chiave è la STESSA che la RPC ha messo
-// nello step (`event_name|variant|index`): la lista non può disallinearsi dal numero cliccato.
-async function fetchJourneyUsers(key, label, desc) {
-  state.stepUsersModal = { variant: state.journeyVariant, step: key, label, desc };
-  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
-  render();
-  try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_paywall_journey_users', {
-      p_variant: state.journeyVariant,
-      p_key:     key,
-      inizio:    state.premiumFrom,
-      fine:      state.premiumTo,
-      p_start:   selSprint ? sprintStartTs(selSprint) : null,
-      p_end:     selSprint ? sprintEndTs(selSprint) : null,
-    });
-    if (error) throw error;
-    state.stepUsersData = data;
-  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti'; }
   state.stepUsersLoading = false;
   render();
 }
@@ -7075,19 +7023,11 @@ function pagePremium() {
       </div>
     </div>
 
-    <!-- Il percorso completo della proposta post-workout, atto per atto, in utenti unici -->
-    ${paywallJourneyCard()}
-
     <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
     ${premiumCreativesAuditCard()}
 
     <!-- Chi ha pagato davvero nel periodo, e da quale proposta arriva -->
     ${premiumPaywallPurchasesCard()}
-
-    <!-- Coach Spot: il secondo atto del Giorno Zero, letto anche come creatività a sé -->
-    ${premiumCoachSpotCard(d)}
-    <!-- Creatività: quale paywall converte di più, col percorso step inline -->
-    ${premiumCreativesCard(d)}
 
     <!-- Chi ha tentato / acquistato -->
     ${premiumPurchasersDetailCard(purchasers)}
@@ -7142,321 +7082,17 @@ function sezioneTimeoutBox(msg, retryCall) {
     </div>`;
 }
 
-// ── IL PERCORSO DEL PAYWALL, PASSO PER PASSO ─────────────────────────────────
-// Le proposte post-workout NON sono creatività singole, ed è il motivo per cui questa sezione
-// esiste accanto a "Creatività paywall" invece di essere una sua riga:
-//  - il Giorno Zero (1° allenamento) è in DUE atti con DUE tracker sulla stessa apertura — la
-//    chat col coach firma `variant=paywall_giorno_zero`, lo spot a 5 scene firma
-//    `variant=coach_spot` — quindi qualsiasi lettura per variant lo spezza a metà e fa sembrare
-//    lo spot una creatività a sé;
-//  - l'annuncio (dal 2° in poi) è interstitial AdMob + schermata prezzi.
-// Quello che tiene insieme gli atti è l'`exposure_id`, generato dallo `paywall_open` della slide
-// post-workout e appeso a ogni evento dell'apertura. La RPC `kpi_paywall_journey` parte da lì e
-// conta SEMPRE utenti unici; qui ci sono solo le etichette.
-//
-// Le etichette sono una mappa aperta, non una lista chiusa: uno step che nessuno ha ancora
-// battezzato compare lo stesso, con la sua chiave tecnica e il tag "da battezzare". Così una
-// scena nuova appare in dashboard il giorno in cui l'app la emette, senza toccare questo file —
-// che è esattamente il controllo che serve per accorgersi se qualcosa NON è tracciato.
-const JOURNEY_ENTRIES = [
-  {
-    variant: 'paywall_giorno_zero',
-    tab:     '1° allenamento',
-    title:   'Giorno Zero',
-    desc:    'Due atti di fila, una sola apertura. Prima la chat col coach — l\'utente prova il prodotto, non gli si vende niente — poi lo spot a 5 scene che finisce sui prezzi, con la × bloccata fino alla scena dell\'offerta.',
-    when:    'a chi finisce il PRIMO allenamento e non è premium né in prova',
-    chain:   'paywall_giorno_zero (atto 1) + coach_spot (atto 2) · source = post_workout',
-  },
-  {
-    variant: 'ad_paywall',
-    tab:     'dal 2° in poi',
-    title:   'Annuncio + prezzi',
-    desc:    'Un interstitial AdMob a schermo intero, poi la schermata dei piani. È la proposta che esce a ogni allenamento dal secondo in avanti: la stessa persona la rivede decine di volte, quindi le aperture sono molte più degli utenti.',
-    when:    'a ogni allenamento dal 2° in poi, a chi non è premium né in prova',
-    chain:   'ad_paywall · source = post_workout',
-  },
-];
-
-// Etichette per chiave `event_name|variant|index`. `kind`:
-//   flow = passo del racconto (entra nella cascata e nelle percentuali)
-//   buy  = gesto d'acquisto — blocco a sé, perché toccare un piano e premere il bottone sono
-//          azioni PARALLELE, non una in fila all'altra: c'è chi compra senza toccare i piani
-//   exit = uscita o rifiuto (fuori cascata: non è "meno gente", è un altro fatto)
-//   tech = lo stesso passo visto da un secondo tracker — fuori cascata, tenuto a vista perché
-//          sparire sarebbe peggio: è così che ci si accorge di un doppio conteggio.
-const JOURNEY_STEPS = {
-  'paywall_open|paywall_giorno_zero|':        { kind: 'flow', label: 'La proposta si apre',              hint: 'la slide post-workout pesca il Giorno Zero e apre l\'esposizione · l\'evento esiste solo dal 02/09/2026, prima il percorso parte dall\'impression' },
-  'paywall_open|ad_paywall|':                 { kind: 'flow', label: 'La proposta si apre',              hint: 'la slide post-workout pesca l\'annuncio e apre l\'esposizione · l\'evento esiste solo dal 02/09/2026' },
-  'view_Paywall|paywall_giorno_zero|':        { kind: 'flow', label: 'Atto 1 · la chat col coach è a schermo', hint: 'impression: il primo atto è montato e visibile' },
-  'paywall_step_view|paywall_giorno_zero|0':  { kind: 'tech', label: 'Atto 1 · registrato anche come step', hint: 'stesso istante dell\'impression, scritto dal tracker del Giorno Zero' },
-  'paywall_chat_reply|paywall_giorno_zero|':  { kind: 'flow', label: 'Risponde al coach',                 hint: 'ha toccato almeno una delle risposte pronte · il dettaglio dice quale e a che turno' },
-  'paywall_chat_continue|paywall_giorno_zero|': { kind: 'flow', label: 'Tocca «continua» → va allo spot', hint: 'fine dell\'atto 1: da qui parte il video' },
-  'view_Paywall|coach_spot|':                 { kind: 'flow', label: 'Atto 2 · lo spot parte',            hint: 'impression del secondo atto, sulla stessa apertura' },
-  'paywall_step_view|paywall_giorno_zero|1':  { kind: 'tech', label: 'Atto 2 · registrato anche dal tracker del Giorno Zero', hint: 'doppione dello stesso passaggio: due tracker, una sola apertura' },
-  'paywall_ad_result|ad_paywall|':            { kind: 'flow', label: 'Esito dell\'annuncio',              hint: 'cosa ha risposto AdMob · il dettaglio distingue mostrato, saltato, fallito' },
-  'paywall_step_view|ad_paywall|0':           { kind: 'flow', label: 'Schermata dei prezzi',             hint: 'unico step della creatività: l\'annuncio è finito e si vedono i piani' },
-  'paywall_plan_select|coach_spot|':          { kind: 'buy',  label: 'Tocca un piano (mensile ⇄ annuale)', hint: 'ha cambiato la selezione fra i due piani: interesse, non acquisto', ord: 1 },
-  'paywall_plan_select|ad_paywall|':          { kind: 'buy',  label: 'Tocca un piano (mensile ⇄ annuale)', hint: 'ha cambiato la selezione fra i due piani: interesse, non acquisto', ord: 1 },
-  'paywall_cta_tap|coach_spot|':              { kind: 'buy',  label: 'Preme il bottone che compra',       hint: 'intenzione dichiarata: l\'evento parte PRIMA di chiamare lo store', ord: 2 },
-  'paywall_cta_tap|ad_paywall|':              { kind: 'buy',  label: 'Preme il bottone che compra',       hint: 'intenzione dichiarata: l\'evento parte PRIMA di chiamare lo store', ord: 2 },
-  'paywall_purchase_attempt|coach_spot|':     { kind: 'buy',  label: 'Si apre il foglio di pagamento Google', hint: 'lo store ha preso in carico il tentativo', ord: 3 },
-  'paywall_purchase_attempt|ad_paywall|':     { kind: 'buy',  label: 'Si apre il foglio di pagamento Google', hint: 'lo store ha preso in carico il tentativo', ord: 3 },
-  'paywall_purchase_success|coach_spot|':     { kind: 'buy',  label: 'Acquisto riuscito',                 hint: '⚠️ quasi sempre arriva senza exposure_id: vedi il riquadro dei buchi in fondo', ord: 4 },
-  'paywall_purchase_success|ad_paywall|':     { kind: 'buy',  label: 'Acquisto riuscito',                 hint: '⚠️ quasi sempre arriva senza exposure_id: vedi il riquadro dei buchi in fondo', ord: 4 },
-  'paywall_purchase_cancelled|coach_spot|':   { kind: 'exit', label: 'Annulla sul foglio Google',         hint: 'ha aperto il pagamento e si è tirato indietro' },
-  'paywall_purchase_cancelled|ad_paywall|':   { kind: 'exit', label: 'Annulla sul foglio Google',         hint: 'ha aperto il pagamento e si è tirato indietro' },
-  'paywall_purchase_error|coach_spot|':       { kind: 'exit', label: 'Errore di pagamento',               hint: 'il dettaglio riporta la fase e il messaggio dello store' },
-  'paywall_purchase_error|ad_paywall|':       { kind: 'exit', label: 'Errore di pagamento',               hint: 'il dettaglio riporta la fase e il messaggio dello store' },
-  'paywall_close|paywall_giorno_zero|':       { kind: 'exit', label: 'Esce dalla proposta (tracker atto 1)', hint: 'una sola uscita per apertura · il gesto qui è quasi sempre back_hardware, cioè il ripiego che scatta quando la schermata viene smontata' },
-  'paywall_close|coach_spot|':                { kind: 'exit', label: 'Esce dalla proposta (tracker atto 2)', hint: 'la STESSA uscita, registrata anche dal tracker dello spot: qui il gesto è quello vero (× o back)' },
-  'paywall_close|ad_paywall|':                { kind: 'exit', label: 'Esce dalla proposta',               hint: '`continue_free` = ha toccato «continua gratis», `x_button` = la ×' },
-  'paywall_decline_survey_shown|coach_spot|': { kind: 'exit', label: '«Perché no?» · domanda mostrata',   hint: 'micro-survey che compare dopo il rifiuto' },
-  'paywall_decline_survey_answer|coach_spot|':{ kind: 'exit', label: '«Perché no?» · ha risposto',        hint: 'il dettaglio è il motivo scelto' },
-  'paywall_decline_survey_shown|ad_paywall|': { kind: 'exit', label: '«Perché no?» · domanda mostrata',   hint: 'micro-survey che compare dopo il rifiuto' },
-  'paywall_decline_survey_answer|ad_paywall|':{ kind: 'exit', label: '«Perché no?» · ha risposto',        hint: 'il dettaglio è il motivo scelto' },
-  'paywall_terms_open|coach_spot|':           { kind: 'exit', label: 'Apre i termini',                   hint: 'ha toccato il link legale sotto i piani' },
-  'paywall_terms_open|ad_paywall|':           { kind: 'exit', label: 'Apre i termini',                   hint: 'ha toccato il link legale sotto i piani' },
-};
-
-// Le 5 scene dello spot hanno nome e battuta: stanno già in COACH_SPOT_SCENES, si riusano qui
-// invece di riscriverle (un solo posto da aggiornare se lo spot cambia montaggio).
-function journeyStepMeta(key, row) {
-  const known = JOURNEY_STEPS[key];
-  if (known) return known;
-  if (row.event_name === 'paywall_step_view' && row.variant === 'coach_spot') {
-    const sc = COACH_SPOT_SCENES.find(s => String(s.idx) === String(row.idx));
-    if (sc) return { kind: 'flow', label: `Spot · scena ${sc.idx + 1} · ${sc.label}`, hint: sc.hint };
-  }
-  // Sconosciuto: si mostra comunque, dichiarato tale. È il segnale che qualcosa di nuovo sta
-  // arrivando dall'app (o che una scena ha cambiato indice) e che questa mappa va aggiornata.
-  return {
-    kind: 'flow',
-    label: `${row.event_name}${row.idx !== null && row.idx !== undefined ? ' · step ' + row.idx : ''}`,
-    hint: `variant ${row.variant || '—'} · nessuna etichetta ancora`,
-    unnamed: true,
-  };
-}
-
-const JOURNEY_KIND_COLOR = { flow: '#a78bfa', buy: '#4ade80', exit: '#f59e0b', tech: '#4a4a6a' };
-
-// Motivi della micro-survey: gli slug arrivano dall'app, qui tornano le frasi vere che l'utente
-// ha letto (it/shop.json → shop.decline.options), non una parafrasi.
-const JOURNEY_SURVEY_LABELS = {
-  price:      'Costa troppo per me adesso',
-  unclear:    'Non ho capito bene cosa ottengo',
-  not_yet:    'Voglio provare ancora un po\'',
-  not_useful: 'Quello che offre non mi serve',
-  payment:    'Preferisco non pagare dentro un\'app',
-  other:      'Altro (ha scritto al coach)',
-  skip:       'Preferisco non dirlo',
-  dismissed:  'Ha chiuso la domanda senza rispondere',
-  reason:     'Ha scelto un motivo',
-};
-function journeySurveyLabel(s) { return JOURNEY_SURVEY_LABELS[s] || s || '—'; }
-
-function journeyNum(n) { return (n === null || n === undefined) ? 0 : Number(n); }
-
-// Riga del percorso: il numero grande è UTENTI UNICI. Sotto, la percentuale sulla testa e il
-// calo rispetto al passo precedente. La barra è larga quanto la percentuale: il crollo si vede
-// prima di leggere i numeri.
-function journeyRow(row, meta, head, prev, i) {
-  const users = journeyNum(row.users);
-  const pctHead = head > 0 ? (users / head * 100) : 0;
-  const delta = (prev !== null && prev > 0) ? (1 - users / prev) * 100 : null;
-  const col = JOURNEY_KIND_COLOR[meta.kind] || 'var(--fg)';
-  const dim = meta.kind === 'tech';
-  // Un passo che ha PIÙ utenti del precedente non è una crescita: è il passo prima a essere
-  // tracciato peggio (tipico di paywall_open, che esiste solo dal 02/09). Grigio, non verde.
-  const deltaHtml = delta === null ? '' : Math.abs(delta) < 0.5 ? `<div style="font-size:9.5px;color:#4a6a55">stessa gente del passo prima</div>` : delta > 0
-    ? `<div style="font-size:9.5px;font-weight:700;color:${delta >= 50 ? '#ef4444' : delta >= 15 ? '#f59e0b' : '#4ade80'}">-${delta.toFixed(0)}% dal passo prima</div>`
-    : `<div style="font-size:9.5px;color:#5a5a7a" title="più utenti del passo precedente: è quello a essere tracciato peggio, non gente in più">+${Math.abs(delta).toFixed(0)}% · il passo prima ne vede meno</div>`;
-  return `
-    <div class="journey-step" data-key="${esc(row.key)}" data-label="${esc(meta.label)}" data-hint="${esc(meta.hint || '')}"
-         title="Clicca: chi sono, uno per uno"
-         style="display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:9px;cursor:pointer;
-                background:${dim ? 'transparent' : '#111120'};border:1px solid ${dim ? '#17172a' : '#1f1f33'};margin-bottom:5px;${dim ? 'opacity:.62;' : ''}">
-      <div style="width:22px;text-align:right;font-family:var(--mono);font-size:11px;color:#4a4a6a;flex-shrink:0">${i}</div>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12.5px;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:7px;flex-wrap:wrap">
-          ${esc(meta.label)}
-          ${meta.kind === 'tech'    ? `<span style="font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;border:1px solid #2a2a3d;border-radius:4px;padding:1px 5px">doppione tecnico</span>` : ''}
-          ${meta.unnamed            ? `<span style="font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;color:#fbbf24;border:1px solid #5a4318;border-radius:4px;padding:1px 5px">da battezzare</span>` : ''}
-          ${row.events > row.users  ? `<span style="font-size:9px;color:#5a5a7a">${row.events} eventi in tutto</span>` : ''}
-        </div>
-        ${meta.hint ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${esc(meta.hint)}</div>` : ''}
-        <div style="height:3px;background:#1a1a2e;border-radius:2px;margin-top:6px;overflow:hidden">
-          <div style="height:100%;width:${Math.max(0, Math.min(100, pctHead)).toFixed(1)}%;background:${col};opacity:.8"></div>
-        </div>
-        <div style="font-size:9px;color:#5a5a7a;font-family:var(--mono);margin-top:4px">${esc(row.key)}</div>
-      </div>
-      <div style="text-align:right;flex-shrink:0;min-width:100px">
-        <div style="font-size:19px;font-weight:800;color:${col};line-height:1.1">${users}</div>
-        <div style="font-size:9.5px;color:var(--muted)">${pctHead.toFixed(1)}% · utenti</div>
-        ${deltaHtml}
-      </div>
-    </div>`;
-}
-
-function journeyMiniTable(title, sub, rows, note) {
-  if (!rows.length) return '';
-  return `
-    <div style="flex:1;min-width:240px">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:2px">${esc(title)}</div>
-      ${sub ? `<div style="font-size:10px;color:var(--muted);margin-bottom:7px">${esc(sub)}</div>` : ''}
-      ${rows.map(r => `
-        <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:4px 0;border-bottom:1px solid #15151f">
-          <span style="color:var(--fg)">${r.label}</span>
-          <span style="font-family:var(--mono);color:${r.color || 'var(--fg)'};font-weight:700">${r.value}</span>
-        </div>`).join('')}
-      ${note ? `<div style="font-size:9.5px;color:#5a5a7a;margin-top:7px;line-height:1.5">${note}</div>` : ''}
-    </div>`;
-}
-
-function paywallJourneyCard() {
-  const entry = JOURNEY_ENTRIES.find(e => e.variant === state.journeyVariant) || JOURNEY_ENTRIES[0];
-  const chips = JOURNEY_ENTRIES.map(e => `
-    <button class="journey-chip" data-variant="${esc(e.variant)}" style="
-      background:${e.variant === state.journeyVariant ? 'var(--accent-lo)' : 'transparent'};
-      border:1px solid ${e.variant === state.journeyVariant ? 'var(--accent)' : '#2a2a3d'};
-      color:${e.variant === state.journeyVariant ? '#a78bfa' : 'var(--muted)'};
-      border-radius:20px;padding:4px 13px;font-size:11.5px;font-weight:600;cursor:pointer;font-family:inherit">${esc(e.tab)}</button>`).join('');
-
-  const head = `
-    <div style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">
-        <div class="card-title" style="margin-bottom:0">Il paywall passo per passo · ${esc(entry.title)}</div>
-        <div style="display:flex;gap:6px">${chips}</div>
-      </div>
-      <div style="font-size:11.5px;color:var(--muted);line-height:1.55">
-        ${esc(entry.desc)}<br>
-        Si mostra ${esc(entry.when)} · <code style="font-family:var(--mono);font-size:10.5px">${esc(entry.chain)}</code>
-      </div>
-    </div>`;
-
-  if (state.journeyLoading && !state.journeyData) {
-    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:28px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Ricostruisco il percorso…</div></div>`;
-  }
-  if (state.journeyError && !state.journeyData) {
-    const box = state.journeyErrorTimeout
-      ? sezioneTimeoutBox(state.journeyError, 'fetchPaywallJourney()')
-      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.journeyError)}</div>`;
-    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
-  }
-  const d = state.journeyData;
-  if (!d || !(d.steps || []).length) {
-    return `<div class="card" style="margin-bottom:16px">${head}
-      <div style="color:var(--muted);font-size:12px;padding:10px 0">Nessuna apertura di questa proposta nel periodo selezionato.</div></div>`;
-  }
-
-  const rows  = (d.steps || []).map(r => ({ row: r, meta: journeyStepMeta(r.key, r) }));
-  const story = rows.filter(r => r.meta.kind === 'flow' || r.meta.kind === 'tech');
-  const buys  = rows.filter(r => r.meta.kind === 'buy').sort((a, b) => (a.meta.ord || 9) - (b.meta.ord || 9));
-  const exits = rows.filter(r => r.meta.kind === 'exit');
-  // Testa = il passo più popolato del racconto, non il primo: `paywall_open` esiste solo dal
-  // 02/09 e prenderlo come base darebbe percentuali sopra il 100% per tutto il resto.
-  const headN = Math.max(0, ...story.map(r => journeyNum(r.row.users)));
-
-  let prev = null, n = 0;
-  const storyList = story.map(r => {
-    const inCascade = r.meta.kind !== 'tech';
-    const html = journeyRow(r.row, r.meta, headN, inCascade ? prev : null, inCascade ? ++n : '·');
-    if (inCascade) prev = journeyNum(r.row.users);
-    return html;
-  }).join('');
-
-  let prevBuy = null, nb = 0;
-  const buyList = buys.map(r => {
-    const html = journeyRow(r.row, r.meta, headN, prevBuy, '€' + (++nb));
-    prevBuy = journeyNum(r.row.users);
-    return html;
-  }).join('');
-
-  const exitList = exits.map(r => journeyRow(r.row, r.meta, headN, null, '×')).join('');
-
-  const planLabel = pid => pid === 'premium_yearly' ? 'Annuale' : pid === 'premium_monthly' ? 'Mensile' : (pid || '—');
-  const planActLabel = ev => ev === 'paywall_plan_select' ? 'toccato'
-    : ev === 'paywall_cta_tap' ? 'bottone premuto'
-    : ev === 'paywall_purchase_attempt' ? 'pagamento aperto'
-    : ev === 'paywall_purchase_cancelled' ? 'annullato' : 'comprato';
-  const planRows = (d.plans || []).map(p => ({
-    label: `${esc(planLabel(p.product_id))} <span style="color:#5a5a7a">· ${esc(planActLabel(p.event_name))}</span>`,
-    value: p.users,
-  }));
-  const closeRows = (d.closes || []).map(c => ({
-    label: `${esc(c.dismiss_method)} <span style="color:#5a5a7a">· era su ${esc(c.step)}</span> <span style="color:#3a3a55;font-size:9.5px">${esc(c.variant)}</span>`,
-    value: c.users,
-  }));
-  const surveyRows = (d.survey || []).map(s => ({
-    label: esc(journeySurveyLabel(s.reason || s.answer)),
-    value: s.users,
-    color: s.reason === 'price' ? '#f59e0b' : null,
-  }));
-
-  const diag = d.diag || {};
-  const noExitPct = journeyNum(diag.esposizioni) > 0 ? (diag.senza_uscita / diag.esposizioni * 100).toFixed(0) : '0';
-  const gaps = [];
-  if (journeyNum(diag.senza_uscita) > 0) gaps.push(
-    `<strong>${diag.senza_uscita} aperture su ${diag.esposizioni} (${noExitPct}%) finiscono senza nessuna traccia di uscita</strong>: né chiusura né acquisto. Il ripiego che chiude l'esposizione gira allo smontaggio della schermata, e un'app uccisa dal sistema non lo esegue. Non è gente che resta: è gente che se ne va senza dirlo.`);
-  if (journeyNum(diag.success_orfani) > 0) gaps.push(
-    `<strong>${diag.success_orfani} acquisti riusciti su ${diag.success_totali} nel periodo non sono attribuibili a nessun paywall</strong>: <code style="font-family:var(--mono)">paywall_purchase_success</code> arriva senza <code style="font-family:var(--mono)">exposure_id</code> perché lo emette <code style="font-family:var(--mono)">PurchaseService</code> quando le dimensioni dell'esposizione sono già state azzerate (ricevuta che arriva tardi, o sblocco letto dal database). Corretto in app il 13/09/2026 (l'esito in ritardo eredita l'ultimo tentativo su quel prodotto e porta il marchio dims_late), ma il numero qui sopra resta com'è finché la correzione non è in mano agli utenti: gli eventi già scritti non si riscrivono.`);
-
-  return `
-    <div class="card" style="margin-bottom:16px">
-      ${head}
-
-      <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #1a1a2e">
-        <div><div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:.5px">Aperture</div>
-          <div style="font-size:22px;font-weight:800;color:var(--fg)">${journeyNum(d.exposures)}</div></div>
-        <div><div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:.5px">Utenti diversi</div>
-          <div style="font-size:22px;font-weight:800;color:#a78bfa">${journeyNum(d.users)}</div></div>
-        <div style="flex:1;min-width:220px;font-size:10.5px;color:var(--muted);align-self:center;line-height:1.5">
-          Ogni numero qui sotto è <strong style="color:var(--fg)">quante persone diverse</strong> hanno raggiunto quel punto:
-          chi rivede lo stesso passo conta una volta sola. Le percentuali sono sul passo più popolato del racconto
-          (${headN} utenti). <strong style="color:var(--fg)">Clicca una riga</strong> per l'elenco con nome, email e dettaglio.
-        </div>
-      </div>
-
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:7px">Il racconto, nell'ordine in cui succede</div>
-      ${storyList}
-
-      ${buys.length ? `
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:14px 0 7px">
-          Il gesto di comprare <span style="text-transform:none;letter-spacing:0;color:var(--muted)">· toccare un piano e premere il bottone sono azioni parallele, non una in fila all'altra</span>
-        </div>
-        ${buyList}` : ''}
-
-      ${exits.length ? `
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:14px 0 7px">
-          Uscite e rifiuti <span style="text-transform:none;letter-spacing:0;color:var(--muted)">· fuori cascata: non sono «meno gente», sono un altro fatto</span>
-        </div>
-        ${exitList}` : ''}
-
-      <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid #1a1a2e">
-        ${journeyMiniTable('Quale piano toccano', 'utenti unici per prodotto', planRows)}
-        ${journeyMiniTable('Come escono', 'gesto di uscita e schermata dov\'erano', closeRows,
-          'La stessa uscita può comparire due volte quando la proposta ha due tracker: quello dello spot registra il gesto vero (la ×), quello del Giorno Zero il ripiego allo smontaggio (back_hardware).')}
-        ${journeyMiniTable('Perché non comprano', 'risposte alla micro-survey, parola per parola', surveyRows)}
-      </div>
-
-      ${gaps.length ? `
-        <div style="margin-top:16px;background:#2b210f;border:1px solid #5a4318;border-radius:9px;padding:11px 13px">
-          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:6px">⚠️ Buchi di tracciamento in questo percorso</div>
-          ${gaps.map(g => `<div style="font-size:11px;color:#d9c48a;line-height:1.6;margin-bottom:6px">${g}</div>`).join('')}
-        </div>` : ''}
-    </div>`;
-}
-
 // ── CATALOGO DELLE CREATIVITÀ PAYWALL ────────────────────────────────────────
-// Stessa grammatica della tabella "Creatività paywall" qui sotto — riga per creatività, il
-// percorso disegnato a caselle, le colonne dei gesti d'acquisto a destra — con tre cose in più
-// che quella tabella non può dare:
+// Una riga per creatività, il percorso disegnato a caselle e le colonne dei gesti d'acquisto a
+// destra. È l'unica lettura per creatività rimasta in pagina, e porta tre cose che una tabella
+// di soli numeri non può dare:
 //  · il NOME di ogni schermata al posto del ruolo tecnico (`Pasto`, `Chat`, `I prezzi` invece di
 //    `features`, `plans`): sapere dove si fermano serve a poco se non si sa cosa stavano guardando;
 //  · lo stato: il codice la monta ancora, oppure è rimasta solo nell'anteprima Dev? Quando il
 //    codice e i dati non vanno d'accordo la riga si accende d'ambra;
 //  · la scheda, che si apre dal nome: quando compare, in che punto dell'app, come se ne esce.
 //
-// I numeri sono UTENTI DISTINTI (la tabella sotto conta gli eventi): una persona che rivede la
+// I numeri sono UTENTI DISTINTI: una persona che rivede la
 // stessa schermata vale uno. Le caselle si cliccano e danno la lista di chi si è fermato lì.
 //
 // Il registro è scritto a mano perché descrive INTENZIONI (dove dovrebbe uscire, cosa racconta),
@@ -8397,115 +8033,8 @@ function creativeModal() {
     </div>`;
 }
 
-// ── COACH SPOT · lo spot del coach ───────────────────────────────────
-// Sezione dedicata all'unico paywall post-workout in produzione (dal 23/08/2026,
-// spec app: monetizzazione/coach-spot-paywall). Risponde a: dove si fermano,
-// come chiudono, cosa cliccano, chi compra. Tutto dalla STESSA kpi_premium
-// (creatives / step_flow / step_close): nessuna RPC in più. I box scena sono
-// .premium-step-box → il click apre la lista utenti (kpi_premium_step_users,
-// p_idx disambigua le due scene col ruolo 'features').
-const COACH_SPOT_SCENES = [
-  { idx: 0, label: 'Saluto',    hint: '“Ciao, sono il tuo coach”' },
-  { idx: 1, label: 'Pasto',     hint: 'foto del piatto → kcal' },
-  { idx: 2, label: 'Chat',      hint: 'stanco → allungamento + elastico' },
-  { idx: 3, label: '“Ci sono”', hint: 'allagamento arancio · si sblocca la ×' },
-  { idx: 4, label: 'Piani',     hint: 'offerta e acquisto nella stessa scena' },
-];
-const COACH_SPOT_CLOSE_LABELS = { hero: 'Saluto', features: 'Pasto/Chat', offer: '“Ci sono”', plans: 'Piani' };
-
-function csKpi(label, value, sub, color) {
-  return `
-    <div style="background:#111120;border:1px solid #1f1f33;border-radius:8px;padding:10px 12px">
-      <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:.5px">${esc(label)}</div>
-      <div style="font-weight:800;font-size:20px;color:${color || 'var(--fg)'};margin-top:2px">${value}</div>
-      ${sub ? `<div style="font-size:9px;color:var(--muted);margin-top:2px">${esc(sub)}</div>` : ''}
-    </div>`;
-}
-
-function premiumCoachSpotCard(d) {
-  const row    = (d.creatives || []).find(r => r.variant === 'coach_spot') || null;
-  const steps  = mergeStepsByIdx((d.step_flow || []).filter(s => s.variant === 'coach_spot'));
-  const closes = (d.step_close || []).filter(c => c.variant === 'coach_spot');
-  const head = `
-      <div style="margin-bottom:12px">
-        <div class="card-title" style="margin-bottom:3px">Coach Spot · lo spot del coach</div>
-        <div style="font-size:11px;color:var(--muted)">
-          il secondo atto del Giorno Zero (1° allenamento): 5 scene, × bloccata ~17s, acquisto in scena · fuori rotazione da solo dal 31/08 ·
-          <code style="font-family:var(--mono)">variant = coach_spot</code>
-        </div>
-      </div>`;
-  if (!row && !steps.length) {
-    return `
-    <div class="card" style="margin-bottom:16px">
-      ${head}
-      <div style="color:var(--muted);font-size:12px;padding:10px 0">
-        Nessuna esposizione nel periodo selezionato. Lo spot si mostra ai workout dispari
-        (1°, 3°, 5°…) di chi non è premium e non è in prova: i primi numeri compaiono qui da soli.
-        Esclusi solo gli account della lista "Account esclusi dalle metriche" (pagina Sprint):
-        per vederti durante una prova, togli il tuo con la × e ricalcola.
-      </div>
-    </div>`;
-  }
-  const shownUsers = row ? premiumNum(row.shown_users) : 0;
-  const firstUsers = steps.length ? (steps[0].viewed_users || 0) : 0;
-  const base = shownUsers || firstUsers;
-  const sceneBoxes = COACH_SPOT_SCENES.map((sc, i) => {
-    const st = steps.find(s => s.idx === sc.idx) || null;
-    const users = st ? (st.viewed_users || 0) : 0;
-    const pct = base > 0 ? Math.round(users / base * 100) : 0;
-    const prevSt = i > 0 ? steps.find(s => s.idx === COACH_SPOT_SCENES[i - 1].idx) : null;
-    const prev = prevSt ? (prevSt.viewed_users || 0) : null;
-    const drop = (prev && prev > 0) ? Math.round((1 - users / prev) * 100) : null;
-    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
-    const arrow = i > 0 ? `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:#3a3a55;padding:0 3px">
-        ${drop !== null ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
-        <span style="font-size:14px;line-height:1">→</span>
-      </div>` : '';
-    const clickable = st ? ` class="premium-step-box" data-variant="coach_spot" data-step="${esc(st.step)}" data-steps="${esc((st.names || []).map(n => n.step).join(',') || st.step)}" data-idx="${st.idx}" title="Vedi chi è arrivato a ${esc(sc.label)}"` : '';
-    return arrow + `
-      <div${clickable} style="flex:1;min-width:86px;text-align:center;background:#111120;border:1px solid ${sc.idx === 4 ? '#1f5a3699' : '#1f1f33'};border-radius:8px;padding:9px 8px;${st ? 'cursor:pointer;' : ''}">
-        <div style="font-size:9px;color:#5a5a7a;text-transform:uppercase;letter-spacing:.5px">scena ${sc.idx + 1}</div>
-        <div style="font-weight:700;color:var(--fg);font-size:12px;margin:2px 0">${esc(sc.label)}</div>
-        <div style="font-weight:800;font-size:18px;color:${users > 0 ? 'var(--fg)' : 'var(--muted)'}">${users || '—'}</div>
-        <div style="font-size:9px;color:#5a5a7a">${pct}% · ${st ? (st.viewed || 0) + ' viste' : 'mai raggiunta'}</div>
-        <div style="font-size:8.5px;color:var(--muted);margin-top:3px;line-height:1.25">${esc(sc.hint)}</div>
-      </div>`;
-  }).join('');
-  const closesTot = closes.reduce((s, c) => s + (c.closed || 0), 0);
-  const closeRow = closesTot ? `
-    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
-      Chiusure senza comprare (dov'erano arrivati): ${
-        Object.entries(closes.reduce((m, c) => { const k = COACH_SPOT_CLOSE_LABELS[c.step] || c.step; m[k] = (m[k] || 0) + (c.closed || 0); return m; }, {}))
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, n]) => `<span style="color:var(--fg)">${esc(k)}</span> ${n}`).join(' · ')
-      } · totale ${closesTot}
-    </div>` : '';
-  const plansUsers = (steps.find(s => s.idx === 4) || {}).viewed_users || 0;
-  const kpis = row ? `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:14px">
-      ${csKpi('Mostrato', `${row.shown}`, `${shownUsers} utenti`)}
-      ${csKpi('Ai piani', `${plansUsers}`, base > 0 ? `${Math.round(plansUsers / base * 100)}% dei mostrati` : '')}
-      ${csKpi('Piano scelto', `${row.plan_select || 0}`, 'plan_select')}
-      ${csKpi('Tocca il bottone', `${row.purchase_attempt || 0}`, 'purchase_attempt', row.purchase_attempt > 0 ? '#f59e0b' : null)}
-      ${csKpi('In prova', `${premiumNum(row.trials) || 0}`, 'stato attuale', premiumNum(row.trials) > 0 ? '#22d3ee' : null)}
-      ${csKpi('Paganti', `${premiumNum(row.purchases) || 0}`, 'stato attuale', premiumNum(row.purchases) > 0 ? '#4ade80' : null)}
-      ${csKpi('Errori billing', `${row.errors || 0}`, 'nel periodo', row.errors > 0 ? '#ef4444' : null)}
-    </div>` : '';
-  return `
-    <div class="card" style="margin-bottom:16px">
-      ${head}
-      <div style="display:flex;align-items:stretch;gap:2px;overflow-x:auto;padding-bottom:4px">${sceneBoxes}</div>
-      ${closeRow}
-      ${kpis}
-      <div style="font-size:10px;color:#5a5a7a;margin-top:10px">
-        Click su una scena = lista di chi c'è arrivato (nome, email, quando). Chi ha comprato è nella
-        tabella "Chi ha tentato / acquistato" qui sotto, attribuito a <code style="font-family:var(--mono)">coach_spot</code>.
-      </div>
-    </div>`;
-}
-
-// ── CREATIVITÀ PAYWALL ────────────────────────────────────────────────
+// ── ETICHETTE DELLE CREATIVITÀ PAYWALL ─────────────────────
+// Nome leggibile di ogni variant: lo usano il catalogo, la sua scheda e la tabella degli acquisti.
 const CREATIVE_LABELS = {
   coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
@@ -8519,157 +8048,10 @@ const CREATIVE_LABELS = {
   coach_call_v2:     'Coach call v2',
   change_goal_premium: 'Cambio obiettivo',
   onboarding_results_chart: 'Fine onboarding · Risultati',
-  // Il gate ha ANCHE la sua sezione dedicata (film + biforcazione + trial_choice):
-  // questa riga lo tiene nel confronto standard fra creatività, dove entra da solo
-  // perché kpi_premium non filtra per lista chiusa di varianti.
+  // Il gate di fine prova non è un paywall come gli altri, ma esce come variant a sé.
   trial_end_gate: 'Gate fine prova',
 };
 function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
-
-// Unisce gli step con lo STESSO indice in un box solo. Serve quando una creatività
-// rinomina una schermata tra due build (es. video_ad: primo step "ad"→"hero" dal 21/07):
-// i due nomi convivono allo stesso idx e altrimenti verrebbero disegnati affiancati come
-// se fossero passi in fila → sembra un funnel che "sale". Qui si sommano (viewed è un
-// conteggio di eventi, quindi la somma è esatta); il nome mostrato è quello più visto e
-// il click interroga tutti i nomi uniti.
-function mergeStepsByIdx(steps) {
-  const byIdx = {}; const order = [];
-  steps.forEach(s => {
-    const k = s.idx;
-    if (byIdx[k] === undefined) {
-      byIdx[k] = { variant: s.variant, idx: s.idx, step: s.step,
-                   viewed: s.viewed || 0, viewed_users: s.viewed_users || 0,
-                   names: [{ step: s.step, viewed: s.viewed || 0 }] };
-      order.push(k);
-    } else {
-      const m = byIdx[k];
-      m.viewed += s.viewed || 0;
-      m.viewed_users += s.viewed_users || 0;
-      m.names.push({ step: s.step, viewed: s.viewed || 0 });
-      m.step = m.names.reduce((a, b) => b.viewed > a.viewed ? b : a).step; // canonico = più visto
-    }
-  });
-  return order.map(k => byIdx[k]);
-}
-
-// Percorso step inline di una creatività: per ogni schermata quanti la raggiungono,
-// con il calo % rispetto alla schermata precedente. Mostra dove si fermano gli utenti.
-function premiumStepPath(rawSteps) {
-  if (!rawSteps || !rawSteps.length) return '<span style="color:var(--muted);font-size:11px">nessuno step</span>';
-  const steps = mergeStepsByIdx(rawSteps);
-  const first = steps[0].viewed || 0;
-  // se il primo step ha idx > 0, il paywall apre direttamente su quella schermata
-  // (salta le precedenti — es. cambio obiettivo che apre sui piani): non è un drop-off.
-  const direct = steps[0].idx > 0
-    ? `<div style="font-size:10px;color:#60a5fa;margin-top:5px">↪ apre diretto su "${esc(steps[0].step)}" (salta le schermate precedenti)</div>`
-    : (steps.length === 1
-        ? `<div style="font-size:10px;color:var(--muted);margin-top:5px">nessuno è andato oltre questa schermata nel periodo</div>`
-        : '');
-  const row = `<div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap">` +
-    steps.map((s, i) => {
-      const prev    = i > 0 ? steps[i - 1].viewed : null;
-      const drop    = (prev && prev > 0) ? Math.round((1 - s.viewed / prev) * 100) : null;
-      const pctOf1  = first > 0 ? Math.round(s.viewed / first * 100) : 0;
-      const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
-      const arrow = i > 0 ? `
-        <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 2px">
-          ${drop !== null ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
-          <span style="font-size:13px;line-height:1">→</span>
-        </div>` : '';
-      const isLast = i === steps.length - 1;
-      const merged   = s.names && s.names.length > 1;
-      const allSteps = merged ? s.names.map(n => n.step).join(',') : s.step;
-      const boxTitle = merged
-        ? `Schermate unite (stesso passo, build diverse): ${s.names.map(n => n.step).join(' + ')} — clicca per gli utenti`
-        : 'Vedi gli utenti che si sono fermati qui';
-      return arrow + `
-        <div class="premium-step-box" data-variant="${esc(s.variant)}" data-step="${esc(s.step)}" data-steps="${esc(allSteps)}" title="${esc(boxTitle)}"
-          style="text-align:center;min-width:48px;background:#111120;border:1px solid ${isLast ? '#1f5a3699' : '#1f1f33'};border-radius:6px;padding:5px 6px;cursor:pointer;transition:border-color .12s,background .12s">
-          <div style="font-weight:700;color:var(--fg);font-size:13px;line-height:1">${s.viewed}</div>
-          <div style="font-size:9px;color:var(--muted);white-space:nowrap;margin-top:2px">${esc(s.step)}${merged ? ' <span style="color:#60a5fa" title="schermate unite">≡</span>' : ''}</div>
-          <div style="font-size:8px;color:#5a5a7a;line-height:1">${pctOf1}%</div>
-        </div>`;
-    }).join('') + `</div>`;
-  return `<div>${row}${direct}</div>`;
-}
-
-// Tabella di confronto fra le creatività paywall: mostrato → ai piani → plan select → tentativo → in prova → pagante.
-// Risponde a "quale paywall converte di più" e "chi è in trial vs chi paga davvero". In prova/Pagante sono
-// attribuiti per token (include CLIENT_VERIFIED, quindi anche conversioni senza RTDN di Google) allo stato ATTUALE.
-// Finché variant_attribution_live è false, plan_select e purchase_attempt delle custom finiscono nel funnel standard (banner).
-function premiumCreativesCard(d) {
-  const rows = (d.creatives || []).slice().sort((a, b) => b.shown - a.shown);
-  const live = !!(d.data_quality && d.data_quality.variant_attribution_live);
-  // step per variante (ordinati per idx dalla RPC) → percorso inline in ogni riga
-  const stepsByVariant = {};
-  (d.step_flow || []).forEach(s => { (stepsByVariant[s.variant] = stepsByVariant[s.variant] || []).push(s); });
-  if (!rows.length) return `
-    <div class="card" style="margin-bottom:16px">
-      <div class="card-title" style="margin-bottom:10px">Creatività paywall</div>
-      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun paywall mostrato nel periodo selezionato.</div>
-    </div>`;
-
-  const banner = live ? `
-    <div style="background:#0f2417;border:1px solid #1f5a36;border-radius:8px;padding:9px 12px;margin-bottom:14px;font-size:11px;color:#4ade80;line-height:1.5">
-      ✓ <strong>Attribuzione conversione per creatività attiva.</strong>
-      <code style="font-family:var(--mono)">plan_select</code> e <code style="font-family:var(--mono)">purchase_attempt</code> portano ora il nome della creatività: piani e tentativi sono attribuiti a ciascuna.
-    </div>` : `
-    <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#fbbf24;line-height:1.5">
-      ⏳ <strong>Attribuzione conversione per creatività in attesa di rilascio app.</strong>
-      Oggi <code style="font-family:var(--mono)">plan_select</code> e <code style="font-family:var(--mono)">purchase_attempt</code> delle creatività custom
-      vengono ancora contati sul <em>Funnel standard</em>. Mostrato e "arriva ai piani" sono invece già corretti per ogni creatività.
-      Le colonne piani/tentativo si popoleranno da sole quando il nuovo build sarà live.
-    </div>`;
-
-  const body = rows.map(r => {
-    const label    = premiumCreativeLabel(r.variant);
-    const shownUsers = premiumNum(r.shown_users);
-    const lowSample = shownUsers < 10;
-    const convCol  = r.purchase_attempt > 0 ? `${r.purchase_attempt}` : '—';
-    const steps    = (stepsByVariant[r.variant] || []).slice().sort((a, b) => a.idx - b.idx);
-    return `
-      <tr style="border-bottom:1px solid #111120">
-        <td style="padding:10px 12px;vertical-align:top">
-          <div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(label)}</div>
-          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono)">${esc(r.variant)}</div>
-          <div style="font-size:10px;color:var(--muted);margin-top:4px">${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}${lowSample ? ' · <span style="color:#fbbf24">campione basso</span>' : ''}</div>
-        </td>
-        <td style="padding:8px 12px;vertical-align:middle">${premiumStepPath(steps)}</td>
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.plan_select > 0 ? 'var(--fg)' : 'var(--muted)'}">${r.plan_select || '—'}</td>
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${r.purchase_attempt > 0 ? '#f59e0b' : 'var(--muted)'}">${convCol}</td>
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${premiumNum(r.trials) > 0 ? '#22d3ee' : 'var(--muted)'}">${premiumNum(r.trials) || '—'}</td>
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;font-weight:700;color:${premiumNum(r.purchases) > 0 ? '#4ade80' : 'var(--muted)'}">${premiumNum(r.purchases) || '—'}</td>
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;color:${r.errors > 0 ? '#ef4444' : 'var(--muted)'}">${r.errors || '—'}</td>
-      </tr>`;
-  }).join('');
-
-  return `
-    <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px;flex-wrap:wrap">
-        <div>
-          <div class="card-title" style="margin-bottom:3px">Creatività paywall</div>
-          <div style="font-size:11px;color:var(--muted)">percorso step per step di ogni paywall · <span style="color:#22d3ee">In prova</span> = carta inserita, trial attivo ora · <span style="color:#4ade80">Pagante</span> = trial finito e pagamento reale · ordinato per esposizione</div>
-        </div>
-      </div>
-      ${banner}
-      <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1000px">
-          <thead>
-            <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
-              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
-              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Percorso step → dove si fermano</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Plan select</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Tentato acq.</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Ha inserito la carta ed è in prova gratuita adesso">In prova</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Prova finita e pagamento reale in corso">Pagante</th>
-              <th style="text-align:center;padding:6px 12px;border-bottom:1px solid #1a1a2e">Errori</th>
-            </tr>
-          </thead>
-          <tbody>${body}</tbody>
-        </table>
-      </div>
-    </div>`;
-}
 
 // Modal con la lista degli utenti che hanno raggiunto uno step di una creatività paywall.
 // Per ogni utente: giorno, ora, nome, email. Aperto cliccando su un box del percorso step.
@@ -11263,7 +10645,6 @@ function attachEvents() {
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
-      if (state.page === 'premium'    && !state.journeyData   && !state.journeyLoading)   fetchPaywallJourney();
       if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
       if (state.page === 'premium'    && !state.purchases      && !state.purchasesLoading)      fetchPaywallPurchases();
       if (state.page === 'ai-coach') {
@@ -12897,7 +12278,6 @@ function attachEvents() {
     if (sprint) { state.premiumFrom = sprint.inizio; state.premiumTo = sprint.fine; }
     state.premiumData = null;
     fetchPremium();
-    fetchPaywallJourney();
     fetchCreativesAudit();
     fetchPaywallPurchases();
   });
@@ -12913,29 +12293,15 @@ function attachEvents() {
     if (!selSprint || selSprint.inizio !== state.premiumFrom || selSprint.fine !== state.premiumTo) state.premiumSprintId = '';
     state.premiumData = null;
     fetchPremium();
-    fetchPaywallJourney();
     fetchCreativesAudit();
     fetchPaywallPurchases();
   });
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
     state.premiumData = null;
     fetchPremium();
-    fetchPaywallJourney();
     fetchCreativesAudit();
     fetchPaywallPurchases();
   });
-  // Percorso del paywall: cambio proposta (1° allenamento / dal 2° in poi) e click su un passo.
-  document.querySelectorAll('.journey-chip').forEach(el =>
-    el.addEventListener('click', () => {
-      if (el.dataset.variant === state.journeyVariant) return;
-      state.journeyVariant = el.dataset.variant;
-      state.journeyData = null;
-      fetchPaywallJourney();
-    }));
-  document.querySelectorAll('.journey-step').forEach(el =>
-    el.addEventListener('click', () =>
-      fetchJourneyUsers(el.dataset.key, el.dataset.label, el.dataset.hint)));
-
   // Catalogo creatività: il numero di una colonna apre la lista di chi ha fatto quel gesto.
   document.querySelectorAll('.creative-conv').forEach(el =>
     el.addEventListener('click', (e) => {
