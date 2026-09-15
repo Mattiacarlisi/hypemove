@@ -7103,11 +7103,28 @@ function sezioneTimeoutBox(msg, retryCall) {
 // solo l'anteprima /dev/premium, in app non la monta nessuno.
 const CREATIVE_REGISTRY = [
   {
+    variant: 'coach_slides',
+    name: 'Primo allenamento · 3 slide',
+    rotation: 'live',
+    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, prima del ritorno in Home. Porta la sua chrome: i tre segmenti in cima e la × solo sull\'ultima slide.',
+    when: 'Alla fine del PRIMO allenamento in assoluto (conteggio allenamenti completati = 1), a utente non premium e non in prova. Dal 15/09/2026 prende il posto del Giorno Zero, che qui non esce più.',
+    exit: 'Sulle prime due slide NON c\'è nessuna ×: l\'unica uscita è «Avanti». La × compare sulla terza, quella dei prezzi. Il tasto indietro del telefono torna alla slide precedente e chiude solo dalla prima.',
+    what: 'Tre slide bianche al posto di uno spot da 24 secondi. Le prime due sono due dimostrazioni dentro un telefono disegnato: la chat del coach che risponde coi numeri e apre il grafico del peso, e la foto di un piatto che diventa calorie, macro e punteggio. La terza è la scena dei prezzi dello spot, parola per parola, con la timeline della prova al posto di un elenco di vantaggi — perché quella schermata non era il problema (il 95% di chi vedeva lo spot ci arrivava) e perché la domanda che blocca questo pubblico è «e poi mi ritrovo un addebito?», non «cosa fa l\'app».',
+    file: 'app/src/components/PremiumProposals/CoachSlidesPaywall/CoachSlidesFlow.tsx',
+    soft: ['open'],
+    screens: [
+      { idx: 0, t: 'Il coach', d: '«Ehi coach, come sto andando?» → la risposta coi numeri e il grafico del peso che scende verso l\'obiettivo' },
+      { idx: 1, t: 'Il contacalorie', d: 'il piatto inquadrato, lo scatto, la scansione, e la scheda del pasto che sale' },
+      { idx: 2, t: 'I prezzi', d: 'la promessa della prova, la timeline a tre tappe, i due piani e la CTA' },
+    ],
+    note: 'La riga dell\'obiettivo nel grafico (55 kg) è l\'unico elemento senza una fonte dati vera: il peso OBIETTIVO oggi non si salva da nessuna parte, si salva solo quello corrente. Finché non c\'è, il grafico è una dimostrazione dichiarata, non i dati di chi guarda.',
+  },
+  {
     variant: 'paywall_giorno_zero',
     name: 'Giorno Zero',
-    rotation: 'live',
+    rotation: 'retired',
     where: 'Ultima slide del flusso di fine allenamento, a schermo intero, prima del ritorno in Home.',
-    when: 'Alla fine del PRIMO allenamento in assoluto (conteggio allenamenti completati = 1), a utente non premium e non in prova. Esce a schermo intero come ultima slide del flusso di fine allenamento, prima di tornare in Home.',
+    when: 'RIMOSSA il 13/09/2026: era un doppione dello spot (l\'atto 2 montava lo stesso CoachSpotFlow), e il codice di questa variant non esiste più. La sequenza chat+spot è rimasta ancora due giorni firmandosi come Coach Spot; dal 15/09/2026 al primo allenamento esce la proposta a tre slide. Fino al 13/09 usciva alla fine del PRIMO allenamento in assoluto. Resta qui perché i suoi eventi sono ancora nei dati storici.',
     exit: 'Durante la chat si può uscire con la × dell\'overlay; nello spot la × resta bloccata fino alla scena dell\'offerta (~17 secondi).',
     what: 'La proposta più curata che abbiamo: prima l\'utente PROVA il coach (chat vera, risposte pronte, nessuna vendita), poi parte lo spot che aggancia quello che è appena successo e finisce sui prezzi. È in due atti sulla stessa apertura, e il secondo atto è il Coach Spot: per questo nei dati compaiono due variant per una proposta sola.',
     file: 'app/src/components/PremiumProposals/PaywallGiornoZero/PaywallGiornoZeroFlow.tsx',
@@ -7120,9 +7137,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'coach_spot',
     name: 'Coach Spot',
-    rotation: 'live',
-    where: 'Dentro il Giorno Zero, sulla stessa schermata piena: la chat lascia il posto allo spot senza cambio di pagina.',
-    when: 'Subito dopo la chat del Giorno Zero, appena l\'utente tocca «continua»: è il secondo atto della stessa apertura, non una proposta che parte da sé. Fino al 31/08/2026 usciva anche da sola, al 5° allenamento.',
+    rotation: 'dormant',
+    where: 'Dentro il Giorno Zero, sulla stessa schermata piena: la chat lascia il posto allo spot senza cambio di pagina. Oggi si vede solo dall\'anteprima /dev/premium.',
+    when: 'FUORI ROTAZIONE dal 15/09/2026: usciva come secondo atto del Giorno Zero, che a sua volta non si pesca più. Resta montabile a mano da /dev/premium per confronto. Fino al 31/08/2026 usciva anche da sola, al 5° allenamento.',
     exit: 'La × compare solo sull\'ultima scena, quella dei prezzi: prima non c\'è niente da rifiutare.',
     what: 'Lo spot lungo del coach: 5 scene doppiate, la × bloccata per ~17 secondi, e i piani che salgono DENTRO l\'ultima scena invece di essere una schermata a parte (il 90-98% moriva sul cambio schermata). È qui che avvengono l\'acquisto e la micro-survey del rifiuto, anche quando l\'apertura è del Giorno Zero.',
     file: 'app/src/components/PremiumProposals/CoachSpotPaywall/CoachSpotFlow.tsx',
@@ -8036,6 +8053,7 @@ function creativeModal() {
 // ── ETICHETTE DELLE CREATIVITÀ PAYWALL ─────────────────────
 // Nome leggibile di ogni variant: lo usano il catalogo, la sua scheda e la tabella degli acquisti.
 const CREATIVE_LABELS = {
+  coach_slides: 'Primo allenamento · 3 slide',
   coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
   coach_ai_chat:     'Coach AI · Chat',
