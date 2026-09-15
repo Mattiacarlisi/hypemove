@@ -467,3 +467,155 @@
 }
 .retd-row:last-child { border-bottom: 0; }
 .retd-row:hover { background: var(--surface2); }
+
+/* ── Attivazione ──────────────────────────────────────────────────────────────
+   Tutte le classi sono prefissate `act-` perché i nomi del mockup (.track, .fill,
+   .row, .stats, .legend) collidono con classi già usate altrove nella dashboard.
+   Dove il mockup usava un grigio più tenue di --muted si usa --muted con opacity:
+   la palette è congelata, non si aggiungono token. */
+.act-card-sub { font-size: 12px; color: var(--muted); opacity: .8; margin: 5px 0 16px; }
+
+.act-stats, .act-fstats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  padding-bottom: 16px; border-bottom: 1px solid var(--border);
+}
+.act-stats  { margin-bottom: 20px; }
+.act-fstats { margin: 14px 0 18px; }
+@media (max-width: 820px) { .act-stats, .act-fstats { grid-template-columns: repeat(2, 1fr); } }
+.act-stat-l { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 5px; }
+.act-stat-v { font-family: var(--mono); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.act-stat-v small {
+  font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 400;
+  color: var(--muted); margin-left: 6px;
+}
+.act-up { color: var(--mattia); }
+
+/* Blocco 1 — cascata */
+.act-frow {
+  display: grid; grid-template-columns: 186px 1fr 104px;
+  align-items: center; gap: 14px; padding: 7px 0;
+}
+@media (max-width: 820px) { .act-frow { grid-template-columns: 120px 1fr 86px; gap: 9px; } }
+.act-frow .lab { font-size: 12.5px; }
+.act-frow .lab .ev { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: .8; }
+.act-ftrack { position: relative; height: 34px; border-radius: 5px; background: var(--surface2); overflow: hidden; }
+.act-ffill  { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+.act-floss  {
+  position: absolute; top: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, rgba(248,113,113,.14) 0 6px, transparent 6px 12px);
+}
+.act-fdrop {
+  position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+  font-family: var(--mono); font-size: 10.5px; color: var(--red);
+  background: var(--red-bg); border: 1px solid var(--border2); border-radius: 5px; padding: 2px 7px;
+}
+.act-frow .val { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.act-frow .val b    { font-size: 14px; font-weight: 600; }
+.act-frow .val span { display: block; font-size: 10.5px; color: var(--muted); opacity: .8; }
+.act-tie {
+  display: flex; align-items: center; gap: 9px; margin-top: 2px; padding: 9px 12px;
+  border-left: 2px solid var(--purple); background: var(--accent-lo);
+  border-radius: 0 7px 7px 0; font-size: 12.5px;
+}
+.act-tie b { color: var(--purple); }
+
+/* Blocco 2 — barre con intervallo di Wilson */
+.act-rows { display: flex; flex-direction: column; gap: 2px; }
+.act-row {
+  display: grid; grid-template-columns: 150px 1fr 112px;
+  align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+@media (max-width: 820px) { .act-row { grid-template-columns: 96px 1fr 92px; gap: 9px; } }
+.act-row .row-l { font-size: 12.5px; }
+.act-row .row-l .n { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--muted); opacity: .8; }
+.act-track { position: relative; height: 30px; background: var(--surface2); border-radius: 5px; overflow: hidden; }
+.act-fill  { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+.act-fill.flat { background: linear-gradient(90deg, var(--border2), var(--muted)); opacity: .7; }
+.act-ci {
+  position: absolute; top: 50%; height: 11px; transform: translateY(-50%);
+  border-left: 2px solid var(--purple); border-right: 2px solid var(--purple);
+}
+.act-ci::before {
+  content: ""; position: absolute; top: 50%; left: 0; right: 0;
+  height: 2px; background: var(--purple); opacity: .5;
+}
+.act-ci.flat { border-color: var(--muted); }
+.act-ci.flat::before { background: var(--muted); }
+.act-row .row-r { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.act-row .row-r .p { font-size: 14px; font-weight: 600; }
+.act-row .row-r .k { display: block; font-size: 10.5px; color: var(--muted); opacity: .8; }
+.act-axis {
+  display: flex; justify-content: space-between; font-family: var(--mono);
+  font-size: 10px; color: var(--muted); opacity: .8; padding-top: 8px;
+  /* allineato alla traccia: colonna sinistra + gap a sinistra, colonna destra + gap a destra */
+  margin-left: 164px; margin-right: 126px;
+}
+@media (max-width: 820px) { .act-axis { margin-left: 105px; margin-right: 101px; } }
+
+.act-warn {
+  display: flex; gap: 11px; align-items: flex-start;
+  background: var(--amber-bg); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 11px 13px; margin-bottom: 18px; font-size: 12.5px;
+}
+.act-warn > span:first-child { color: var(--amber); flex: none; display: inline-flex; padding-top: 1px; }
+.act-warn b { color: var(--amber); }
+.act-warn-act {
+  margin-left: auto; white-space: nowrap; border: 1px solid var(--border2);
+  border-radius: 6px; padding: 3px 10px; font-size: 11.5px;
+  color: var(--amber); background: transparent; font-family: inherit; cursor: pointer;
+}
+.act-warn-act:hover { border-color: var(--amber); }
+
+/* Blocco 3 — punti per settimana */
+.act-chartbox { position: relative; padding-left: 34px; padding-top: 12px; }
+.act-dots {
+  position: relative; height: 196px; overflow: hidden;
+  border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
+}
+.act-band {
+  position: absolute; top: 0; bottom: 0; background: rgba(124, 58, 237, .09);
+  border-left: 1px solid rgba(167, 139, 250, .28); border-right: 1px solid rgba(167, 139, 250, .28);
+}
+.act-band b {
+  position: absolute; top: 5px; left: 6px; font-family: var(--mono);
+  font-size: 9.5px; font-weight: 500; color: var(--purple); opacity: .75; letter-spacing: .04em;
+}
+.act-mean { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--border2); }
+.act-mean span {
+  position: absolute; right: 3px; top: -15px; font-family: var(--mono);
+  font-size: 10px; color: var(--muted); background: var(--surface); padding: 0 3px;
+}
+.act-wk { position: absolute; top: 0; bottom: 0; }
+.act-bar-ci { position: absolute; width: 2px; background: var(--border2); left: 50%; transform: translateX(-50%); }
+.act-dot {
+  position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--purple);
+  left: 50%; transform: translate(-50%, 50%); box-shadow: 0 0 0 3px rgba(167, 139, 250, .16);
+}
+.act-xl { display: flex; }
+.act-xl div {
+  text-align: center; font-family: var(--mono); font-size: 10px;
+  color: var(--muted); opacity: .8; padding-top: 7px;
+}
+.act-yl {
+  position: absolute; left: -30px; font-family: var(--mono); font-size: 10px;
+  color: var(--muted); opacity: .8; transform: translateY(-50%);
+}
+.act-legend {
+  display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+  font-size: 11px; color: var(--muted); opacity: .85; margin-top: 11px;
+}
+.act-legend i {
+  display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+  background: rgba(124, 58, 237, .22); border: 1px solid rgba(167, 139, 250, .4);
+  margin-right: 6px; vertical-align: -1px;
+}
+
+.act-callout {
+  margin-top: 16px; border-left: 2px solid var(--purple); background: var(--accent-lo);
+  border-radius: 0 7px 7px 0; padding: 11px 14px; font-size: 12.5px;
+}
+.act-callout b { color: var(--purple); }
+.act-foot {
+  margin-top: 14px; font-size: 11px; color: var(--muted); opacity: .8;
+  font-family: var(--mono); line-height: 1.6;
+}

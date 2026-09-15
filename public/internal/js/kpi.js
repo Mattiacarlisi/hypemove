@@ -403,7 +403,9 @@ let state = {
   funnelConfig: JSON.parse(JSON.stringify(DEF_FUN_CFG)),
   editingOverview: false,
   editingFunnel: false,
-  funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2)
+  funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2) · 'activation' = linguetta Attivazione (kpi_activation)
+  activation: null,            // payload di kpi_activation: {funnel, by_workouts, weekly, sprint}
+  activationLoading: false, activationError: null,
   funnelParamsOpen: false,     // card "Parametri" in fondo alla pagina funnel (collassata di default)
   funnelIncludeEmulators: false, // override v2: reinclude gli emulatori (p_include_emulators)
   funnelIncludeTest: false,      // override v2: reinclude gli account test (p_include_test)
@@ -2336,7 +2338,11 @@ function manualRefresh() {
   fetchFunnelDefinitions();
   fetchFunnelPhases();
   fetchSprints();
-  if (state.page === 'funnel') { if (state.funnelMode === 'event') fetchEventFunnel(); else fetchFunnel(); }
+  if (state.page === 'funnel') {
+    if (state.funnelMode === 'event') fetchEventFunnel();
+    else if (state.funnelMode === 'activation') fetchActivation();
+    else fetchFunnel();
+  }
 }
 
 function layout() {
@@ -4681,7 +4687,7 @@ function chipColorHex(name) {
 // Seed di default: [default, onboarding, ...saved by order_index]. Se esiste un ordine salvato in
 // localStorage lo si rispetta (filtrando token spariti), accodando i token nuovi non ancora ordinati.
 function funnelToolbarTokens() {
-  const seed = ['default', 'onboarding', ...state.savedFunnels.map(f => f.id)];
+  const seed = ['default', 'onboarding', 'activation', ...state.savedFunnels.map(f => f.id)];
   let stored = [];
   try { stored = JSON.parse(localStorage.getItem(LS_FUNNEL_TOOLBAR_ORDER)) || []; } catch { stored = []; }
   const seedSet = new Set(seed);
@@ -4695,7 +4701,7 @@ function funnelToolbarTokens() {
 // (order_index) così un browser fresco parte da un ordine sensato. I due built-in vivono solo qui.
 async function saveFunnelToolbarOrder(tokens) {
   try { localStorage.setItem(LS_FUNNEL_TOOLBAR_ORDER, JSON.stringify(tokens)); } catch (e) { console.error('saveFunnelToolbarOrder LS', e); }
-  const savedIds = tokens.filter(t => t !== 'default' && t !== 'onboarding');
+  const savedIds = tokens.filter(t => t !== 'default' && t !== 'onboarding' && t !== 'activation');
   if (savedIds.length) await reorderFunnels(savedIds);
   else render();
 }
@@ -4724,7 +4730,7 @@ function savedFunnelBar(opts = {}) {
   // built-in Default
   const defaultChip = () => wrap('default', tabBtn({
     cls: 'funnel-preset-btn', dataIdx: 'default',
-    active: state.funnelMode !== 'event' && activeFunnelPreset === null,
+    active: state.funnelMode === 'catalog' && activeFunnelPreset === null,
     accentHex: chipColorHex('purple'), name: 'Default',
   }));
 
@@ -4733,6 +4739,13 @@ function savedFunnelBar(opts = {}) {
     id: 'funnel-onboarding-btn',
     active: state.funnelMode === 'event' && activeFunnelPreset === null,
     accentHex: chipColorHex('purple'), icon: 'zap', name: 'funnel onboarding',
+  }));
+
+  // built-in Attivazione — coorte matura, non è un funnel configurabile: niente editor chip.
+  const activationChip = () => wrap('activation', tabBtn({
+    id: 'funnel-activation-btn',
+    active: state.funnelMode === 'activation',
+    accentHex: chipColorHex('purple'), icon: 'rocket', name: 'Attivazione',
   }));
 
   // tab salvata custom
@@ -4747,6 +4760,7 @@ function savedFunnelBar(opts = {}) {
   const chipsHtml = funnelToolbarTokens().map(token => {
     if (token === 'default') return defaultChip();
     if (token === 'onboarding') return onboardingChip();
+    if (token === 'activation') return activationChip();
     const i = savedFunnels.findIndex(f => f.id === token);
     return i === -1 ? '' : savedChip(savedFunnels[i], i);
   }).join('');
@@ -4881,6 +4895,7 @@ function periodStrip(opts = {}) {
 
 function pageFunnel() {
   if (state.funnelMode === 'event') return pageFunnelEvent();
+  if (state.funnelMode === 'activation') return pageActivation();
   const chipEditor = state.editingFunnel && state.chipEditorIdx != null
     ? chipEditorPanel(state.chipEditorIdx) : '';
   const editPanel = state.editingFunnel ? `
@@ -4993,6 +5008,293 @@ function pageFunnelEvent() {
     </div>
     ${sprintEventFunnelSection()}
     ${funnelParamsSection()}`;
+}
+
+// ── ATTIVAZIONE ───────────────────────────────────────────────────────
+// Tre pannelli su una sola coorte: dove si perde la gente (funnel), se quella perdita conta per
+// il pagamento (barre per allenamenti fatti), e se la quota di attivazione si muove nel tempo.
+// Una sola RPC per tutti e tre — vedi supabase/functions/rpc/kpi_activation.sql.
+// Lo sprint selezionato NON filtra i dati: serve solo a dire se quello sprint è leggibile.
+
+const ACT_MATURITY_DAYS = 14;
+
+async function fetchActivation() {
+  state.activationLoading = true;
+  state.activationError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    const res = await sb.rpc('kpi_activation', {
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint)   : null,
+    });
+    if (res.error) throw res.error;
+    state.activation = res.data;
+  } catch (e) { state.activationError = e.message || 'Errore sconosciuto'; }
+  state.activationLoading = false;
+  render();
+}
+
+const actInt = n => Number(n || 0).toLocaleString('it-IT');
+// Le percentuali arrivano dal DB come numeric: virgola decimale e niente zeri di coda finti.
+const actPct = (v, dec = 1) =>
+  v == null ? '—' : Number(v).toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + '%';
+
+// Blocco 1 — cascata sulla coorte matura. Barra piena + area tratteggiata della perdita +
+// pillola rossa col drop, stessa resa del funnel a eventi.
+function actFunnelViz(fun) {
+  const base = fun.cohort || 0;
+  const steps = fun.steps || [];
+  if (!base) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna persona matura nella coorte.</div>`;
+
+  const worst = steps.reduce((a, s) => (s.lost_pct != null && (!a || s.lost_pct > a.lost_pct) ? s : a), null);
+  const last  = steps[steps.length - 1] || {};
+  const pay   = steps.find(s => s.evento === 'paywall_purchase_attempt') || {};
+
+  const rows = steps.map(s => {
+    const w = Number(s.pct || 0);
+    const prevW = s.lost_pct != null ? w + Number(s.lost_pct) : w;
+    const loss = s.lost_pct != null && s.lost > 0
+      ? `<div class="act-floss" style="left:${w}%;width:${Number(s.lost_pct)}%"></div>
+         <div class="act-fdrop">↘ −${actPct(s.lost_pct)} · −${actInt(s.lost)}</div>`
+      : '';
+    return `
+      <div class="act-frow">
+        <div class="lab">${esc(s.label)}<span class="ev">${esc(s.evento)}</span></div>
+        <div class="act-ftrack" title="${esc(s.label)}: ${actInt(s.n)} su ${actInt(base)}">
+          <div class="act-ffill" style="width:${Math.max(w, 0.4)}%"></div>${loss}
+        </div>
+        <div class="val"><b>${actInt(s.n)}</b><span>${actPct(s.pct, s.pct != null && s.pct < 1 ? 2 : 1)}</span></div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="act-fstats">
+      <div><div class="act-stat-l">Coorte</div><div class="act-stat-v">${actInt(base)}</div></div>
+      <div><div class="act-stat-l">Arriva in fondo</div>
+        <div class="act-stat-v">${actPct(last.pct, 2)}<small>${actInt(last.n)} su ${actInt(base)}</small></div></div>
+      <div><div class="act-stat-l">Drop peggiore</div>
+        <div class="act-stat-v" style="color:var(--red)">${worst ? '−' + actPct(worst.lost_pct) : '—'}<small style="color:var(--muted)">${worst ? actInt(worst.lost) + ' · ' + esc(worst.label) : ''}</small></div></div>
+      <div><div class="act-stat-l">Tocca «paga»</div>
+        <div class="act-stat-v">${actInt(pay.n)}<small>${actPct(pay.pct)}</small></div></div>
+    </div>
+    ${rows}
+    <div class="act-tie">
+      <span>↓</span>
+      <div>Il funnel dice <b>dove</b> si perde la gente${worst ? `: ${actInt(worst.lost)} persone su «${esc(worst.label)}»` : ''}.
+      I due grafici sotto dicono <b>se quella perdita conta</b> per il pagamento, e quanto è rumore.</div>
+    </div>`;
+}
+
+// Blocco 2 — barre orizzontali con dentro l'intervallo di Wilson al 95%.
+// Le righe il cui intervallo si sovrappone a quello della riga sopra restano grigie: non è una
+// differenza che i dati contengono, e colorarle la farebbe leggere come tale.
+function actWorkoutsViz(bw, sprintWarn) {
+  const rows = bw.rows || [];
+  if (!rows.length) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna coorte matura da mostrare.</div>`;
+
+  // Scala comune: il massimo estremo superiore, arrotondato per eccesso a un multiplo comodo.
+  const maxCi = Math.max(...rows.map(r => Number(r.ci_hi || 0)), 1);
+  const top   = Math.ceil(maxCi / 11) * 11;
+  const x     = v => (Number(v || 0) / top) * 100;
+
+  // Una riga resta grigia finché il suo intervallo contiene ancora il tasso della prima riga:
+  // è il modo diretto di dire "questa quota non è distinguibile da chi non ha fatto niente".
+  // Confrontarla con la riga immediatamente sopra invece della baseline non funziona — due
+  // intervalli adiacenti si sfiorano quasi sempre e non si uscirebbe mai dal grigio.
+  const baseRate = Number(rows[0]?.pct || 0);
+  let flat = true;
+  const marked = rows.map((r, i) => {
+    if (i > 0 && flat) {
+      const contiene = Number(r.ci_lo || 0) <= baseRate && baseRate <= Number(r.ci_hi || 0);
+      if (!contiene) flat = false;
+    }
+    return { ...r, flat };
+  });
+
+  // Soglia = prima riga che si stacca davvero dalle precedenti.
+  const firstSolid = marked.findIndex(r => !r.flat);
+  const sotto = marked.filter((r, i) => firstSolid === -1 || i < firstSolid);
+  const sopra = marked.filter((r, i) => firstSolid !== -1 && i >= firstSolid);
+  const sum = (arr, k) => arr.reduce((a, r) => a + Number(r[k] || 0), 0);
+  const rateSotto = sum(sotto, 'tot') ? sum(sotto, 'hit') / sum(sotto, 'tot') : 0;
+  const rateSopra = sum(sopra, 'tot') ? sum(sopra, 'hit') / sum(sopra, 'tot') : 0;
+  const stacco = rateSotto > 0 ? Math.round(rateSopra / rateSotto) : null;
+  const nSotto = sum(sotto, 'tot');
+
+  const body = marked.map(r => {
+    const g = r.flat ? ' flat' : '';
+    const lo = x(r.ci_lo), hi = x(r.ci_hi);
+    return `
+      <div class="act-row">
+        <div class="row-l">${esc(r.label)}<span class="n">${actInt(r.hit)} su ${actInt(r.tot)}</span></div>
+        <div class="act-track" title="${esc(r.label)}: ${actPct(r.pct, 2)} (${actPct(r.ci_lo, 2)} – ${actPct(r.ci_hi, 2)})">
+          <div class="act-fill${g}" style="width:${Math.max(x(r.pct), 0.4)}%"></div>
+          <div class="act-ci${g}" style="left:${lo}%;width:${Math.max(hi - lo, 0.5)}%"></div>
+        </div>
+        <div class="row-r"><span class="p">${actPct(r.pct, 2)}</span><span class="k">${actPct(r.ci_lo, 2).replace('%','')} – ${actPct(r.ci_hi, 2).replace('%','')}</span></div>
+      </div>`;
+  }).join('');
+
+  const sogliaLabel = firstSolid === -1 ? '—' : String(marked[firstSolid].bucket);
+
+  return `
+    ${sprintWarn}
+    <div class="act-stats">
+      <div><div class="act-stat-l">Coorte</div><div class="act-stat-v">${actInt(bw.cohort)}<small>la stessa di sopra</small></div></div>
+      <div><div class="act-stat-l">Soglia che conta</div><div class="act-stat-v">${sogliaLabel}<small>allenamenti</small></div></div>
+      <div><div class="act-stat-l">Stacco sopra soglia</div><div class="act-stat-v act-up">${stacco ? stacco + '×' : '—'}</div></div>
+      <div><div class="act-stat-l">Sotto soglia</div><div class="act-stat-v">${actInt(nSotto)}<small>${bw.cohort ? Math.round(100 * nSotto / bw.cohort) + '%' : '—'}</small></div></div>
+    </div>
+    <div class="act-rows">${body}</div>
+    <div class="act-axis"><span>0%</span><span>${actPct(top / 2, 0)}</span><span>${actPct(top, 0)}</span></div>
+    <div class="act-callout">
+      ${stacco && firstSolid > 0
+        ? `Chi arriva a ${sogliaLabel} allenamenti tocca «paga» <b>${stacco} volte più spesso</b> di chi ne fa meno:
+           ${actInt(sum(sopra, 'hit'))} persone su ${actInt(sum(sopra, 'tot'))} contro ${actInt(sum(sotto, 'hit'))} su ${actInt(nSotto)}.
+           Le prime ${firstSolid === 1 ? 'riga è grigia' : firstSolid + ' righe sono grigie'} perché
+           ${firstSolid === 1 ? 'il suo intervallo comprende' : 'i loro intervalli comprendono'} ancora
+           il tasso di chi non ha fatto niente: fra di loro non cambia nulla.`
+        : `Nessuna riga si stacca davvero dalle altre: tutti gli intervalli comprendono il tasso di partenza.`}
+    </div>
+    <div class="act-foot">
+      esito = evento paywall_purchase_attempt · account is_test esclusi<br>
+      coorte = primo evento dal ${state.activation?.cohort_start ? fmtDateIt(state.activation.cohort_start) : '20/07'}
+      con ${ACT_MATURITY_DAYS} giorni di maturità · intervallo di Wilson 95%
+    </div>`;
+}
+
+// Blocco 3 — punti con segmento di incertezza, media tratteggiata, sprint come bande di sfondo.
+// NON si filtra per sprint: una serie settimanale tagliata su uno sprint di quattro giorni
+// lascerebbe un punto solo.
+function actWeeklyViz(wk) {
+  const rows = wk.rows || [];
+  if (!rows.length) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna settimana da mostrare.</div>`;
+
+  // Asse Y fino al multiplo di 20 sopra l'estremo superiore più alto, minimo 40%.
+  const topY = Math.max(40, Math.ceil(Math.max(...rows.map(r => Number(r.ci_hi || 0))) / 20) * 20);
+  const y = v => (Number(v || 0) / topY) * 100;   // % dal basso
+  const colW = 100 / rows.length;
+
+  // Le bande degli sprint si posizionano sulle settimane che coprono: la prima e l'ultima
+  // settimana toccate dallo sprint, così la banda resta allineata alla griglia dei punti.
+  const weekStarts = rows.map(r => new Date(r.week_start + 'T00:00:00Z').getTime());
+  const bands = (state.sprints || []).map(sp => {
+    if (!sp.inizio || !sp.fine) return null;
+    const a = new Date(sp.inizio + 'T00:00:00Z').getTime();
+    const b = new Date(sp.fine   + 'T00:00:00Z').getTime() + 86400000;
+    const idx = weekStarts.map((w, i) => (w + 7 * 86400000 > a && w < b ? i : -1)).filter(i => i >= 0);
+    if (!idx.length) return null;
+    const from = Math.min(...idx), to = Math.max(...idx);
+    return `<div class="act-band" style="left:${from * colW}%;width:${(to - from + 1) * colW}%"><b>${esc(sp.nome)}</b></div>`;
+  }).filter(Boolean).join('');
+
+  const pts = rows.map((r, i) => {
+    const lo = y(r.ci_lo), hi = y(r.ci_hi);
+    const tip = `${fmtDateIt(r.week_start)}: ${actInt(r.attivi)} su ${actInt(r.tot)} = ${actPct(r.pct)} (${actPct(r.ci_lo)} – ${actPct(r.ci_hi)})`;
+    return `<div class="act-wk" style="left:${i * colW}%;width:${colW}%" title="${esc(tip)}">
+      <div class="act-bar-ci" style="bottom:${lo}%;height:${Math.max(hi - lo, 0.5)}%"></div>
+      <div class="act-dot" style="bottom:${y(r.pct)}%"></div>
+    </div>`;
+  }).join('');
+
+  const xl = rows.map(r =>
+    `<div style="width:${colW}%">${fmtWeekLabel(r.week_start)}${r.in_corso ? '*' : ''}</div>`).join('');
+
+  const inCorso = rows.some(r => r.in_corso);
+
+  return `
+    <div class="act-chartbox">
+      <div class="act-dots">
+        ${bands}
+        <div class="act-yl" style="top:0">${actPct(topY, 0)}</div>
+        <div class="act-yl" style="top:50%">${actPct(topY / 2, 0)}</div>
+        <div class="act-yl" style="top:100%">0%</div>
+        <div class="act-mean" style="top:${100 - y(wk.mean_pct)}%"><span>media ${actPct(wk.mean_pct)}</span></div>
+        ${pts}
+      </div>
+      <div class="act-xl">${xl}</div>
+    </div>
+    <div class="act-legend">
+      <span><i></i>periodo di uno sprint</span>
+      <span>segmento verticale = intervallo al 95%</span>
+      ${inCorso ? '<span>* settimana ancora in corso</span>' : ''}
+    </div>
+    <div class="act-foot">
+      attivazione = almeno 2 allenamenti finiti entro 7 giorni dal primo evento<br>
+      ${actInt(wk.attivi)} su ${actInt(wk.cohort)} = ${actPct(wk.mean_pct)} · account is_test esclusi · settimane da lunedì
+    </div>`;
+}
+
+function fmtDateIt(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return isNaN(d) ? iso : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+}
+function fmtWeekLabel(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return isNaN(d) ? iso : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', timeZone: 'UTC' }).replace('.', '');
+}
+
+// Avviso ambra: lo sprint scelto in alto non ha ancora nessuno con 14 giorni di vita, quindi le
+// barre uscirebbero vuote. Invece di mostrarle vuote si dice perché, e si ricade su tutte le
+// coorti mature.
+function actSprintWarning() {
+  const sel = state.sprints.find(s => s.id === state.funnelSprintId);
+  const sp  = state.activation?.sprint;
+  if (!sel || !sp || sp.mature) return '';
+  const prev = [...state.sprints]
+    .filter(s => s.fine && sel.fine && s.fine < sel.fine)
+    .sort((a, b) => (a.fine < b.fine ? 1 : -1))[0];
+  return `
+    <div class="act-warn">
+      <span>${actWarnSvg}</span>
+      <div><b>${esc(sel.nome)} non è ancora leggibile.</b> Si contano i primi 7 giorni di ogni persona e poi
+      ne servono altri ${ACT_MATURITY_DAYS - 7} di attesa. Le sue ${actInt(sp.cohort)} persone hanno al massimo
+      ${actInt(sp.eta_max_giorni)} giorn${sp.eta_max_giorni === 1 ? 'o' : 'i'}. Sotto vedi <b>tutte le coorti mature</b>
+      dal ${state.activation?.cohort_start ? fmtDateIt(state.activation.cohort_start) : '20/07'}:
+      ${actInt(state.activation?.by_workouts?.cohort)} persone.</div>
+      ${prev ? `<button class="act-warn-act" data-act-sprint="${esc(prev.id)}">${esc(prev.nome)} →</button>` : ''}
+    </div>`;
+}
+
+const actWarnSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+function pageActivation() {
+  const a = state.activation;
+  const loading = state.activationLoading;
+  const err = state.activationError;
+
+  const card = (title, sub, body) => `
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title" style="margin-bottom:0">${title}</div>
+      <p class="act-card-sub">${sub}</p>
+      ${body}
+    </div>`;
+
+  const spinner = `<div class="fun-empty"><div class="fun-empty-ring spin"></div><div class="fun-empty-text">Calcolo attivazione…</div></div>`;
+
+  const body = loading
+    ? card('Attivazione', 'Calcolo in corso sulla coorte matura.', spinner)
+    : err
+    ? `<div class="card"><div style="padding:20px;color:var(--red);font-size:13px">${esc(err)}</div></div>`
+    : !a
+    ? card('Attivazione', 'Nessun calcolo.', `<div class="fun-empty"><div class="fun-empty-ring"></div><div class="fun-empty-text">Premi <b>Calcola</b> per costruire i tre grafici.</div></div>`)
+    : [
+        card('Funnel della coorte matura',
+          `Primo evento dal ${fmtDateIt(a.cohort_start)}, con almeno ${a.maturity_days} giorni di maturità. È la stessa coorte dei due grafici qui sotto.`,
+          actFunnelViz(a.funnel || {})),
+        card('Allenamenti fatti → tocca «paga»',
+          `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio.`,
+          actWorkoutsViz(a.by_workouts || {}, actSprintWarning())),
+        card('Attivazione per settimana',
+          'Quota di ogni settimana che arriva a 2 allenamenti entro 7 giorni. La serie non si taglia sullo sprint: gli sprint sono le bande sullo sfondo.',
+          actWeeklyViz(a.weekly || {})),
+      ].join('');
+
+  return `
+    ${savedFunnelBar({})}
+    ${periodStrip({ calcId: 'activation-apply', showPresets: false })}
+    ${body}`;
 }
 
 // Sub-riga con gli eventi in OR di uno step (parent o variante). Uno step multi-evento conta
@@ -10659,7 +10961,8 @@ function attachEvents() {
   document.querySelectorAll('[data-nav]').forEach(el =>
     el.addEventListener('click', () => {
       state.page = el.dataset.nav;
-      if (state.page === 'funnel'     && state.funnelMode !== 'event' && !state.funnel && !state.funnelLoading) fetchFunnel();
+      if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
+      if (state.page === 'funnel'     && state.funnelMode === 'activation' && !state.activation && !state.activationLoading) fetchActivation();
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
@@ -11010,6 +11313,25 @@ function attachEvents() {
     state.eventFunnelError = null;
     fetchEventFunnel();
   });
+  // Attivazione (built-in) — coorte matura, non ha step configurabili: apre e calcola.
+  document.getElementById('funnel-activation-btn')?.addEventListener('click', () => {
+    state.funnelMode = 'activation';
+    state.activeFunnelPreset = null;
+    state.editingFunnel = false;
+    state.editingEventFunnel = false;
+    fetchActivation();
+  });
+  document.getElementById('activation-apply')?.addEventListener('click', () => fetchActivation());
+  // "Sprint 10 →" dell'avviso ambra: sposta il selettore in alto sull'ultimo sprint precedente.
+  document.querySelector('[data-act-sprint]')?.addEventListener('click', e => {
+    const sp = state.sprints.find(s => s.id === e.currentTarget.dataset.actSprint);
+    if (!sp) return;
+    state.funnelSprintId = sp.id;
+    state.funnelFrom = sp.inizio;
+    state.funnelTo   = sp.fine;
+    fetchActivation();
+  });
+
   document.getElementById('edit-event-funnel')?.addEventListener('click', () => {
     state.editingEventFunnel = true;
     openChipDraftForActivePreset();
@@ -11602,6 +11924,7 @@ function attachEvents() {
       state.funnelTo   = sprint.fine;
     }
     if (state.funnelMode === 'event') { fetchEventFunnel(); return; }
+    if (state.funnelMode === 'activation') { fetchActivation(); return; }
     state.funnel = null;
     fetchFunnel();
   });
