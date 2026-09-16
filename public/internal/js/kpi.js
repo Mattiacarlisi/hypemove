@@ -5020,16 +5020,29 @@ function pageFunnelEvent() {
 
 const ACT_MATURITY_DAYS = 14;
 
+// 'YYYY-MM-DD' → istante di inizio giornata nel fuso del browser, e inizio del giorno dopo:
+// la finestra passata alla RPC è chiusa a sinistra e aperta a destra.
+const dayStartTs = d => (d ? new Date(`${d}T00:00:00`).toISOString() : null);
+const dayAfterTs = d => {
+  if (!d) return null;
+  const x = new Date(`${d}T00:00:00`);
+  x.setDate(x.getDate() + 1);
+  return x.toISOString();
+};
+
 async function fetchActivation() {
   state.activationLoading = true;
   state.activationError = null;
   render();
   try {
+    // La finestra arriva dallo sprint se ne è selezionato uno, altrimenti dalle due date scritte
+    // a mano: senza questo, cambiare le date in alto non cambiava un solo numero.
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
-    const res = await sb.rpc('kpi_activation', {
-      p_start: selSprint ? sprintStartTs(selSprint) : null,
-      p_end:   selSprint ? sprintEndTs(selSprint)   : null,
-    });
+    const p_start = (selSprint && sprintStartTs(selSprint)) || dayStartTs(state.funnelFrom);
+    const p_end   = (selSprint && sprintEndTs(selSprint))   || dayAfterTs(state.funnelTo);
+    // p_cohort_start resta al default: è la storia su cui vive la serie settimanale, che non si
+    // filtra mai. Il periodo scelto viaggia in p_start/p_end e tocca solo gli altri due pannelli.
+    const res = await sb.rpc('kpi_activation', { p_start, p_end });
     if (res.error) throw res.error;
     state.activation = res.data;
   } catch (e) { state.activationError = e.message || 'Errore sconosciuto'; }
@@ -5227,18 +5240,17 @@ function actWeeklyViz(wk) {
     </div>`;
 }
 
-// Nome dello sprint quando i primi due pannelli sono davvero ristretti a lui, altrimenti null.
-function actSprintApplied() {
-  if (!state.activation?.sprint?.applied) return null;
-  return state.sprints.find(s => s.id === state.funnelSprintId) || null;
+// Come si chiama il periodo su cui sono i numeri dei due pannelli filtrabili: il nome dello
+// sprint se ne è selezionato uno, altrimenti le due date scritte a mano.
+function actWindowLabel() {
+  const sp = state.sprints.find(s => s.id === state.funnelSprintId);
+  if (sp) return esc(sp.nome);
+  return `${fmtDateIt(state.funnelFrom)} → ${fmtDateIt(state.funnelTo)}`;
 }
 
 // Riga di coda dei due pannelli filtrabili: dice su quale insieme di persone sono i numeri.
 function actCohortFoot() {
-  const sp = actSprintApplied();
-  if (sp) return `persone del ${esc(sp.nome)}`;
-  const start = state.activation?.cohort_start ? fmtDateIt(state.activation.cohort_start) : '20/07';
-  return `primo evento dal ${start} con ${ACT_MATURITY_DAYS} giorni di maturità`;
+  return `primo evento dentro ${actWindowLabel()}, con ${ACT_MATURITY_DAYS} giorni di maturità`;
 }
 
 function fmtDateIt(iso) {
@@ -5254,9 +5266,10 @@ function fmtWeekLabel(iso) {
 // barre uscirebbero vuote. Invece di mostrarle vuote si dice perché, e si ricade su tutte le
 // coorti mature.
 function actSprintWarning() {
-  const sel = state.sprints.find(s => s.id === state.funnelSprintId);
-  const sp  = state.activation?.sprint;
-  if (!sel || !sp || sp.mature) return '';
+  const sp = state.activation?.sprint;
+  if (!sp || sp.mature) return '';
+  const sel = state.sprints.find(s => s.id === state.funnelSprintId)
+           || { nome: actWindowLabel(), fine: state.funnelTo };
   const prev = [...state.sprints]
     .filter(s => s.fine && sel.fine && s.fine < sel.fine)
     .sort((a, b) => (a.fine < b.fine ? 1 : -1))[0];
@@ -5265,9 +5278,8 @@ function actSprintWarning() {
       <span>${actWarnSvg}</span>
       <div><b>${esc(sel.nome)} non è ancora leggibile.</b> Si contano i primi 7 giorni di ogni persona e poi
       ne servono altri ${ACT_MATURITY_DAYS - 7} di attesa. Le sue ${actInt(sp.cohort)} persone hanno al massimo
-      ${actInt(sp.eta_max_giorni)} giorn${sp.eta_max_giorni === 1 ? 'o' : 'i'}. Sotto vedi <b>tutte le coorti mature</b>
-      dal ${state.activation?.cohort_start ? fmtDateIt(state.activation.cohort_start) : '20/07'}:
-      ${actInt(state.activation?.by_workouts?.cohort)} persone.</div>
+      ${actInt(sp.eta_max_giorni)} giorn${sp.eta_max_giorni === 1 ? 'o' : 'i'}, quindi i due grafici qui sotto
+      restano vuoti: scegli un periodo più vecchio.</div>
       ${prev ? `<button class="act-warn-act" data-act-sprint="${esc(prev.id)}">${esc(prev.nome)} →</button>` : ''}
     </div>`;
 }
@@ -5296,12 +5308,10 @@ function pageActivation() {
     ? card('Attivazione', 'Nessun calcolo.', `<div class="fun-empty"><div class="fun-empty-ring"></div><div class="fun-empty-text">Premi <b>Calcola</b> per costruire i tre grafici.</div></div>`)
     : [
         card('Funnel della coorte matura',
-          actSprintApplied()
-            ? `Solo le persone del ${esc(actSprintApplied().nome)}, che ha almeno ${a.maturity_days} giorni di maturità. È la stessa coorte del grafico qui sotto.`
-            : `Primo evento dal ${fmtDateIt(a.cohort_start)}, con almeno ${a.maturity_days} giorni di maturità. È la stessa coorte dei due grafici qui sotto.`,
+          `Solo chi ha il primo evento dentro ${actWindowLabel()} e almeno ${a.maturity_days} giorni di maturità. È la stessa coorte del grafico qui sotto.`,
           actFunnelViz(a.funnel || {})),
         card('Allenamenti fatti → tocca «paga»',
-          `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio${actSprintApplied() ? `, sulle persone del ${esc(actSprintApplied().nome)}` : ''}.`,
+          `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio. Stesso periodo: ${actWindowLabel()}.`,
           actWorkoutsViz(a.by_workouts || {}, actSprintWarning())),
         card('Attivazione per settimana',
           'Quota di ogni settimana che arriva a 2 allenamenti entro 7 giorni. La serie non si taglia sullo sprint: gli sprint sono le bande sullo sfondo.',
