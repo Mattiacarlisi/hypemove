@@ -5014,7 +5014,9 @@ function pageFunnelEvent() {
 // Tre pannelli su una sola coorte: dove si perde la gente (funnel), se quella perdita conta per
 // il pagamento (barre per allenamenti fatti), e se la quota di attivazione si muove nel tempo.
 // Una sola RPC per tutti e tre — vedi supabase/functions/rpc/kpi_activation.sql.
-// Lo sprint selezionato NON filtra i dati: serve solo a dire se quello sprint è leggibile.
+// Lo sprint selezionato filtra i primi due pannelli quando è maturo (finito da almeno
+// ACT_MATURITY_DAYS giorni); altrimenti resta solo l'avviso ambra e i numeri sono di tutte le
+// coorti mature. La serie settimanale non si filtra mai.
 
 const ACT_MATURITY_DAYS = 14;
 
@@ -5159,8 +5161,7 @@ function actWorkoutsViz(bw, sprintWarn) {
     </div>
     <div class="act-foot">
       esito = evento paywall_purchase_attempt · account is_test esclusi<br>
-      coorte = primo evento dal ${state.activation?.cohort_start ? fmtDateIt(state.activation.cohort_start) : '20/07'}
-      con ${ACT_MATURITY_DAYS} giorni di maturità · intervallo di Wilson 95%
+      coorte = ${actCohortFoot()} · intervallo di Wilson 95%
     </div>`;
 }
 
@@ -5226,6 +5227,20 @@ function actWeeklyViz(wk) {
     </div>`;
 }
 
+// Nome dello sprint quando i primi due pannelli sono davvero ristretti a lui, altrimenti null.
+function actSprintApplied() {
+  if (!state.activation?.sprint?.applied) return null;
+  return state.sprints.find(s => s.id === state.funnelSprintId) || null;
+}
+
+// Riga di coda dei due pannelli filtrabili: dice su quale insieme di persone sono i numeri.
+function actCohortFoot() {
+  const sp = actSprintApplied();
+  if (sp) return `persone del ${esc(sp.nome)}`;
+  const start = state.activation?.cohort_start ? fmtDateIt(state.activation.cohort_start) : '20/07';
+  return `primo evento dal ${start} con ${ACT_MATURITY_DAYS} giorni di maturità`;
+}
+
 function fmtDateIt(iso) {
   const d = new Date(iso + 'T00:00:00Z');
   return isNaN(d) ? iso : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
@@ -5281,10 +5296,12 @@ function pageActivation() {
     ? card('Attivazione', 'Nessun calcolo.', `<div class="fun-empty"><div class="fun-empty-ring"></div><div class="fun-empty-text">Premi <b>Calcola</b> per costruire i tre grafici.</div></div>`)
     : [
         card('Funnel della coorte matura',
-          `Primo evento dal ${fmtDateIt(a.cohort_start)}, con almeno ${a.maturity_days} giorni di maturità. È la stessa coorte dei due grafici qui sotto.`,
+          actSprintApplied()
+            ? `Solo le persone del ${esc(actSprintApplied().nome)}, che ha almeno ${a.maturity_days} giorni di maturità. È la stessa coorte del grafico qui sotto.`
+            : `Primo evento dal ${fmtDateIt(a.cohort_start)}, con almeno ${a.maturity_days} giorni di maturità. È la stessa coorte dei due grafici qui sotto.`,
           actFunnelViz(a.funnel || {})),
         card('Allenamenti fatti → tocca «paga»',
-          `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio.`,
+          `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio${actSprintApplied() ? `, sulle persone del ${esc(actSprintApplied().nome)}` : ''}.`,
           actWorkoutsViz(a.by_workouts || {}, actSprintWarning())),
         card('Attivazione per settimana',
           'Quota di ogni settimana che arriva a 2 allenamenti entro 7 giorni. La serie non si taglia sullo sprint: gli sprint sono le bande sullo sfondo.',
