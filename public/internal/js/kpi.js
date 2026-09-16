@@ -5060,7 +5060,7 @@ const actPct = (v, dec = 1) =>
 function actFunnelViz(fun) {
   const base = fun.cohort || 0;
   const steps = fun.steps || [];
-  if (!base) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna persona matura nella coorte.</div>`;
+  if (!base) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna persona nel periodo scelto.</div>`;
 
   const worst = steps.reduce((a, s) => (s.lost_pct != null && (!a || s.lost_pct > a.lost_pct) ? s : a), null);
   const last  = steps[steps.length - 1] || {};
@@ -5068,7 +5068,14 @@ function actFunnelViz(fun) {
 
   const rows = steps.map(s => {
     const w = Number(s.pct || 0);
-    const prevW = s.lost_pct != null ? w + Number(s.lost_pct) : w;
+    // La barra si divide in due: la parte piena sono le persone che hanno già finito la loro
+    // settimana, quella tratteggiata chi la sta ancora vivendo. Il secondo numero può solo salire.
+    const pend  = Number(s.n_pending || 0);
+    const pendW = base > 0 ? (100 * pend) / base : 0;
+    const doneW = Math.max(w - pendW, 0);
+    const pendBar = pend > 0
+      ? `<div class="act-fpend" style="left:${doneW}%;width:${pendW}%" title="${actInt(pend)} ancora dentro la loro settimana"></div>`
+      : '';
     const loss = s.lost_pct != null && s.lost > 0
       ? `<div class="act-floss" style="left:${w}%;width:${Number(s.lost_pct)}%"></div>
          <div class="act-fdrop">↘ −${actPct(s.lost_pct)} · −${actInt(s.lost)}</div>`
@@ -5077,13 +5084,25 @@ function actFunnelViz(fun) {
       <div class="act-frow">
         <div class="lab">${esc(s.label)}<span class="ev">${esc(s.evento)}</span></div>
         <div class="act-ftrack" title="${esc(s.label)}: ${actInt(s.n)} su ${actInt(base)}">
-          <div class="act-ffill" style="width:${Math.max(w, 0.4)}%"></div>${loss}
+          <div class="act-ffill" style="width:${Math.max(doneW, pend > 0 ? 0 : 0.4)}%"></div>${pendBar}${loss}
         </div>
-        <div class="val"><b>${actInt(s.n)}</b><span>${actPct(s.pct, s.pct != null && s.pct < 1 ? 2 : 1)}</span></div>
+        <div class="val"><b>${actInt(s.n)}</b><span>${actPct(s.pct, s.pct != null && s.pct < 1 ? 2 : 1)}</span>
+          ${pend > 0 && pend < Number(s.n || 0) ? `<span class="act-pend-n">${actInt(pend)} in corso</span>` : ''}</div>
       </div>`;
   }).join('');
 
+  const pending = Number(fun.pending || 0);
+  const gg = Number(fun.giorni_mancanti || 0);
+  const pendNote = pending > 0
+    ? `<div class="act-pendnote">
+         <b>${actInt(pending)} person${pending === 1 ? 'a è ancora' : 'e sono ancora'} dentro la loro prima settimana.</b>
+         I loro conteggi sono disegnati tratteggiati e possono solo salire.
+         Il periodo sarà leggibile per intero fra ${actInt(gg)} giorn${gg === 1 ? 'o' : 'i'}.
+       </div>`
+    : '';
+
   return `
+    ${pendNote}
     <div class="act-fstats">
       <div><div class="act-stat-l">Coorte</div><div class="act-stat-v">${actInt(base)}</div></div>
       <div><div class="act-stat-l">Arriva in fondo</div>
@@ -5278,8 +5297,8 @@ function actSprintWarning() {
       <span>${actWarnSvg}</span>
       <div><b>${esc(sel.nome)} non è ancora leggibile.</b> Si contano i primi 7 giorni di ogni persona e poi
       ne servono altri ${ACT_MATURITY_DAYS - 7} di attesa. Le sue ${actInt(sp.cohort)} persone hanno al massimo
-      ${actInt(sp.eta_max_giorni)} giorn${sp.eta_max_giorni === 1 ? 'o' : 'i'}, quindi i due grafici qui sotto
-      restano vuoti: scegli un periodo più vecchio.</div>
+      ${actInt(sp.eta_max_giorni)} giorn${sp.eta_max_giorni === 1 ? 'o' : 'i'}: il funnel qui sopra le mostra
+      tratteggiate, ma queste barre restano vuote finché la prima non finisce la sua settimana.</div>
       ${prev ? `<button class="act-warn-act" data-act-sprint="${esc(prev.id)}">${esc(prev.nome)} →</button>` : ''}
     </div>`;
 }
@@ -5307,8 +5326,13 @@ function pageActivation() {
     : !a
     ? card('Attivazione', 'Nessun calcolo.', `<div class="fun-empty"><div class="fun-empty-ring"></div><div class="fun-empty-text">Premi <b>Calcola</b> per costruire i tre grafici.</div></div>`)
     : [
-        card('Funnel della coorte matura',
-          `Solo chi ha il primo evento dentro ${actWindowLabel()} e almeno ${a.maturity_days} giorni di maturità. È la stessa coorte del grafico qui sotto.`,
+        card(
+          (a.funnel?.pending || 0) >= (a.funnel?.cohort || 0) && (a.funnel?.cohort || 0) > 0
+            ? 'Funnel del periodo, ancora in corso'
+            : 'Funnel della coorte matura',
+          (a.funnel?.pending || 0) > 0
+            ? `Chi ha il primo evento dentro ${actWindowLabel()}. Le persone che non hanno ancora finito la loro settimana sono disegnate tratteggiate.`
+            : `Solo chi ha il primo evento dentro ${actWindowLabel()} e almeno ${a.maturity_days} giorni di maturità. È la stessa coorte del grafico qui sotto.`,
           actFunnelViz(a.funnel || {})),
         card('Allenamenti fatti → tocca «paga»',
           `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio. Stesso periodo: ${actWindowLabel()}.`,

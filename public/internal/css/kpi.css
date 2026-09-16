@@ -500,6 +500,20 @@
 .act-frow .lab .ev { display: block; font-family: var(--mono); font-size: 10px; color: var(--muted); opacity: .8; }
 .act-ftrack { position: relative; height: 34px; border-radius: 5px; background: var(--surface2); overflow: hidden; }
 .act-ffill  { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: linear-gradient(90deg, var(--accent), var(--purple)); }
+.act-fpend  {
+  position: absolute; top: 0; bottom: 0;
+  background: repeating-linear-gradient(135deg, var(--accent) 0 5px, transparent 5px 10px);
+  opacity: .55; border-radius: 0 5px 5px 0;
+}
+.act-pend-n {
+  display: block; font-family: 'Inter', sans-serif; font-size: 10.5px;
+  color: var(--accent); opacity: .85;
+}
+.act-pendnote {
+  background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px;
+  padding: 10px 13px; margin-bottom: 14px; font-size: 12.5px; color: var(--muted);
+}
+.act-pendnote b { color: var(--text); }
 .act-floss  {
   position: absolute; top: 0; bottom: 0;
   background: repeating-linear-gradient(135deg, rgba(248,113,113,.14) 0 6px, transparent 6px 12px);
