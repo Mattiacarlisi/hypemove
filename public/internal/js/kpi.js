@@ -7454,6 +7454,14 @@ function sezioneTimeoutBox(msg, retryCall) {
 // `rotation`: 'live' = il codice la monta oggi in un punto raggiungibile · 'dormant' = il
 // componente c'è ed è raggiungibile solo da un ramo che non si pesca più · 'retired' = resta
 // solo l'anteprima /dev/premium, in app non la monta nessuno.
+// Versione degli scatti: finisce in coda a ogni URL di /internal/paywalls/.
+// Serve perche i file si chiamano <variant>-<indice>.png e vengono RISCRITTI quando si
+// riscatta: lo stesso nome ha contenuti diversi nel tempo, e il browser continua a
+// mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
+// «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
+// precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
+const PAYWALL_SHOT_V = '20260917b';
+
 const CREATIVE_REGISTRY = [
   {
     variant: 'coach_slides',
@@ -7866,7 +7874,7 @@ function creativeAuditRow(reg, live, win) {
     <tr style="border-bottom:1px solid #111120;${warn ? 'background:#17130a' : ''}">
       <td style="padding:10px 12px;vertical-align:top;border-left:2px solid ${warn ? '#5a4318' : 'transparent'}">
         <div class="creative-open" data-variant="${esc(reg.variant)}" title="Apri la scheda: quando compare, in che punto dell'app, cosa mostra" style="cursor:pointer;display:flex;gap:10px">
-          <img src="/internal/paywalls/${esc(reg.variant)}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png" alt="" loading="lazy"
+          <img src="/internal/paywalls/${esc(reg.variant)}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png?v=${PAYWALL_SHOT_V}" alt="" loading="lazy"
                onerror="this.style.display='none'"
                style="width:42px;border-radius:6px;border:1px solid #1f1f33;flex-shrink:0;align-self:flex-start">
         <div>
@@ -8343,7 +8351,7 @@ function creativeModal() {
 
   const screensHtml = (reg.screens || []).map((s, i) => {
     const n = s.idx === undefined || s.idx === null ? null : usersByIdx[String(s.idx)];
-    const shot = `/internal/paywalls/${reg.variant}-${s.idx ?? i}.png`;
+    const shot = `/internal/paywalls/${reg.variant}-${s.idx ?? i}.png?v=${PAYWALL_SHOT_V}`;
     return `
       <div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #15151f">
         <a href="${shot}" target="_blank" rel="noopener" title="Apri a schermo intero" style="flex-shrink:0;line-height:0">
