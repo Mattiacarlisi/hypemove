@@ -7674,17 +7674,38 @@ const CREATIVE_REGISTRY = [
       { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
     ],
   },
+  // Fine onboarding: una chiave sola in app, DUE creativita nei dati. Le separa la data
+  // (public.kpi_paywall_variant a due argomenti), perche il campo che le distingueva
+  // (`feature`: chart | program_ready) e' arrivato il 20/07, dopo che il passaggio era
+  // gia uscito dal flusso: e NULL su tutti e 270 gli eventi.
   {
     variant: 'onboarding_results_chart',
+    name: 'Fine onboarding · grafico',
+    rotation: 'retired',
+    where: 'Era un overlay alla fine dell\'onboarding, subito dopo il reveal del piano.',
+    when: 'Sprint 6, 1-2 luglio 2026: due giorni, poi tolta. I 12 ritardatari fra il 3 e l\'8 luglio erano rimasti su build vecchie e hanno visto questa. Dall\'11 luglio la prima schermata cambia, ed e\' l\'altra creativita: «Fine onboarding · risultati».',
+    exit: 'La × dell\'overlay (quando esisteva).',
+    what: 'Il grafico che si disegna — «I tuoi risultati nel tempo», HypeMove+ contro allenarsi senza un piano — con la copy di fine onboarding: «Ottieni un piano ancora piu\' personalizzato…», CTA «Scopri HypeMove+». E\' il paywall che ha convertito piu\' di ogni altro che abbiamo mai messo in aria: nella coorte dello Sprint 6 (71 persone) 13 sono arrivate fino alla cassa di Google, il 18,3%, contro l\'1,4-3,0% di ogni altro sprint. Ed e\' anche quello che ha fatto piu\' danni: primo allenamento vero entro 48h al 14,1% contro il 32-37% degli sprint senza paywall, e secondo allenamento entro 7 giorni al 7,0% contro il 17-21%. Chiesto nel momento di desiderio massimo, ma prima che l\'app avesse dato qualcosa.',
+    note: 'Chi ha visto questa e chi ha visto la gemella sono due gruppi senza nessuno in comune: 97 persone di qua, 97 di la\', a dieci giorni di distanza.',
+    file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/CoachAiChartFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Il grafico', d: 'la curva che si disegna fino a «Obiettivo raggiunto!»' },
+      { idx: 1, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'onboarding_results_program_ready',
     name: 'Fine onboarding · risultati',
     rotation: 'retired',
-    where: 'Era un overlay alla fine dell\'onboarding, dopo il reveal del piano.',
-    when: 'Era il paywall alla fine dell\'onboarding, subito dopo il reveal del piano. È andato in aria in DUE finestre, con due prime schermate diverse: Sprint 6 (1-2 luglio) con l\'hero a GRAFICO, Sprint 7 (11-12 luglio) con l\'hero «programma pronto» (ProgramReadyHero, commit 2/07 18:48, cioè esattamente a cavallo fra i due test). A dirlo non è un campo negli eventi — feature: chart | program_ready è arrivato solo il 20 luglio ed è null su tutti i 270 eventi — sono il registro sprint e le date: 85 persone il 30/06-01/07, 91 l\'11-12/07, e in mezzo solo 12 ritardatari rimasti su build vecchie. Il passaggio è stato tolto il 12 luglio, ed è la ragione per cui lo step «Vede il paywall (fine onboarding)» del funnel sprint vale zero.',
-    exit: 'La × dell\'overlay (quando esisteva).',
-    what: 'Gemella della «grafico», montata a fine onboarding: stesso grafico che si disegna, ma con la copy di fine onboarding («Ottieni un piano ancora più personalizzato…», CTA «Scopri HypeMove+»). È il paywall che ha convertito più di ogni altro: nella coorte dello Sprint 6 (71 persone) 13 sono arrivate fino alla cassa di Google, il 18,3%, contro l\'1,4-3,0% di ogni altro sprint. Ed è anche quello che ha fatto più danni: primo allenamento vero entro 48h al 14,1% contro il 32-37% degli sprint senza paywall, e secondo allenamento entro 7 giorni al 7,0% contro il 17-21%. Lo Sprint 7, con l\'hero morbido dopo i 5 squat, ha lasciato l\'attivazione intatta (30,0%) e non ha convertito nulla (1,4%): innocuo e inutile.',
+    where: 'Stesso punto della gemella, ma nello Sprint 7 l\'onboarding finiva prima con un mini allenamento da 5 squat, premio streak e card, e solo dopo questo overlay.',
+    when: 'Sprint 7, 11-12 luglio 2026. Il commit di ProgramReadyHero e\' del 2/07 alle 18:48, cioe\' la notte fra i due test: e\' stato scritto alla fine dello Sprint 6 per essere provato nello Sprint 7. Il passaggio e\' stato tolto il 12 luglio ed e\' la ragione per cui lo step «Vede il paywall (fine onboarding)» del funnel sprint vale zero.',
+    exit: '«Inizia con il piano base · Gratis», il secondo bottone: qui l\'uscita e\' dichiarata, non e\' una ×.',
+    what: 'La versione morbida: niente grafico che promette, ma «Il tuo programma di tonificazione e\' pronto» con la settimana-roadmap che si spunta, e l\'alternativa gratuita scritta sotto. Ha fatto esattamente il contrario della gemella: attivazione intatta (primo allenamento vero entro 48h al 30,0%, in linea col 32-37% degli sprint senza paywall) e conversione azzerata — 1,4%, sotto il 3,0% degli sprint in cui il paywall non c\'era proprio. Innocua e inutile. Ha pero\' pesato sull\'esplorazione: chat AI aperta dal 7,1%, contro il 24,4% dello Sprint 8 che aveva la stessa strumentazione.',
+    note: 'Questa variant l\'app non l\'ha mai emessa: negli eventi c\'e\' scritto onboarding_results_chart come nella gemella, e a separarle e\' la data (dall\'11/07 in poi). Cercarla nel codice non serve — il componente e\' ProgramReadyHero, montato da CoachAiChartFlow con hero=program-ready.',
     file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/ProgramReadyHero.tsx',
     screens: [
-      { idx: 0, t: 'Hero · due versioni', d: 'il grafico (nello scatto) nello Sprint 6, poi «programma pronto» con la roadmap che si spunta nello Sprint 7 — quello nello scatto è il primo, quello che ha convertito' },
+      { idx: 0, t: 'Programma pronto', d: '«Il tuo programma di tonificazione è pronto» e la roadmap che si spunta' },
       { idx: 1, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
       { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
     ],
@@ -8422,7 +8443,9 @@ const CREATIVE_LABELS = {
   coach_call:        'Coach call',
   coach_call_v2:     'Coach call v2',
   change_goal_premium: 'Cambio obiettivo',
-  onboarding_results_chart: 'Fine onboarding · Risultati',
+  // Una chiave sola in app, due creatività nei dati: la data le separa (vedi kpi_paywall_variant).
+  onboarding_results_chart:         'Fine onboarding · grafico',
+  onboarding_results_program_ready: 'Fine onboarding · risultati',
   // Il gate di fine prova non è un paywall come gli altri, ma esce come variant a sé.
   trial_end_gate: 'Gate fine prova',
 };
