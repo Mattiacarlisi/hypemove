@@ -7683,7 +7683,11 @@ const CREATIVE_REGISTRY = [
     exit: 'La × dell\'overlay (quando esisteva).',
     what: 'Gemella della «grafico», montata a fine onboarding. È la ragione per cui lo step «Vede il paywall (fine onboarding)» del funnel sprint vale zero da settimane.',
     file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/ProgramReadyHero.tsx',
-    screens: [],
+    screens: [
+      { idx: 0, t: 'Programma pronto', d: 'la roadmap che si spunta, poi «Scopri HypeMove+» o «Inizia gratis»' },
+      { idx: 1, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
   },
   {
     variant: 'video_ad',
