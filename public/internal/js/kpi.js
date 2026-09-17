@@ -7761,6 +7761,13 @@ const CREATIVE_REGISTRY = [
     what: 'Stessa idea della v2 ma con lo script del pitch variabile per segmento (nome, numero di allenamenti). La v2 ha una voce registrata sola, uguale per tutti.',
     file: 'app/src/components/PremiumProposals/CoachCallPaywall/CoachCallFlow.tsx',
     screens: [],
+    // Il banco di posa non la sa fotografare: nel codice la v1 non c'è più, CoachCallFlow emette
+    // coach_call_v2 e basta. A dividerle è stato ebbd7421 (18/07/2026), un commit di solo
+    // tracking — «nessuna grafica ne' logica d'acquisto» — quindi la schermata della chiamata
+    // era proprio quella. Ma la voce unica è arrivata dopo (544b3088), e la foto della v2 quella
+    // la mostra già: si presta la gemella, dicendo che è prestata.
+    shotFrom: 'coach_call_v2',
+    shotNote: 'La foto è quella della v2: la v1 nel codice non esiste più e il banco di posa non può rifotografarla. La schermata della chiamata era la stessa — a dividerle fu un commit di solo tracking, il 18/07/2026 — ma lì lo script del pitch cambiava da persona a persona, e la voce unica della v2 è arrivata dopo. Se hai uno screenshot vero della v1, caricalo qui: quello vince su tutto.',
   },
   {
     variant: 'coach_call_v2',
@@ -7939,9 +7946,10 @@ function creativeAuditRow(reg, live, win) {
     <tr style="border-bottom:1px solid #111120;${warn ? 'background:#17130a' : ''}">
       <td style="padding:10px 12px;vertical-align:top;border-left:2px solid ${warn ? '#5a4318' : 'transparent'}">
         <div class="creative-open" data-variant="${esc(reg.variant)}" title="Apri la scheda: quando compare, in che punto dell'app, cosa mostra" style="cursor:pointer;display:flex;gap:10px">
-          <img src="/internal/paywalls/${esc(reg.variant)}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png?v=${PAYWALL_SHOT_V}" alt="" loading="lazy"
+          <img src="/internal/paywalls/${esc(reg.shotFrom || reg.variant)}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png?v=${PAYWALL_SHOT_V}" alt="" loading="lazy"
                onerror="this.style.display='none'"
-               style="width:42px;border-radius:6px;border:1px solid #1f1f33;flex-shrink:0;align-self:flex-start">
+               ${reg.shotNote ? `title="${esc(reg.shotNote)}"` : ''}
+               style="width:42px;border-radius:6px;border:1px ${reg.shotFrom ? 'dashed #3a3a55' : 'solid #1f1f33'};flex-shrink:0;align-self:flex-start">
         <div>
           <div style="font-weight:600;color:var(--fg);white-space:nowrap;display:flex;align-items:center;gap:7px">
             ${esc(reg.name)}
@@ -8451,6 +8459,12 @@ function creativeModal() {
       <span style="font-family:var(--mono);font-weight:700">${s.users}</span>
     </div>`).join('');
 
+  // La foto prestata da un'altra creatività, quando la propria non è fotografabile (vedi
+  // `shotFrom` nel registro): si mostra a parte e dichiarata, mai mescolata alle sue schermate.
+  const borrowedShot = reg.shotFrom
+    ? `/internal/paywalls/${reg.shotFrom}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png?v=${PAYWALL_SHOT_V}`
+    : '';
+
   const screensHtml = (reg.screens || []).map((s, i) => {
     const n = s.idx === undefined || s.idx === null ? null : usersByIdx[String(s.idx)];
     const shot = `/internal/paywalls/${reg.variant}-${s.idx ?? i}.png?v=${PAYWALL_SHOT_V}`;
@@ -8505,6 +8519,18 @@ function creativeModal() {
 
 
           ${paywallShotsStrip(reg.variant)}
+
+          ${reg.shotNote ? `
+            <div style="display:flex;gap:14px;align-items:flex-start;margin-top:16px;background:#111120;border:1px dashed #3a3a55;border-radius:10px;padding:12px 14px">
+              <a href="${borrowedShot}" target="_blank" rel="noopener" title="Apri a schermo intero" style="flex-shrink:0;line-height:0">
+                <img src="${borrowedShot}" alt="" loading="lazy" onerror="this.parentElement.style.display='none'"
+                     style="width:96px;border-radius:9px;border:1px solid #1f1f33;display:block">
+              </a>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:4px">Foto in prestito dalla gemella</div>
+                <div style="font-size:11.5px;color:var(--muted);line-height:1.6">${esc(reg.shotNote)}</div>
+              </div>
+            </div>` : ''}
 
           ${screensHtml ? `
             <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:16px 0 4px">Le schermate, una per una <span style="text-transform:none;letter-spacing:0;color:#5a5a7a">· scatti automatici dal banco di posa</span></div>
