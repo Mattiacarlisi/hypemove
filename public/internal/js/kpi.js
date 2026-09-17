@@ -498,6 +498,11 @@ let state = {
   // scheda aperta, se ce n'è una.
   creativesAudit: null, creativesAuditLoading: false, creativesAuditError: null, creativesAuditErrorTimeout: false,
   creativeModal: null,
+  // Il percorso a caselle è la colonna più larga della tabella: chiuderlo è l'unico modo di
+  // vedere i gesti d'acquisto senza scorrere di lato. Aperto di default, com'era prima.
+  creativePathOpen: true,
+  // Quale gesto mostrare in percentuale di fianco al nome ('' = nessuno, tabella com'era).
+  creativeRateKey: '',
   // Foto caricate a mano, per creatività: { [variant]: [{id, path, url, position}] }.
   shots: {}, shotsLoading: false, shotsError: null, shotsUploading: 0,
   // Acquisti veri del periodo + attribuzione per ultimo tocco (kpi_paywall_purchases).
@@ -7792,6 +7797,44 @@ const CREATIVE_ACT_COLS = [
   { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · fino al 13/09/2026 arrivava quasi sempre senza il nome della creatività: qui è sottostimato finché il nuovo build non è in mano agli utenti', ev: 'paywall_purchase_success' },
 ];
 
+// I gesti che si possono mettere in percentuale. Sono quelli delle colonne di destra più prova e
+// incasso, che vengono dai soldi e non dagli eventi: tutti si leggono contro la stessa base, cioè
+// quante persone quella creatività l'hanno vista davvero.
+const CREATIVE_RATE_COLS = [
+  ...CREATIVE_ACT_COLS.map(c => ({ k: c.k, l: c.l, c: c.c, from: 'marks' })),
+  { k: 'in_prova', l: 'In prova', c: '#22d3ee', from: 'conv' },
+  { k: 'paganti',  l: 'Pagante',  c: '#4ade80', from: 'conv' },
+];
+
+// La base delle percentuali: chi ha visto la PRIMA schermata, cioè il numero grande della prima
+// casella del percorso. Non `users`, che conta anche chi la proposta l'ha aperta senza che una
+// schermata gli sia mai comparsa — e che quindi una CTA non l'ha potuta nemmeno vedere.
+// Se le schermate non ci sono (eventi step assenti), si ripiega su `users`: meglio una base
+// larga di nessun numero.
+function creativeRateBase(live) {
+  const steps = (live && live.steps) || [];
+  const first = steps.length ? Number(steps[0].users || 0) : 0;
+  return first || Number((live && live.users) || 0);
+}
+
+function creativeRateValue(variant, live, key) {
+  const col = CREATIVE_RATE_COLS.find(c => c.k === key);
+  if (!col) return 0;
+  if (col.from === 'conv') {
+    const conv = ((state.purchases && state.purchases.per_variant) || {})[variant] || null;
+    return conv ? Number(conv[key] || 0) : 0;
+  }
+  return live && live.marks ? Number(live.marks[key] || 0) : 0;
+}
+
+// Una cifra sotto il 10%, intero sopra: con due decimali un «4,32%» finge una precisione che
+// quattordici persone non hanno.
+function creativeRateFmt(v, base) {
+  if (!base) return '';
+  const p = v / base * 100;
+  return (p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p))) + '%';
+}
+
 // Etichetta di una casella: il nome della schermata dal registro, se quell'indice lo ha; il
 // ruolo tecnico altrimenti (che è comunque meglio di niente, e segnala cosa manca nel registro).
 function creativeScreenLabel(reg, step) {
@@ -7870,6 +7913,28 @@ function creativeAuditRow(reg, live, win) {
     return `<td title="${esc(c.t + (v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${v > 0 ? c.c : 'var(--muted)'}"><span${open}>${v || '—'}</span></td>`;
   }).join('');
 
+  // La colonna del tasso compare solo se un gesto è stato scelto col selettore qui sopra, e sta
+  // subito dopo il nome: è lì che si legge in verticale, confrontando creatività con creatività.
+  const rateSel = CREATIVE_RATE_COLS.find(c => c.k === state.creativeRateKey) || null;
+  const base = creativeRateBase(live);
+  const rateV = rateSel ? creativeRateValue(reg.variant, live, rateSel.k) : 0;
+  const rateS = rateSel ? creativeRateFmt(rateV, base) : '';
+  const rateCol = !rateSel ? '' : `
+    <td title="${esc(rateSel.l + ': ' + rateV + ' su ' + base + ' che hanno visto la prima schermata')}"
+        style="padding:10px 10px;text-align:center;vertical-align:middle">
+      <div style="font-weight:700;font-size:16px;color:${rateV > 0 ? rateSel.c : 'var(--muted)'};line-height:1">${rateS || '—'}</div>
+      ${base ? `<div style="font-size:9px;color:#5a5a7a;margin-top:3px;white-space:nowrap">${rateV} su ${base}</div>` : ''}
+    </td>`;
+
+  // Percorso chiuso: la colonna non sparisce, si stringe a «prima → ultima». Una colonna che
+  // scompare del tutto fa saltare l'occhio, e quel primo-ultimo è comunque il riassunto onesto.
+  const steps = (live && live.steps) || [];
+  const pathCell = state.creativePathOpen
+    ? `<td style="padding:8px 12px;vertical-align:middle">${creativeStepPath(reg, live)}</td>`
+    : `<td style="padding:8px 12px;vertical-align:middle;white-space:nowrap;font-family:var(--mono);font-size:10.5px;color:#5a5a7a">${
+        steps.length ? `${Number(steps[0].users || 0)}${steps.length > 1 ? ` → ${Number(steps[steps.length - 1].users || 0)}` : ''}` : '—'
+      }</td>`;
+
   return `
     <tr style="border-bottom:1px solid #111120;${warn ? 'background:#17130a' : ''}">
       <td style="padding:10px 12px;vertical-align:top;border-left:2px solid ${warn ? '#5a4318' : 'transparent'}">
@@ -7890,9 +7955,30 @@ function creativeAuditRow(reg, live, win) {
         </div>
         </div>
       </td>
-      <td style="padding:8px 12px;vertical-align:middle">${creativeStepPath(reg, live)}</td>
+      ${rateCol}
+      ${pathCell}
       ${cols}${convCols}
     </tr>`;
+}
+
+// Il selettore del tasso. Un gesto per volta e non otto colonne di percentuali: la domanda è
+// «quale ha convertito meglio», e si risponde leggendo UNA colonna dall'alto in basso.
+// Scegliere un gesto riordina anche le righe su quello — altrimenti il confronto resta a carico
+// dell'occhio, che è il lavoro che questa colonna dovrebbe togliere.
+function creativeRatePicker() {
+  const chip = (k, l, c) => {
+    const on = state.creativeRateKey === k;
+    return `<button class="creative-rate-chip" data-k="${esc(k)}" style="cursor:pointer;padding:3px 10px;font-size:10.5px;font-weight:600;border-radius:20px;border:1px solid;transition:all .15s;
+      ${on ? `background:${c}1f;border-color:${c};color:${c}` : 'background:var(--surface2);border-color:#2a2a3d;color:var(--muted)'}">${esc(l)}</button>`;
+  };
+  return `
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px">
+      <span style="font-size:10.5px;color:var(--muted)" title="Quante persone, su cento che hanno visto la prima schermata di quella creatività, sono arrivate a fare quel gesto. Sceglierne uno aggiunge la colonna di fianco al nome e ordina le righe su quella.">
+        Percentuale su chi l'ha vista:
+      </span>
+      ${chip('', 'nessuna', '#8b8ba7')}
+      ${CREATIVE_RATE_COLS.map(c => chip(c.k, c.l, c.c)).join('')}
+    </div>`;
 }
 
 function premiumCreativesAuditCard() {
@@ -7906,6 +7992,7 @@ function premiumCreativesAuditCard() {
         clicca il nome per la scheda: quando compare, dove, e cosa mostra ·
         riga ambra = il codice e i dati non vanno d'accordo
       </div>
+      ${creativeRatePicker()}
     </div>`;
 
   if (state.creativesAuditLoading && !state.creativesAudit) {
@@ -7940,8 +8027,17 @@ function premiumCreativesAuditCard() {
   // confrontare numeri di date diverse. Restano nominate in fondo, senza numeri.
   const shown  = CREATIVE_REGISTRY.filter(r => Number((byVariant[r.variant] || {}).users || 0) > 0);
   const hidden = CREATIVE_REGISTRY.filter(r => !Number((byVariant[r.variant] || {}).users || 0));
-  const rows = shown.sort((a, b) =>
-    Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0));
+  // Col tasso scelto l'ordine diventa quello, perché è la domanda che si sta facendo. Senza,
+  // resta per utenti come prima.
+  const rateSel = CREATIVE_RATE_COLS.find(c => c.k === state.creativeRateKey) || null;
+  const rateOf = (r) => {
+    const l = byVariant[r.variant];
+    const base = creativeRateBase(l);
+    return base ? creativeRateValue(r.variant, l, rateSel.k) / base : -1;
+  };
+  const rows = shown.sort((a, b) => rateSel
+    ? (rateOf(b) - rateOf(a)) || (Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0))
+    : Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0));
 
   // Varianti che i dati conoscono e il registro no: non devono sparire, sono la prova che
   // qualcosa di nuovo (o di rinominato) sta uscendo in app.
@@ -7959,11 +8055,17 @@ function premiumCreativesAuditCard() {
     <div class="card" style="margin-bottom:16px">
       ${head}
       <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1040px">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:${state.creativePathOpen ? 1040 : 800}px">
           <thead>
             <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
-              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Cosa vede, schermata per schermata → dove si ferma</th>
+              ${rateSel ? `<th title="${esc(rateSel.l + ' su cento persone che hanno visto la prima schermata · le righe sono ordinate su questa colonna')}" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:${rateSel.c}">% ${esc(rateSel.l)} ↓</th>` : ''}
+              <th id="creative-path-toggle" title="${esc(state.creativePathOpen ? 'Chiudi il percorso: le colonne dei gesti entrano nello schermo senza scorrere di lato' : 'Riapri il percorso schermata per schermata')}"
+                  style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e;cursor:pointer;white-space:nowrap">
+                ${state.creativePathOpen
+                  ? `Cosa vede, schermata per schermata → dove si ferma <span style="color:#60a5fa;font-weight:600;margin-left:6px">◂ chiudi</span>`
+                  : `Percorso <span style="color:#60a5fa;font-weight:600;margin-left:6px">▸ apri</span>`}
+              </th>
               ${headerCols}
               <th title="Prove in corso attribuite a questa proposta, per ultimo tocco prima del pagamento" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:#22d3ee">In prova</th>
               <th title="Paganti veri attribuiti a questa proposta, per ultimo tocco prima del pagamento" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:#4ade80">Pagante</th>
@@ -12729,6 +12831,19 @@ function attachEvents() {
     fetchCreativesAudit();
     fetchPaywallPurchases();
   });
+  // Catalogo creatività: apri/chiudi la colonna del percorso, e scegli quale gesto vedere in
+  // percentuale di fianco al nome.
+  document.getElementById('creative-path-toggle')?.addEventListener('click', () => {
+    state.creativePathOpen = !state.creativePathOpen;
+    render();
+  });
+  document.querySelectorAll('.creative-rate-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const k = el.dataset.k || '';
+      state.creativeRateKey = state.creativeRateKey === k ? '' : k;
+      render();
+    }));
+
   // Catalogo creatività: il numero di una colonna apre la lista di chi ha fatto quel gesto.
   document.querySelectorAll('.creative-conv').forEach(el =>
     el.addEventListener('click', (e) => {
