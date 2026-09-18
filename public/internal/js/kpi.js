@@ -7469,6 +7469,20 @@ const PAYWALL_SHOT_V = '20260917b';
 
 const CREATIVE_REGISTRY = [
   {
+    variant: 'onboarding_start',
+    name: 'Paywall di partenza',
+    rotation: 'live',
+    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home.',
+    when: 'Al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding. Dal 18/09/2026. È l\'unica superficie che questo pubblico incontra prima di usare l\'app, e la vede una volta sola.',
+    exit: 'La × in alto a sinistra, o il tasto indietro di Android. Nessun bottone «continua gratis»: lo sprint 7 ce l\'aveva e ha fatto l\'1,0%.',
+    what: 'Una pagina sola che si scorre, sul modello di Bend: titolo grande, il prezzo piccolo sotto, il grafico dei risultati che si disegna, otto benefici, le recensioni che scorrono da sole, il numero degli allenamenti, la chiusura, e i due piani incollati in basso. Fondo verde coi colori misurati sullo screenshot di Bend. Come loro NON offre la prova gratuita: si sceglie un piano e si paga. Il piano è il bottone — primo tocco sceglie, secondo apre il pagamento di Google.',
+    note: 'Le sei citazioni sono frasi VERE prese dalle chat col coach, non recensioni votate: le stelle accanto sono un segnale di voto che quelle frasi non hanno, e vanno autorizzate o riscritte prima di restare. I numeri della community (3.130 scaricamenti, 4.364 allenamenti) sono una fotografia al 18/09/2026, non una lettura viva: invecchiano.',
+    file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
     variant: 'coach_slides',
     name: 'Primo allenamento · 3 slide',
     rotation: 'live',
@@ -8567,6 +8581,7 @@ function creativeModal() {
 // ── ETICHETTE DELLE CREATIVITÀ PAYWALL ─────────────────────
 // Nome leggibile di ogni variant: lo usano il catalogo, la sua scheda e la tabella degli acquisti.
 const CREATIVE_LABELS = {
+  onboarding_start: 'Paywall di partenza',
   coach_slides: 'Primo allenamento · 3 slide',
   coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
