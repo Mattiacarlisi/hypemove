@@ -7467,7 +7467,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20260917b';
+const PAYWALL_SHOT_V = '20260921a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7496,6 +7496,21 @@ const CREATIVE_REGISTRY = [
     file: 'app/src/pages/AppOpenPaywall/AppOpenPaywall.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
+    variant: 'welcome_offer',
+    name: 'Offerta di benvenuto',
+    rotation: 'live',
+    where: 'Due pezzi in due posti: un foglietto che sale in Home, e dietro il suo unico tocco la pagina intera `/offerta`. È una rotta e non un overlay per il tasto indietro di Android: da un overlay porterebbe fuori dall\'app.',
+    when: 'Dal 20/09/2026, UNA VOLTA SOLA nella vita dell\'installazione, solo a chi ha appena chiuso con la × il paywall di partenza. Tre guardie: il passaggio di consegne da `/inizia`, il «mai più» su localStorage scritto nell\'istante in cui compare, e l\'offerta `discount-19` presente DAVVERO nel catalogo di quel telefono — che oggi vuol dire solo Italia.',
+    exit: 'Dal foglietto si esce facendolo scendere, e finisce lì: non torna più, la chiave resta scritta anche dopo il rifiuto. Dalla schermata: la × in alto a destra o il tasto indietro, entrambi tracciati, entrambi riportano in Home. Nessuna micro-survey «Perché no?»: `onboarding_end` è uscito dalle sorgenti della survey lo stesso giorno, perché a trenta secondi da una controproposta quella domanda anticipa l\'obiezione invece di raccoglierla.',
+    what: 'Un prodotto solo e nessun confronto — chi è qui ha appena guardato due piani affiancati e ha detto di no. Il riquadro del risparmio, 59,99 € sbarrato → 19,99 €/anno, la riga «Poi 29,99 €/anno, e disdici quando vuoi» che Play pretende su ogni offerta introduttiva, «Te la proponiamo una volta sola», e in fondo il piano annuale col suo equivalente al mese. Il foglietto invece NON mostra il prezzo: dice che c\'è un regalo e lascia decidere.',
+    note: '⚠️ Il barrato 59,99 € è l\'unica cifra che non esce dal catalogo: su Play il piano base annuale è 29,99 € e non esiste nessun prezzo superiore da cui scontare. È una decisione presa col rischio dichiarato e chiusa in un file solo (`annualListPrice.ts`). Le due cifre che si pagano davvero — primo anno e rinnovo — escono dalle due fasi di `discount-19` come le vede quel telefono. Al 21/09/2026 la schermata non è ancora uscita a NESSUNO: l\'account usato per il collaudo non è idoneo all\'offerta, perché l\'idoneità la decide Play sull\'account Google, non sull\'account HypeMove. La riga qui resterà a zero finché non arriva un account idoneo — non è un guasto del catalogo, è la terza guardia che fa il suo mestiere.',
+    file: 'app/src/pages/WelcomeOffer/WelcomeOffer.tsx',
+    screens: [
+      { idx: 0, t: 'La schermata dell\'offerta', d: 'il risparmio, 59,99 sbarrato → 19,99, il rinnovo dichiarato, il piano annuale · è questa lo step 0 del paywall, ed è qui che si contano gli utenti' },
+      { t: 'Il foglietto che la annuncia', d: 'sale in Home e la precede: «Ancora un\'ultima cosa», il regalo, «Apri adesso». Non è uno step del paywall — ha eventi suoi (`welcome_offer_sheet_*`), quindi nessuna casella e nessun conteggio' },
     ],
   },
   {
@@ -7560,6 +7575,20 @@ const CREATIVE_REGISTRY = [
     screens: [
       { t: 'L\'annuncio', d: 'interstitial AdMob a schermo pieno · non è una schermata nostra, quindi non ha una casella: l\'esito (mostrato/saltato/fallito) sta nella scheda' },
       { idx: 0, t: 'I prezzi', d: 'titolo, i due piani, la CTA. Chi esce può toccare «continua gratis» invece della ×' },
+    ],
+  },
+  {
+    variant: 'daily_limit_sheet',
+    name: 'Limite giornaliero',
+    rotation: 'live',
+    where: 'Bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
+    when: 'Dal 18/09/2026, quando un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono, perché la sheet dice «si sblocca a mezzanotte» e la persona guarda l\'orologio che ha in mano. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo — si passa. Dal 20/09 anche dal tasto della Home, che è da dove la gente parte davvero: prima il muro arrivava una schermata dopo.',
+    exit: '«No grazie» è l\'uscita dichiarata, l\'unica che si conta come rifiuto esplicito (`continue_free`). Non c\'è nessuna ×: swipe, tocco fuori e tasto indietro restano e si registrano come `x_button`. A pagamento aperto non si chiude.',
+    what: 'Un muro e una sola offerta, comprabile in un tocco senza passare dalla pagina dei piani — chi è qui stava per allenarsi e si è trovato fermato, e mettergli un confronto fra due tessere tra l\'intenzione e il pagamento è il modo di perderlo. Orologio col triangolo, «Limite giornaliero raggiunto», «Il prossimo allenamento si sblocca a mezzanotte», la riga del prezzo dell\'annuale con lo sconto sul mensile fra parentesi, il pulsante che compra, «No grazie». Il mensile non è nominato, quindi da qui non è comprabile.',
+    note: 'L\'offerta nominata è `freetrial-7d`, che su Play Console non è attiva: il catalogo non la manda, la sheet ripiega sul listino e smette DA SOLA di nominare la prova (la CTA passa da «Prova illimitato a 0 €» a «Sblocca allenamenti illimitati»). Se qualcuno la riattiva i sette giorni ricompaiono senza toccare il codice, e lo scatto qui sopra invecchia lo stesso giorno. La percentuale di sconto si calcola sui prezzi vivi, mai a mano.',
+    file: 'app/src/components/PremiumProposals/DailyLimitPaywall/DailyLimitFlow.tsx',
+    screens: [
+      { idx: 0, t: 'La sheet', d: 'il muro, l\'orario di sblocco, il prezzo dell\'annuale con lo sconto, il pulsante che compra e «No grazie»' },
     ],
   },
   {
@@ -8599,6 +8628,19 @@ function creativeModal() {
 const CREATIVE_LABELS = {
   onboarding_start: 'Paywall di partenza',
   app_open: 'Paywall apertura app',
+  welcome_offer: 'Offerta di benvenuto',
+  daily_limit_sheet: 'Limite giornaliero',
+  // Le cinque qui sotto avevano la scheda nel registro ma non l'etichetta: nella
+  // tabella degli acquisti comparivano col nome tecnico della variant, perché
+  // `premiumCreativeLabel` ripiega sulla chiave. Trovate il 21/09/2026 dal guard
+  // `kpiCreativeRegistry.contract.l1`, che prima non esisteva. I nomi sono
+  // esattamente quelli delle rispettive schede: le due liste devono dire la
+  // stessa cosa, o la stessa creatività ha due nomi a seconda di dove la leggi.
+  subscription_page: 'Pagina Abbonamento',
+  ad_paywall: 'Annuncio + prezzi',
+  paywall_giorno_zero: 'Giorno Zero',
+  coach_personalization: 'Aumenta la personalizzazione',
+  meal_scan: 'Contacalorie',
   coach_slides: 'Primo allenamento · 3 slide',
   coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
