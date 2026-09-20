@@ -7168,6 +7168,8 @@ const PREMIUM_SOURCE_LABELS = {
   'shop_vault_locked':      'Vault shop bloccato',
   'home_premium_badge':     'Badge Premium home',
   'onboarding_end':         'Fine onboarding',
+  'app_cold_start':         'Apertura app',
+  'app_resume':             'Rientro nell\'app',
   'ai_premium_feature_locked':'Feature AI bloccata',
   'unknown':                'Sconosciuto',
 };
@@ -7478,6 +7480,20 @@ const CREATIVE_REGISTRY = [
     what: 'Una pagina sola che si scorre, sul modello di Bend: titolo grande, il prezzo piccolo sotto, il grafico dei risultati che si disegna, otto benefici, le recensioni che scorrono da sole, il numero degli allenamenti, la chiusura, e i due piani incollati in basso. Fondo verde coi colori misurati sullo screenshot di Bend. Come loro NON offre la prova gratuita: si sceglie un piano e si paga. Il piano è il bottone — primo tocco sceglie, secondo apre il pagamento di Google.',
     note: 'Le sei citazioni sono frasi VERE prese dalle chat col coach, non recensioni votate: le stelle accanto sono un segnale di voto che quelle frasi non hanno, e vanno autorizzate o riscritte prima di restare. I numeri della community (3.130 scaricamenti, 4.364 allenamenti) sono una fotografia al 18/09/2026, non una lettura viva: invecchiano.',
     file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
+    variant: 'app_open',
+    name: 'Paywall apertura app',
+    rotation: 'live',
+    where: 'Overlay a pieno campo sopra qualunque schermata, non una rotta: l\'app si apre e lui c\'è già.',
+    when: 'A OGNI accesso, dal 20/09/2026: sia quando l\'app parte da zero, sia quando torna in primo piano dopo essere stata in background — anche dopo pochi secondi. Nessuna soglia di tempo, nessun tetto giornaliero. Non si mostra a chi è premium, a chi non ha finito l\'onboarding, né nella sessione in cui l\'onboarding è appena finito (lì ha già girato il paywall di partenza).',
+    exit: 'La × in alto a sinistra, o il tasto indietro di Android: entrambe portano in Home e finisce lì. A differenza del paywall di partenza NON passa la palla all\'offerta di benvenuto — la richiesta tornerà da sé alla prossima apertura.',
+    what: 'La stessa schermata del paywall di partenza, con due titoli suoi: «Prenditi cura del tuo corpo.» e «Bastano 5 minuti al giorno per stare meglio.». Tutto il resto — il grafico, i benefici, le recensioni, i numeri, i due piani incollati in basso — è identico, e nessuna prova gratuita.',
+    note: 'Due source sotto una sola variant: app_cold_start (l\'app è partita) e app_resume (l\'utente è rientrato). Sono pubblici molto diversi sotto la stessa creatività, e vanno letti separati prima di decidere se il rientro va lasciato o tolto. La creatività è oggi quasi identica a onboarding_start ma è tenuta separata apposta, perché divergerà: mescolarle darebbe una media che non descrive nessuna delle due. Da guardare con lo stesso KPI di guardia del paywall di partenza — primo allenamento entro 48h — perché sta sulla stessa strada, e ci sta a ogni apertura.',
+    file: 'app/src/pages/AppOpenPaywall/AppOpenPaywall.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
     ],
@@ -8582,6 +8598,7 @@ function creativeModal() {
 // Nome leggibile di ogni variant: lo usano il catalogo, la sua scheda e la tabella degli acquisti.
 const CREATIVE_LABELS = {
   onboarding_start: 'Paywall di partenza',
+  app_open: 'Paywall apertura app',
   coach_slides: 'Primo allenamento · 3 slide',
   coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
