@@ -7543,11 +7543,11 @@ const CREATIVE_REGISTRY = [
     when: 'Dal 20/09/2026, UNA VOLTA SOLA nella vita dell\'installazione, solo a chi ha appena chiuso con la × il paywall di partenza. Tre guardie: il passaggio di consegne da `/inizia`, il «mai più» su localStorage scritto nell\'istante in cui compare, e l\'offerta `discount-19` presente DAVVERO nel catalogo di quel telefono — che oggi vuol dire solo Italia.',
     exit: 'Dal foglietto si esce facendolo scendere, e finisce lì: non torna più, la chiave resta scritta anche dopo il rifiuto. Dalla schermata: la × in alto a destra o il tasto indietro, entrambi tracciati, entrambi riportano in Home. Nessuna micro-survey «Perché no?»: `onboarding_end` è uscito dalle sorgenti della survey lo stesso giorno, perché a trenta secondi da una controproposta quella domanda anticipa l\'obiezione invece di raccoglierla.',
     what: 'Un prodotto solo e nessun confronto — chi è qui ha appena guardato due piani affiancati e ha detto di no. Il riquadro del risparmio, 59,99 € sbarrato → 19,99 €/anno, la riga «Poi 29,99 €/anno, e disdici quando vuoi» che Play pretende su ogni offerta introduttiva, «Te la proponiamo una volta sola», e in fondo il piano annuale col suo equivalente al mese. Il foglietto invece NON mostra il prezzo: dice che c\'è un regalo e lascia decidere.',
-    note: '⚠️ Il barrato 59,99 € è l\'unica cifra che non esce dal catalogo: su Play il piano base annuale è 29,99 € e non esiste nessun prezzo superiore da cui scontare. È una decisione presa col rischio dichiarato e chiusa in un file solo (`annualListPrice.ts`). Le due cifre che si pagano davvero — primo anno e rinnovo — escono dalle due fasi di `discount-19` come le vede quel telefono. Al 21/09/2026 la schermata non è ancora uscita a NESSUNO: l\'account usato per il collaudo non è idoneo all\'offerta, perché l\'idoneità la decide Play sull\'account Google, non sull\'account HypeMove. La riga qui resterà a zero finché non arriva un account idoneo — non è un guasto del catalogo, è la terza guardia che fa il suo mestiere.',
+    note: '⚠️ Il barrato 59,99 € è l\'unica cifra che non esce dal catalogo: su Play il piano base annuale è 29,99 € e non esiste nessun prezzo superiore da cui scontare. È una decisione presa col rischio dichiarato e chiusa in un file solo (`annualListPrice.ts`). Le due cifre che si pagano davvero — primo anno e rinnovo — escono dalle due fasi di `discount-19` come le vede quel telefono. · Prima giornata di vita (21/09/2026): 56 hanno visto il foglietto, 30 l\'hanno aperto, 30 hanno visto il prezzo, 1 è arrivata alla cassa di Google e ha annullato. Zero acquisti. L\'account usato per il collaudo non è idoneo all\'offerta — l\'idoneità la decide Play sull\'account Google — ma gli utenti veri in Italia sì, quindi la riga si popola da sé. · ⚠️ Il foglietto RISALE: dopo che lo si fa scendere l\'effect di `WelcomeOfferSheet` riparte e lo rimette davanti finché non si esce dalla Home — 164 comparse per 56 persone il primo giorno. Le 56 sono persone, le 164 no.',
     file: 'app/src/pages/WelcomeOffer/WelcomeOffer.tsx',
     screens: [
-      { idx: 0, t: 'La schermata dell\'offerta', d: 'il risparmio, 59,99 sbarrato → 19,99, il rinnovo dichiarato, il piano annuale · è questa lo step 0 del paywall, ed è qui che si contano gli utenti' },
-      { t: 'Il foglietto che la annuncia', d: 'sale in Home e la precede: «Ancora un\'ultima cosa», il regalo, «Apri adesso». Non è uno step del paywall — ha eventi suoi (`welcome_offer_sheet_*`), quindi nessuna casella e nessun conteggio' },
+      { idx: 0, t: 'La schermata dell\'offerta', d: 'il risparmio, 59,99 sbarrato → 19,99, il rinnovo dichiarato, il piano annuale · è lo step 0 del paywall, l\'unico che emette `paywall_step_view`' },
+      { idx: -1, t: 'Il foglietto che la annuncia', d: 'sale in Home e la precede: «Ancora un\'ultima cosa», il regalo, «Apri adesso», e il prezzo non lo dice. Non emette `paywall_step_view` — ha tre eventi suoi (`welcome_offer_sheet_*`) — ma è una schermata della creatività a tutti gli effetti: `kpi_paywall_passi_esterni()` la traduce nell\'indice -1, cioè il passo PRIMA del passo zero. È il denominatore vero: le percentuali di questa riga si contano su chi ha visto il foglietto, non su chi è già arrivato al prezzo' },
     ],
   },
   {
@@ -8643,7 +8643,13 @@ function creativeModal() {
             <div style="flex:1;min-width:260px">
               <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Eventi nel periodo · utenti unici</div>
               ${marksHtml}
-              ${live ? `<div style="font-size:10px;color:#5a5a7a;margin-top:7px">${live.pct_exposure}% degli eventi porta l'exposure_id${live.pct_exposure < 100 ? ' — per il resto il percorso non è ricostruibile (build vecchie)' : ''}</div>` : ''}
+              ${!live ? '' : live.pct_exposure === null || live.pct_exposure === undefined
+                // Nessun evento del protocollo paywall nel periodo: può succedere alle
+                // creatività che hanno una schermata fuori protocollo (il foglietto del
+                // regalo) uscita a qualcuno senza che nessuno l'abbia aperta. Non è un
+                // buco: non c'è nessun evento di cui chiedersi se porta l'exposure_id.
+                ? `<div style="font-size:10px;color:#5a5a7a;margin-top:7px">nessun evento del protocollo paywall in questo periodo — solo schermate che ne stanno fuori</div>`
+                : `<div style="font-size:10px;color:#5a5a7a;margin-top:7px">${live.pct_exposure}% degli eventi porta l'exposure_id${live.pct_exposure < 100 ? ' — per il resto il percorso non è ricostruibile (build vecchie)' : ''}</div>`}
             </div>
             <div style="flex:1;min-width:220px">
               ${srcHtml ? `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Da dove è uscita</div>${srcHtml}` : ''}
