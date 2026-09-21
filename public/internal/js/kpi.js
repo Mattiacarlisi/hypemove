@@ -121,7 +121,18 @@ const FUNNEL_LABELS = [
 // first_open come testa/denominatore e onboarding_complete come endpoint. Nomi amichevoli già pronti;
 // l'event_name reale è mostrato tra parentesi nel menu. Le view_Onboarding* appaiono subito anche se
 // non ancora in prod (mostreranno 0 finché l'app non le emette). Aggiungere una voce qui = disponibile
-// nel menu. NON è il posto per gli step del funnel standard (quelli girano sul funnel-utenti).
+// nel menu.
+//
+// 2026-09-21 — La coda post-onboarding (Home → dettaglio → Start → esercizio → completa, più il
+// paywall) è entrata qui, dove prima si leggeva "NON è il posto per gli step del funnel standard".
+// Il motivo è cambiato sotto: con l'ingresso anonimo la coorte del funnel-utenti (`kpi_funnel`) è
+// rimasta `auth.identities` join su email, e chi entra senza registrarsi non la aggancia — quegli
+// step leggono 0 da quando l'anonimo è in campo (21/09: 50 in Home e 13 sul dettaglio, mostrati
+// come 0). Il builder a eventi gira su `kpi_funnel_v2`, che identifica per user_id o session_id e
+// gli anonimi li vede: finché la coorte non viene riparata è l'unico posto dove quel pezzo di
+// percorso si legge davvero, anche a confronto fra sprint.
+// Queste voci NON servono a rendere selezionabili gli eventi — il browser eventi li pesca già da
+// `event_registry` — ma a dargli il nome italiano nelle righe del funnel invece del nome grezzo.
 const EVENT_CATALOG = [
   { event: 'first_open',                          label: 'Download / primo avvio' },
   { event: 'view_Welcome',                        label: 'Onboarding · Benvenuto (coach)' },
@@ -154,6 +165,15 @@ const EVENT_CATALOG = [
   { event: 'view_OnboardingTrialGift',            label: 'Onboarding · Schermata regalo (7 giorni)' },
   { event: 'onboarding_age_gate_blocked',         label: 'Onboarding · Bloccato (minorenne)' },
   { event: 'view_Home',                           label: 'Arrivo in Home' },
+  // Coda post-onboarding: dalla Home al primo workout completato. `workout_start` vive sulla
+  // WorkoutDetail (è il tasto Start), `exercise_complete` e `workout_complete` sulla pagina
+  // esercizio. Il paywall è l'unico non lineare dei cinque: si vede da più punti (post-workout,
+  // fine prova, coach, shop), quindi in cascata va messo sapendo che non è un passaggio obbligato.
+  { event: 'view_WorkoutDetail',                  label: 'Apre il dettaglio del workout' },
+  { event: 'workout_start',                       label: 'Preme Start (inizia il workout)' },
+  { event: 'exercise_complete',                   label: 'Completa almeno un esercizio' },
+  { event: 'workout_complete',                    label: 'Completa il workout' },
+  { event: 'paywall_step_view',                   label: 'Vede il paywall (da qualsiasi punto)' },
   // Ritirato con il redesign coach-flow (l'intro questionario non esiste più): resta qui
   // solo per rileggere gli sprint chiusi prima del rilascio del nuovo onboarding.
   { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario (ritirato)' },
