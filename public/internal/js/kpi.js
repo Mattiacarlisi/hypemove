@@ -114,6 +114,23 @@ const FUNNEL_LABELS = [
   // hanno visto un paywall, da qualsiasi punto: post-workout, fine trial, coach, shop. Chi lo
   // rivede resta uno. Lo step 11 resta al suo posto per rileggere gli sprint chiusi.
   'Vede il paywall (qualsiasi)',         // 22 · paywall_step_view · qualsiasi source · utenti unici
+  // 2026-09-21 — Step 23-29, la COORTE D'INGRESSO (migration kpi_funnel_coorte_ingresso_anonimi).
+  // Gli step 11-18 e 22 qui sopra contano sulla coorte che passa da `auth.identities` joinata su
+  // email: dall'ingresso anonimo (19/09/2026) chi entra senza registrarsi non la aggancia e quegli
+  // step leggono 0 — il 21/09, su 58 nuovi utenti, 50 erano in Home e 13 sul dettaglio, mostrati
+  // come 0. Questi sette contano sulle righe utente nate nel periodo, anonime comprese.
+  // ⚠️ Non sono una cascata: sono conteggi indipendenti di utenti unici, come gli step 13-17. Su
+  // sprint 12 "Apre workout detail" (281) supera "Arriva in Home" (256) — si arriva al dettaglio
+  // anche dal primo workout dell'onboarding, senza passare da una view della Home.
+  // Sono confrontabili all'indietro con i vecchi: su sprint 12 danno 256/281/184/147/117 contro
+  // 255/281/185/149/120. Gli step vecchi restano per rileggere gli sprint chiusi.
+  'Entra nell’app (anche anonimi)',     // 23 · righe public.users nate nel periodo = denominatore dei sei sotto
+  'Arriva in Home (anche anonimi)',      // 24 · view_Home
+  'Apre workout detail (anche anonimi)', // 25 · view_WorkoutDetail
+  'Preme Start (anche anonimi)',         // 26 · workout_start
+  'Fa ≥1 esercizio (anche anonimi)',     // 27 · exercise_complete
+  'Completa workout (anche anonimi)',    // 28 · workout_complete
+  'Vede il paywall (anche anonimi)',     // 29 · paywall_step_view · qualsiasi source
 ];
 
 // Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_v2, UNION user_events+anonymous_events).
