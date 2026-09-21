@@ -191,6 +191,17 @@
     </div>
 
     <div class="subsection">
+      <div class="subsection-title">Passi camminati letti da Health Connect (Android)</div>
+      <ul class="doc-list">
+        <li>Il <strong>numero di passi camminati nella giornata corrente</strong>, letto da <strong>Health Connect</strong> soltanto se l'utente attiva la funzione dalla schermata di profilo</li>
+        <li>Nessun altro dato di salute viene letto da Health Connect: non distanza, non calorie, non frequenza cardiaca, non sonno. L'App non scrive nulla in Health Connect</li>
+        <li>Il valore viene mostrato <strong>soltanto all'utente stesso</strong> nella sua schermata di profilo, <strong>non viene conservato</strong> dal Servizio né trasmesso ai nostri server o a terze parti, e non viene usato per pubblicità o profilazione</li>
+        <li>Il permesso di lettura non viene chiesto all'avvio dell'App: parte solo dal tocco dell'utente sulla scheda dei passi, ed è <strong>revocabile in ogni momento</strong> dalle impostazioni di Health Connect, con effetto immediato</li>
+      </ul>
+      <p>Si tratta di un dato relativo alla salute: il trattamento è disciplinato nella sezione <a href="#p3">03</a>.</p>
+    </div>
+
+    <div class="subsection">
       <div class="subsection-title">Valori calcolati dall'App</div>
       <ul class="doc-list">
         <li>Indice di massa corporea (BMI), fabbisogno energetico stimato, stime di capacità aerobica</li>
@@ -234,7 +245,7 @@
 
     <div class="callout">
       <strong>Cosa non raccogliamo</strong>
-      Hypemove non raccoglie dati biometrici per l'identificazione univoca, posizione GPS, rubrica dei contatti, dati sanitari da dispositivi o app di terzi, né dati di terze persone. Non accediamo alla galleria fotografica del dispositivo: le immagini sono acquisite solo quando l'utente ne sceglie una esplicitamente. <strong>I dati degli utenti non vengono mai venduti.</strong>
+      Hypemove non raccoglie dati biometrici per l'identificazione univoca, posizione GPS, rubrica dei contatti, dati di terze persone. L'unico dato proveniente da un'app di terzi sono i passi camminati della giornata corrente letti da Health Connect, e solo se l'utente attiva espressamente quella funzione. Non accediamo alla galleria fotografica del dispositivo: le immagini sono acquisite solo quando l'utente ne sceglie una esplicitamente. <strong>I dati degli utenti non vengono mai venduti.</strong>
     </div>
   </div>
 
@@ -250,9 +261,11 @@
       <li>i riferimenti alla salute forniti spontaneamente nelle conversazioni con il Coach AI</li>
       <li>i <strong>dati alimentari</strong> derivanti dal controllo dei pasti, e i valori nutrizionali che ne discendono</li>
       <li>il peso corporeo e il suo andamento nel tempo, e gli indici da esso derivati</li>
+      <li>i <strong>passi camminati nella giornata corrente</strong>, letti da Health Connect quando l'utente attiva la funzione, mostrati soltanto all'utente stesso nella schermata di profilo e non conservati dal Servizio né trasmessi ai suoi server o a terze parti</li>
     </ul>
     <p>Il trattamento di questi dati avviene esclusivamente sulla base del <strong>consenso esplicito</strong> dell'utente ai sensi dell'<strong>art. 9.2.a GDPR</strong>, raccolto in modo separato e specifico nel momento in cui l'utente sceglie di attivare la funzione corrispondente, e ha la sola finalità di adattare e personalizzare il percorso e di restituire all'utente ciò che ha registrato.</p>
     <p>Sono previsti <strong>due consensi distinti e indipendenti</strong>: uno per i dati sanitari legati all'allenamento, uno per i dati alimentari e il controllo dei pasti. <strong>Nessuno dei due è obbligatorio</strong>: l'App resta utilizzabile senza fornirli, con le sole funzionalità corrispondenti disattivate. Ciascuno può essere revocato in qualsiasi momento dalle impostazioni dell'App: la revoca del consenso nutrizione comporta la <strong>cancellazione dei pasti già registrati</strong> e non pregiudica il consenso sanitario, e viceversa.</p>
+    <p>La lettura dei <strong>passi camminati</strong> da Health Connect è anch'essa facoltativa e indipendente dai due consensi sopra: si attiva dal tocco dell'utente sulla scheda dei passi nel profilo, dove il sistema Android chiede il permesso, e si revoca in ogni momento dalle impostazioni di Health Connect. Revocata l'autorizzazione, l'App smette immediatamente di leggere il dato; poiché il valore non viene conservato, non resta nulla da cancellare.</p>
     <p>Ogni modifica ai dati sanitari è registrata in un log interno che ne conserva la storia, per garantire tracciabilità e correttezza dei trattamenti.</p>
     <div class="warning-callout">
       <strong>Un promemoria importante</strong>
