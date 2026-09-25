@@ -3376,7 +3376,7 @@ const KPI_INFO_TEXTS = {
   abbonati_attivi: 'Abbonati PAGANTI attivi ORA, contati per purchase_token (l\'identità reale dell\'abbonamento su Google), NON per utente — così lo stesso acquisto non viene contato due volte se è agganciato a più account. Condizioni: ultima riga del token con expires_at futuro, status ≠ revoked, is_trial=false. Esclude i token legati ad account interni bloccati. Indipendente dal periodo.',
   in_prova_ora: 'Utenti attualmente in prova gratuita 7 giorni: token con is_trial=true ancora attivo (expires_at futuro), dato server di Google. Quando un trial si converte in pagamento, esce da qui ed entra in "Abbonati paganti". Resta 0 finché non parte un trial reale.',
   nuovi_acquisti: 'Nuovi abbonamenti reali nel periodo (per purchase_token, event_type=SUBSCRIPTION_PURCHASED), esclusi gli account interni e le licenze tester della closed-track (durata < 2 giorni = test accelerati, non clienti). La nota mostra data e giorni dall\'ultimo acquisto reale — se cresce, le vendite si sono fermate.',
-  mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 6,99 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
+  mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 9,90 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
   paywall_mostrati: 'Quante volte un paywall è stato mostrato, contando paywall_step_view con index=0. È l\'UNICO segnale che copre il 100% delle varianti (view_Paywall non copre i paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). Denominatore corretto del funnel.',
 };
 
@@ -7397,7 +7397,7 @@ function pagePremium() {
         const cancP = d.canceled_period || 0;
         return premiumKpi('In disdetta', canc, cancP > 0 ? `${cancP} disdett${cancP === 1 ? 'a' : 'e'} nel periodo` : null, canc > 0 ? '#f472b6' : 'var(--muted)', 'paganti attivi che hanno già annullato il rinnovo · restano fino a scadenza poi escono (churn in arrivo)', null, 'canceling');
       })()}
-      ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×6,99 + annuali×2,50', 'mrr_stimato')}
+      ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×9,90 + annuali×2,50', 'mrr_stimato')}
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
       ${premiumKpi('Frequenza paywall', avgShown ? avgShown + '×' : '—', null, avgShown ? '#818cf8' : 'var(--muted)', 'volte in media che ogni utente vede il paywall · alto = mostrato troppo spesso', 'frequenza_paywall')}
       ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
