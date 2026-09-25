@@ -7504,7 +7504,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20260921a';
+const PAYWALL_SHOT_V = '20260925a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7535,6 +7535,21 @@ const CREATIVE_REGISTRY = [
     file: 'app/src/pages/AppOpenPaywall/AppOpenPaywall.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
+    variant: 'onboarding_trial',
+    name: 'Paywall di partenza · con la prova',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (voce «Paywall di partenza · con la prova»). È pensata per la stessa pagina intera del paywall di partenza, a fine onboarding.',
+    when: 'Nata il 25/09/2026 e non ancora in app: nessun punto del codice la monta. Quando andrà in rotazione starà ACCANTO al paywall di partenza, non al suo posto — la domanda sarà quale dei due converte di più.',
+    exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nel paywall di partenza.',
+    what: 'La schermata del paywall di partenza, identica sopra la barra: titolo coi minuti scelti, grafico che si disegna, benefici per obiettivo, recensioni che scorrono, chiusura sul numero degli allenamenti. In basso, al posto delle due schede dei piani, UN bottone crema «Prova 7 giorni gratis» e sotto, in piccolo, «Poi 29,99 € l\'anno, cioè 2,50 € al mese» e «Nessun addebito se disdici entro i 7 giorni». Solo l\'annuale: il mensile non c\'è. Poi Termini · Privacy · Ripristina.',
+    cta: 'Il bottone compra l\'annuale con l\'offerta `freetrial-7d` NOMINATA, passata identica al catalogo e all\'acquisto: i giorni e le cifre scritti sono quelli dell\'offerta che il tocco paga. Se il catalogo di quel telefono non ha la prova — account che l\'ha già consumata, o offerta spenta su Console — il bottone diventa «Inizia con l\'annuale · 29,99 €» e la schermata non nomina più la prova. `cta_copy` riporta la chiave esatta del bottone: `onboarding_start.trial.cta` (con la prova), `onboarding_start.trial.cta_plain` (senza), `onboarding_start.trial.cta_plain_noprice` (catalogo non ancora letto). ⚠️ Limite noto: senza la prova il ripiego è la scala generica di `pickPreferredOffer` — oggi il piano base 29,99 €/anno, ma se un giorno comparissero le rate o `discount-19` senza la prova, il bottone venderebbe quelle con il testo del piano base.',
+    note: 'Creatività separata da `onboarding_start` per scelta esplicita di Mattia: le due vanno lette come due righe, mai sommate. Stesso KPI di guardia del paywall di partenza — primo allenamento entro 48h — quando entrerà in rotazione.',
+    file: 'app/src/pages/OnboardingTrialPaywall/OnboardingTrialPaywall.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, e in basso il bottone della prova' },
     ],
   },
   {
@@ -7624,7 +7639,7 @@ const CREATIVE_REGISTRY = [
     when: 'Dal 18/09/2026, quando un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono, perché la sheet dice «si sblocca a mezzanotte» e la persona guarda l\'orologio che ha in mano. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo — si passa. Dal 20/09 anche dal tasto della Home, che è da dove la gente parte davvero: prima il muro arrivava una schermata dopo.',
     exit: '«No grazie» è l\'uscita dichiarata, l\'unica che si conta come rifiuto esplicito (`continue_free`). Non c\'è nessuna ×: swipe, tocco fuori e tasto indietro restano e si registrano come `x_button`. A pagamento aperto non si chiude.',
     what: 'Un muro e una sola offerta, comprabile in un tocco senza passare dalla pagina dei piani — chi è qui stava per allenarsi e si è trovato fermato, e mettergli un confronto fra due tessere tra l\'intenzione e il pagamento è il modo di perderlo. Orologio col triangolo, «Limite giornaliero raggiunto», «Il prossimo allenamento si sblocca a mezzanotte», la riga del prezzo dell\'annuale con lo sconto sul mensile fra parentesi, il pulsante che compra, «No grazie». Il mensile non è nominato, quindi da qui non è comprabile.',
-    note: 'L\'offerta nominata è `freetrial-7d`, che su Play Console non è attiva: il catalogo non la manda, la sheet ripiega sul listino e smette DA SOLA di nominare la prova (la CTA passa da «Prova illimitato a 0 €» a «Sblocca allenamenti illimitati»). Se qualcuno la riattiva i sette giorni ricompaiono senza toccare il codice, e lo scatto qui sopra invecchia lo stesso giorno. La percentuale di sconto si calcola sui prezzi vivi, mai a mano.',
+    note: 'L\'offerta nominata è `freetrial-7d`. Era spenta su Play Console al 18/09/2026 ed è stata riattivata: il 25/09/2026 arrivava sull\'annuale a circa 88 telefoni su 100 (evento `paywall_product_updated`, `has_trial_offer`), quindi oggi quasi tutti vedono «Prova illimitato a 0 €». Chi non la riceve — account che l\'ha già consumata — vede «Sblocca allenamenti illimitati»: la sheet ripiega sul listino e smette DA SOLA di nominare la prova. La percentuale di sconto si calcola sui prezzi vivi, mai a mano.',
     file: 'app/src/components/PremiumProposals/DailyLimitPaywall/DailyLimitFlow.tsx',
     screens: [
       { idx: 0, t: 'La sheet', d: 'il muro, l\'orario di sblocco, il prezzo dell\'annuale con lo sconto, il pulsante che compra e «No grazie»' },
@@ -8679,6 +8694,7 @@ function creativeModal() {
 const CREATIVE_LABELS = {
   onboarding_start: 'Paywall di partenza',
   app_open: 'Paywall apertura app',
+  onboarding_trial: 'Paywall di partenza · con la prova',
   welcome_offer: 'Offerta di benvenuto',
   daily_limit_sheet: 'Limite giornaliero',
   // Le cinque qui sotto avevano la scheda nel registro ma non l'etichetta: nella
