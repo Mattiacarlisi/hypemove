@@ -7401,7 +7401,7 @@ function pagePremium() {
       ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
       ${premiumKpi('Frequenza paywall', avgShown ? avgShown + '×' : '—', null, avgShown ? '#818cf8' : 'var(--muted)', 'volte in media che ogni utente vede il paywall · alto = mostrato troppo spesso', 'frequenza_paywall')}
       ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
-      ${premiumKpi('Tentato acquisto', f.purchase_attempts, null, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% di chi vede il paywall' : null)}
+      ${premiumKpi('Tentato acquisto', f.purchase_attempts, `person${f.purchase_attempts === 1 ? 'a' : 'e'} diverse · ${f.purchase_attempts_total ?? f.purchase_attempts} tentativ${(f.purchase_attempts_total ?? f.purchase_attempts) === 1 ? 'o' : 'i'}`, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% delle persone che vedono il paywall' : null)}
     </div>
 
     <!-- Conversion funnel -->
