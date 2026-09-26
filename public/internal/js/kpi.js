@@ -491,6 +491,9 @@ let state = {
   chipReorderSaving: false,   // flag per disabilitare drag mentre stiamo salvando l'ordine
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
+  // Card "Prove e paganti" (overview): abbonamenti da kpi_premium_timeline, vista e serie scelte qui.
+  premTimeline: null, premTimelineError: null,
+  ptlBucket: 'week', ptlRange: 90, ptlSeries: { paid: true, trials: false, active: true },
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
   sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' },
@@ -637,11 +640,12 @@ async function fetchData() {
   state.error = null;
   updateHeaderActions();
   try {
-    const [ov, ch, ec, lk] = await Promise.all([
+    const [ov, ch, ec, lk, pt] = await Promise.all([
       sb.rpc('kpi_overview'),
       sb.rpc('kpi_chart_daily', { days_back: 14 }),
       sb.rpc('kpi_extra_charts'),
       sb.rpc('kpi_liked_exercises', likedExercisesParams()),
+      sb.rpc('kpi_premium_timeline'),
     ]);
     if (ov.error) throw ov.error;
     if (ch.error) throw ch.error;
@@ -649,6 +653,8 @@ async function fetchData() {
     state.chart = ch.data || [];
     if (!ec.error) state.extraCharts = ec.data;
     if (!lk.error) state.likedExercises = lk.data;
+    if (pt.error) state.premTimelineError = pt.error.message || 'Errore caricamento abbonamenti';
+    else { state.premTimeline = pt.data || []; state.premTimelineError = null; }
     state.lastUpdated = new Date();
     await Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
@@ -2411,6 +2417,250 @@ function page() {
 
 const GOAL_BAR_COLORS = ['#a78bfa', '#22d3ee', '#4ade80', '#f59e0b', '#f43f5e', '#60a5fa', '#fbbf24', '#34d399'];
 
+// ── Card "Prove e paganti" ────────────────────────────────────────────
+// Un abbonamento Play per riga da kpi_premium_timeline (fonte play_token_facts: test e account
+// interni già esclusi). Il raggruppamento per giorno/settimana si fa qui, così cambiare vista
+// non richiama il DB. Ogni prova è colorata col suo esito: è quello che dice se la prova funziona.
+const PTL_PRICE_MONTH = { monthly: 9.90, yearly: 29.99 / 12 };
+const PTL_OUTCOMES = [
+  { k: 'converted', l: 'Diventata pagante',       c: '#4ade80' },
+  { k: 'open',      l: 'In corso',                c: '#a78bfa' },
+  { k: 'canceling', l: 'In corso, già disdetta',  c: '#fb923c' },
+  { k: 'lost',      l: 'Finita senza pagare',     c: '#4b4b6a' },
+];
+const PTL_PAID_COLOR   = '#fbbf24';
+const PTL_ACTIVE_COLOR = '#22d3ee';
+
+const romeDay = ts => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+const addDays = (day, n) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const mondayOf = day => { const d = new Date(day + 'T12:00:00Z'); return addDays(day, -((d.getUTCDay() + 6) % 7)); };
+const ddmm = day => day.slice(8, 10) + '/' + day.slice(5, 7);
+
+function ptlPlan(product) {
+  return /year/i.test(product || '') ? 'yearly' : /month/i.test(product || '') ? 'monthly' : null;
+}
+
+// Esito di una prova, guardando lo stato attuale del token.
+function ptlTrialOutcome(t, now) {
+  if (t.paid_at) return 'converted';
+  const running = t.expires_at && new Date(t.expires_at) > now && t.status !== 'revoked'
+    && (t.payment_state === 2 || t.is_trial);
+  if (!running) return 'lost';
+  return t.status === 'cancelled' ? 'canceling' : 'open';
+}
+
+// Fine del periodo pagato. Un rimborso (revoked) chiude oggi anche se la scadenza è futura.
+function ptlPaidEnd(t, now) {
+  const exp = t.expires_at ? new Date(t.expires_at) : now;
+  return t.status === 'revoked' && exp > now ? now : exp;
+}
+
+function premiumTimelineModel() {
+  const rows  = state.premTimeline || [];
+  const now   = new Date();
+  const today = romeDay(now);
+  const week  = state.ptlBucket === 'week';
+  const bucketOf = day => week ? mondayOf(day) : day;
+
+  const firstDay = rows.length ? romeDay(rows[0].acquired_at) : today;
+  const from = state.ptlRange ? addDays(today, -state.ptlRange + 1) : firstDay;
+
+  const buckets = [];
+  for (let d = bucketOf(from); d <= today; d = addDays(d, week ? 7 : 1)) {
+    buckets.push({ key: d, paidTrial: 0, paidDirect: 0, trials: { converted: 0, open: 0, canceling: 0, lost: 0 }, active: 0 });
+  }
+  const byKey = Object.fromEntries(buckets.map(b => [b.key, b]));
+
+  const inRange = ts => ts && romeDay(ts) >= from;
+  for (const t of rows) {
+    if (inRange(t.trial_at)) {
+      const b = byKey[bucketOf(romeDay(t.trial_at))];
+      if (b) b.trials[ptlTrialOutcome(t, now)]++;
+    }
+    if (inRange(t.paid_at)) {
+      const b = byKey[bucketOf(romeDay(t.paid_at))];
+      if (b) t.trial_at ? b.paidTrial++ : b.paidDirect++;
+    }
+  }
+
+  // Paganti attivi alla fine di ogni periodo (oggi per quello in corso), a giorni di Roma.
+  const paidSpans = rows.filter(t => t.paid_at).map(t => ({ from: romeDay(t.paid_at), to: romeDay(ptlPaidEnd(t, now)) }));
+  for (const b of buckets) {
+    const lastDay = week ? addDays(b.key, 6) : b.key;
+    const at = lastDay > today ? today : lastDay;
+    b.active = at === today
+      ? rows.filter(t => t.paid_at && ptlPaidEnd(t, now) > now).length
+      : paidSpans.filter(x => x.from <= at && x.to > at).length;
+  }
+
+  // Riepilogo del periodo scelto.
+  const trialsIn = rows.filter(t => inRange(t.trial_at));
+  const outcomes = { converted: 0, open: 0, canceling: 0, lost: 0 };
+  trialsIn.forEach(t => outcomes[ptlTrialOutcome(t, now)]++);
+  const paidIn   = rows.filter(t => inRange(t.paid_at));
+  const payingNow = rows.filter(t => t.paid_at && ptlPaidEnd(t, now) > now);
+  const mrr = payingNow.reduce((s, t) => s + (PTL_PRICE_MONTH[ptlPlan(t.product)] || 0), 0);
+  const soon = rows
+    .filter(t => ['open', 'canceling'].includes(ptlTrialOutcome(t, now)) && t.trial_at)
+    .map(t => ({ day: romeDay(t.expires_at), canceling: t.status === 'cancelled' }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  return {
+    buckets, week, today, outcomes, soon,
+    paidIn: paidIn.length,
+    paidFromTrial: paidIn.filter(t => t.trial_at).length,
+    payingNow: payingNow.length,
+    payingCanceling: payingNow.filter(t => t.status === 'cancelled').length,
+    lostPaid: rows.filter(t => t.paid_at && ptlPaidEnd(t, now) <= now && inRange(t.expires_at)).length,
+    mrr,
+  };
+}
+
+function premiumTimelineChart(m) {
+  const show = state.ptlSeries;
+  const n = m.buckets.length;
+  if (!n) return chartPlaceholder();
+
+  const W = 900, H = 210, PT = 22, PB = 28, PL = 34, PR = 14;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const slot = cW / n;
+  const both = show.paid && show.trials;
+  const barW = Math.max(3, Math.min(26, slot * (both ? 0.36 : 0.6)));
+
+  const paidTot  = b => b.paidTrial + b.paidDirect;
+  const trialTot = b => PTL_OUTCOMES.reduce((s, o) => s + b.trials[o.k], 0);
+  const maxV = Math.max(1,
+    ...m.buckets.map(b => Math.max(show.paid ? paidTot(b) : 0, show.trials ? trialTot(b) : 0, show.active ? b.active : 0)));
+  const y = v => PT + cH - v / maxV * cH;
+  const h = v => v / maxV * cH;
+
+  const step = Math.max(1, Math.ceil(maxV / 4));
+  let refs = '';
+  for (let v = 0; v <= maxV; v += step) {
+    refs += `<line x1="${PL}" y1="${y(v)}" x2="${W - PR}" y2="${y(v)}" stroke="#1d1d2e" stroke-width="1"/>
+             <text x="${PL - 6}" y="${y(v) + 3}" text-anchor="end" font-size="9" fill="#5a5a80">${v}</text>`;
+  }
+
+  const every = Math.ceil(n / 12);
+  let bars = '';
+  m.buckets.forEach((b, i) => {
+    const cx = PL + slot * i + slot / 2;
+    const label = m.week ? 'sett. dal ' + ddmm(b.key) : ddmm(b.key);
+    const tip = [label,
+      `Nuovi paganti: ${paidTot(b)} (${b.paidTrial} da prova, ${b.paidDirect} diretti)`,
+      `Prove iniziate: ${trialTot(b)}` + (trialTot(b) ? ' → ' + PTL_OUTCOMES.filter(o => b.trials[o.k]).map(o => `${b.trials[o.k]} ${o.l.toLowerCase()}`).join(', ') : ''),
+      `Paganti attivi a fine periodo: ${b.active}`].join('\n');
+
+    const paidX  = both ? cx - barW - 1 : cx - barW / 2;
+    const trialX = both ? cx + 1 : cx - barW / 2;
+    if (show.paid && paidTot(b)) {
+      bars += `<rect x="${paidX}" y="${y(paidTot(b))}" width="${barW}" height="${h(paidTot(b))}" rx="2" fill="${PTL_PAID_COLOR}"/>
+               <text x="${paidX + barW / 2}" y="${y(paidTot(b)) - 4}" text-anchor="middle" font-size="9" fill="${PTL_PAID_COLOR}" font-weight="700">${paidTot(b)}</text>`;
+    }
+    if (show.trials && trialTot(b)) {
+      let acc = 0;
+      for (const o of PTL_OUTCOMES) {
+        const v = b.trials[o.k];
+        if (!v) continue;
+        bars += `<rect x="${trialX}" y="${y(acc + v)}" width="${barW}" height="${h(v)}" fill="${o.c}"/>`;
+        acc += v;
+      }
+      bars += `<text x="${trialX + barW / 2}" y="${y(acc) - 4}" text-anchor="middle" font-size="9" fill="#a78bfa">${acc}</text>`;
+    }
+    bars += `<rect x="${PL + slot * i}" y="${PT}" width="${slot}" height="${cH}" fill="transparent"><title>${esc(tip)}</title></rect>`;
+    if (i % every === 0 || i === n - 1) {
+      bars += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="8" fill="#5a5a80">${ddmm(b.key)}</text>`;
+    }
+  });
+
+  let line = '';
+  if (show.active) {
+    const pts = m.buckets.map((b, i) => [PL + slot * i + slot / 2, y(b.active)]);
+    line = `<polyline points="${pts.map(p => p.join(',')).join(' ')}" fill="none" stroke="${PTL_ACTIVE_COLOR}" stroke-width="2" stroke-linejoin="round" pointer-events="none"/>`;
+    const last = pts[pts.length - 1];
+    line += `<circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${PTL_ACTIVE_COLOR}" stroke="#111118" stroke-width="2" pointer-events="none"/>
+             <text x="${last[0] - 8}" y="${last[1] - 8}" text-anchor="end" font-size="11" font-weight="700" fill="${PTL_ACTIVE_COLOR}" pointer-events="none">${m.buckets[n - 1].active}</text>`;
+  }
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px" xmlns="http://www.w3.org/2000/svg">${refs}${bars}${line}</svg>`;
+}
+
+function premiumTimelineCard() {
+  const head = (inner) => `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Prove e paganti</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:4px">
+            ${[['day', 'Giorni'], ['week', 'Settimane']].map(([v, l]) => `<button class="filter-btn ${state.ptlBucket === v ? 'active' : ''}" data-ptl-bucket="${v}">${l}</button>`).join('')}
+          </div>
+          <div style="display:flex;gap:4px">
+            ${[30, 90, 0].map(r => `<button class="filter-btn ${state.ptlRange === r ? 'active' : ''}" data-ptl-range="${r}">${r ? r + 'g' : 'Tutto'}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">abbonamenti Google Play · un abbonamento conta una volta · acquisti di test e account interni esclusi · passa sopra una colonna per il dettaglio</div>
+      ${inner}
+    </div>`;
+
+  if (state.premTimelineError) return head(`<div style="color:var(--red);font-size:12px">${esc(state.premTimelineError)}</div>`);
+  if (!state.premTimeline) return head(chartPlaceholder());
+
+  const m = premiumTimelineModel();
+  const s = state.ptlSeries;
+  const chip = (key, label, swatch) => `
+    <button class="filter-btn ${s[key] ? 'active' : ''}" data-ptl-series="${key}" style="display:inline-flex;align-items:center;gap:6px">
+      ${swatch}${label}
+    </button>`;
+  const box  = c => `<span style="width:10px;height:10px;border-radius:2px;background:${c};display:inline-block"></span>`;
+  const dash = c => `<span style="width:14px;height:2px;background:${c};display:inline-block"></span>`;
+
+  const outcomeLegend = s.trials ? `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10.5px;color:var(--muted);margin-top:6px">
+      <span>Prove, per esito:</span>
+      ${PTL_OUTCOMES.map(o => `<span style="display:inline-flex;align-items:center;gap:5px">${box(o.c)}${o.l}</span>`).join('')}
+    </div>` : '';
+
+  // Conversione solo sulle prove già concluse: quelle in corso non sono ancora né sì né no.
+  const o = m.outcomes;
+  const closed = o.converted + o.lost;
+  const convPct = closed ? Math.round(o.converted / closed * 100) + '%' : '—';
+  const stillOpen = m.soon.length;
+  const openCanceling = m.soon.filter(x => x.canceling).length;
+  const soonTxt = m.soon.length
+    ? m.soon.slice(0, 6).map(x => `<span style="color:${x.canceling ? '#fb923c' : 'var(--fg)'}">${ddmm(x.day)}</span>`).join(' · ') + (m.soon.length > 6 ? ' …' : '')
+    : 'nessuna';
+  const periodTxt = state.ptlRange ? `ultimi ${state.ptlRange} giorni` : 'da sempre';
+
+  const kpi = (label, value, sub, color) => `
+    <div style="flex:1;min-width:170px;padding:12px 14px;background:#15151f;border:1px solid #1e1e30;border-radius:10px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${label}</div>
+      <div style="font-size:22px;font-weight:700;color:${color}">${value}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.45">${sub}</div>
+    </div>`;
+
+  return head(`
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+      ${chip('paid', 'Nuovi paganti', box(PTL_PAID_COLOR))}
+      ${chip('trials', 'Prove iniziate', box('#a78bfa'))}
+      ${chip('active', 'Paganti attivi', dash(PTL_ACTIVE_COLOR))}
+    </div>
+    ${premiumTimelineChart(m)}
+    ${outcomeLegend}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px">
+      ${kpi('Prova → pagante', convPct,
+        closed ? `${o.converted} su ${closed} prove concluse (${periodTxt})` : `nessuna prova conclusa (${periodTxt})`, '#4ade80')}
+      ${kpi('Paganti oggi', m.payingNow,
+        `MRR stimato <b style="color:var(--fg)">€ ${m.mrr.toFixed(2).replace('.', ',')}</b>` +
+        (m.payingCanceling ? ` · <span style="color:#fb923c">${m.payingCanceling === 1 ? '1 ha disdetto, non rinnova' : m.payingCanceling + ' hanno disdetto, non rinnovano'}</span>` : ''), PTL_ACTIVE_COLOR)}
+      ${kpi('Nuovi paganti', m.paidIn,
+        `${m.paidFromTrial} da prova · ${m.paidIn - m.paidFromTrial} diretti` +
+        (m.lostPaid ? ` · <span style="color:var(--red)">${m.lostPaid} ${m.lostPaid === 1 ? 'perso' : 'persi'}</span>` : '') + ` (${periodTxt})`, PTL_PAID_COLOR)}
+      ${kpi('Prove aperte', stillOpen,
+        `scadono: ${soonTxt}` + (openCanceling ? `<br><span style="color:#fb923c">${openCanceling === 1 ? 'in arancione quella già disdetta' : 'in arancione le ' + openCanceling + ' già disdette'}</span>` : ''), '#a78bfa')}
+    </div>`);
+}
+
 function pageOverview() {
   const keys = state.overviewKeys.filter(k => METRICS[k]);
   const colCount = Math.min(Math.max(keys.length, 1), 5);
@@ -2448,6 +2698,8 @@ function pageOverview() {
     </div>
 
     ${keys.includes('eng.streaks') && state.streakChartOpen ? streakChartCard() : ''}
+
+    ${premiumTimelineCard()}
 
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -10988,6 +11240,16 @@ function attachEvents() {
     el.addEventListener('click', () => purgePromptCache()));
 
   // Chart range filters
+  document.querySelectorAll('[data-ptl-bucket]').forEach(el =>
+    el.addEventListener('click', () => { state.ptlBucket = el.dataset.ptlBucket; render(); }));
+  document.querySelectorAll('[data-ptl-range]').forEach(el =>
+    el.addEventListener('click', () => { state.ptlRange = +el.dataset.ptlRange; render(); }));
+  document.querySelectorAll('[data-ptl-series]').forEach(el =>
+    el.addEventListener('click', () => {
+      const k = el.dataset.ptlSeries;
+      state.ptlSeries = { ...state.ptlSeries, [k]: !state.ptlSeries[k] };
+      render();
+    }));
   document.querySelectorAll('[data-growth-range]').forEach(el =>
     el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));
   document.querySelectorAll('[data-weekly-range]').forEach(el =>
