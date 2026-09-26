@@ -7124,7 +7124,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20260925c';
+const PAYWALL_SHOT_V = '20260926a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7301,9 +7301,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'coach_ai_chat',
     name: 'Coach AI · chat',
-    rotation: 'live',
-    where: 'Overlay a schermo pieno sopra la chat del coach o il dettaglio dell\'allenamento.',
-    when: 'Quando i crediti AI sono finiti e l\'utente prova comunque a usarli: scrivendo al coach in chat, o toccando «Modifica» nel dettaglio dell\'allenamento. Overlay sopra quella schermata.',
+    rotation: 'retired',
+    where: 'Overlay a schermo pieno sopra la chat del coach o il dettaglio dell\'allenamento. Oggi si vede solo dall\'anteprima /dev/premium.',
+    when: 'FUORI ROTAZIONE dal 26/09/2026: al suo posto, negli stessi punti, esce «Coach AI · demo». Fino ad allora usciva quando i crediti AI erano finiti e l\'utente provava comunque a usarli: scrivendo al coach in chat, toccando «Modifica» nel dettaglio dell\'allenamento, o dalla CTA della card upsell in chat. Resta qui perché i suoi eventi sono nei dati storici.',
     exit: 'La × dell\'overlay.',
     what: 'Hero con la chat che si anima, poi la lista di cosa fa il coach, poi i piani. Arriva nel momento in cui l\'utente ha appena sbattuto contro un muro: aveva una domanda e non può farla.',
     file: 'app/src/components/PremiumProposals/CoachAiChatPaywall/CoachAiChatFlow.tsx',
@@ -7312,6 +7312,21 @@ const CREATIVE_REGISTRY = [
       { idx: 1, t: 'Feature', d: 'la lista di cosa sblocca' },
       { idx: 2, t: 'I prezzi', d: 'schermata piani standard, skin arancione' },
     ],
+  },
+  {
+    variant: 'coach_ai_demo',
+    name: 'Coach AI · demo',
+    rotation: 'live',
+    where: 'Overlay a schermo pieno sopra la chat del coach o il dettaglio dell\'allenamento.',
+    when: 'Quando i crediti AI sono finiti e l\'utente prova comunque a usarli: scrivendo al coach in chat, toccando «Modifica» nel dettaglio dell\'allenamento, o dalla CTA della card upsell in chat. Dal 26/09/2026, al posto di «Coach AI · chat».',
+    exit: 'La × dell\'overlay su entrambe le schermate. Il tasto indietro dai prezzi torna alla dimostrazione, dalla dimostrazione chiude.',
+    what: 'La prima slide della proposta del primo allenamento — la chat del coach che risponde coi numeri e apre il grafico del peso, dentro il telefono disegnato — con un titolo suo, «Chiedi al tuo coach quello che vuoi», e poi subito i piani. Due schermate e non tre: chi arriva qui ha appena sbattuto contro un muro (aveva una domanda e non può farla), e ogni schermata prima del prezzo è gente che se ne va. Il primo passo si chiama `hero` con feature `chat` come nella «Coach AI · chat», così i due gradini zero si confrontano.',
+    file: 'app/src/components/PremiumProposals/CoachAiDemoPaywall/CoachAiDemoFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Il coach', d: '«Ehi coach, come sto andando?» → la risposta coi numeri e il grafico del peso che scende verso l\'obiettivo' },
+      { idx: 1, t: 'I prezzi', d: 'schermata piani standard, skin arancione' },
+    ],
+    note: 'La riga dell\'obiettivo nel grafico (55 kg) non ha una fonte dati vera, come nella tre-slide da cui viene: è una dimostrazione dichiarata, non i dati di chi guarda.',
   },
   {
     variant: 'coach_ai_visual',
@@ -8332,6 +8347,7 @@ const CREATIVE_LABELS = {
   coach_spot: 'Coach Spot',
   onboarding_funnel: 'Funnel standard',
   coach_ai_chat:     'Coach AI · Chat',
+  coach_ai_demo:     'Coach AI · Demo',
   coach_ai_memory:   'Coach AI · Memoria',
   coach_ai_visual:   'Coach AI · Visual',
   coach_ai_chart:    'Coach AI · Grafici',
