@@ -356,6 +356,9 @@ let state = {
   chartTipo: "barre",
   chartShowSpese: true,
   chartShowEntrate: true,
+  // fatture
+  ftData: null, ftLoading: false, ftError: null, ftSyncing: false, ftSaving: null,
+  ftTab: "da_fare", ftOpen: null, ftDrafts: {},
 };
 
 function setState(patch) {
@@ -604,6 +607,7 @@ function renderSidebar() {
       ${nav("dashboard","📊","Dashboard")}
       ${nav("registro","📋","Registro")}
       ${nav("ricorrenti","🔁","Ricorrenti")}
+      ${nav("fatture","🧾","Fatture" + ftBadgeSidebar())}
       <div class="nav-section" style="margin-top:10px">Analisi</div>
       ${nav("riepilogo","📅","Riepilogo")}
       ${nav("categorie","🏷️","Categorie")}
@@ -620,6 +624,7 @@ function renderPage() {
   if (state.page === "dashboard")    return renderDashboard();
   if (state.page === "registro")     return renderRegistro();
   if (state.page === "ricorrenti")   return renderRicorrenti();
+  if (state.page === "fatture")      return renderFatture();
   if (state.page === "riepilogo")    return renderRiepilogo();
   if (state.page === "categorie")    return renderCategorieView();
   if (state.page === "impostazioni") return renderImpostazioni();
@@ -1415,6 +1420,7 @@ function renderModal() {
 
 // ── EVENTS ────────────────────────────────────────────────────────────────────
 function attachEvents() {
+  attachFattureEvents();
   document.querySelectorAll("[data-nav]").forEach(el =>
     el.addEventListener("click", () => setState({ page: el.dataset.nav })));
 
@@ -1531,6 +1537,355 @@ function attachEvents() {
   });
 }
 
+// ── FATTURE ───────────────────────────────────────────────────────────────────
+//
+// Una riga per ogni pagamento che Google ha davvero incassato (tabella finance_fatture,
+// riempita ogni mattina dall'edge function sync-fatture e dal bottone «Aggiorna da Google»).
+// La chiave è il numero d'ordine di Google: lo stesso pagamento non può comparire due volte,
+// un rinnovo è una riga nuova. Chi è in prova non c'è finché non paga (l'ordine della prova
+// vale 0 € e la sincronizzazione lo scarta).
+//
+// Qui l'operatore segna «fatta» con il numero di fattura: è l'unica cosa che questa pagina
+// scrive, tramite la RPC finance_fattura_segna (gate operatore). I dati personali arrivano
+// solo da finance_fatture_list, che chiede il login da operatore della dashboard KPI.
+
+const FT_SYNC_STALE_MS = 12 * 60 * 60 * 1000; // aprendo la pagina, se l'ultimo giro è più vecchio, ne parte uno
+
+function ftEsc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function ftEuro(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  return Number(n).toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+function ftData(iso, conAnno = true) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('it-IT', conAnno ? { day: '2-digit', month: '2-digit', year: 'numeric' } : { day: '2-digit', month: '2-digit' });
+}
+function ftDataOra(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const oggi = new Date();
+  const stessoGiorno = d.toDateString() === oggi.toDateString();
+  const ora = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  return stessoGiorno ? `oggi alle ${ora}` : `${ftData(iso)} alle ${ora}`;
+}
+
+// Mensile, annuale, o annuale pagato a rate (una rata al mese: importo molto sotto l'annuale).
+function ftPiano(f) {
+  const annuale = /year|annual/i.test(f.product_id);
+  if (!annuale) return 'Mensile';
+  return Number(f.importo) > 0 && Number(f.importo) < 15 ? 'Annuale · rata mensile' : 'Annuale';
+}
+
+// Il nome da mostrare: quello di fatturazione se c'è, se no quello dell'app, se no l'email.
+function ftNome(f) {
+  const b = f.fatturazione || f.intestatario;
+  const pieno = b && [b.first_name, b.last_name].filter(Boolean).join(' ');
+  return pieno || f.utente?.name || f.utente?.username || f.utente?.email || 'Utente sconosciuto';
+}
+
+// Quale pagamento è per quell'abbonamento: 1°, 2°, … contando solo quelli incassati.
+function ftOrdinali(fatture) {
+  const perToken = {};
+  for (const f of fatture) (perToken[f.purchase_token] ||= []).push(f);
+  const out = {};
+  for (const lista of Object.values(perToken)) {
+    lista.sort((a, b) => String(a.incassato_at).localeCompare(String(b.incassato_at)));
+    lista.forEach((f, i) => { out[f.order_id] = i + 1; });
+  }
+  return out;
+}
+
+const FT_CAMPI = [
+  ['first_name', 'Nome'], ['last_name', 'Cognome'], ['tax_code', 'Codice fiscale'],
+  ['address_line', 'Via'], ['house_number', 'Civico'], ['postal_code', 'CAP'],
+  ['city', 'Città'], ['province', 'Provincia'], ['country', 'Paese'], ['email', 'Email'],
+];
+// Il codice fiscale serve solo in Italia: fuori non è «mancante».
+function ftCampiMancanti(b) {
+  if (!b) return FT_CAMPI.filter(([k]) => k !== 'email').map(([, l]) => l);
+  return FT_CAMPI.filter(([k]) => k !== 'email' && !(k === 'tax_code' && b.country && b.country !== 'IT')
+    && !(k === 'province' && b.country && b.country !== 'IT')).filter(([k]) => !String(b[k] ?? '').trim()).map(([, l]) => l);
+}
+
+async function ftLoad() {
+  state.ftLoading = true; state.ftError = null;
+  if (state.page === 'fatture') render();
+  try {
+    const { data, error } = await sb.rpc('finance_fatture_list');
+    if (error) throw error;
+    state.ftData = data;
+  } catch (e) {
+    const msg = e?.message || String(e);
+    state.ftError = /forbidden|operatore|JWT|permission/i.test(msg)
+      ? 'Serve il login da operatore. Accedi dalla dashboard KPI e poi ricarica questa pagina.'
+      : msg;
+  }
+  state.ftLoading = false;
+  render();
+}
+
+async function ftSync(automatico = false) {
+  if (state.ftSyncing) return;
+  state.ftSyncing = true; render();
+  try {
+    const { data, error } = await sb.functions.invoke('sync-fatture', { body: {} });
+    if (error) throw error;
+    const n = data?.esito?.nuove ?? 0;
+    if (!automatico || n > 0) showToast(n > 0 ? `${n} ${n === 1 ? 'fattura nuova' : 'fatture nuove'} da fare` : 'Tutto già aggiornato, niente di nuovo', 'success');
+  } catch (e) {
+    showToast('Aggiornamento da Google non riuscito: ' + (e?.message || e), 'error');
+  }
+  state.ftSyncing = false;
+  await ftLoad();
+}
+
+async function ftSegna(orderId, fatta) {
+  // Dal dettaglio aperto, dalla bozza scritta prima, o da quello già salvato: in quest'ordine.
+  const f = (state.ftData?.fatture || []).find(x => x.order_id === orderId);
+  const draft = state.ftDrafts?.[orderId] || {};
+  const numero = document.querySelector(`[data-ft-numero="${CSS.escape(orderId)}"]`)?.value ?? draft.numero ?? f?.numero_fattura ?? null;
+  const note = document.querySelector(`[data-ft-note="${CSS.escape(orderId)}"]`)?.value ?? draft.note ?? f?.note ?? null;
+  if (fatta && !String(numero || '').trim()
+      && !confirm('Stai segnando la fattura come fatta senza numero. Vuoi continuare?')) return;
+  if (!fatta && !confirm('Rimettere questa fattura tra quelle da fare?')) return;
+  state.ftSaving = orderId; render();
+  try {
+    const { error } = await sb.rpc('finance_fattura_segna', { p_order_id: orderId, p_fatta: fatta, p_numero: numero, p_note: note });
+    if (error) throw error;
+    showToast(fatta ? 'Segnata come fatta' : 'Rimessa tra quelle da fare', 'success');
+  } catch (e) {
+    showToast('Non salvata: ' + (e?.message || e), 'error');
+  }
+  state.ftSaving = null;
+  if (state.ftDrafts) delete state.ftDrafts[orderId];
+  await ftLoad();
+}
+
+function ftStatCard(label, value, sub, color) {
+  return `<div class="card" style="flex:1;min-width:180px;margin-bottom:0">
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">${label}</div>
+    <div style="font-size:26px;font-weight:700;margin-top:6px;color:${color}">${value}</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:2px">${sub}</div>
+  </div>`;
+}
+
+function ftCampoRiga(label, valore, obbligatorio) {
+  const v = String(valore ?? '').trim();
+  return `<div style="display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border)">
+    <span style="font-size:12px;color:var(--muted)">${label}</span>
+    ${v
+      ? `<span style="font-family:var(--mono);font-size:13px">${ftEsc(v)}</span>
+         <button class="btn btn-ghost" style="font-size:11px;padding:3px 9px" data-ft-copia="${ftEsc(v)}">Copia</button>`
+      : `<span style="font-size:12px;color:${obbligatorio ? 'var(--amber)' : 'var(--muted)'}">${obbligatorio ? 'manca' : '—'}</span><span></span>`}
+  </div>`;
+}
+
+function ftDettaglio(f) {
+  // Fatta: si mostra la fotografia salvata quando è stata segnata (a chi è stata intestata).
+  const b = f.fatta && f.intestatario ? f.intestatario : (f.fatturazione ? { ...f.fatturazione, email: f.utente?.email } : null);
+  const estero = b?.country && b.country !== 'IT';
+  const imponibile = f.importo !== null && f.iva !== null ? Math.round((Number(f.importo) - Number(f.iva)) * 100) / 100 : null;
+  const periodo = f.periodo_da && f.periodo_a ? `dal ${ftData(f.periodo_da)} al ${ftData(f.periodo_a)}` : '';
+  const descrizione = `HypeMove Premium – abbonamento ${ftPiano(f).toLowerCase()}${periodo ? ', ' + periodo : ''}`;
+  const tuttiDati = b ? FT_CAMPI.map(([k, l]) => `${l}: ${b[k] ?? ''}`).join('\n') : '';
+  const saving = state.ftSaving === f.order_id;
+
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px;padding:16px 4px 6px">
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600;color:var(--text)">Intestatario${f.fatta && f.intestatario ? ' <span style="color:var(--muted);font-weight:400">(come era quando l\'hai segnata)</span>' : ''}</div>
+        ${b ? `<button class="btn btn-ghost" style="font-size:11px;padding:3px 9px" data-ft-copia="${ftEsc(tuttiDati)}">Copia tutto</button>` : ''}
+      </div>
+      ${b ? FT_CAMPI.map(([k, l]) => ftCampoRiga(l, b[k], k !== 'email' && !((k === 'tax_code' || k === 'province') && estero))).join('')
+          : `<div style="font-size:13px;color:var(--amber);padding:10px 0">Questa persona non ha ancora compilato i dati di fatturazione nell'app.
+             <div style="color:var(--muted);font-size:12px;margin-top:4px">Email dell'account: ${ftEsc(f.utente?.email || '—')}</div></div>`}
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px">Fattura</div>
+      ${ftCampoRiga('Descrizione', descrizione, true)}
+      ${ftCampoRiga('Totale', ftEuro(f.importo), true)}
+      ${ftCampoRiga('di cui IVA', f.iva !== null ? ftEuro(f.iva) : '', false)}
+      ${ftCampoRiga('Imponibile', imponibile !== null ? ftEuro(imponibile) : '', false)}
+      ${ftCampoRiga('Incassato il', ftData(f.incassato_at), true)}
+      ${ftCampoRiga('Ordine Google', f.order_id, true)}
+      <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <input class="form-input" data-ft-numero="${ftEsc(f.order_id)}" placeholder="Numero fattura" value="${ftEsc(state.ftDrafts?.[f.order_id]?.numero ?? f.numero_fattura ?? '')}" style="font-size:13px">
+        <input class="form-input" data-ft-note="${ftEsc(f.order_id)}" placeholder="Note (facoltative)" value="${ftEsc(state.ftDrafts?.[f.order_id]?.note ?? f.note ?? '')}" style="font-size:13px">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+        ${f.fatta
+          ? `<button class="btn btn-ghost" style="font-size:12px;padding:7px 14px" data-ft-segna="${ftEsc(f.order_id)}" data-ft-fatta="0" ${saving ? 'disabled' : ''}>Rimetti da fare</button>
+             <button class="btn btn-ghost" style="font-size:12px;padding:7px 14px" data-ft-segna="${ftEsc(f.order_id)}" data-ft-fatta="1" ${saving ? 'disabled' : ''}>Salva numero e note</button>
+             <span style="font-size:12px;color:var(--mattia)">✓ Fatta ${f.fatta_at ? 'il ' + ftData(f.fatta_at) : ''}${f.fatta_da ? ' da ' + ftEsc(f.fatta_da) : ''}</span>`
+          : `<button class="btn btn-primary" style="font-size:12px;padding:7px 16px" data-ft-segna="${ftEsc(f.order_id)}" data-ft-fatta="1" ${saving ? 'disabled' : ''}>${saving ? 'Salvo…' : '✓ Segna come fatta'}</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function ftRiga(f, ordinale, altreDaFare) {
+  const aperta = state.ftOpen === f.order_id;
+  const mancanti = f.fatta ? [] : ftCampiMancanti(f.fatturazione);
+  const rimborso = f.google_stato && f.google_stato !== 'PROCESSED';
+  const badges = [
+    rimborso ? `<span class="badge red">${f.google_stato === 'REFUNDED' ? 'Rimborsato da Google' : 'Rimborso in corso'}${f.fatta ? ' · serve nota di credito' : ' · non fatturare'}</span>` : '',
+    mancanti.length ? `<span class="badge amber" title="${ftEsc(mancanti.join(', '))}">${f.fatturazione ? 'Dati incompleti' : 'Mancano i dati di fatturazione'}</span>` : '',
+    f.da_verificare ? `<span class="badge amber">Importo da verificare in Play Console</span>` : '',
+    altreDaFare > 0 ? `<span class="badge blue" title="Sono pagamenti diversi, ognuno con il suo numero d'ordine">${altreDaFare + 1} fatture da fare per questa persona</span>` : '',
+  ].filter(Boolean).join(' ');
+  return `<div class="card" style="padding:0;margin-bottom:10px;${f.fatta ? 'opacity:.8' : ''}">
+    <div data-ft-apri="${ftEsc(f.order_id)}" style="display:grid;grid-template-columns:28px 1fr auto 20px;align-items:center;gap:14px;padding:14px 18px;cursor:pointer">
+      <span data-ft-flag="${ftEsc(f.order_id)}" data-ft-fatta="${f.fatta ? '0' : '1'}" title="${f.fatta ? 'Fatta: clicca per rimetterla da fare' : 'Da fare: clicca per segnarla fatta'}" style="cursor:pointer;width:22px;height:22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:14px;
+        ${f.fatta ? 'background:var(--mattia-bg);color:var(--mattia);border:1px solid var(--mattia)' : 'border:1.5px solid var(--border2)'}">${f.fatta ? '✓' : ''}</span>
+      <div style="min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-weight:600;font-size:14px">${ftEsc(ftNome(f))}</span>
+          ${badges}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">
+          ${ftPiano(f)} · ${ordinale === 1 ? '1° pagamento' : `${ordinale}° pagamento (rinnovo)`} · incassato il ${ftData(f.incassato_at)}
+          ${f.periodo_da && f.periodo_a ? ` · periodo ${ftData(f.periodo_da, false)} → ${ftData(f.periodo_a)}` : ''}
+          ${f.fatta && f.numero_fattura ? ` · <span style="color:var(--mattia)">fattura n. ${ftEsc(f.numero_fattura)}</span>` : ''}
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:var(--mono);font-size:15px;font-weight:700">${ftEuro(f.importo)}</div>
+        <div style="font-size:11px;color:var(--muted)">${f.iva !== null ? 'IVA ' + ftEuro(f.iva) : ''}</div>
+      </div>
+      <span style="color:var(--muted);font-size:12px">${aperta ? '▲' : '▼'}</span>
+    </div>
+    ${aperta ? `<div style="border-top:1px solid var(--border);padding:0 18px 14px">${ftDettaglio(f)}</div>` : ''}
+  </div>`;
+}
+
+function renderFatture() {
+  const header = `<div class="page-header">
+    <div class="page-title">Fatture</div>
+    <div class="page-sub">Una riga per ogni pagamento incassato da Google, rinnovi compresi. Chi è in prova compare solo quando paga davvero.</div>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="ftSyncBtn" style="font-size:12px;padding:7px 14px" ${state.ftSyncing ? 'disabled' : ''}>${state.ftSyncing ? 'Aggiorno da Google…' : '↻ Aggiorna da Google'}</button>
+      <div style="font-size:12px;color:var(--muted)">${state.ftData?.ultimo_sync
+        ? `Ultimo aggiornamento ${ftDataOra(state.ftData.ultimo_sync.at)} · ${state.ftData.ultimo_sync.origine === 'cron' ? 'automatico' : 'manuale'}`
+        : 'Mai aggiornato'} · in automatico ogni mattina</div>
+    </div>
+  </div>`;
+
+  if (state.ftError) return header + `<div class="card" style="color:var(--amber)">${ftEsc(state.ftError)}</div>`;
+  if (!state.ftData) return header + `<div class="card" style="text-align:center;color:var(--muted);padding:40px">Carico le fatture…</div>`;
+
+  const fatture = state.ftData.fatture || [];
+  const ord = ftOrdinali(fatture);
+  const daFare = fatture.filter(f => !f.fatta && (!f.google_stato || f.google_stato === 'PROCESSED'));
+  const creditoDaFare = fatture.filter(f => f.fatta && f.google_stato && f.google_stato !== 'PROCESSED');
+  const meseOra = new Date().toISOString().slice(0, 7);
+  const fatteMese = fatture.filter(f => f.fatta && String(f.fatta_at || '').slice(0, 7) === meseOra);
+  const tot = l => l.reduce((s, f) => s + Number(f.importo || 0), 0);
+  const inArrivo = (state.ftData.in_arrivo || []);
+  const fra30 = Date.now() + 30 * 86400000;
+  const arrivo30 = inArrivo.filter(a => new Date(a.scadenza).getTime() <= fra30);
+
+  const tab = state.ftTab || 'da_fare';
+  const lista = tab === 'da_fare' ? [...daFare, ...creditoDaFare]
+    : tab === 'fatte' ? fatture.filter(f => f.fatta)
+    : fatture;
+  // Da fare: dalla più vecchia (è la più urgente). Le altre: dalla più recente.
+  lista.sort((a, b) => tab === 'da_fare'
+    ? String(a.incassato_at).localeCompare(String(b.incassato_at))
+    : String(b.incassato_at).localeCompare(String(a.incassato_at)));
+  const daFarePerUtente = {};
+  for (const f of daFare) daFarePerUtente[f.user_id || f.purchase_token] = (daFarePerUtente[f.user_id || f.purchase_token] || 0) + 1;
+
+  const tabBtn = (id, label, n) => `<button class="filter-btn ${tab === id ? 'active' : ''}" data-ft-tab="${id}">${label}${n !== undefined ? ` <b>${n}</b>` : ''}</button>`;
+
+  const stats = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+    ${ftStatCard('Da fare', daFare.length, daFare.length ? `${ftEuro(tot(daFare))} in tutto` : 'sei in pari', daFare.length ? 'var(--amber)' : 'var(--mattia)')}
+    ${ftStatCard('Fatte questo mese', fatteMese.length, fatteMese.length ? ftEuro(tot(fatteMese)) : '—', 'var(--text)')}
+    ${ftStatCard('Rinnovi nei prossimi 30 giorni', arrivo30.length, arrivo30.length ? `circa ${ftEuro(arrivo30.reduce((s, a) => s + Number(a.prezzo || 0), 0))} se pagano tutti` : '—', 'var(--purple)')}
+  </div>`;
+
+  const avvisoCredito = creditoDaFare.length ? `<div class="card" style="border-color:var(--red);color:var(--red);font-size:13px">
+    ⚠️ ${creditoDaFare.length === 1 ? 'Un pagamento già fatturato è stato rimborsato' : `${creditoDaFare.length} pagamenti già fatturati sono stati rimborsati`} da Google: serve una nota di credito. Li trovi in cima a «Da fare».
+  </div>` : '';
+
+  const elenco = lista.length
+    ? lista.map(f => ftRiga(f, ord[f.order_id], f.fatta ? 0 : (daFarePerUtente[f.user_id || f.purchase_token] || 1) - 1)).join('')
+    : `<div class="card"><div class="empty"><div class="empty-icon">${tab === 'da_fare' ? '✅' : '🧾'}</div>
+        <div class="empty-text">${tab === 'da_fare' ? 'Nessuna fattura da fare' : 'Nessuna fattura qui'}</div></div></div>`;
+
+  const arrivo = inArrivo.length ? `<div style="margin-top:26px">
+    <div style="font-size:13px;font-weight:600;margin-bottom:4px">Prossimi rinnovi</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Non sono ancora fatture: diventano una riga «da fare» solo quando Google incassa.</div>
+    <div class="card" style="padding:4px 18px">
+      ${inArrivo.map(a => `<div style="display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <div><span style="font-weight:600">${ftEsc(a.utente?.name || a.utente?.username || a.utente?.email || 'Utente sconosciuto')}</span>
+          <span style="color:var(--muted);font-size:12px"> · ${/year|annual/i.test(a.product_id) ? (Number(a.prezzo) < 15 ? 'Annuale · rata mensile' : 'Annuale') : 'Mensile'}</span>
+          ${a.stato === 'in_prova' ? '<span class="badge blue" style="margin-left:6px">in prova: si fattura solo se paga</span>' : ''}
+          ${!a.ha_fatturazione ? '<span class="badge amber" style="margin-left:6px">mancano i dati di fatturazione</span>' : ''}</div>
+        <span style="color:var(--muted);font-size:12px">${ftData(a.scadenza)}</span>
+        <span style="font-family:var(--mono)">${ftEuro(a.prezzo)}</span>
+      </div>`).join('')}
+    </div>
+  </div>` : '';
+
+  return `${header}${stats}${avvisoCredito}
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      ${tabBtn('da_fare', 'Da fare', daFare.length + creditoDaFare.length)}
+      ${tabBtn('fatte', 'Fatte', fatture.filter(f => f.fatta).length)}
+      ${tabBtn('tutte', 'Tutte', fatture.length)}
+    </div>
+    ${elenco}
+    ${arrivo}`;
+}
+
+function attachFattureEvents() {
+  if (state.page !== 'fatture') return;
+  document.getElementById('ftSyncBtn')?.addEventListener('click', () => ftSync(false));
+  document.querySelectorAll('[data-ft-tab]').forEach(el =>
+    el.addEventListener('click', () => setState({ ftTab: el.dataset.ftTab, ftOpen: null })));
+  // Il quadratino della riga è il flag: segna fatta / rimette da fare senza aprire il dettaglio.
+  document.querySelectorAll('[data-ft-flag]').forEach(el =>
+    el.addEventListener('click', (ev) => { ev.stopPropagation(); ftSegna(el.dataset.ftFlag, el.dataset.ftFatta === '1'); }));
+  document.querySelectorAll('[data-ft-apri]').forEach(el =>
+    el.addEventListener('click', () => setState({ ftOpen: state.ftOpen === el.dataset.ftApri ? null : el.dataset.ftApri })));
+  document.querySelectorAll('[data-ft-segna]').forEach(el =>
+    el.addEventListener('click', () => ftSegna(el.dataset.ftSegna, el.dataset.ftFatta === '1')));
+  // Quello che si scrive nei campi resta in memoria: un aggiornamento che ridisegna la pagina
+  // mentre si sta scrivendo non lo deve cancellare.
+  document.querySelectorAll('[data-ft-numero],[data-ft-note]').forEach(el =>
+    el.addEventListener('input', () => {
+      const id = el.dataset.ftNumero ?? el.dataset.ftNote;
+      state.ftDrafts = state.ftDrafts || {};
+      const d = (state.ftDrafts[id] ||= {});
+      if (el.dataset.ftNumero !== undefined) d.numero = el.value; else d.note = el.value;
+    }));
+  document.querySelectorAll('[data-ft-copia]').forEach(el =>
+    el.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try { await navigator.clipboard.writeText(el.dataset.ftCopia); showToast('Copiato', 'success'); }
+      catch { showToast('Copia non riuscita', 'error'); }
+    }));
+  // Primo ingresso nella pagina: carica, e se l'ultimo giro con Google è vecchio ne fa partire uno.
+  if (!state.ftData && !state.ftLoading && !state.ftError) {
+    ftLoad().then(() => {
+      const last = state.ftData?.ultimo_sync?.at;
+      if (state.ftData && (!last || Date.now() - new Date(last).getTime() > FT_SYNC_STALE_MS)) ftSync(true);
+    });
+  }
+}
+
+// Quante da fare, accanto alla voce di menu.
+function ftBadgeSidebar() {
+  // Da fare = pagamenti non ancora fatturati (e non rimborsati) + fatturati poi rimborsati (nota di credito).
+  const n = (state.ftData?.fatture || []).filter(f => {
+    const rimborsato = f.google_stato && f.google_stato !== "PROCESSED";
+    return f.fatta ? rimborsato : !rimborsato;
+  }).length;
+  return n ? ` <span style="margin-left:auto;background:var(--amber-bg);color:var(--amber);border-radius:10px;font-size:10px;font-weight:700;padding:1px 7px">${n}</span>` : "";
+}
+
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 async function boot() {
   setState({ loading: true, dbError: null });
@@ -1540,6 +1895,8 @@ async function boot() {
     setState({ loading: false });
     // Meta ADS: sincronizza in background, senza bloccare il primo render.
     generaMetaAds().then(render).catch(e => console.error("genera meta ads", e));
+    // Fatture: solo il conteggio per la voce di menu; il resto lo carica la pagina.
+    if (!state.ftData && !state.ftLoading) ftLoad();
   } catch (e) {
     console.error(e);
     setState({ loading: false, dbError: (e && e.message) ? e.message : "errore sconosciuto" });
