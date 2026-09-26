@@ -9077,21 +9077,27 @@ function premiumFunnelViz(f) {
   return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${html}</div>`;
 }
 
-// ── TENTATIVI DI ACQUISTO — GRAFICO PER SPRINT ──────────────────────────
+// ── TENTATIVI DI ACQUISTO — CONFRONTO FRA SPRINT ────────────────────────
 //
-// Quanti tentativi di acquisto (`paywall_purchase_attempt`) fa la coorte di ogni sprint,
-// giorno per giorno dall'inizio dello sprint, con le linee di più sprint sovrapposte.
-// Due metri: PERSONE (persone diverse che hanno provato a pagare almeno una volta fino a quel
-// giorno) e CLICK (tutti i tentativi, anche ripetuti dalla stessa persona). Le linee sono
-// cumulate: l'ultimo punto di ogni linea è il totale dello sprint.
+// Una barra per sprint: su cento persone che hanno visto il paywall, quante provano a pagare.
+// Due metri: PERSONE (persone diverse con almeno un `paywall_purchase_attempt`) e CLICK (tutti
+// i tentativi, anche ripetuti), tutti e due divisi per chi ha visto il paywall.
 //
-// Dati: RPC kpi_purchase_attempts_daily (gate operatore), una chiamata per sprint e sesso,
-// tenuta in memoria. Contano solo i tentativi fatti DENTRO la finestra dello sprint, dalle
-// persone registrate nello sprint: per questo il totale può essere più basso della colonna
-// «Tentato acquisto» del confronto sprint, che conta anche i tentativi fatti dopo.
+// Perché una percentuale e non i conteggi giorno per giorno: la prima versione (26/09/2026)
+// sommava i tentativi giorno dopo giorno, e la linea di uno sprint lungo finiva sempre più in
+// alto di quella di uno corto. Mattia l'ha bocciata: confrontava la durata, non la resa.
+//
+// Dati: RPC kpi_purchase_attempt_rate (gate operatore), una chiamata per sprint e sesso, tenuta
+// in memoria. Coorte = registrati nello sprint; eventi contati solo dentro le date dello sprint.
 //
 // Il colore di uno sprint è quello del suo pallino nei chip (indice in state.sprints), lo
 // stesso delle altre tabelle di confronto: togliere uno sprint non ridipinge gli altri.
+
+// Sotto il 5% dei registrati che «vede il paywall» l'evento non era ancora tracciato (sprint
+// 1-4 a zero, sprint 10 allo 0,9%; tutti gli altri sopra il 24%): la percentuale non vale.
+const ATTEMPTS_MIN_TRACKED = 0.05;
+// Sotto queste persone al paywall la percentuale si mostra, ma con l'avviso «pochi dati».
+const ATTEMPTS_FEW = 30;
 
 function attemptsSprintColor(s) {
   const i = state.sprints.findIndex(x => x.id === s.id);
@@ -9127,7 +9133,7 @@ async function ensureAttemptsChartData() {
     const k = attemptsKey(s);
     const { start, end } = attemptsSprintWindow(s);
     try {
-      const { data, error } = await sb.rpc('kpi_purchase_attempts_daily', {
+      const { data, error } = await sb.rpc('kpi_purchase_attempt_rate', {
         p_start: start, p_end: end, p_gender: state.premiumGender,
       });
       if (error) throw error;
@@ -9140,99 +9146,86 @@ async function ensureAttemptsChartData() {
   render();
 }
 
-// Una serie per sprint: valori cumulati dal giorno 1 all'ultimo giorno già trascorso
-// (uno sprint in corso si ferma a oggi, non scende a zero nei giorni che non ci sono ancora).
-function attemptsSeries(s) {
-  const data = state.attemptsChartData[attemptsKey(s)];
-  if (!data) return null;
-  const { start } = attemptsSprintWindow(s);
-  const elapsed = Math.max(1, Math.ceil((Date.now() - new Date(start).getTime()) / 86400000));
-  const days = Math.max(1, Math.min(Number(data.days) || 1, elapsed));
-  const byDay = {};
-  for (const r of (data.rows || [])) byDay[r.d] = r;
-  const people = [], clicks = [], dayPeople = [], dayClicks = [];
-  let cp = 0, cc = 0;
-  for (let d = 1; d <= days; d++) {
-    const r = byDay[d] || { new_people: 0, clicks: 0 };
-    cp += Number(r.new_people) || 0;
-    cc += Number(r.clicks) || 0;
-    people.push(cp); clicks.push(cc);
-    dayPeople.push(Number(r.new_people) || 0); dayClicks.push(Number(r.clicks) || 0);
-  }
-  return { sprint: s, color: attemptsSprintColor(s), days, people, clicks, dayPeople, dayClicks };
+// Una riga per sprint, con i numeri già pronti per barra, etichetta, tooltip e tabella.
+function attemptsRow(s) {
+  const d = state.attemptsChartData[attemptsKey(s)];
+  if (!d) return null;
+  const reg = Number(d.registrati) || 0, seen = Number(d.visto_paywall) || 0;
+  const people = Number(d.persone) || 0, clicks = Number(d.click) || 0;
+  const tracked = reg > 0 && seen / reg >= ATTEMPTS_MIN_TRACKED;
+  const { start, end } = attemptsSprintWindow(s);
+  const inCorso = new Date(end).getTime() > Date.now();
+  return {
+    sprint: s, color: attemptsSprintColor(s), reg, seen, people, clicks, tracked, inCorso,
+    days: Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000)),
+    ratePeople: tracked && seen > 0 ? people / seen * 100 : null,
+    rateClicks: tracked && seen > 0 ? clicks / seen * 100 : null,
+  };
 }
 
 function attemptsNiceMax(v) {
-  if (v <= 4) return 4;
+  if (v <= 0) return 4;
   const raw = v / 4;
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const step = [1, 2, 5, 10].map(m => m * mag).find(st => st >= raw);
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(st => st >= raw);
   return step * 4;
 }
 
-// Geometria condivisa fra disegno e hover.
-// Il margine destro ospita le etichette a fine linea, che ci sono solo fino a 4 sprint.
-const ATT_W = 760, ATT_H = 280, ATT_PAD = { l: 44, t: 16, b: 34 };
-const attPadR = n => (n <= 4 ? 150 : 20);
+const attemptsPct = (v, dec = 1) => v.toFixed(dec).replace('.', ',') + '%';
+// In Click il valore è un conteggio ogni cento persone (può passare 100): niente «%».
+const attemptsFmt = (mode, v, dec = 1) => (mode === 'people' ? attemptsPct(v, dec) : v.toFixed(dec).replace('.', ','));
+const attemptsDate = iso => String(iso).slice(5).split('-').reverse().join('/');
+const ATTEMPTS_GRID = 'grid-template-columns:minmax(120px,210px) 1fr 124px';
 
-function attemptsChartSvg(series, mode) {
-  const vals = series.flatMap(se => se[mode]);
-  const maxDays = Math.max(...series.map(se => se.days), 1);
-  const yMax = attemptsNiceMax(Math.max(...vals, 0));
-  const pw = ATT_W - ATT_PAD.l - attPadR(series.length), ph = ATT_H - ATT_PAD.t - ATT_PAD.b;
-  const x = d => ATT_PAD.l + (maxDays === 1 ? pw / 2 : (d - 1) / (maxDays - 1) * pw);
-  const y = v => ATT_PAD.t + ph - (v / yMax) * ph;
+function attemptsBars(rows, mode) {
+  const rateOf = r => (mode === 'people' ? r.ratePeople : r.rateClicks);
+  const max = attemptsNiceMax(Math.max(0, ...rows.map(r => rateOf(r) ?? 0)));
+  const ticks = [0, 1, 2, 3, 4].map(i => max / 4 * i);
+  const tickDec = Number.isInteger(max / 4) ? 0 : 1;
+  const grid = ticks.map(t => `<span style="position:absolute;top:-4px;bottom:-4px;left:${t / max * 100}%;width:1px;background:${t === 0 ? '#333345' : '#1c1c2a'}"></span>`).join('');
 
-  const ticks = [0, 1, 2, 3, 4].map(i => yMax / 4 * i);
-  const grid = ticks.map(t => `
-    <line x1="${ATT_PAD.l}" x2="${ATT_PAD.l + pw}" y1="${y(t)}" y2="${y(t)}" stroke="${t === 0 ? '#333345' : '#1c1c2a'}" stroke-width="1"/>
-    <text x="${ATT_PAD.l - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--muted)">${Math.round(t)}</text>`).join('');
-
-  const xStep = maxDays > 14 ? Math.ceil(maxDays / 7) : 1;
-  const xLabels = Array.from({ length: maxDays }, (_, i) => i + 1)
-    .filter(d => d === 1 || d === maxDays || (d - 1) % xStep === 0)
-    .map(d => `<text x="${x(d)}" y="${ATT_H - ATT_PAD.b + 18}" text-anchor="middle" font-size="11" fill="var(--muted)">g${d}</text>`).join('');
-
-  const lines = series.map(se => {
-    const pts = se[mode].map((v, i) => `${x(i + 1).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-    const dots = se[mode].map((v, i) =>
-      `<circle cx="${x(i + 1)}" cy="${y(v)}" r="4" fill="${se.color}" stroke="var(--surface)" stroke-width="2"/>`).join('');
-    return `<polyline points="${pts}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}`;
+  const bars = rows.map((r, i) => {
+    const rate = rateOf(r);
+    const num = mode === 'people' ? r.people : r.clicks;
+    const name = `<div style="display:flex;align-items:center;gap:7px;min-width:0">
+        <span style="width:8px;height:8px;border-radius:50%;background:${r.color};flex-shrink:0"></span>
+        <span style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.sprint.nome)}">${esc(r.sprint.nome)}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin:2px 0 0 15px">${attemptsDate(r.sprint.inizio)} → ${attemptsDate(r.sprint.fine)} · ${r.days} g${r.inCorso ? ' · in corso' : ''}</div>`;
+    if (rate === null) {
+      return `<div class="attempts-bar-row" data-i="${i}" style="display:grid;${ATTEMPTS_GRID};align-items:center;gap:12px;padding:8px 0;border-radius:6px">
+        <div style="min-width:0">${name}</div>
+        <div style="grid-column:2 / span 2;font-size:11px;color:var(--muted);font-style:italic">paywall non tracciato in questo sprint · ${num} ${mode === 'people' ? (num === 1 ? 'persona' : 'persone') : 'click'} su ${r.reg} registrati</div>
+      </div>`;
+    }
+    return `<div class="attempts-bar-row" data-i="${i}" style="display:grid;${ATTEMPTS_GRID};align-items:center;gap:12px;padding:8px 0;border-radius:6px">
+      <div style="min-width:0">${name}</div>
+      <div style="position:relative;height:18px">${grid}
+        <div style="position:absolute;left:0;top:0;height:18px;width:${rate > 0 ? Math.max(rate / max * 100, 0.6) : 0}%;background:${r.color};border-radius:0 4px 4px 0"></div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">${attemptsFmt(mode, rate)}</span>${mode === 'clicks' ? '<span style="font-size:11px;color:var(--muted)"> ogni 100</span>' : ''}
+        <div style="font-size:11px;color:var(--muted)">${num} su ${r.seen}${r.seen < ATTEMPTS_FEW ? ' · <span style="color:#fbbf24">pochi dati</span>' : ''}</div>
+      </div>
+    </div>`;
   }).join('');
 
-  // Etichette dirette a fine linea (fino a 4 sprint): nome e totale, in inchiostro di testo
-  // con il pallino del colore accanto. Spinte in verticale se si sovrappongono.
-  let endLabels = '';
-  if (series.length <= 4) {
-    // Tutte nel margine destro, alla quota dell'ultimo valore: una linea che finisce a metà
-    // grafico non si porta l'etichetta sopra le linee degli sprint più lunghi.
-    const xx = ATT_PAD.l + pw + 10;
-    const labs = series.map(se => ({ se, yy: y(se[mode][se.days - 1]), xx }))
-      .sort((a, b) => a.yy - b.yy);
-    for (let i = 1; i < labs.length; i++) {
-      if (labs[i].yy - labs[i - 1].yy < 16) labs[i].yy = labs[i - 1].yy + 16;
-    }
-    endLabels = labs.map(l => {
-      const name = l.se.sprint.nome.length > 16 ? l.se.sprint.nome.slice(0, 15) + '…' : l.se.sprint.nome;
-      return `<g><circle cx="${l.xx + 4}" cy="${l.yy}" r="4" fill="${l.se.color}"/>
-        <text x="${l.xx + 12}" y="${l.yy + 4}" font-size="11" fill="var(--text)"><tspan font-weight="700">${l.se[mode][l.se.days - 1]}</tspan> <tspan fill="var(--muted)">${esc(name)}</tspan></text></g>`;
-    }).join('');
-  }
-
-  return `<svg id="attempts-chart-svg" viewBox="0 0 ${ATT_W} ${ATT_H}" width="100%" role="img"
-      aria-label="Tentativi di acquisto cumulati per giorno di sprint" style="display:block;overflow:visible"
-      data-maxdays="${maxDays}">
-    ${grid}${xLabels}${lines}${endLabels}
-    <line id="attempts-crosshair" x1="0" x2="0" y1="${ATT_PAD.t}" y2="${ATT_PAD.t + ph}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" style="display:none"/>
-    <rect id="attempts-hit" x="${ATT_PAD.l - 10}" y="${ATT_PAD.t}" width="${pw + 20}" height="${ph + 20}" fill="transparent" style="cursor:crosshair"/>
-  </svg>`;
+  const axis = `<div style="display:grid;${ATTEMPTS_GRID};gap:12px;margin-top:4px">
+    <div></div>
+    <div style="position:relative;height:16px">${ticks.map((t, i) =>
+      `<span style="position:absolute;left:${t / max * 100}%;transform:translateX(${i === 0 ? '0' : i === 4 ? '-100%' : '-50%'});font-size:10px;color:var(--muted)">${attemptsFmt(mode, t, tickDec)}</span>`).join('')}</div>
+    <div></div>
+  </div>`;
+  return bars + axis;
 }
 
 function premiumAttemptsChartCard() {
   if (!state.sprints.length) return '';
   const mode = state.attemptsChartMode;
-  const selected = state.sprints.filter(s => state.attemptsChartSel.includes(s.id));
-  const series = selected.map(attemptsSeries).filter(Boolean);
+  // In ordine di data, dal più vecchio: si legge come una storia, non come una classifica.
+  const selected = state.sprints.filter(s => state.attemptsChartSel.includes(s.id))
+    .sort((a, b) => String(a.inizio).localeCompare(String(b.inizio)));
+  const rows = selected.map(attemptsRow).filter(Boolean);
   const loading = selected.some(s => state.attemptsChartLoading[attemptsKey(s)]);
   const errors = selected.map(s => state.attemptsChartErrors[attemptsKey(s)] ? `${esc(s.nome)}: ${esc(state.attemptsChartErrors[attemptsKey(s)])}` : null).filter(Boolean);
 
@@ -9249,40 +9242,29 @@ function premiumAttemptsChartCard() {
     </button>`;
   }).join('');
 
-  const legend = series.length ? `<div style="display:flex;flex-wrap:wrap;gap:16px;margin:4px 0 10px">
-    ${series.map(se => `<span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
-      <span style="width:18px;height:3px;border-radius:2px;background:${se.color}"></span>
-      <span style="font-weight:600;color:var(--text)">${esc(se.sprint.nome)}</span>
-      <span style="color:var(--muted)">${se.sprint.inizio} → ${se.sprint.fine}${sprintHourSuffix(se.sprint)}</span>
-    </span>`).join('')}
-  </div>` : '';
-
-  const table = series.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:14px">
+  const th = (label, on) => `<th style="padding:6px 8px;font-weight:500;${on ? 'color:var(--text)' : ''}">${label}</th>`;
+  const table = rows.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:18px">
     <thead><tr style="color:var(--muted);text-align:right">
       <th style="text-align:left;padding:6px 8px;font-weight:500">Sprint</th>
-      <th style="padding:6px 8px;font-weight:500">Giorni</th>
-      <th style="padding:6px 8px;font-weight:500">Persone</th>
-      <th style="padding:6px 8px;font-weight:500">Click</th>
-      <th style="padding:6px 8px;font-weight:500">Click a persona</th>
+      ${th('Registrati')}${th('Hanno visto il paywall')}${th('Persone che tentano', mode === 'people')}${th('Click', mode === 'clicks')}${th('% persone', mode === 'people')}${th('Click ogni 100', mode === 'clicks')}
     </tr></thead>
-    <tbody>${series.map(se => {
-      const p = se.people[se.days - 1], c = se.clicks[se.days - 1];
-      return `<tr style="border-top:1px solid var(--border);text-align:right;color:var(--text)">
-        <td style="text-align:left;padding:6px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${se.color};margin-right:7px"></span>${esc(se.sprint.nome)}</td>
-        <td style="padding:6px 8px;color:var(--muted)">${se.days}</td>
-        <td style="padding:6px 8px;${mode === 'people' ? 'font-weight:700' : ''}">${p}</td>
-        <td style="padding:6px 8px;${mode === 'clicks' ? 'font-weight:700' : ''}">${c}</td>
-        <td style="padding:6px 8px;color:var(--muted)">${p > 0 ? (c / p).toFixed(1).replace('.', ',') : '—'}</td>
-      </tr>`;
-    }).join('')}</tbody>
+    <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--border);text-align:right;color:var(--text)">
+        <td style="text-align:left;padding:6px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${r.color};margin-right:7px"></span>${esc(r.sprint.nome)}</td>
+        <td style="padding:6px 8px;color:var(--muted)">${r.reg}</td>
+        <td style="padding:6px 8px;color:var(--muted)">${r.seen}${r.reg ? ` <span style="font-size:10px">(${Math.round(r.seen / r.reg * 100)}%)</span>` : ''}</td>
+        <td style="padding:6px 8px">${r.people}</td>
+        <td style="padding:6px 8px">${r.clicks}</td>
+        <td style="padding:6px 8px;${mode === 'people' ? 'font-weight:700' : 'color:var(--muted)'}">${r.ratePeople === null ? '—' : attemptsPct(r.ratePeople)}</td>
+        <td style="padding:6px 8px;${mode === 'clicks' ? 'font-weight:700' : 'color:var(--muted)'}">${r.rateClicks === null ? '—' : r.rateClicks.toFixed(1).replace('.', ',')}</td>
+      </tr>`).join('')}</tbody>
   </table>` : '';
 
   const body = !selected.length
     ? `<div style="color:var(--muted);font-size:13px;padding:28px 0;text-align:center">Scegli uno o più sprint da confrontare</div>`
-    : !series.length && loading
+    : !rows.length && loading
     ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🛒</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
-    : series.length
-    ? `<div id="attempts-chart-wrap" style="position:relative">${attemptsChartSvg(series, mode)}
+    : rows.length
+    ? `<div id="attempts-chart-wrap" style="position:relative">${attemptsBars(rows, mode)}
          <div id="attempts-tip" style="display:none;position:absolute;pointer-events:none;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text);white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:5"></div>
        </div>${table}`
     : '';
@@ -9291,26 +9273,25 @@ function premiumAttemptsChartCard() {
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">
       <div>
         <div class="card-title" style="margin-bottom:4px">Tentativi di acquisto per sprint</div>
-        <div style="font-size:12px;color:var(--muted);max-width:560px">${mode === 'people'
-          ? 'Persone diverse che hanno toccato «acquista» almeno una volta, sommate giorno dopo giorno.'
-          : 'Tutti i tocchi su «acquista», anche ripetuti dalla stessa persona, sommati giorno dopo giorno.'}
-          Persone registrate nello sprint, tentativi fatti dentro lo sprint${loading ? ' · <span class="pulse">aggiorno…</span>' : ''}</div>
+        <div style="font-size:12px;color:var(--muted);max-width:600px">${mode === 'people'
+          ? 'Su cento persone che hanno visto il paywall, quante hanno toccato «acquista» almeno una volta.'
+          : 'Ogni cento persone che hanno visto il paywall, quanti tocchi su «acquista», anche ripetuti.'}
+          Persone registrate nello sprint, eventi dentro le date dello sprint: la durata non conta${loading ? ' · <span class="pulse">aggiorno…</span>' : ''}</div>
       </div>
       <div style="display:flex;gap:6px">${modeBtn('people', 'Persone')}${modeBtn('clicks', 'Click')}</div>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 12px">${chips}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 16px">${chips}</div>
     ${errors.length ? `<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠️ ${errors.join(' · ')}</div>` : ''}
-    ${legend}
     ${body}
   </div>`;
 }
 
 function attachAttemptsChartEvents() {
-  // Prima apertura: gli ultimi due sprint, così il grafico non nasce vuoto.
+  // Prima apertura: gli ultimi tre sprint, così il grafico non nasce vuoto.
   if (!state.attemptsChartInit && state.sprints.length && document.querySelector('.attempts-chip')) {
     state.attemptsChartInit = true;
     const byStart = [...state.sprints].sort((a, b) => String(a.inizio).localeCompare(String(b.inizio)));
-    state.attemptsChartSel = byStart.slice(-2).map(s => s.id);
+    state.attemptsChartSel = byStart.slice(-3).map(s => s.id);
   }
   document.querySelectorAll('.attempts-mode').forEach(el =>
     el.addEventListener('click', () => { state.attemptsChartMode = el.dataset.mode; render(); }));
@@ -9323,42 +9304,31 @@ function attachAttemptsChartEvents() {
     }));
   if (document.querySelector('.attempts-chip')) ensureAttemptsChartData();
 
-  const svg = document.getElementById('attempts-chart-svg');
-  const hit = document.getElementById('attempts-hit');
-  const tip = document.getElementById('attempts-tip');
-  const cross = document.getElementById('attempts-crosshair');
   const wrap = document.getElementById('attempts-chart-wrap');
-  if (!svg || !hit || !tip || !cross || !wrap) return;
-  const mode = state.attemptsChartMode;
-  const series = state.sprints.filter(s => state.attemptsChartSel.includes(s.id)).map(attemptsSeries).filter(Boolean);
-  const maxDays = Number(svg.dataset.maxdays) || 1;
-  const pw = ATT_W - ATT_PAD.l - attPadR(series.length);
-  const dayX = d => ATT_PAD.l + (maxDays === 1 ? pw / 2 : (d - 1) / (maxDays - 1) * pw);
-  const dayCum = mode === 'people' ? 'people' : 'clicks';
-  const dayNew = mode === 'people' ? 'dayPeople' : 'dayClicks';
-
-  hit.addEventListener('mousemove', ev => {
-    const r = svg.getBoundingClientRect();
-    const vx = (ev.clientX - r.left) / r.width * ATT_W;
-    const d = maxDays === 1 ? 1 : Math.min(maxDays, Math.max(1, Math.round((vx - ATT_PAD.l) / pw * (maxDays - 1)) + 1));
-    cross.setAttribute('x1', dayX(d)); cross.setAttribute('x2', dayX(d));
-    cross.style.display = '';
-    const rows = series.filter(se => d <= se.days).map(se =>
-      `<div style="display:flex;align-items:center;gap:7px;margin-top:4px">
-        <span style="width:8px;height:8px;border-radius:50%;background:${se.color}"></span>
-        <span style="color:var(--muted)">${esc(se.sprint.nome)}</span>
-        <span style="margin-left:auto;padding-left:14px;font-weight:700">${se[dayCum][d - 1]}</span>
-        <span style="color:var(--muted);min-width:34px;text-align:right">+${se[dayNew][d - 1]}</span>
-      </div>`).join('');
-    tip.innerHTML = `<div style="font-weight:600">Giorno ${d}</div>${rows || '<div style="color:var(--muted);margin-top:4px">nessuno sprint arriva a questo giorno</div>'}
-      <div style="color:var(--muted);font-size:10px;margin-top:6px">totale fino a qui · +quel giorno${mode === 'people' ? ' (primo tentativo)' : ''}</div>`;
-    tip.style.display = 'block';
-    const px = dayX(d) / ATT_W * r.width;
-    const left = px + 14 + tip.offsetWidth > wrap.clientWidth ? px - 14 - tip.offsetWidth : px + 14;
-    tip.style.left = Math.max(0, left) + 'px';
-    tip.style.top = (ATT_PAD.t + (ATT_H - ATT_PAD.t - ATT_PAD.b) * 0.55) / ATT_H * r.height + 'px';
+  const tip = document.getElementById('attempts-tip');
+  if (!wrap || !tip) return;
+  const rows = state.sprints.filter(s => state.attemptsChartSel.includes(s.id))
+    .sort((a, b) => String(a.inizio).localeCompare(String(b.inizio)))
+    .map(attemptsRow).filter(Boolean);
+  wrap.querySelectorAll('.attempts-bar-row').forEach(el => {
+    const r = rows[Number(el.dataset.i)];
+    if (!r) return;
+    el.addEventListener('mouseenter', () => {
+      el.style.background = 'rgba(255,255,255,.03)';
+      const line = (k, v) => `<div style="display:flex;gap:16px;justify-content:space-between;margin-top:3px"><span style="color:var(--muted)">${k}</span><span style="font-weight:600">${v}</span></div>`;
+      tip.innerHTML = `<div style="display:flex;align-items:center;gap:7px;font-weight:600"><span style="width:8px;height:8px;border-radius:50%;background:${r.color}"></span>${esc(r.sprint.nome)}</div>
+        ${line('Registrati', r.reg)}
+        ${line('Hanno visto il paywall', r.seen)}
+        ${line('Persone che tentano', r.people + (r.ratePeople === null ? '' : ` · ${attemptsPct(r.ratePeople)}`))}
+        ${line('Click', r.clicks + (r.rateClicks === null ? '' : ` · ${r.rateClicks.toFixed(1).replace('.', ',')} ogni 100`))}
+        ${r.people > 0 ? line('Click a persona', (r.clicks / r.people).toFixed(1).replace('.', ',')) : ''}
+        ${r.tracked ? '' : '<div style="color:#fbbf24;font-size:11px;margin-top:6px">paywall non tracciato: la percentuale non vale</div>'}`;
+      tip.style.display = 'block';
+      tip.style.top = (el.offsetTop + el.offsetHeight + 2) + 'px';
+      tip.style.left = Math.max(0, Math.min(wrap.clientWidth - tip.offsetWidth, wrap.clientWidth * 0.35)) + 'px';
+    });
+    el.addEventListener('mouseleave', () => { el.style.background = ''; tip.style.display = 'none'; });
   });
-  hit.addEventListener('mouseleave', () => { tip.style.display = 'none'; cross.style.display = 'none'; });
 }
 
 // ── SPRINT COMPARE — FUNNEL PREMIUM ─────────────────────────────────────
