@@ -7405,23 +7405,11 @@ function pagePremium() {
       ${premiumKpi('Tentato acquisto', f.purchase_attempts, `person${f.purchase_attempts === 1 ? 'a' : 'e'} diverse · ${f.purchase_attempts_total ?? f.purchase_attempts} tentativ${(f.purchase_attempts_total ?? f.purchase_attempts) === 1 ? 'o' : 'i'}`, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% delle persone che vedono il paywall' : null)}
     </div>
 
-    <!-- Conversion funnel -->
-    ${premiumFunnelEditPanel()}
-    <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
-        <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
-        ${!state.editingPremiumFunnel ? `<button id="edit-premium-funnel" class="btn btn-ghost" style="padding:5px 12px;font-size:12px">⚙ Modifica funnel</button>` : ''}
-      </div>
-      ${premiumFunnelSemanticsBadge()}
-      ${premiumFunnelRangeBar()}
-      ${premiumFunnelViz(state.premiumFunnelRangeData?.funnel || f)}
+    <!-- Il «Funnel di conversione» (con il suo confronto sprint) è stato tolto il 26/09/2026:
+         Mattia non lo usava più. Le funzioni premiumFunnel* e sprintPremiumFunnel* restano nel
+         file ma nessuno le disegna; i loro handler sono tutti con ?. e non trovano niente. -->
 
-      <div style="border-top:1px solid #1a1a2e;margin-top:18px;padding-top:18px">
-        ${sprintPremiumFunnelSection()}
-      </div>
-    </div>
-
-    <!-- Tentativi di acquisto giorno per giorno, più sprint sovrapposti -->
+    <!-- Tentativi di acquisto per sprint, in percentuale su chi ha visto il paywall -->
     ${premiumAttemptsChartCard()}
 
     <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
