@@ -7370,7 +7370,7 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'coach_personalization',
     name: 'Aumenta la personalizzazione',
-    rotation: 'live',
+    rotation: 'retired',
     where: 'Overlay a schermo pieno sopra l\'hub del coach.',
     when: 'Quando un utente free tocca il tastino «Aumenta la personalizzazione» nell\'hub del coach. Overlay a tre slide, in produzione dal 12/09/2026.',
     exit: 'La × dell\'overlay, o il tasto indietro del telefono.',
@@ -7381,6 +7381,21 @@ const CREATIVE_REGISTRY = [
       { idx: 1, t: 'Dove ti porta', d: 'due curve, settimana 1 → settimana 12' },
       { idx: 2, t: 'I prezzi', d: 'disegno proprio, numeri del paywall vero' },
     ],
+    note: 'Fuori dall\'hub dal 27/09/2026: sullo stesso tastino (source coach_checkin) c\'è «Il coach ti segue». Resta montabile solo da /dev. Le build uscite prima di quella data mostrano ancora questa.',
+  },
+  {
+    variant: 'coach_follow',
+    name: 'Il coach ti segue',
+    rotation: 'live',
+    where: 'Overlay a schermo pieno sopra l\'hub del coach.',
+    when: 'Quando un utente free tocca il tastino delle domande («Aumenta la personalizzazione») nell\'hub del coach. Dal 27/09/2026, al posto delle tre slide di «Aumenta la personalizzazione».',
+    exit: 'La × in alto a sinistra, o il tasto indietro del telefono.',
+    what: 'Una schermata sola. Il coach parla in quattro fumetti («Anna, oggi ti conosco solo al 30%» → «Fatti seguire da me e ti creo un piano pensato al 100% per te» → «Tu pensa solo ad allenarti» → «Al resto ci penso io e ti porto al 100% del tuo potenziale!»), la mascotte cambia posa e l\'anello sale dal punteggio vero al 100%. All\'ultimo fumetto compaiono tre tessere (un coach che ti segue, allenati senza limiti, esercizi adatti a te) e, per ultimi, l\'interruttore «Ottieni 7 giorni gratis» (spento), l\'annuale, il mensile e il pulsante. Spento si paga subito l\'annuale a listino (piano base, senza prova); acceso l\'annuale diventa la scheda «0 € oggi» e il mensile sparisce.',
+    file: 'app/src/components/PremiumProposals/CoachFollowPaywall/CoachFollowFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Il coach ti segue', d: 'quattro fumetti, anello fino al 100%, tre tessere, poi prova e piani' },
+    ],
+    note: 'I prezzi compaiono circa 8,5 secondi dopo l\'apertura (subito con le animazioni ridotte): chi chiude prima non ha visto il prezzo. Il cta_copy dice se il tocco era con la prova (label_trial) o senza (common:continue).',
   },
   {
     variant: 'meal_scan',
@@ -8369,6 +8384,7 @@ const CREATIVE_LABELS = {
   ad_paywall: 'Annuncio + prezzi',
   paywall_giorno_zero: 'Giorno Zero',
   coach_personalization: 'Aumenta la personalizzazione',
+  coach_follow: 'Il coach ti segue',
   meal_scan: 'Contacalorie',
   coach_slides: 'Primo allenamento · 3 slide',
   coach_spot: 'Coach Spot',
