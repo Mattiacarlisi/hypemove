@@ -447,10 +447,11 @@ let state = {
   funnelIncludeEmulators: false, // override v2: reinclude gli emulatori (p_include_emulators)
   funnelIncludeTest: false,      // override v2: reinclude gli account test (p_include_test)
   funnelIncludeBlocked: false,   // override v2: reinclude gli utenti bloccati (p_include_blocked)
+  funnelIncludeBots: false,      // override: reinclude i bot — Test Lab, browser automatici, UA falsificata (p_include_bots, anche su Attivazione)
   funnelCohortBase: null,        // coorte dell'ultimo calcolo SENZA override — baseline per il delta
   excludedUsers: null,           // lista nominale esclusi (RPC kpi_excluded_users_list)
   excludedLoading: false, excludedError: null,
-  excludedFilter: null,          // filtro motivo nella lista: null | 'blocked' | 'test' | 'emulator'
+  excludedFilter: null,          // filtro motivo nella lista: null | 'blocked' | 'test' | 'emulator' | 'bot'
   eventFunnelConfig: [],       // [{event, source, label, vsIdx, children?:[{event,source,label}]}] — step del funnel a eventi. `children` = varianti annidate visibili espandendo il parent (es. sign_up → signup_google/signup_email); non partecipano al calcolo della % dello step successivo.
   eventFunnel: null,           // risultato RPC kpi_funnel_v2: {steps:[{idx,event,source,numero}]}
   eventFunnelFlatMap: null,    // { parent:[flatIdx|null,...], child:[[flatIdx|null,...],...] } — mappa posizione UI ↔ posizione in p_steps del flatten (parent+children serializzati in sequenza per la RPC)
@@ -905,11 +906,12 @@ async function fetchEventFunnel() {
       includeEmulators: state.funnelIncludeEmulators,
       includeTest:      state.funnelIncludeTest,
       includeBlocked:   state.funnelIncludeBlocked,
+      includeBots:      state.funnelIncludeBots,
       mode:             state.eventFunnelMode,
     });
     // Baseline per il delta coorte della card Parametri: la fotografo solo quando
     // nessun override è attivo, così il confronto è sempre "vs esclusioni standard".
-    if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked) {
+    if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked && !state.funnelIncludeBots) {
       state.funnelCohortBase = state.eventFunnel?.cohort_size ?? null;
     }
   } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
@@ -970,6 +972,7 @@ async function computeEventFunnel(flatSteps, opts) {
     if (opts.includeEmulators) args.p_include_emulators = true;
     if (opts.includeTest)      args.p_include_test      = true;
     if (opts.includeBlocked)   args.p_include_blocked   = true;
+    if (opts.includeBots)      args.p_include_bots      = true;
     // Filtro sorgente coorte (install_referrer di sessione, dati dall'11/07/2026).
     if (opts.source && opts.source !== 'all') args.p_source = opts.source;
     // Modalità volumi: conteggi indipendenti per step, niente cascata (default RPC = 'cohort').
@@ -983,6 +986,7 @@ async function computeEventFunnel(flatSteps, opts) {
       include_emulators: res.data?.include_emulators,
       include_test:      res.data?.include_test,
       include_blocked:   res.data?.include_blocked,
+      include_bots:      res.data?.include_bots,
       excluded_counts:   res.data?.excluded_counts || null,
       cohort_size:       res.data?.cohort_size ?? null,
     };
@@ -4713,7 +4717,10 @@ async function fetchActivation() {
     const p_end   = (selSprint && sprintEndTs(selSprint))   || dayAfterTs(state.funnelTo);
     // p_cohort_start resta al default: è la storia su cui vive la serie settimanale, che non si
     // filtra mai. Il periodo scelto viaggia in p_start/p_end e tocca solo gli altri due pannelli.
-    const res = await sb.rpc('kpi_activation', { p_start, p_end });
+    // p_include_bots solo se acceso: col chip spento vale il default della RPC (bot esclusi).
+    const args = { p_start, p_end };
+    if (state.funnelIncludeBots) args.p_include_bots = true;
+    const res = await sb.rpc('kpi_activation', args);
     if (res.error) throw res.error;
     state.activation = res.data;
   } catch (e) { state.activationError = e.message || 'Errore sconosciuto'; }
@@ -5016,7 +5023,8 @@ function pageActivation() {
   return `
     ${savedFunnelBar({})}
     ${periodStrip({ calcId: 'activation-apply', showPresets: false })}
-    ${body}`;
+    ${body}
+    ${funnelParamsSection()}`;
 }
 
 // Sub-riga con gli eventi in OR di uno step (parent o variante). Uno step multi-evento conta
@@ -5594,14 +5602,20 @@ function sprintEventFunnelSection() {
 // ── CARD PARAMETRI DEL FUNNEL ────────────────────────────────────────────────
 // Card collassabile in fondo alla pagina Funnel. Mostra SOLO dati reali del
 // funnel a eventi (kpi_funnel_v2), niente documentazione statica:
-//   1. Toggle di inclusione (emulatori / account test / bloccati) → ricalcolo
+//   1. Toggle di inclusione (emulatori / account test / bloccati / bot) → ricalcolo
 //      immediato del funnel via p_include_emulators / p_include_test /
-//      p_include_blocked. Accanto a ognuno il delta reale sulla coorte.
+//      p_include_blocked / p_include_bots. Accanto a ognuno il delta reale sulla coorte.
+//      Sulla linguetta Attivazione (kpi_activation) c'è solo il toggle Bot: emulatori,
+//      test e bloccati lì sono esclusi sempre.
 //   2. Lista nominale degli esclusi (RPC kpi_excluded_users_list): email, motivo,
 //      iscrizione, eventi emessi, workout. Filtrabile per motivo.
 //   3. Parametri correnti della chiamata RPC (periodo, p_start/p_end, segmento).
 function funnelParamsSection() {
-  const nOverride = [state.funnelIncludeEmulators, state.funnelIncludeTest, state.funnelIncludeBlocked].filter(Boolean).length;
+  const isActivation = state.funnelMode === 'activation';
+  const nOverride = (isActivation
+    ? [state.funnelIncludeBots]
+    : [state.funnelIncludeEmulators, state.funnelIncludeTest, state.funnelIncludeBlocked, state.funnelIncludeBots]
+  ).filter(Boolean).length;
   const hdrBadge = nOverride
     ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${nOverride} override attivi</span>` : '';
   const headerEl = `
@@ -5613,7 +5627,7 @@ function funnelParamsSection() {
     </div>`;
   if (!state.funnelParamsOpen) return `<div class="card" style="margin-top:16px">${headerEl}</div>`;
 
-  if (state.funnelMode !== 'event') {
+  if (state.funnelMode !== 'event' && !isActivation) {
     return `
       <div class="card" style="margin-top:16px">
         ${headerEl}
@@ -5633,16 +5647,24 @@ function funnelParamsSection() {
 
   // Delta reale sulla coorte: differenza fra il calcolo corrente e la baseline
   // salvata al primo calcolo senza override (state.funnelCohortBase).
-  const cohortNow = fn && fn.cohort_size != null ? fn.cohort_size : null;
+  // Su Attivazione la coorte arriva da kpi_activation e il delta è il numero di bot del periodo.
+  const act = state.activation;
+  const cohortNow = isActivation
+    ? (act?.funnel?.cohort ?? null)
+    : (fn && fn.cohort_size != null ? fn.cohort_size : null);
   const base = state.funnelCohortBase;
-  const deltaStr = (cohortNow != null && base != null && cohortNow !== base)
+  const nBotsAct = act?.bots_excluded || 0;
+  const deltaStr = isActivation
+    ? (nBotsAct ? `<span style="color:var(--muted);font-weight:400;font-size:12px">${state.funnelIncludeBots ? `di cui ${nBotsAct} bot` : `${nBotsAct} bot esclusi`}</span>` : '')
+    : (cohortNow != null && base != null && cohortNow !== base)
     ? `<span style="color:${cohortNow > base ? 'var(--mattia)' : 'var(--red)'};font-weight:600">${cohortNow > base ? '+' : ''}${cohortNow - base}</span>` : '';
 
   const toggles = [
     { key: 'emulators', on: state.funnelIncludeEmulators, label: 'Emulatori',    n: nOf('emulator') },
     { key: 'test',      on: state.funnelIncludeTest,      label: 'Account test', n: nOf('test') },
     { key: 'blocked',   on: state.funnelIncludeBlocked,   label: 'Bloccati',     n: nOf('blocked') },
-  ];
+    { key: 'bots',      on: state.funnelIncludeBots,      label: 'Bot',          n: nOf('bot') },
+  ].filter(t => !isActivation || t.key === 'bots');
   const chips = toggles.map(t => `
     <button class="funnel-param-chip" data-param="${t.key}"
       style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
@@ -5667,12 +5689,12 @@ function funnelParamsSection() {
   const filt = state.excludedFilter;
   const shown = filt ? rows.filter(r => (r.reason || '').split(',').includes(filt)) : rows;
   const reasonBadge = reason => (reason || '').split(',').map(r => {
-    const c = r === 'blocked' ? '#f87171' : r === 'test' ? '#fbbf24' : '#22d3ee';
-    const l = r === 'blocked' ? 'bloccato' : r === 'test' ? 'test' : 'emulatore';
+    const c = r === 'blocked' ? '#f87171' : r === 'test' ? '#fbbf24' : r === 'bot' ? '#a78bfa' : '#22d3ee';
+    const l = r === 'blocked' ? 'bloccato' : r === 'test' ? 'test' : r === 'bot' ? 'bot' : 'emulatore';
     return `<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${c}22;color:${c};font-weight:600;margin-left:4px;white-space:nowrap">${l}</span>`;
   }).join('');
-  const filtChips = [null, 'blocked', 'test', 'emulator'].map(f => {
-    const lab = f === null ? `Tutti ${rows.length}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Test ${nOf('test')}` : `Emulatori ${nOf('emulator')}`;
+  const filtChips = [null, 'blocked', 'test', 'emulator', 'bot'].map(f => {
+    const lab = f === null ? `Tutti ${rows.length}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Test ${nOf('test')}` : f === 'bot' ? `Bot ${nOf('bot')}` : `Emulatori ${nOf('emulator')}`;
     const on = filt === f;
     return `<button class="excl-filter" data-filter="${f || ''}"
       style="cursor:pointer;padding:3px 11px;font-size:11px;font-weight:600;border-radius:20px;border:1px solid;
@@ -5711,6 +5733,7 @@ function funnelParamsSection() {
         ${statusRow}
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Chi conta nel funnel — click per ricalcolare</div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+        ${isActivation ? `<div style="margin-top:10px;font-size:11px;color:var(--muted)">Emulatori, account test e bloccati qui sono esclusi sempre.</div>` : ''}
         <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:16px">
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
             <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-right:4px">Chi è escluso</span>
@@ -5760,6 +5783,7 @@ async function fetchSprintEventFunnel() {
         includeEmulators: state.funnelIncludeEmulators,
         includeTest:      state.funnelIncludeTest,
         includeBlocked:   state.funnelIncludeBlocked,
+        includeBots:      state.funnelIncludeBots,
       }).then(data => ({ id: s.id, data }))
        .catch(err  => ({ id: s.id, error: err }))
     ));
@@ -12056,10 +12080,13 @@ function attachEvents() {
       if (k === 'emulators')    state.funnelIncludeEmulators = !state.funnelIncludeEmulators;
       else if (k === 'test')    state.funnelIncludeTest      = !state.funnelIncludeTest;
       else if (k === 'blocked') state.funnelIncludeBlocked   = !state.funnelIncludeBlocked;
+      else if (k === 'bots')    state.funnelIncludeBots      = !state.funnelIncludeBots;
       // Il confronto sprint eventualmente già calcolato resta con i vecchi flag:
       // lo svuoto così un nuovo "Calcola confronto" riparte coerente.
       state.sprintEventData = {};
-      if (state.funnelMode === 'event') fetchEventFunnel(); else render();
+      if (state.funnelMode === 'event') fetchEventFunnel();
+      else if (state.funnelMode === 'activation') fetchActivation();
+      else render();
     }));
 
   // Funnel — "Assegna a sprint": copia il funnel corrente negli sprint selezionati (DB).
