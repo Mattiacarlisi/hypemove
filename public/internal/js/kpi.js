@@ -7549,7 +7549,7 @@ const CREATIVE_ACT_COLS = [
   { k: 'attempt',   l: 'Pagamento',     c: '#f59e0b', t: 'paywall_purchase_attempt · si è aperto il foglio di pagamento Google', ev: 'paywall_purchase_attempt' },
   { k: 'cancelled', l: 'Annullato',     c: '#8b8ba7', t: 'paywall_purchase_cancelled · ha aperto il pagamento e si è tirato indietro', ev: 'paywall_purchase_cancelled' },
   { k: 'error',     l: 'Errore',        c: '#ef4444', t: 'paywall_purchase_error · lo store ha risposto con un errore', ev: 'paywall_purchase_error' },
-  { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · fino al 13/09/2026 arrivava quasi sempre senza il nome della creatività: qui è sottostimato finché il nuovo build non è in mano agli utenti', ev: 'paywall_purchase_success' },
+  { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · perdeva il nome della creatività quando Android uccideva l\'app durante il pagamento, e contava come acquisto la rivalidazione di un abbonamento vecchio: corretto il 27/09/2026, vale dal rilascio successivo', ev: 'paywall_purchase_success' },
 ];
 
 // I gesti che si possono mettere in percentuale. Sono quelli delle colonne di destra più prova e
@@ -7838,9 +7838,12 @@ function premiumCreativesAuditCard() {
           <div style="font-size:11px;color:#d9c48a;line-height:1.65">
             ${orfani.users} utent${orfani.users === 1 ? "e" : "i"} nel periodo. Non sono di nessuna creatività: l'evento arriva senza il nome
             della proposta, e fino al 13/09/2026 finiva silenziosamente dentro <strong>Funnel standard</strong> — che per questo
-            sembrava convertire meglio di tutti. Sono quasi tutti <code style="font-family:var(--mono)">paywall_purchase_success</code>,
-            che <code style="font-family:var(--mono)">PurchaseService</code> emette quando l'esito dell'acquisto arriva a pagamento già chiuso.
-            Corretto in app lo stesso giorno: gli acquisti nuovi porteranno di nuovo il nome della creatività, questi no.
+            sembrava convertire meglio di tutti. Sono quasi tutti <code style="font-family:var(--mono)">paywall_purchase_success</code>, e le cause
+            erano due: Android che uccide l'app mentre l'utente paga sul foglio di Google (la ricevuta arriva in un processo che non
+            ricorda il paywall), e abbonamenti vecchi rivalidati dopo una reinstallazione, contati come acquisti nuovi.
+            Corretto in app il 27/09/2026, vale dal rilascio successivo: il paywall di partenza si salva sul telefono prima del pagamento, e
+            una rivalidazione non è più un «Comprato». Gli eventi già scritti restano così: per chi ha pagato davvero fanno fede
+            le colonne <strong>In prova</strong> e <strong>Pagante</strong>, che partono dai pagamenti.
           </div>
           <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:9px">
             ${CREATIVE_ACT_COLS.map(c => {
@@ -7877,7 +7880,7 @@ const CREATIVE_MARKS = [
   { k: 'plan',    l: 'piano',      d: 'paywall_plan_select · scatta solo se CAMBIA piano, uno zero può essere vero', soft: true },
   { k: 'cta',     l: 'CTA',        d: 'paywall_cta_tap · ha premuto il bottone che compra', soft: true },
   { k: 'attempt', l: 'pagamento',  d: 'paywall_purchase_attempt · lo store ha preso in carico', soft: true },
-  { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · fino al 13/09/2026 arrivava senza variant e una volta per riavvio: corretto in app, in dashboard si vedrà dal prossimo rilascio', soft: true },
+  { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · senza variant se Android uccideva l\'app durante il pagamento, e scattava anche su un abbonamento vecchio rivalidato: corretto il 27/09/2026, vale dal rilascio successivo', soft: true },
 ];
 // ── LE FOTO CARICATE A MANO ──────────────────────────────────────────────────
 // Gli scatti automatici (banco di posa) fotografano i componenti in un browser con dati finti:
