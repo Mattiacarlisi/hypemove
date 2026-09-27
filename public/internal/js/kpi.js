@@ -7124,7 +7124,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20260926a';
+const PAYWALL_SHOT_V = '20260927a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7320,13 +7320,13 @@ const CREATIVE_REGISTRY = [
     where: 'Overlay a schermo pieno sopra la chat del coach o il dettaglio dell\'allenamento.',
     when: 'Quando i crediti AI sono finiti e l\'utente prova comunque a usarli: scrivendo al coach in chat, toccando «Modifica» nel dettaglio dell\'allenamento, o dalla CTA della card upsell in chat. Dal 26/09/2026, al posto di «Coach AI · chat».',
     exit: 'La × dell\'overlay su entrambe le schermate. Il tasto indietro dai prezzi torna alla dimostrazione, dalla dimostrazione chiude.',
-    what: 'La prima slide della proposta del primo allenamento — la chat del coach che risponde coi numeri e apre il grafico del peso, dentro il telefono disegnato — con un titolo suo, «Chiedi al tuo coach quello che vuoi», e poi subito i piani. Due schermate e non tre: chi arriva qui ha appena sbattuto contro un muro (aveva una domanda e non può farla), e ogni schermata prima del prezzo è gente che se ne va. Il primo passo si chiama `hero` con feature `chat` come nella «Coach AI · chat», così i due gradini zero si confrontano.',
+    what: 'La prima slide della proposta del primo allenamento — la chat del coach che risponde coi numeri e apre il grafico del peso, dentro il telefono disegnato — con un titolo suo, «Chiedi al tuo coach quello che vuoi», e poi subito i piani, disegnati come quelli del Contacalorie ma coi punti del coach: allenamenti illimitati, il coach in chat, l\'allenamento cambiato su misura. Il pulsante promette la prova solo a chi su Play ne ha diritto (7 giorni sull\'annuale). Due schermate e non tre: chi arriva qui ha appena sbattuto contro un muro (aveva una domanda e non può farla), e ogni schermata prima del prezzo è gente che se ne va. Il primo passo si chiama `hero` con feature `chat` come nella «Coach AI · chat», così i due gradini zero si confrontano.',
     file: 'app/src/components/PremiumProposals/CoachAiDemoPaywall/CoachAiDemoFlow.tsx',
     screens: [
       { idx: 0, t: 'Il coach', d: '«Ehi coach, come sto andando?» → la risposta coi numeri e il grafico del peso che scende verso l\'obiettivo' },
-      { idx: 1, t: 'I prezzi', d: 'schermata piani standard, skin arancione' },
+      { idx: 1, t: 'I prezzi', d: 'la mascotte, «Passa a HypeMove+», tre punti sul coach e sugli allenamenti, le due tessere e il pulsante' },
     ],
-    note: 'La riga dell\'obiettivo nel grafico (55 kg) non ha una fonte dati vera, come nella tre-slide da cui viene: è una dimostrazione dichiarata, non i dati di chi guarda.',
+    note: 'La riga dell\'obiettivo nel grafico (55 kg) non ha una fonte dati vera, come nella tre-slide da cui viene: è una dimostrazione dichiarata, non i dati di chi guarda. La schermata dei prezzi è cambiata il 27/09/2026: prima era quella standard (skin arancione), dal 27/09 è quella del Contacalorie coi testi del coach. Le build uscite prima di quella data mostrano ancora la standard.',
   },
   {
     variant: 'coach_ai_visual',
