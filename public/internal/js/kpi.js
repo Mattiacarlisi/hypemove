@@ -2424,7 +2424,7 @@ const GOAL_BAR_COLORS = ['#a78bfa', '#22d3ee', '#4ade80', '#f59e0b', '#f43f5e', 
 // Un abbonamento Play per riga da kpi_premium_timeline (fonte play_token_facts: test e account
 // interni già esclusi); i conti si fanno qui, così cambiare periodo non richiama il DB.
 // Sopra tre risposte (paganti, prove del periodo, prove in scadenza), sotto la curva dei paganti
-// giorno per giorno con le prove sulla stessa linea del tempo.
+// giorno per giorno.
 const PTL_PRICE_MONTH = { monthly: 9.90, yearly: 29.99 / 12 };
 const PTL = { paid: '#fbbf24', trial: '#a78bfa', lost: '#3c3c55', warn: '#fb923c', grid: '#1d1d2b', faint: '#4a4a68', surface: '#111118' };
 const PTL_OUTCOME = {
@@ -2487,13 +2487,7 @@ function premiumTimelineModel() {
   const exits   = spans.filter(x => x.ended && x.to >= from && x.to <= today).map(x => ({ day: x.to, plan: ptlPlan(x.t.product) }));
 
   const trials = rows.filter(t => t.trial_at && romeDay(t.trial_at) >= from)
-    .map(t => {
-      const outcome = ptlTrialOutcome(t, now);
-      // Una prova convertita finisce al primo pagamento; le altre alla scadenza della prova.
-      const end = outcome === 'converted' ? romeDay(t.paid_at) : romeDay(t.expires_at || t.trial_at);
-      return { start: romeDay(t.trial_at), end: end < romeDay(t.trial_at) ? romeDay(t.trial_at) : end, outcome };
-    })
-    .sort((a, b) => a.start.localeCompare(b.start));
+    .map(t => ({ outcome: ptlTrialOutcome(t, now) }));
   const outcomes = { converted: 0, lost: 0, canceling: 0, open: 0 };
   trials.forEach(t => outcomes[t.outcome]++);
 
@@ -2536,10 +2530,7 @@ function premiumTimelineChart(m) {
   if (!n) return chartPlaceholder();
   const W = 900, L = 30, R = 34, T = 16, chartH = 150;
   const axisY = T + chartH + 16;
-  // L'asse va oltre oggi fino all'ultima prova aperta, così le scadenze in arrivo si vedono.
-  const lastDue = Object.keys(m.due).sort().pop();
-  const end = lastDue && lastDue > m.today ? lastDue : m.today;
-  const spanDays = Math.max(1, dayDiff(m.from, end));
+  const spanDays = Math.max(1, dayDiff(m.from, m.today));
   const x = day => L + dayDiff(m.from, day) / spanDays * (W - L - R);
   const ghost = state.ptlCompare && m.prevSeries ? m.prevSeries : null;
   const maxV = Math.max(4, ...pts.map(p => p.v), ...(ghost ? ghost.map(p => p.v) : []));
@@ -2571,40 +2562,14 @@ function premiumTimelineChart(m) {
   const last = pts[n - 1];
   const every = Math.max(1, Math.ceil(n / 6));
   const xl = pts.filter((_, i) => i % every === 0 && n - 1 - i >= every / 2).concat(last)
-    .map(p => `<text x="${x(p.day)}" y="${axisY}" font-size="9.5" text-anchor="middle" fill="${p.day === m.today ? 'var(--text)' : PTL.faint}">${p.day === m.today ? 'oggi' : ddmm(p.day)}</text>`).join('')
-    + (end > m.today ? `<text x="${x(end)}" y="${axisY}" font-size="9.5" text-anchor="end" fill="${PTL.faint}">${ddmm(end)}</text>` : '');
-
-  // Prove: una capsula per prova, impilate in corsie quando si sovrappongono.
-  const laneEnd = [];
-  const caps = m.trials.map(t => {
-    let lane = 0;
-    while (laneEnd[lane] && laneEnd[lane] >= t.start) lane++;
-    laneEnd[lane] = t.end;
-    return { ...t, lane };
-  });
-  const lanes = Math.max(1, laneEnd.length);
-  const capH = Math.max(2, Math.min(6, Math.floor(60 / lanes) - 2));
-  const stripY = axisY + 28;
-  const strip = m.trials.length ? `
-    <text x="${L}" y="${stripY - 10}" font-size="10" fill="#7070a0" letter-spacing=".06em">PROVE</text>
-    ${caps.map(c => {
-      const x1 = x(c.start), x2 = x(c.end > m.today ? m.today : c.end);
-      const o = PTL_OUTCOME[c.outcome];
-      const future = c.end > m.today ? `<rect x="${x2}" y="${stripY + c.lane * (capH + 2)}" width="${x(c.end) - x2}" height="${capH}" rx="${capH / 2}" fill="${o.c}" opacity=".3"><title>Scade il ${ddmm(c.end)}</title></rect>` : '';
-      return `<rect x="${x1}" y="${stripY + c.lane * (capH + 2)}" width="${Math.max(capH, x2 - x1)}" height="${capH}" rx="${capH / 2}" fill="${o.c}">
-        <title>Prova ${ddmm(c.start)} → ${ddmm(c.end)}: ${o.l}</title></rect>${future}`;
-    }).join('')}
-    <g font-size="10" fill="#7070a0">${['converted', 'open', 'canceling', 'lost'].map((k, i) =>
-      `<rect x="${W - R - 330 + i * 84}" y="${stripY - 19}" width="8" height="8" rx="2" fill="${PTL_OUTCOME[k].c}"/><text x="${W - R - 318 + i * 84}" y="${stripY - 11}">${PTL_OUTCOME[k].l}</text>`).join('')}</g>`
-    : `<text x="${L}" y="${stripY - 10}" font-size="10" fill="#7070a0">Nessuna prova nel periodo</text>`;
-  const H = stripY + lanes * (capH + 2) + 6;
-  const todayLine = end > m.today ? `<line x1="${x(m.today)}" x2="${x(m.today)}" y1="${T}" y2="${H - 4}" stroke="var(--text)" stroke-opacity=".25"/>` : '';
+    .map(p => `<text x="${x(p.day)}" y="${axisY}" font-size="9.5" text-anchor="middle" fill="${p.day === m.today ? 'var(--text)' : PTL.faint}">${p.day === m.today ? 'oggi' : ddmm(p.day)}</text>`).join('');
+  const H = axisY + 6;
 
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">
     <defs><linearGradient id="ptl-area" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="${PTL.paid}" stop-opacity=".22"/><stop offset="1" stop-color="${PTL.paid}" stop-opacity="0"/>
     </linearGradient></defs>
-    ${grid}${todayLine}
+    ${grid}
     <path d="${area}" fill="url(#ptl-area)"/>
     ${ghost ? (() => {
       let g = `M${x(pts[0].day)},${y(ghost[0].v)}`;
@@ -2616,7 +2581,7 @@ function premiumTimelineChart(m) {
     ${hover}${marks}
     <circle cx="${x(last.day)}" cy="${y(last.v)}" r="5" fill="${PTL.paid}" stroke="${PTL.surface}" stroke-width="2"/>
     <text x="${x(last.day) + 10}" y="${y(last.v) + 4}" font-size="12" font-weight="600" fill="var(--text)" font-family="var(--mono)">${last.v}</text>
-    ${xl}${strip}
+    ${xl}
   </svg>`;
 }
 
