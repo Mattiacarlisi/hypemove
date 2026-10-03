@@ -493,7 +493,7 @@ let state = {
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
   // Card "Abbonamenti" (overview): dati da kpi_premium_timeline, periodo e confronto scelti qui.
-  premTimeline: null, premTimelineError: null, ptlRange: 60, ptlCompare: false,
+  premTimeline: null, premTimelineError: null, ptlFrom: null, ptlTo: null, ptlCompare: false,
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
   sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' },
@@ -2430,6 +2430,7 @@ const PTL = { paid: '#fbbf24', trial: '#a78bfa', lost: '#3c3c55', warn: '#fb923c
 const PTL_OUTCOME = {
   converted: { l: 'pagante',     c: PTL.paid },
   lost:      { l: 'persa',       c: PTL.lost },
+  pending:   { l: 'in attesa di esito', c: PTL.trial, outline: true },
   canceling: { l: 'già disdetta', c: PTL.warn },
   open:      { l: 'in corso',    c: PTL.trial },
 };
@@ -2447,11 +2448,14 @@ function ptlPlan(product) {
 }
 
 // Esito di una prova, guardando lo stato attuale del token.
+// 'pending': la prova è scaduta ma il token dice ancora "prova in corso". Google non ha ancora
+// comunicato se ha fatto pagare o ha chiuso: non è persa finché non lo dice.
 function ptlTrialOutcome(t, now) {
   if (t.paid_at) return 'converted';
-  const running = t.expires_at && new Date(t.expires_at) > now && t.status !== 'revoked'
-    && (t.payment_state === 2 || t.is_trial);
-  if (!running) return 'lost';
+  const trialing = t.status !== 'revoked' && (t.payment_state === 2 || t.is_trial);
+  const expired  = !t.expires_at || new Date(t.expires_at) <= now;
+  if (!trialing) return 'lost';
+  if (expired) return t.status === 'active' ? 'pending' : 'lost';
   return t.status === 'cancelled' ? 'canceling' : 'open';
 }
 
@@ -2461,35 +2465,57 @@ function ptlPaidEnd(t, now) {
   return t.status === 'revoked' && exp > now ? now : exp;
 }
 
+// Periodo scelto con le due date; senza scelta, gli ultimi 30 giorni fino a oggi.
+function ptlPeriod(today) {
+  let to   = state.ptlTo && state.ptlTo < today ? state.ptlTo : today;
+  let from = state.ptlFrom || addDays(to, -29);
+  if (from > to) [from, to] = [to, from];
+  return { from, to };
+}
+
 function premiumTimelineModel() {
   const rows  = state.premTimeline || [];
   const now   = new Date();
   const today = romeDay(now);
   const first = rows.length ? romeDay(rows[0].acquired_at) : today;
-  const from  = state.ptlRange ? addDays(today, -state.ptlRange + 1) : first;
+  const { from, to } = ptlPeriod(today);
+  const inPeriod = day => day >= from && day <= to;
 
   // Paganti attivi a fine giornata, a giorni di Roma; oggi = adesso.
   const spans = rows.filter(t => t.paid_at).map(t => ({
     t, from: romeDay(t.paid_at), to: romeDay(ptlPaidEnd(t, now)), ended: ptlPaidEnd(t, now) <= now,
   }));
-  const activeOn = d => d === today
-    ? spans.filter(x => !x.ended).length
-    : spans.filter(x => x.from <= d && x.to > d).length;
+  const activeAt = d => d === today
+    ? spans.filter(x => !x.ended)
+    : spans.filter(x => x.from <= d && x.to > d);
+  const activeOn = d => activeAt(d).length;
   const series = [];
-  for (let d = from; d <= today; d = addDays(d, 1)) series.push({ day: d, v: activeOn(d) });
+  for (let d = from; d <= to; d = addDays(d, 1)) series.push({ day: d, v: activeOn(d) });
 
-  // Periodo precedente di pari durata (solo con un periodo scelto, non con "Tutto").
-  const len = dayDiff(from, today) + 1;
-  const prevFrom = state.ptlRange ? addDays(from, -len) : null;
-  const inPrev = day => prevFrom && day >= prevFrom && day < from;
-  const prevSeries = prevFrom ? series.map((p, i) => ({ day: p.day, v: activeOn(addDays(prevFrom, i)) })) : null;
-  const entries = spans.filter(x => x.from >= from).map(x => ({ day: x.from, plan: ptlPlan(x.t.product), fromTrial: !!x.t.trial_at }));
-  const exits   = spans.filter(x => x.ended && x.to >= from && x.to <= today).map(x => ({ day: x.to, plan: ptlPlan(x.t.product) }));
+  // Periodo precedente di pari durata, subito prima di "from".
+  const len = dayDiff(from, to) + 1;
+  const prevFrom = addDays(from, -len);
+  const inPrev = day => day >= prevFrom && day < from;
+  const prevSeries = series.map((p, i) => ({ day: p.day, v: activeOn(addDays(prevFrom, i)) }));
+  const entries = spans.filter(x => inPeriod(x.from)).map(x => ({ day: x.from, plan: ptlPlan(x.t.product), fromTrial: !!x.t.trial_at }));
+  const exits   = spans.filter(x => x.ended && inPeriod(x.to)).map(x => ({ day: x.to, plan: ptlPlan(x.t.product) }));
 
-  const trials = rows.filter(t => t.trial_at && romeDay(t.trial_at) >= from)
+  const trials = rows.filter(t => t.trial_at && inPeriod(romeDay(t.trial_at)))
     .map(t => ({ outcome: ptlTrialOutcome(t, now) }));
-  const outcomes = { converted: 0, lost: 0, canceling: 0, open: 0 };
+  const outcomes = { converted: 0, lost: 0, pending: 0, canceling: 0, open: 0 };
   trials.forEach(t => outcomes[t.outcome]++);
+
+  // Prove arrivate a scadenza: le paganti il giorno del primo pagamento, le altre il giorno
+  // di scadenza. Contate per giorno di fine, così "perse nel periodo" vuol dire perse in quei giorni.
+  const ends = rows.filter(t => t.trial_at).map(t => {
+    const outcome = ptlTrialOutcome(t, now);
+    const end = outcome === 'converted' ? t.paid_at : t.expires_at;
+    return end && (outcome === 'converted' || outcome === 'lost' || outcome === 'pending')
+      ? { outcome, day: romeDay(end), start: romeDay(t.trial_at), plan: ptlPlan(t.product) } : null;
+  }).filter(Boolean);
+  const ended = ends.filter(e => inPeriod(e.day));
+  const lostList = ended.filter(e => e.outcome === 'lost').sort((a, b) => b.day.localeCompare(a.day));
+  const pendingList = ended.filter(e => e.outcome === 'pending');
 
   // Prove aperte (di qualunque periodo) per giorno di scadenza.
   const due = {};
@@ -2501,16 +2527,19 @@ function premiumTimelineModel() {
     if (o === 'canceling') due[day].canceling++;
   });
 
-  const paying = spans.filter(x => !x.ended);
-  const prev = prevFrom ? {
+  // Paganti a fine periodo: "non rinnova" esiste solo per chi paga adesso.
+  const paying = activeAt(to);
+  const prev = {
     trials:  rows.filter(t => t.trial_at && inPrev(romeDay(t.trial_at))).length,
     newPaid: spans.filter(x => inPrev(x.from)).length,
     paying:  activeOn(addDays(from, -1)),
-  } : null;
+    lost:    ends.filter(e => e.outcome === 'lost' && inPrev(e.day)).length,
+  };
   return {
-    today, from, series, entries, exits, trials, outcomes, due,
+    today, first, from, to, series, entries, exits, trials, outcomes, due,
+    ended, lostList, pendingList,
     payingNow: paying.length,
-    payingCanceling: paying.filter(x => x.t.status === 'cancelled').length,
+    payingCanceling: to === today ? paying.filter(x => x.t.status === 'cancelled').length : 0,
     mrr: paying.reduce((s, x) => s + (PTL_PRICE_MONTH[ptlPlan(x.t.product)] || 0), 0),
     newPaid: entries.length,
     prevSeries, prev,
@@ -2518,9 +2547,11 @@ function premiumTimelineModel() {
 }
 
 // "+50% · da 4 a 6". Da 0 la percentuale non esiste: si scrivono solo i numeri.
-function ptlChange(cur, prev) {
+// lowerIsBetter: per le perdite, dove salire è rosso e scendere è verde.
+function ptlChange(cur, prev, lowerIsBetter) {
   if (prev == null) return '';
-  const col = cur > prev ? 'var(--mattia)' : cur < prev ? 'var(--red)' : 'var(--muted)';
+  const good = lowerIsBetter ? cur < prev : cur > prev;
+  const col = cur === prev ? 'var(--muted)' : good ? 'var(--mattia)' : 'var(--red)';
   const pct = prev === 0 ? (cur === 0 ? '=' : 'nuovo') : (cur === prev ? '=' : (cur > prev ? '+' : '') + Math.round((cur - prev) / prev * 100) + '%');
   return `<span style="font-family:var(--mono);font-size:11.5px;color:${col}">${pct}</span><span style="font-size:11.5px;color:var(--muted)"> · da ${prev} a ${cur}</span>`;
 }
@@ -2530,7 +2561,7 @@ function premiumTimelineChart(m) {
   if (!n) return chartPlaceholder();
   const W = 900, L = 30, R = 34, T = 16, chartH = 150;
   const axisY = T + chartH + 16;
-  const spanDays = Math.max(1, dayDiff(m.from, m.today));
+  const spanDays = Math.max(1, dayDiff(m.from, m.to));
   const x = day => L + dayDiff(m.from, day) / spanDays * (W - L - R);
   const ghost = state.ptlCompare && m.prevSeries ? m.prevSeries : null;
   const maxV = Math.max(4, ...pts.map(p => p.v), ...(ghost ? ghost.map(p => p.v) : []));
@@ -2575,7 +2606,7 @@ function premiumTimelineChart(m) {
       let g = `M${x(pts[0].day)},${y(ghost[0].v)}`;
       ghost.forEach((p, i) => { if (i) g += ` H${x(pts[i].day)} V${y(p.v)}`; });
       return `<path d="${g}" fill="none" stroke="#7070a0" stroke-opacity=".6" stroke-width="1.5" stroke-linejoin="round"/>
-        <text x="${x(m.today) - 6}" y="${y(ghost[ghost.length - 1].v) - 6}" font-size="10" text-anchor="end" fill="#7070a0">periodo precedente</text>`;
+        <text x="${x(m.to) - 6}" y="${y(ghost[ghost.length - 1].v) - 6}" font-size="10" text-anchor="end" fill="#7070a0">periodo precedente</text>`;
     })() : ''}
     <path d="${path}" fill="none" stroke="${PTL.paid}" stroke-width="2" stroke-linejoin="round"/>
     ${hover}${marks}
@@ -2586,16 +2617,16 @@ function premiumTimelineChart(m) {
 }
 
 function premiumTimelineCard() {
-  const periodTxt = state.ptlRange ? `negli ultimi ${state.ptlRange} giorni` : 'da sempre';
-  const shell = inner => `
+  const shell = (inner, m) => `
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
         <div class="card-title" style="margin-bottom:0" title="Abbonamenti Google Play. Un abbonamento conta una volta anche se passa su due account; acquisti di test e account interni esclusi.">Abbonamenti</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="filter-btn ${state.ptlCompare ? 'active' : ''}" data-ptl-compare ${state.ptlRange ? '' : 'disabled style="opacity:.4"'} title="Mostra sul grafico la curva del periodo precedente di pari durata">Confronta</button>
-          <div style="display:flex;gap:4px">
-          ${[30, 60, 90, 0].map(r => `<button class="filter-btn ${state.ptlRange === r ? 'active' : ''}" data-ptl-range="${r}">${r ? r + 'g' : 'Tutto'}</button>`).join('')}
-          </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="filter-btn ${state.ptlCompare ? 'active' : ''}" data-ptl-compare title="Mostra sul grafico la curva del periodo precedente di pari durata">Confronta</button>
+          ${m ? `<span class="filter-label">Dal</span>
+          <input type="date" class="form-input" data-ptl-date="from" value="${m.from}" min="${m.first}" max="${m.today}" style="width:140px;padding:4px 8px;font-size:12px">
+          <span class="filter-label">al</span>
+          <input type="date" class="form-input" data-ptl-date="to" value="${m.to}" min="${m.first}" max="${m.today}" style="width:140px;padding:4px 8px;font-size:12px">` : ''}
         </div>
       </div>
       ${inner}
@@ -2606,37 +2637,62 @@ function premiumTimelineCard() {
 
   const m = premiumTimelineModel();
   const o = m.outcomes;
-  const tile = inner => `<div style="background:var(--surface2);border-radius:10px;padding:16px;display:grid;gap:10px;align-content:start">${inner}</div>`;
+  const periodTxt = `dal ${ddmm(m.from)} ${m.to === m.today ? 'a oggi' : 'al ' + ddmm(m.to)}`;
+  const prevTxt = `rispetto ai ${dayDiff(m.from, m.to) + 1} giorni prima`;
+  const tile = (inner, style = '') => `<div style="background:var(--surface2);border-radius:10px;padding:16px;display:grid;gap:10px;align-content:start;${style}">${inner}</div>`;
   const k = t => `<div style="font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase">${t}</div>`;
   const big = (v, c) => `<div style="font-family:var(--mono);font-size:32px;font-weight:600;line-height:1;color:${c}">${v}</div>`;
   const note = t => `<div style="font-size:12px;color:var(--muted);line-height:1.5">${t}</div>`;
   const numTxt = t => `<span style="font-family:var(--mono);color:var(--text)">${t}</span>`;
+  const vs = (html, txt) => `<div>${html} <span style="font-size:11px;color:${PTL.faint}">${txt}</span></div>`;
+  // Quadratino di un esito: pieno, oppure solo bordo per le prove ancora senza esito.
+  const fill = key => PTL_OUTCOME[key].outline
+    ? `background:transparent;box-shadow:inset 0 0 0 2px ${PTL_OUTCOME[key].c}`
+    : `background:${PTL_OUTCOME[key].c}`;
 
-  // 1 · Paganti
-  const vsTxt = state.ptlRange ? `rispetto a ${state.ptlRange} giorni fa` : '';
+  // 1 · Paganti a fine periodo
   const paidTile = tile(`
-    ${k('Paganti')}
+    ${k(m.to === m.today ? 'Paganti' : 'Paganti al ' + ddmm(m.to))}
     ${big(m.payingNow, PTL.paid)}
-    ${m.prev ? `<div>${ptlChange(m.payingNow, m.prev.paying)} <span style="font-size:11px;color:var(--faint,#4a4a68)">${vsTxt}</span></div>` : ''}
+    ${vs(ptlChange(m.payingNow, m.prev.paying), `rispetto al ${ddmm(addDays(m.from, -1))}`)}
     ${m.payingCanceling ? `<div style="display:inline-flex;width:fit-content;font-size:11px;padding:3px 9px;border-radius:99px;background:#2b1a08;color:${PTL.warn}">${m.payingCanceling === 1 ? '1 non rinnova' : m.payingCanceling + ' non rinnovano'}</div>` : ''}
-    ${note(`MRR stimato ${numTxt('€ ' + m.mrr.toFixed(2).replace('.', ','))}<br>Nuovi paganti ${periodTxt}: ${numTxt(m.newPaid)}`
-      + (m.prev ? ` ${ptlChange(m.newPaid, m.prev.newPaid)}` : ''))}`);
+    ${note(`MRR stimato ${numTxt('€ ' + m.mrr.toFixed(2).replace('.', ','))}<br>Nuovi paganti ${periodTxt}: ${numTxt(m.newPaid)} ${ptlChange(m.newPaid, m.prev.newPaid)}`)}`);
 
-  // 2 · Prove del periodo: quadratini finché sono pochi, poi barra proporzionale.
-  const order = ['converted', 'lost', 'canceling', 'open'];
+  // 2a · Prove iniziate nel periodo: quadratini finché sono pochi, poi barra proporzionale.
+  const order = ['converted', 'lost', 'pending', 'canceling', 'open'];
   const total = m.trials.length;
   const units = total <= PTL_UNITS_MAX
-    ? `<div style="display:flex;gap:4px;flex-wrap:wrap">${order.flatMap(key => Array(o[key]).fill(`<i title="${PTL_OUTCOME[key].l}" style="width:16px;height:16px;border-radius:4px;display:block;background:${PTL_OUTCOME[key].c}"></i>`)).join('')}</div>`
-    : `<div style="display:flex;gap:2px;height:14px">${order.filter(key => o[key]).map(key => `<i title="${o[key]} ${PTL_OUTCOME[key].l}" style="flex:${o[key]};border-radius:3px;background:${PTL_OUTCOME[key].c}"></i>`).join('')}</div>`;
+    ? `<div style="display:flex;gap:4px;flex-wrap:wrap">${order.flatMap(key => Array(o[key]).fill(`<i title="${PTL_OUTCOME[key].l}" style="width:16px;height:16px;border-radius:4px;display:block;box-sizing:border-box;${fill(key)}"></i>`)).join('')}</div>`
+    : `<div style="display:flex;gap:2px;height:14px">${order.filter(key => o[key]).map(key => `<i title="${o[key]} ${PTL_OUTCOME[key].l}" style="flex:${o[key]};border-radius:3px;${fill(key)}"></i>`).join('')}</div>`;
   const closed = o.converted + o.lost;
-  const trialTile = tile(`
-    ${k('Prove ' + (state.ptlRange ? `ultimi ${state.ptlRange}g` : 'da sempre'))}
+  const startedHalf = `<div style="display:grid;gap:10px;align-content:start;flex:1 1 220px">
+    ${k('Prove iniziate')}
     ${big(total, 'var(--text)')}
-    ${m.prev ? `<div>${ptlChange(total, m.prev.trials)} <span style="font-size:11px;color:#4a4a68">rispetto ai ${state.ptlRange} giorni prima</span></div>` : ''}
+    ${vs(ptlChange(total, m.prev.trials), prevTxt)}
     ${total ? units : ''}
     ${total ? `<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted)">${order.filter(key => o[key]).map(key =>
-      `<span style="display:inline-flex;align-items:center;gap:5px"><i style="width:8px;height:8px;border-radius:2px;display:inline-block;background:${PTL_OUTCOME[key].c}"></i>${o[key]} ${PTL_OUTCOME[key].l}</span>`).join('')}</div>` : ''}
-    ${note(closed ? `Delle prove già concluse, ${numTxt(o.converted + ' su ' + closed)} è diventata pagante.` : total ? 'Nessuna prova ancora conclusa.' : 'Nessuna prova nel periodo.')}`);
+      `<span style="display:inline-flex;align-items:center;gap:5px"><i style="width:8px;height:8px;border-radius:2px;display:inline-block;box-sizing:border-box;${fill(key)}"></i>${o[key]} ${PTL_OUTCOME[key].l}</span>`).join('')}</div>` : ''}
+    ${note(closed ? `Di quelle già concluse, ${numTxt(o.converted + ' su ' + closed)} ${o.converted === 1 ? 'è diventata pagante' : 'sono diventate paganti'}.` : total ? 'Nessuna prova ancora conclusa.' : 'Nessuna prova nel periodo.')}
+  </div>`;
+
+  // 2b · Prove scadute senza rinnovo, contate nel giorno in cui sono scadute.
+  const lost = m.lostList;
+  const pending = m.pendingList;
+  const endedClosed = m.ended.length - pending.length;
+  const LOST_ROWS = 5;
+  const lostRows = lost.slice(0, LOST_ROWS).map(e => `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted)">
+      <span style="font-family:var(--mono);color:var(--text)">${ddmm(e.day)}</span><span>iniziata il ${ddmm(e.start)}${e.plan === 'monthly' ? ' · mensile' : e.plan === 'yearly' ? ' · annuale' : ''}</span></div>`).join('')
+    + (lost.length > LOST_ROWS ? `<div style="font-size:11px;color:${PTL.faint}">e altre ${lost.length - LOST_ROWS}</div>` : '');
+  const expiredHalf = `<div style="display:grid;gap:10px;align-content:start;flex:1 1 220px">
+    ${k('Scadute senza rinnovo')}
+    ${big(lost.length, lost.length ? 'var(--red)' : 'var(--text)')}
+    ${vs(ptlChange(lost.length, m.prev.lost, true), prevTxt)}
+    ${lost.length ? `<div style="display:grid;gap:4px">${lostRows}</div>` : ''}
+    ${pending.length ? `<div style="font-size:11.5px;color:${PTL.trial}" title="La prova è scaduta ma Google non ha ancora detto se ha fatto pagare o ha chiuso">${pending.length === 1 ? `1 scaduta il ${ddmm(pending[0].day)} aspetta ancora l'esito da Google` : `${pending.length} scadute aspettano ancora l'esito da Google`}</div>` : ''}
+    ${note(endedClosed ? `Su ${numTxt(endedClosed)} ${endedClosed === 1 ? 'prova arrivata' : 'prove arrivate'} a scadenza ${periodTxt}, ${numTxt(lost.length)} senza pagamento.` : 'Nessuna prova arrivata a scadenza nel periodo.')}
+  </div>`;
+  const trialTile = tile(`<div style="display:flex;flex-wrap:wrap;gap:16px 20px">${startedHalf}
+    <div style="width:1px;background:var(--border,#26263a);align-self:stretch"></div>${expiredHalf}</div>`, 'grid-column:span 2');
 
   // 3 · Prove che scadono nei prossimi giorni: pallino col numero.
   const dueTotal = Object.values(m.due).reduce((s, d) => s + d.n, 0);
@@ -2664,10 +2720,10 @@ function premiumTimelineCard() {
       : 'Nessuna prova aperta.')}`);
 
   return shell(`
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:22px">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:22px">
       ${paidTile}${trialTile}${dueTile}
     </div>
-    ${premiumTimelineChart(m)}`);
+    ${premiumTimelineChart(m)}`, m);
 }
 
 function pageOverview() {
@@ -11304,10 +11360,13 @@ function attachEvents() {
     el.addEventListener('click', () => purgePromptCache()));
 
   // Chart range filters
-  document.querySelectorAll('[data-ptl-range]').forEach(el =>
-    el.addEventListener('click', () => { state.ptlRange = +el.dataset.ptlRange; render(); }));
+  // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
+  document.querySelectorAll('[data-ptl-date]').forEach(el =>
+    el.addEventListener('change', () => {
+      if (!/^20\d\d-/.test(el.value)) return;
+      state[el.dataset.ptlDate === 'from' ? 'ptlFrom' : 'ptlTo'] = el.value; render();
+    }));
   document.querySelector('[data-ptl-compare]')?.addEventListener('click', () => {
-    if (!state.ptlRange) return;
     state.ptlCompare = !state.ptlCompare; render();
   });
   document.querySelectorAll('[data-growth-range]').forEach(el =>
