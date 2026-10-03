@@ -233,8 +233,8 @@ Hypemove è un'app **freemium** con direzione subscription.
 - **Piano Free**: accesso alla roadmap guidata base, gamification completa, primo percorso disponibile. La versione gratuita non deve sembrare brutta o inutile — deve permettere all'utente di vivere il valore reale del prodotto.
 - **Piano Premium**: percorso più personalizzato, adattivo e flessibile. L'AI impara dai comportamenti dell'utente (feedback, sostituzioni, esercizi amati o evitati, livello di fatica) e adatta il percorso nel tempo. Il Premium non vende "più funzioni": vende **un percorso più adatto a te, più flessibile e più facile da seguire anche nelle giornate storte**.
 
-**Pricing in test (live nell'app dal 15/07/2026; nel sito vive in un solo posto, `src/site.js`):**
-- Premium mensile: 6,99 €/mese
+**Pricing (mensile a 9,90 € confermato il 03/10/2026; nel sito vive in un solo posto, `src/site.js`):**
+- Premium mensile: 9,90 €/mese
 - Premium annuale: 29,99 €/anno (presentato come "migliore scelta", costo mensile implicito ~2,50 €)
 
 Il Premium viene venduto come:
