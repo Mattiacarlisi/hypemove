@@ -10,7 +10,7 @@ await fs.mkdir(OUT, { recursive: true });
 
 const cards = [
   { name: "home", kicker: "App fitness gratuita", title: "Torna a muoverti.<br><em>Questa volta per davvero.</em>", sub: "Allenamenti da 5 a 15 minuti a casa, un percorso a tappe e un coach che si adatta a te." },
-  { name: "prezzi", kicker: "Prezzi", title: "Gratis per iniziare.<br><em>Premium se vuoi di più.</em>", sub: "6,99 € al mese o 29,99 € l'anno. Si disdice da Google Play quando vuoi." },
+  { name: "prezzi", kicker: "Prezzi", title: "Gratis per iniziare.<br><em>Premium se vuoi di più.</em>", sub: "9,90 € al mese o 29,99 € l'anno. Si disdice da Google Play quando vuoi." },
   { name: "coach-ai", kicker: "Coach AI", title: "Un coach che ti ascolta<br><em>e cambia il programma.</em>", sub: "Gli scrivi quanto tempo hai e cosa hai in casa. Lui sistema l'allenamento di oggi." },
   { name: "chi-siamo", kicker: "Chi siamo", title: "Due persone, un'app<br><em>costruita in pubblico.</em>", sub: "Mattia Carlisi, chinesiologo, e Danilo, sviluppatore. Nasce in Italia per chi fatica a essere costante." },
   { name: "confronti", kicker: "Confronti", title: "Hypemove e le altre app.<br><em>Senza giri di parole.</em>", sub: "Nike Training Club, Seven, Freeletics: per chi è meglio l'una e per chi l'altra." },

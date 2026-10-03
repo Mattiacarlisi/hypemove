@@ -100,7 +100,7 @@ const comparisons = indexable.filter((route) => route.path.startsWith("/confront
 const llms = `# Hypemove
 
 > ${DEFINITION ?? "Hypemove è un'app di fitness per Android con allenamenti guidati brevi da fare a casa."}
-> Premium facoltativo: ${PRICES?.monthly ?? "6,99"} €/mese o ${PRICES?.yearly ?? "29,99"} €/anno, si disdice da Google Play.
+> Premium facoltativo: ${PRICES?.monthly ?? "9,90"} €/mese o ${PRICES?.yearly ?? "29,99"} €/anno, si disdice da Google Play.
 
 Lingua: italiano. Sviluppata in Italia da Mattia Carlisi (chinesiologo e founder, scrive gli allenamenti) e Danilo (sviluppatore).
 Non è per atleti, bodybuilder o chi cerca schede avanzate.

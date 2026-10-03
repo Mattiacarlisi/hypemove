@@ -25,7 +25,7 @@ export const FACTS = {
 };
 
 export const PRICES = {
-  monthly: "6,99",
+  monthly: "9,90",
   yearly: "29,99",
   yearlyPerMonth: "2,50",
   currency: "EUR",
