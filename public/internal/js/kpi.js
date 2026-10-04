@@ -566,6 +566,9 @@ let state = {
   selectedFeedback: null,
   feedbackSearchQuery: '',
   recentAISessions: null,
+  // Card «Sprint vs record» dell'Overview (kpi_sprint_scoreboard). scoreSel = id dello sprint
+  // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo.
+  scoreboard: null, scoreboardError: null, scoreSel: null, scoreRef: 'best',
   aiConvOpen: false,
   aiSessions: null,
   aiSessionsLoading: false,
@@ -664,7 +667,7 @@ async function fetchData() {
     state.overviewStale = false;
     // I due riquadri «ultimi feedback» e «ultime chat» arrivano dopo, ognuno col suo render:
     // prima la pagina intera aspettava kpi_ai_sessions, la RPC più lenta del gruppo.
-    Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]).then(render);
+    Promise.all([fetchRecentFeedback(), fetchRecentAISessions(), fetchScoreboard()]).then(render);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
   state.loading = false;
   render();
@@ -1950,6 +1953,18 @@ async function fetchAllFeedbacks() {
   render();
 }
 
+async function fetchScoreboard() {
+  try {
+    const { data, error } = await sb.rpc('kpi_sprint_scoreboard');
+    if (error) throw error;
+    state.scoreboard = data || [];
+    state.scoreboardError = null;
+  } catch (e) {
+    console.error('fetchScoreboard', e);
+    state.scoreboardError = e.message || 'Errore caricamento confronto sprint';
+  }
+}
+
 async function fetchRecentAISessions() {
   try {
     const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 5 });
@@ -2247,6 +2262,8 @@ function updateHeaderActions() {
 
 function manualRefresh() {
   clearInterval(countdownTimer);
+  // gli sprint del grafico tentativi finiti in errore si riprovano: senza, restavano in errore fino al ricarico
+  state.attemptsChartErrors = {};
   fetchData();
   // ripesca dal DB tutto ciò che è condiviso (impostazioni, funnel salvati, sprint) → vedi le modifiche
   // dell'altro utente senza ricaricare la pagina
@@ -2261,14 +2278,67 @@ function manualRefresh() {
   }
 }
 
+// ── BARRA LATERALE APRIBILE ───────────────────────────────────────────
+// Sul telefono la barra è un pannello che si apre col ☰ e si chiude toccando fuori o scegliendo una
+// pagina; sul computer lo stesso pulsante la nasconde per lasciare tutto lo spazio ai dati, e la
+// scelta resta salvata. Le classi vivono su #app, che render() non ricrea: aprire o chiudere il menu
+// non ridisegna la pagina.
+const NAV_MOBILE_MQ = window.matchMedia('(max-width: 900px)');
+const LS_NAV_COLLAPSED = 'kpi_nav_collapsed';
+state.navOpen = false;
+try { state.navCollapsed = localStorage.getItem(LS_NAV_COLLAPSED) === '1'; } catch { state.navCollapsed = false; }
+
+function applyNavState() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.classList.toggle('nav-collapsed', state.navCollapsed);
+  app.classList.toggle('nav-open', state.navOpen);
+  // col pannello aperto sul telefono la pagina dietro non deve scorrere
+  document.body.style.overflow = state.navOpen && NAV_MOBILE_MQ.matches ? 'hidden' : '';
+  const expanded = NAV_MOBILE_MQ.matches ? state.navOpen : !state.navCollapsed;
+  document.querySelectorAll('[data-nav-toggle]').forEach(b => b.setAttribute('aria-expanded', String(expanded)));
+}
+function toggleNav() {
+  if (NAV_MOBILE_MQ.matches) state.navOpen = !state.navOpen;
+  else {
+    state.navCollapsed = !state.navCollapsed;
+    try { localStorage.setItem(LS_NAV_COLLAPSED, state.navCollapsed ? '1' : '0'); } catch { /* storage bloccato: vale per la sessione */ }
+    document.querySelector('.nav-toggle-desk')?.setAttribute('title', state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu');
+  }
+  applyNavState();
+}
+NAV_MOBILE_MQ.addEventListener?.('change', () => { state.navOpen = false; applyNavState(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !state.navOpen) return;
+  state.navOpen = false; applyNavState();
+  document.querySelector('.mtop [data-nav-toggle]')?.focus();
+});
+
+const PAGE_LABELS = {
+  overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
+  premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS',
+};
+const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
+const NAV_PANEL_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>`;
+
 function layout() {
   return `
     ${sidebar()}
+    <div class="nav-backdrop" data-nav-close></div>
     <div class="main">
+      <div class="mtop">
+        <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
+        <span class="logo-mark">Hype<span>move</span></span>
+        <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
+      </div>
       <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div>
-          <div class="page-title">KPI Dashboard</div>
-          <div class="page-sub">Metriche prodotto HypeMove · live da Supabase</div>
+        <div class="page-head-l">
+          <button class="nav-toggle nav-toggle-desk" data-nav-toggle
+            title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button>
+          <div>
+            <div class="page-title">KPI Dashboard</div>
+            <div class="page-sub">Metriche prodotto HypeMove · live da Supabase</div>
+          </div>
         </div>
         <div id="kpi-header-actions" class="refresh-meta">
           ${headerActions()}
@@ -2297,7 +2367,7 @@ function deleteConfirmModal() {
       display:flex;align-items:center;justify-content:center;z-index:1000">
       <div style="
         background:#13131f;border:1px solid #2a2a3d;border-radius:16px;
-        padding:32px;width:360px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+        padding:32px;width:360px;max-width:calc(100vw - 32px);box-shadow:0 24px 64px rgba(0,0,0,0.6)">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
           <div style="width:36px;height:36px;border-radius:50%;background:rgba(239,68,68,0.15);
             display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">⚠</div>
@@ -2754,6 +2824,132 @@ function premiumTimelineCard() {
     ${premiumTimelineChart(m)}`, m);
 }
 
+// ── CARD «SPRINT VS RECORD» ──────────────────────────────────────────
+// Sette passi dello sprint analizzato contro il migliore sprint di sempre (per ogni passo) o
+// contro uno sprint scelto. Base unica: chi ha aperto l'app nella finestra dello sprint, la
+// stessa coorte del Funnel onboarding (kpi_sprint_scoreboard, verificata contro kpi_funnel_v2).
+const SCORE_KPIS = [
+  { k: 'home',   name: 'Arrivo in Home' },
+  { k: 'detail', name: 'Dettaglio workout' },
+  { k: 'w1',     name: '1 workout' },
+  { k: 'w2',     name: '2 workout' },
+  { k: 'w3',     name: '3 workout' },
+  { k: 'trial',  name: 'Prova gratuita' },
+  // ogni passo conta entro 14 giorni dal primo avvio; il primo addebito entro 21 (fino a 14 per
+  // iniziare la prova + 7 di prova). Stesso tempo per tutti: altrimenti vince lo sprint più vecchio.
+  { k: 'paid',   name: 'Premium pagante', days: 21 },
+];
+// Per fare il record uno sprint dev'essere dalla beta, con almeno 100 persone e finito da almeno
+// 14 giorni (21 per «Premium pagante»): prima la finestra di qualcuno è ancora aperta e i numeri crescono.
+const SCORE_MIN_BASE = 100;
+const scoreRate   = (s, k) => s.base ? s[k] / s.base : 0;
+const scoreMature = (s, kpi) => s.age_days >= (kpi.days || 14);
+const scorePct    = v => (v * 100).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// percentuale da mostrare: con nessuno dentro lo sprint non c'è un numero, c'è «—»
+const scoreShow   = (s, k) => s.base ? scorePct(s[k] / s.base) + '%' : '—';
+const scoreDay    = d => String(d).split('-').reverse().slice(0, 2).join('/');
+// z-test a due proporzioni al 95%: true se la differenza fra i due sprint può essere solo rumore.
+// (La sovrapposizione degli intervalli di Wilson era troppo prudente: +8 punti su 257 contro 989
+// persone risultava «in linea».)
+function scoreSame(k1, n1, k2, n2) {
+  if (!n1 || !n2) return true;
+  const p = (k1 + k2) / (n1 + n2);
+  const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+  return se === 0 || Math.abs(k1 / n1 - k2 / n2) / se < 1.96;
+}
+// Uno sprint tutto dentro la finestra di uno più lungo (es. «Sprint 12 - Test» dentro «Sprint 12»)
+// conta le stesse persone due volte: resta selezionabile ma non concorre al record.
+function scoreIsSub(s, all) {
+  return all.some(o => o.id !== s.id && o.inizio <= s.inizio && o.fine >= s.fine && (o.inizio < s.inizio || o.fine > s.fine));
+}
+// Di default si analizza lo sprint iniziato più di recente; se ha ancora meno di 30 persone
+// (appena partito) quello prima, che ha già numeri da leggere.
+function scoreDefaultSel(rows) {
+  const started = rows.filter(s => s.inizio <= TODAY && s.base > 0);
+  if (!started.length) return rows[rows.length - 1]?.id ?? null;
+  const last = started[started.length - 1];
+  return last.base < 30 && started.length > 1 ? started[started.length - 2].id : last.id;
+}
+
+function sprintScoreboardCard() {
+  const rows = state.scoreboard;
+  const shell = body => `<div class="card sb-card"><div class="card-title" style="margin-bottom:12px">Sprint vs record</div>${body}</div>`;
+  if (state.scoreboardError && !rows) {
+    return shell(`<div style="font-size:12px;color:var(--red)">${esc(state.scoreboardError)}
+      <button class="btn btn-ghost" id="sb-retry" style="font-size:11px;padding:4px 10px;margin-left:8px">↻ Riprova</button></div>`);
+  }
+  if (!rows) return shell(`<div class="pulse" style="font-size:12px;color:var(--muted)">Calcolo del confronto fra sprint…</div>`);
+  if (!rows.length) return shell(`<div style="font-size:12px;color:var(--muted)">Nessuno sprint: creane uno dalla pagina Sprint.</div>`);
+
+  if (!rows.some(s => s.id === state.scoreSel)) state.scoreSel = scoreDefaultSel(rows);
+  if (state.scoreRef !== 'best' && !rows.some(s => s.id === state.scoreRef)) state.scoreRef = 'best';
+  const now   = rows.find(s => s.id === state.scoreSel);
+  const fixed = state.scoreRef === 'best' ? null : rows.find(s => s.id === state.scoreRef);
+  const opt   = (s, cur) => `<option value="${s.id}" ${s.id === cur ? 'selected' : ''}>${esc(s.nome)} · ${scoreDay(s.inizio)}–${scoreDay(s.fine)}</option>`;
+
+  const boxes = SCORE_KPIS.map(kpi => {
+    const pool = rows.filter(s => s.inizio >= BETA_START && s.base >= SCORE_MIN_BASE && scoreMature(s, kpi) && !scoreIsSub(s, rows));
+    const ref = fixed || pool.reduce((a, s) => (!a || scoreRate(s, kpi.k) > scoreRate(a, kpi.k) ? s : a), null);
+    const v = scoreRate(now, kpi.k);
+    const right = `<div class="sb-side">
+        <span class="sb-who"><b>${esc(now.nome)}</b></span>
+        <span class="sb-val sb-c-STATUS">${scoreShow(now, kpi.k)}</span>
+        <span class="sb-n">${now[kpi.k]}/${now.base}</span>
+      </div>`;
+    // Nessun confronto possibile: nessuno sprint fa ancora il record, oppure lo sprint scelto non
+    // ha nessuno dentro (uno sprint futuro). Niente verdetto, solo i numeri che ci sono.
+    if (!ref || !now.base || !ref.base) {
+      const left = ref
+        ? `<span class="sb-who">${fixed ? 'Confronto' : 'Record'} · <b>${esc(ref.nome)}</b></span>
+           <span class="sb-val sb-c-ref">${scoreShow(ref, kpi.k)}</span><span class="sb-n">${ref[kpi.k]}/${ref.base}</span>`
+        : `<span class="sb-who">Record</span><span class="sb-val sb-c-none">—</span><span class="sb-n">nessuno sprint confrontabile</span>`;
+      return `<div class="sb-box"><div class="sb-head"><span class="sb-title">${kpi.name}</span></div>
+        <div class="sb-duo"><div class="sb-side">${left}</div>${right.replace('STATUS', 'none')}</div></div>`;
+    }
+    const b = scoreRate(ref, kpi.k);
+    const noise = scoreSame(now[kpi.k], now.base, ref[kpi.k], ref.base);
+    // Stessa regola col migliore e con uno sprint fissato: sopra solo se la differenza è vera
+    // (z-test), altrimenti in linea; sotto: vicino (≥ 75%) o lontano. Uno sprint in corso con poche
+    // persone non «batte il record» per caso.
+    let st, badge;
+    if (ref.id === now.id)     { st = 'good'; badge = fixed ? '≈ stesso sprint' : '▲ record'; }
+    else if (v > b && !noise)  { st = 'good'; badge = fixed ? `▲ +${scorePct(v - b)} pt` : '▲ nuovo record'; }
+    else if (noise)            { st = 'even'; badge = '≈ in linea'; }
+    else                       { st = v / b >= 0.75 ? 'mid' : 'bad'; badge = `▼ ${scorePct(b - v)} pt`; }
+    if (fixed && ref.id === now.id) st = 'even';
+    const refLbl = fixed ? 'Confronto' : (st === 'good' && ref.id !== now.id ? 'Ex record' : 'Record');
+    return `<div class="sb-box">
+      <div class="sb-head"><span class="sb-title">${kpi.name}</span><span class="sb-badge sb-b-${st}">${badge}</span></div>
+      <div class="sb-duo">
+        <div class="sb-side">
+          <span class="sb-who">${refLbl} · <b>${esc(ref.nome)}</b></span>
+          <span class="sb-val sb-c-ref">${scorePct(b)}%</span>
+          <span class="sb-n">${ref[kpi.k]}/${ref.base}</span>
+        </div>
+        ${right.replace('STATUS', st)}
+      </div>
+    </div>`;
+  }).join('');
+
+  const prov = now.age_days < 14 ? ' · sprint in corso o chiuso da meno di 14 giorni, valori provvisori' : '';
+  return `<div class="card sb-card">
+    <div class="sb-top">
+      <div>
+        <div class="card-title" style="margin-bottom:3px">${fixed ? 'Sprint a confronto' : 'Sprint vs record'}</div>
+        <div class="sb-note">% su chi ha aperto l'app · ${now.base.toLocaleString('it-IT')} persone${prov}</div>
+      </div>
+      <div class="sb-pick">
+        <select id="sb-sel" class="form-input" aria-label="Sprint da analizzare">${rows.map(s => opt(s, now.id)).join('')}</select>
+        <span class="sb-vs">vs</span>
+        <select id="sb-ref" class="form-input sb-ref" aria-label="Confronta con">
+          <option value="best" ${fixed ? '' : 'selected'}>Il migliore</option>${rows.map(s => opt(s, fixed?.id)).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="sb-grid">${boxes}</div>
+  </div>`;
+}
+
 function pageOverview() {
   const keys = state.overviewKeys.filter(k => METRICS[k]);
   const colCount = Math.min(Math.max(keys.length, 1), 5);
@@ -2783,7 +2979,7 @@ function pageOverview() {
 
     ${editPanel}
 
-    <div style="display:grid;grid-template-columns:repeat(${colCount},1fr);gap:14px;margin-bottom:24px">
+    <div class="ov-stats" style="--cols:${colCount}">
       ${keys.map(k => {
         const m = METRICS[k];
         return stat(m.label, m.get(state.data), '', m.color, k === 'eng.streaks' ? k : null);
@@ -2791,6 +2987,8 @@ function pageOverview() {
     </div>
 
     ${keys.includes('eng.streaks') && state.streakChartOpen ? streakChartCard() : ''}
+
+    ${sprintScoreboardCard()}
 
     ${premiumTimelineCard()}
 
@@ -6198,9 +6396,9 @@ function funnelViz() {
   const headLabel = headIdx >= 0 ? (FUNNEL_LABELS[cfg[headIdx].stepIdx] || 'step 1') : 'step 1';
 
   const header = `
-    <div style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
-      <div style="width:210px;flex-shrink:0"></div>
-      <div style="flex:1"></div>
+    <div class="fr-row" style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
+      <div class="fr-label" style="width:210px;flex-shrink:0"></div>
+      <div class="fr-bar" style="flex:1"></div>
       <div style="width:44px;text-align:right;flex-shrink:0">n</div>
       <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
       <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
@@ -6226,9 +6424,9 @@ function funnelViz() {
       : 'var(--muted)';
 
     return `
-      <div style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
-        <div style="width:210px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">${label}</div>
-        <div style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
+      <div class="fr-row" style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
+        <div class="fr-label" style="width:210px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">${label}</div>
+        <div class="fr-bar" style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
           <div style="height:100%;width:${pct}%;background:${barColor};opacity:.75;border-radius:3px"></div>
         </div>
         <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0${noData ? ';color:var(--muted)' : ''}" ${noData ? 'title="Dato non disponibile per questo periodo (tabella google_play_installs non aggiornata)"' : ''}>${noData ? 'n.d.' : n}</div>
@@ -8885,12 +9083,16 @@ async function ensureAttemptsChartData() {
   render();
   await Promise.all(missing.map(async s => {
     const k = attemptsKey(s);
-    const { start, end } = attemptsSprintWindow(s);
     try {
+      const { start, end } = attemptsSprintWindow(s);
       const { data, error } = await sb.rpc('kpi_purchase_attempt_rate', {
         p_start: start, p_end: end, p_gender: state.premiumGender,
       });
       if (error) throw error;
+      // Una risposta vuota va segnata come esito: lasciata a null, lo sprint risultava ancora
+      // «mancante», il render di fine giro richiamava questa funzione e il ciclo ripartiva
+      // all'infinito (pagina Premium bloccata e una RPC dopo l'altra sul DB).
+      if (!data) throw new Error('Nessun dato per questo sprint');
       state.attemptsChartData[k] = data;
     } catch (e) {
       state.attemptsChartErrors[k] = e.message || 'Errore';
@@ -9713,7 +9915,7 @@ function pageSprint() {
                          : '';
           return `
             <div style="padding:16px 0;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
-              <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+              <div class="sp-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
                 <div style="display:flex;align-items:flex-start;gap:12px">
                   <div style="width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0;margin-top:3px"></div>
                   <div>
@@ -11106,7 +11308,7 @@ function promptEditModal() {
           </div>
         </div>
         <div style="flex:1;overflow-y:auto;padding:16px 20px">
-          <div style="display:grid;grid-template-columns:1fr 320px;gap:20px">
+          <div class="pe-grid" style="display:grid;grid-template-columns:1fr 320px;gap:20px">
             <div>
               <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Contenuto</label>
               <textarea data-prompt-edit-content style="width:100%;min-height:400px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.55;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical">${esc(state.promptEditContent || '')}</textarea>
@@ -11324,10 +11526,15 @@ function promptingSection(d) {
 // ── EVENTS ────────────────────────────────────────────────────────────
 
 function attachEvents() {
+  applyNavState();
+  document.querySelectorAll('[data-nav-toggle]').forEach(el => el.addEventListener('click', toggleNav));
+  document.querySelector('[data-nav-close]')?.addEventListener('click', () => { state.navOpen = false; applyNavState(); });
   // Navigazione
   document.querySelectorAll('[data-nav]').forEach(el =>
     el.addEventListener('click', () => {
       state.page = el.dataset.nav;
+      state.navOpen = false;
+      window.scrollTo(0, 0);
       // L'auto-refresh salta l'Overview quando non è a schermo: tornandoci si rilegge.
       if (state.page === 'overview'   && state.overviewStale && !state.loading)              fetchData();
       if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
@@ -11561,6 +11768,11 @@ function attachEvents() {
   document.getElementById('refresh-btn')?.addEventListener('click', manualRefresh);
 
   // Overview — personalizza
+  document.getElementById('sb-sel')?.addEventListener('change', e => { state.scoreSel = e.target.value; render(); });
+  document.getElementById('sb-ref')?.addEventListener('change', e => { state.scoreRef = e.target.value; render(); });
+  document.getElementById('sb-retry')?.addEventListener('click', () => {
+    state.scoreboardError = null; render(); fetchScoreboard().then(render);
+  });
   document.getElementById('edit-overview')?.addEventListener('click', () => {
     state.editingOverview = !state.editingOverview;
     render();

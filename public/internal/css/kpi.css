@@ -633,3 +633,142 @@
   margin-top: 14px; font-size: 11px; color: var(--muted); opacity: .8;
   font-family: var(--mono); line-height: 1.6;
 }
+
+/* ── SPRINT VS RECORD (Overview) ── */
+.sb-card { margin-bottom: 16px; }
+.sb-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.sb-note { font-size: 12px; color: var(--muted); }
+.sb-pick { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sb-pick select { font-size: 12px; padding: 6px 10px; max-width: 100%; }
+.sb-pick .sb-ref { color: var(--purple); border-color: #3b2a66; background: var(--accent-lo); }
+.sb-vs { font: 600 10px/1 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+.sb-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.sb-box { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 14px 12px; display: grid; gap: 12px; min-width: 0; }
+.sb-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sb-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-badge { font: 600 11px/1 var(--mono); padding: 4px 8px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+.sb-b-good { color: var(--mattia); background: var(--mattia-bg); }
+.sb-b-even { color: var(--danilo); background: var(--danilo-bg); }
+.sb-b-mid  { color: var(--amber);  background: var(--amber-bg); }
+.sb-b-bad  { color: var(--red);    background: var(--red-bg); }
+.sb-duo { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.sb-side { display: grid; gap: 5px; min-width: 0; }
+.sb-side + .sb-side { border-left: 1px solid var(--border2); padding-left: 12px; }
+.sb-who { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-who b { color: var(--text); font-weight: 500; }
+.sb-val { font: 700 26px/1 var(--mono); letter-spacing: -1px; font-variant-numeric: tabular-nums; }
+.sb-n { font: 500 11px/1 var(--mono); color: var(--muted); }
+.sb-c-ref  { color: var(--purple); }
+.sb-c-good { color: var(--mattia); }
+.sb-c-even { color: var(--danilo); }
+.sb-c-mid  { color: var(--amber); }
+.sb-c-bad  { color: var(--red); }
+.sb-c-none { color: var(--text); }
+@media (max-width: 1280px) { .sb-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1024px) { .sb-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) {
+  .sb-grid { grid-template-columns: minmax(0, 1fr); }
+  .sb-pick { width: 100%; }
+  .sb-pick select { flex: 1 1 0; min-width: 0; }
+  .sb-val { font-size: 24px; }
+}
+
+/* Le select della card restano della loro misura: .form-input altrove le allarga al 100%. */
+.sb-pick select { width: auto; }
+
+/* ── BARRA LATERALE APRIBILE E TELEFONO ──
+   Solo dashboard KPI: shared.css serve anche Finance ed Email, che non hanno il pulsante ☰. */
+.sidebar { transition: transform .22s ease; }
+.main { transition: margin-left .22s ease; min-width: 0; }
+.app.nav-collapsed .sidebar { transform: translateX(-100%); }
+.app.nav-collapsed .main { margin-left: 0; max-width: none; }
+.page-head-l { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.nav-toggle {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+  transition: color .15s, border-color .15s;
+}
+.nav-toggle:hover { color: var(--text); border-color: var(--border2); }
+.nav-toggle:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; }
+.mtop, .nav-backdrop { display: none; }
+
+/* Overview: le metriche in alto, colonne decise dal numero di metriche scelte */
+.ov-stats { display: grid; grid-template-columns: repeat(var(--cols, 5), minmax(0, 1fr)); gap: 14px; margin-bottom: 24px; }
+@media (max-width: 1100px) { .ov-stats { grid-template-columns: repeat(min(var(--cols, 5), 3), minmax(0, 1fr)); } }
+
+@media (max-width: 900px) {
+  .sidebar { transform: translateX(-100%); z-index: 300; box-shadow: none; }
+  .app.nav-open .sidebar { transform: none; box-shadow: 0 0 40px rgba(0, 0, 0, .6); }
+  .app.nav-open .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 250; background: rgba(5, 5, 10, .6); }
+  .main, .app.nav-collapsed .main { margin-left: 0; max-width: none; padding: 0 14px 32px; }
+  .mtop {
+    display: flex; align-items: center; gap: 10px;
+    position: sticky; top: 0; z-index: 90;
+    margin: 0 -14px 14px; padding: 10px 14px;
+    background: rgba(10, 10, 15, .92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .mtop .logo-mark { font-size: 15px; }
+  .mtop-page { margin-left: auto; font-size: 12px; color: var(--muted); }
+  .nav-toggle-desk { display: none; }
+  .page-header { margin-bottom: 18px; }
+  .page-title { font-size: 18px; }
+  .page-sub { font-size: 12px; }
+  .refresh-meta { width: 100%; justify-content: flex-start; }
+  .ov-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .card { padding: 16px; }
+}
+
+/* ── TELEFONO: pagine ── */
+@media (max-width: 900px) {
+  /* griglie condivise a 2-3 colonne: una sotto l'altra */
+  .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .stats-grid, .stats-grid-5, .stats-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* finestra di modifica dei prompt AI: testo sopra, contesto sotto */
+  .pe-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .modal { width: calc(100vw - 24px); max-width: 100%; padding: 20px; }
+}
+@media (max-width: 900px) {
+  /* il nome della dashboard e della pagina sono già nella barra in alto: qui resta solo «Aggiorna» */
+  .page-head-l { display: none; }
+  .page-header { margin-bottom: 14px; }
+}
+@media (max-width: 900px) {
+  .stat-card { padding: 12px 14px; }
+  .stat-label { margin-bottom: 4px; }
+  .stat-value { font-size: 20px; }
+}
+
+/* Barra laterale nascosta: fuori anche dal giro del tasto Tab (visibility arriva a fine transizione) */
+.app.nav-collapsed .sidebar { visibility: hidden; transition: transform .22s ease, visibility 0s linear .22s; }
+@media (min-width: 901px) {
+  /* a barra chiusa il pulsante per riaprirla resta sempre a portata, anche scorrendo */
+  .app.nav-collapsed .nav-toggle-desk { position: fixed; top: 16px; left: 16px; z-index: 90; }
+  .app.nav-collapsed .main { padding-left: 66px; }
+}
+@media (max-width: 900px) {
+  .sidebar { visibility: hidden; transition: transform .22s ease, visibility 0s linear .22s; }
+  .app.nav-open .sidebar { visibility: visible; transition: transform .22s ease, visibility 0s; }
+  /* bersagli da dito: almeno 36px */
+  .btn-refresh, .btn, .tab-action, .filter-btn, .form-input, .form-select, .main select { min-height: 36px; }
+  .filter-btn { padding: 6px 10px; font-size: 11px; }
+}
+/* Telefono vero (il tablet a 768px ha spazio per il layout normale) */
+@media (max-width: 560px) {
+  /* tabelle larghe: scorrono dentro la propria card, non trascinano la pagina */
+  .main .data-table { display: block; max-width: 100%; overflow-x: auto; }
+  /* Funnel catalogo: etichetta più stretta, senza la barra (a 360px sarebbe un trattino) */
+  .fr-row { gap: 8px !important; }
+  .fr-label { width: 118px !important; }
+  .fr-bar { display: none; }
+  /* «+ Salva / Modifica» del Funnel sotto le linguette invece che fuori schermo */
+  .funnel-tabs { flex-wrap: wrap; }
+  .tabs-actions { margin-left: 0; width: 100%; padding: 6px 0 8px; }
+  /* card Sprint vs record: i due menu uno sotto l'altro, interi */
+  .sb-pick { flex-direction: column; align-items: stretch; gap: 6px; }
+  .sb-pick select { width: 100%; flex: none; }
+  .sb-vs { text-align: center; }
+  /* pagina Sprint: pulsanti sotto il nome, le date tornano su una riga */
+  .sp-row { flex-direction: column; }
+}
