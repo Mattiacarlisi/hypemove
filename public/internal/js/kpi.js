@@ -7169,7 +7169,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20261004a';
+const PAYWALL_SHOT_V = '20261004b';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7301,7 +7301,7 @@ const CREATIVE_REGISTRY = [
     name: 'Limite giornaliero · prima versione',
     rotation: 'retired',
     where: 'Bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
-    when: 'RITIRATA dal codice il 04/10/2026, sostituita da «Limite giornaliero · per oggi hai finito» (daily_limit_done) sullo stesso muro. Chi ha una build precedente continua a vederla finché non aggiorna l\'app: dopo il rilascio i suoi numeri vengono solo da lì, e calano man mano che la gente aggiorna. Dal 18/09 al 03/10, in due settimane l\'hanno vista 113 persone, nessuna ha comprato, e più di metà delle aperture arrivava a meno di 30 secondi dalla precedente. Dal 18/09/2026, quando un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono, perché la sheet dice «si sblocca a mezzanotte» e la persona guarda l\'orologio che ha in mano. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo — si passa. Dal 20/09 anche dal tasto della Home, che è da dove la gente parte davvero: prima il muro arrivava una schermata dopo.',
+    when: 'RITIRATA dal codice il 04/10/2026, sostituita da «Limite giornaliero · gratuito completato» (daily_limit_done) sullo stesso muro. Chi ha una build precedente continua a vederla finché non aggiorna l\'app: dopo il rilascio i suoi numeri vengono solo da lì, e calano man mano che la gente aggiorna. Dal 18/09 al 03/10, in due settimane l\'hanno vista 113 persone, nessuna ha comprato, e più di metà delle aperture arrivava a meno di 30 secondi dalla precedente. Dal 18/09/2026, quando un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono, perché la sheet dice «si sblocca a mezzanotte» e la persona guarda l\'orologio che ha in mano. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo — si passa. Dal 20/09 anche dal tasto della Home, che è da dove la gente parte davvero: prima il muro arrivava una schermata dopo.',
     exit: '«No grazie» è l\'uscita dichiarata, l\'unica che si conta come rifiuto esplicito (`continue_free`). Non c\'è nessuna ×: swipe, tocco fuori e tasto indietro restano e si registrano come `x_button`. A pagamento aperto non si chiude.',
     what: 'Un muro e una sola offerta, comprabile in un tocco senza passare dalla pagina dei piani — chi è qui stava per allenarsi e si è trovato fermato, e mettergli un confronto fra due tessere tra l\'intenzione e il pagamento è il modo di perderlo. Orologio col triangolo, «Limite giornaliero raggiunto», «Il prossimo allenamento si sblocca a mezzanotte», la riga del prezzo dell\'annuale con lo sconto sul mensile fra parentesi, il pulsante che compra, «No grazie». Il mensile non è nominato, quindi da qui non è comprabile.',
     note: 'L\'offerta nominata era `freetrial-7d`. Spenta su Play Console al 18/09/2026 e poi riattivata: il 25/09/2026 arrivava sull\'annuale a circa 88 telefoni su 100 (evento `paywall_product_updated`, `has_trial_offer`), quindi quasi tutti vedevano «Prova illimitato a 0 €». Chi non la riceveva — account che l\'aveva già consumata — vedeva «Sblocca allenamenti illimitati»: la sheet ripiegava sul listino e smetteva DA SOLA di nominare la prova. La percentuale di sconto era calcolata sui prezzi vivi, mai a mano.',
@@ -7312,16 +7312,16 @@ const CREATIVE_REGISTRY = [
   },
   {
     variant: 'daily_limit_done',
-    name: 'Limite giornaliero · per oggi hai finito',
+    name: 'Limite giornaliero · gratuito completato',
     rotation: 'live',
     where: 'Bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
     when: 'Dalla build che esce dopo il 04/10/2026 (chi non ha ancora aggiornato vede la prima versione), stesso muro: un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo, conteggio rimasto a ieri — si passa.',
-    exit: '«Aspetto domani» è l\'uscita dichiarata (`continue_free`). Non c\'è nessuna ×: swipe e tocco fuori si registrano come `x_button`, il tasto indietro di Android come `back_hardware` (con la prima versione era l\'83% delle chiusure). «Perché no?» può comparire dopo `continue_free` e `x_button`, non dopo `back_hardware`; mai al primo paywall rifiutato e al massimo una volta ogni 7 giorni. A pagamento aperto non si chiude.',
-    what: 'Spunta verde al posto dell\'orologio con l\'avviso, «Per oggi hai finito», «Il prossimo allenamento si sblocca tra 9 h 42 min» con un conto alla rovescia VIVO fino alla mezzanotte del telefono, il pulsante verde a due righe «Allenati ancora oggi» + «7 giorni gratis», sotto «Oggi non paghi niente. Poi <prezzo annuale> l\'anno, disdici quando vuoi da Google Play», e «Aspetto domani». Niente percentuale di sconto. La riga sotto il pulsante è lì per il foglio di Google: con la versione precedente 12 persone su 12 lo chiudevano senza attivare la prova.',
-    note: 'Prezzo e giorni sempre dal catalogo vivo, offerta `freetrial-7d`. Chi la prova l\'ha già consumata legge «Allenati ancora oggi» + «<prezzo annuale> l\'anno» e sotto solo «Disdici quando vuoi da Google Play»; senza prezzo dallo store resta la prima riga del pulsante. Il `cta_copy` degli acquisti dice quale seconda riga si è letta (`cta_sub_trial` / `cta_sub_price`). I dati NON si sommano a quelli della versione precedente.',
+    exit: 'Nessun tasto di rifiuto e nessuna × («Aspetto domani» è stato tolto il 04/10/2026, prima del rilascio): si chiude toccando fuori o con lo swipe, che si registrano come `x_button`, o col tasto indietro di Android, che arriva come `back_hardware` (con la prima versione era l\'83% delle chiusure). «Perché no?» può comparire dopo `x_button`, non dopo `back_hardware`; mai al primo paywall rifiutato e al massimo una volta ogni 7 giorni. A pagamento aperto non si chiude.',
+    what: 'Spunta verde al posto dell\'orologio con l\'avviso, «Allenamento gratuito di oggi completato», «Il prossimo si rigenera tra 9 h 42 min» con un conto alla rovescia VIVO fino alla mezzanotte del telefono, il pulsante verde a due righe «Allenati senza limiti» + «7 giorni gratis», sotto «Oggi non paghi niente. Poi <prezzo annuale> l\'anno, disdici quando vuoi da Google Play». Nessun secondo bottone accanto al pulsante. Niente percentuale di sconto. La riga sotto il pulsante è lì per il foglio di Google: con la versione precedente 12 persone su 12 lo chiudevano senza attivare la prova.',
+    note: 'Prezzo e giorni sempre dal catalogo vivo, offerta `freetrial-7d`. Chi la prova l\'ha già consumata legge «Allenati senza limiti» + «<prezzo annuale> l\'anno» e sotto solo «Disdici quando vuoi da Google Play»; senza prezzo dallo store resta la prima riga del pulsante. Il `cta_copy` degli acquisti dice quale seconda riga si è letta (`cta_sub_trial` / `cta_sub_price`). I dati NON si sommano a quelli della versione precedente.',
     file: 'app/src/components/PremiumProposals/DailyLimitPaywall/DailyLimitFlow.tsx',
     screens: [
-      { idx: 0, t: 'La sheet', d: 'la spunta, il conto alla rovescia, il pulsante a due righe, la riga «oggi non paghi niente» e «Aspetto domani»' },
+      { idx: 0, t: 'La sheet', d: 'la spunta, il conto alla rovescia, il pulsante a due righe e la riga «oggi non paghi niente»' },
     ],
   },
   {
@@ -8409,7 +8409,7 @@ const CREATIVE_LABELS = {
   onboarding_trial: 'Paywall di partenza · con la prova',
   welcome_offer: 'Offerta di benvenuto',
   daily_limit_sheet: 'Limite giornaliero · prima versione',
-  daily_limit_done: 'Limite giornaliero · per oggi hai finito',
+  daily_limit_done: 'Limite giornaliero · gratuito completato',
   // Le cinque qui sotto avevano la scheda nel registro ma non l'etichetta: nella
   // tabella degli acquisti comparivano col nome tecnico della variant, perché
   // `premiumCreativeLabel` ripiega sulla chiave. Trovate il 21/09/2026 dal guard
