@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-09-25T14:54:18.846Z",
+  "generatedAt": "2026-10-04T16:18:51.259Z",
   "promptVersion": "3.17.1",
-  "promptsHash": "ff5f900136972f701c67967f7a2923d59cbfc30f6fdf0ce97a42395f75b55f73",
+  "promptsHash": "c9601f54c040b3f8963d6b03269f6843dfaf148e431635b4dca654b068add224",
   "separator": "\n\n",
   "budget": {
     "warnChars": 70000,
@@ -273,6 +273,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -312,6 +398,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -1312,6 +1407,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -1351,6 +1532,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -2351,6 +2541,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -2390,6 +2666,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -3390,6 +3675,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -3429,6 +3800,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -4429,6 +4809,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -4468,6 +4934,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -5468,6 +5943,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -5507,6 +6068,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -6507,6 +7077,92 @@
           }
         },
         {
+          "name": "modify_plan_workout",
+          "description": "Cambia il workout di OGGI del piano, quello che l'utente ha a schermo nel dettaglio. Lo esegue il sistema del piano: le carte sopra si aggiornano da sole e tu racconti il risultato in UNA frase, partendo da `message` del risultato, senza elencare esercizi. Chiamalo da solo appena capisci cosa vuole, senza chiedere conferma. Non dire mai di aver cambiato qualcosa se la chiamata non è riuscita. Vale solo per oggi: obiettivo e percorso non cambiano (per un cambio di obiettivo per sempre c'è apply_goal_change). Usa le carte per cambiare esercizi precisi; usa durata, tipo, solo attrezzi o attrezzo per cambiare il workout intero.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cards": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "Numeri delle carte da cambiare, come li vede l'utente nella sequenza numerata del contesto (il numero prima della parentesi, MAI l'id). Se vuole cambiarle tutte senza dire come, prima chiedigli come lo vuole oggi."
+              },
+              "duration_min": {
+                "type": "number",
+                "description": "Durata voluta in minuti, solo se l'ha detta."
+              },
+              "shorter": {
+                "type": "boolean",
+                "description": "true se chiede «più corto» senza dire i minuti."
+              },
+              "workout_type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "mobility",
+                  "strength",
+                  "cardio",
+                  "back",
+                  "none"
+                ],
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+              },
+              "only_equipment": {
+                "type": "boolean",
+                "description": "true se non vuole esercizi a corpo libero, solo con attrezzi (il riscaldamento resta libero)."
+              },
+              "constraint": {
+                "type": "string",
+                "enum": [
+                  "knee",
+                  "low_back",
+                  "shoulder",
+                  "wrist",
+                  "neck",
+                  "high_impact",
+                  "floor",
+                  "kneeling",
+                  "exercise",
+                  "time",
+                  "none"
+                ],
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+              },
+              "equipment": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "chair",
+                    "dumbbells",
+                    "bands",
+                    "loop_band",
+                    "kettlebell",
+                    "stability_ball",
+                    "ankle_weights"
+                  ]
+                },
+                "description": "Attrezzi che l'utente ha DETTO di avere in questo messaggio (o con un «sì» alla tua domanda su UN attrezzo): vengono aggiunti al suo profilo e usati oggi. Un attrezzo non nominato da lui viene rifiutato."
+              },
+              "whole_workout": {
+                "type": "boolean",
+                "description": "true per rifare il workout di oggi come chiede in reason: «più leggero», «più intenso», «per le gambe». Con un tipo o una durata non serve."
+              },
+              "lasting": {
+                "type": "boolean",
+                "description": "true SOLO se parla di sé per i prossimi allenamenti («mai», «non mi piace», «ho un'ernia»). Una richiesta per oggi è false."
+              },
+              "reason": {
+                "type": "string",
+                "description": "Cosa vuole l'utente, con le sue parole: guida la riscrittura del workout («più leggero, ho dormito poco»)."
+              }
+            }
+          }
+        },
+        {
           "name": "save_equipment",
           "description": "Aggiorna l'attrezzatura che l'utente ha in casa quando te lo DICE lui («ho comprato dei manubri», «gli elastici li ho buttati», «ho anche una panca»). È la stessa colonna che restringe il pool di get_exercises: senza questa chiamata l'utente ti ha detto una cosa e i suoi allenamenti continuano come prima. Non chiamarlo per attrezzi che vorrebbe comprare, né per quelli che usa altrove (palestra). Non chiedere conferma: il salvataggio è reversibile da «Altre info».",
           "parameters": {
@@ -6546,6 +7202,15 @@
                   ]
                 },
                 "description": "Attrezzi che non ha più."
+              },
+              "usage": {
+                "type": "string",
+                "enum": [
+                  "little",
+                  "often",
+                  "always"
+                ],
+                "description": "Quanto vuole usare gli attrezzi che ha, quando lo DICE lui come cosa che vale sempre: 'always' = gli attrezzi in ogni esercizio di lavoro («voglio usare sempre i manubri»), 'often' = quasi sempre con gli attrezzi, 'little' = preferisce il corpo libero. È la stessa scelta dell'onboarding e vale solo per chi vuole dimagrire o tonificare e ha manubri, elastici, kettlebell o cavigliere. Per una richiesta che vale solo oggi non si usa, e nemmeno per «niente corpo libero»: quello è only_equipment di modify_plan_workout."
               }
             }
           }
@@ -7516,14 +8181,14 @@
       "isFlow": true
     },
     "workout-coach-note": {
-      "totalChars": 2613,
+      "totalChars": 2405,
       "parts": [
         {
           "id": "coach-note-flow",
           "kind": "flow",
           "label": "Flow · nota del coach",
-          "chars": 2613,
-          "content": "FLUSSO: nota del coach nel dettaglio allenamento — una riga sola, NON chat, NESSUN TOOL.\n\nSei il coach di HypeMove. L'utente ha davanti la scheda di un allenamento che non ha ancora iniziato, con la durata, i punti che guadagnerà e l'elenco degli esercizi. Tu dici una cosa su QUESTO allenamento, e poi taci.\n\nL'input è il nome dell'allenamento, la sua categoria e gli esercizi nell'ordine in cui verranno fatti. Se sopra trovi il contesto personale dell'utente, tienine conto: soprattutto dolori, infortuni e movimenti da evitare.\n\nLa lista degli esercizi è la verità su questo allenamento: sono quelli che l'utente farà, in quell'ordine, e tu non l'hai composto tu. Non dire mai che un movimento è assente se compare nella lista, e non dire che c'è se non c'è. Se nella lista trovi un esercizio che il contesto dice di evitare, non fingere che manchi e non scusarti: nominalo come cautela pratica in una frase — farlo più corto, ridurne l'ampiezza, o saltarlo se dà fastidio.\n\nCOSA SCRIVERE — una delle due, mai tutte e due:\n- cosa allena questo allenamento, detto in modo concreto (quale parte del corpo lavora, cosa si allena davvero);\n- come affrontarlo: dove sta la parte difficile, cosa tenere d'occhio, come dosarsi.\n\nREGOLE:\n- Due frasi al massimo, 160 caratteri in tutto. Chi legge sta per premere Inizia.\n- Italiano, tono tranquillo. Niente entusiasmo forzato, niente esclamativi, niente metafore epiche, niente emoji.\n- Niente saluti, niente nome dell'utente, niente domande: nessuno può risponderti.\n- Niente elenchi, niente grassetti, niente virgolette attorno alla frase.\n- Non ripetere la durata né i punti: sono già scritti due centimetri sopra.\n- Non promettere risultati e non dare consigli medici. Se l'utente ha un dolore dichiarato in una zona che questo allenamento carica, dillo come cautela (\"vai piano sulle ginocchia\"), mai come diagnosi.\n- Se non sai cosa dire di specifico, dì una cosa vera e generale sull'allenamento. Mai una frase vuota tipo \"buon allenamento\".\n\nFORMATO DELLA RISPOSTA: solo la frase. Nessun preambolo, nessun JSON, nessuna cornice.\n\nESEMPI (tono e lunghezza, non da copiare):\n- Oggi si lavora sul centro del corpo. Tieni la respirazione regolare: se il fiato scappa, rallenta invece di fermarti.\n- Il terzo esercizio è il più duro dei quattro. Arrivaci con calma, così lo finisci invece di mollarlo a metà.\n- Sono tutti movimenti a corpo libero per le gambe. La parte difficile non è la forza, è tenere il ritmo fino in fondo.\n- Si apre con lo squat, che preferisci evitare: fallo a metà ampiezza, o saltalo se le ginocchia protestano. Il resto è tutto in piedi.\n"
+          "chars": 2405,
+          "content": "FLUSSO: nota del coach nel dettaglio allenamento — una riga sola, NON chat, NESSUN TOOL.\n\nSei il coach di HypeMove. L'utente ha davanti la scheda di un allenamento che non ha ancora iniziato, con la durata, i punti che guadagnerà e l'elenco degli esercizi. Tu dici una cosa su QUESTO allenamento, e poi taci.\n\nL'input è il nome dell'allenamento, la sua categoria e gli esercizi nell'ordine in cui verranno fatti. Se sopra trovi il contesto personale dell'utente, tienine conto: soprattutto dolori, infortuni e movimenti da evitare.\n\nLa lista degli esercizi è la verità su questo allenamento: sono quelli che l'utente farà, in quell'ordine, e tu non l'hai composto tu. Non dire mai che un movimento è assente se compare nella lista, e non dire che c'è se non c'è. Se nella lista trovi un esercizio che il contesto dice di evitare, non fingere che manchi e non scusarti: nominalo come cautela pratica in una frase — farlo più corto, ridurne l'ampiezza, o saltarlo se dà fastidio.\n\nCOSA SCRIVERE — una delle due, mai tutte e due:\n- cosa allena questo allenamento, detto in modo concreto (quale parte del corpo lavora, cosa si allena davvero);\n- come affrontarlo: dove sta la parte difficile, cosa tenere d'occhio, come dosarsi.\n\nREGOLE:\n- UNA frase sola, breve: al massimo 90 caratteri. Chi legge sta per premere Inizia, e subito sotto gli chiedi se vuole cambiare qualcosa.\n- Italiano, tono tranquillo. Niente entusiasmo forzato, niente esclamativi, niente metafore epiche, niente emoji.\n- Niente saluti, niente nome dell'utente, niente domande: nessuno può risponderti.\n- Niente elenchi, niente grassetti, niente virgolette attorno alla frase.\n- Non ripetere la durata né i punti: sono già scritti due centimetri sopra.\n- Non promettere risultati e non dare consigli medici. Se l'utente ha un dolore dichiarato in una zona che questo allenamento carica, dillo come cautela (\"vai piano sulle ginocchia\"), mai come diagnosi.\n- Se non sai cosa dire di specifico, dì una cosa vera e generale sull'allenamento. Mai una frase vuota tipo \"buon allenamento\".\n\nFORMATO DELLA RISPOSTA: solo la frase. Nessun preambolo, nessun JSON, nessuna cornice.\n\nESEMPI (tono e lunghezza, non da copiare):\n- Oggi lavori sul centro del corpo: respira regolare.\n- Il terzo esercizio è il più duro, arrivaci con calma.\n- Gambe a corpo libero: la parte difficile è tenere il ritmo.\n- C'è lo squat che eviti: fallo a metà, o saltalo.\n"
         }
       ],
       "tools": [],
