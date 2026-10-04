@@ -5,7 +5,8 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ── RPC CON RITENTATIVO SUI TIMEOUT ──────────────────────────────────
-// Il ruolo `anon` di Supabase annulla ogni query oltre i 3s (statement_timeout). Dal
+// La dashboard chiama col JWT dell'operatore, quindi come ruolo `authenticated`, che
+// annulla ogni query oltre gli 8s (statement_timeout; `anon` ne ha 3). Dal
 // 03/08/2026 il traffico è passato da ~1 a ~90 nuovi utenti al giorno, e le RPC più
 // pesanti (kpi_funnel, kpi_premium, kpi_ai_sessions) sforano quel tetto SOLO a cache
 // fredda: la stessa identica query rilanciata subito dopo chiude in 1-2s, perché le
@@ -13,10 +14,14 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // 12/08/2026: funnel 3.77s KO → 2.55s OK, chat AI 4.04s KO → 1.07s OK).
 // Senza ritentativo la dashboard mostrava "canceling statement due to statement
 // timeout" a caso, su schede diverse a ogni caricamento.
-// ⚠️ Cerotto consapevole, non la cura: la cura sta lato DB (alzare lo statement_timeout
-// del ruolo anon e alleggerire le query) e vive nel repo dell'app.
+// ⚠️ Cerotto consapevole, non la cura. La cura (04/10/2026) è stata togliere il motivo per
+// cui la cache era sempre fredda: l'auto-refresh ricaricava l'Overview ogni 5 minuti da
+// ogni scheda aperta, e kpi_ai_sessions leggeva ~90 MB a giro svuotando la memoria del DB
+// (migration 20261004170000_kpi_dashboard_speed nel repo dell'app, più startAutoRefresh
+// qui sotto). Con la causa tolta basta UN ritentativo: prima erano quattro, e una query
+// davvero lenta teneva lo spinner ~45s martellando il DB cinque volte di fila.
 const RPC_TIMEOUT_CODE = '57014';
-const RPC_MAX_RETRY    = 4;
+const RPC_MAX_RETRY    = 1;
 // Attese fra un tentativo e l'altro. Il primo ritentativo parte quasi subito
 // apposta: le pagine appena lette restano in memoria solo finché il traffico
 // dell'app non le sfratta, quindi aspettare troppo butta via il vantaggio. Poi
@@ -656,7 +661,10 @@ async function fetchData() {
     if (pt.error) state.premTimelineError = pt.error.message || 'Errore caricamento abbonamenti';
     else { state.premTimeline = pt.data || []; state.premTimelineError = null; }
     state.lastUpdated = new Date();
-    await Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]);
+    state.overviewStale = false;
+    // I due riquadri «ultimi feedback» e «ultime chat» arrivano dopo, ognuno col suo render:
+    // prima la pagina intera aspettava kpi_ai_sessions, la RPC più lenta del gruppo.
+    Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]).then(render);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
   state.loading = false;
   render();
@@ -2179,18 +2187,38 @@ async function fetchSprintRetention() {
   render();
 }
 
+// Ogni ciclo ripesca funnel salvati, impostazioni e sprint (le tab aperte si sincronizzano con
+// ciò che salva l'altro utente) e i numeri dell'Overview — ma questi ultimi SOLO se l'Overview
+// è a schermo, e niente del tutto se la scheda del browser non è in primo piano.
+// Prima ogni scheda aperta, anche dimenticata in background o ferma su Premium, rilanciava le
+// sette RPC dell'Overview ogni 5 minuti: ~7.400 giri dal 24/08, e quello di kpi_ai_sessions
+// leggeva ~90 MB a volta. Svuotava la cache del DB, e la query che si chiedeva davvero
+// ripartiva a freddo e sforava gli 8 secondi.
+// L'Overview lasciata indietro resta segnata `overviewStale` e si rilegge quando ci si torna.
+let refreshDue = false;
+
+function autoRefreshTick() {
+  if (document.hidden) { refreshDue = true; return; }
+  refreshDue = false;
+  loadSettings();
+  fetchFunnelDefinitions();
+  fetchFunnelPhases();
+  fetchSprints();
+  if (state.page === 'overview') fetchData();
+  else { state.overviewStale = true; startCountdown(); }
+}
+
 function startAutoRefresh() {
   clearInterval(refreshTimer);
-  // ogni ciclo ripesca dati + funnel salvati + sprint dal DB → le tab aperte si sincronizzano
-  // con ciò che salva l'altro utente senza bisogno di ricaricare la pagina.
-  refreshTimer = setInterval(() => {
-    fetchData();
-    loadSettings();
-    fetchFunnelDefinitions();
-    fetchFunnelPhases();
-    fetchSprints();
-  }, REFRESH_MS);
+  refreshTimer = setInterval(autoRefreshTick, REFRESH_MS);
 }
+
+// Scheda tornata in primo piano dopo un giro saltato: si aggiorna subito e il timer riparte da lì.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !refreshDue || !state.opsSession) return;
+  autoRefreshTick();
+  startAutoRefresh();
+});
 
 function startCountdown() {
   clearInterval(countdownTimer);
@@ -7128,7 +7156,7 @@ function premiumKpi(label, value, sub, color, note, infoKey, bucket) {
 // è arrivato è già cablato e vale anche qui.
 
 // Un timeout del DB non è una funzionalità mancante, ed è l'errore più frequente
-// da agosto 2026 (traffico ×10, tetto di 3s per statement). Prima finiva nello
+// da agosto 2026 (traffico ×10, tetto di 8s per statement). Prima finiva nello
 // stesso riquadro di "la RPC non è ancora applicata": si leggeva "il gate non è
 // rilasciato" mentre in realtà i numeri esistevano e la query era stata annullata.
 // Qui la sezione lo dice per quello che è e offre il bottone per rileggere.
@@ -7136,7 +7164,7 @@ function sezioneTimeoutBox(msg, retryCall) {
   return `
     <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
       ⏳ <strong>Il database non ha fatto in tempo a rispondere.</strong>
-      I dati ci sono: la query è stata annullata dopo 3 secondi, cosa che capita alla prima apertura
+      I dati ci sono: la query è stata annullata dopo 8 secondi, cosa che capita alla prima apertura
       con la cache fredda.<br>
       <button onclick="${retryCall}" style="margin-top:7px;background:#3a2d10;border:1px solid #5a4318;color:#fbbf24;
         border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">↻ Rileggi questa sezione</button>
@@ -11300,6 +11328,8 @@ function attachEvents() {
   document.querySelectorAll('[data-nav]').forEach(el =>
     el.addEventListener('click', () => {
       state.page = el.dataset.nav;
+      // L'auto-refresh salta l'Overview quando non è a schermo: tornandoci si rilegge.
+      if (state.page === 'overview'   && state.overviewStale && !state.loading)              fetchData();
       if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
       if (state.page === 'funnel'     && state.funnelMode === 'activation' && !state.activation && !state.activationLoading) fetchActivation();
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
