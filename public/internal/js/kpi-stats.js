@@ -410,6 +410,7 @@ function stHeader() {
        </div>${sp.open_trials > 0 ? `<div class="st-pill st-pill-blue">${sp.open_trials} ${sp.open_trials === 1 ? 'prova aperta' : 'prove aperte'}</div>` : ''}`
     : `<div class="st-sk st-sk-pill"></div>`;
   return `<div class="st-head">
+      <button class="nav-toggle nav-toggle-desk" data-nav-toggle title="Mostra il menu" aria-label="Mostra il menu">${NAV_PANEL_ICON}</button>
       <h1 class="st-h1">Stats</h1>${pill}
       <div class="st-grow"></div>
       <div class="st-meta">${stats.loading ? 'Caricamento…' : (upd ? 'ultimo ' + upd : '')}</div>

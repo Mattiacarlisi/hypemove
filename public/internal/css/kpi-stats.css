@@ -2,6 +2,12 @@
 
 /* Pagina «Stats» — tema Notte del design system HypeMove. Misure dalla tavola «2A - Sprint in alto». */
 .main.main-stats { max-width: none; padding: 0; }
+/* Su «Stats» il pulsante del menu compare solo a barra laterale chiusa, per riaprirla: la tavola non lo prevede nell'intestazione. */
+.app:not(.nav-collapsed) .st-head .nav-toggle-desk { display: none; }
+@media (min-width: 901px) {
+  .app.nav-collapsed .main.main-stats { padding-left: 0; }
+  .app.nav-collapsed .main-stats .st-page { padding-left: 66px; }
+}
 .st-page {
   background: #0f1115; color: #ffffff; min-height: 100vh; padding: 28px 32px 48px;
   font-family: Nunito, system-ui, sans-serif; line-height: 1.3;
