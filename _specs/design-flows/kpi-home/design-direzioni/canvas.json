@@ -1,0 +1,188 @@
+{
+ "v": 3,
+ "attachments": {},
+ "boards": {
+  "Main.dc.html": {
+   "h": 900,
+   "title": "1 - Overview",
+   "w": 1440,
+   "x": 0,
+   "y": 0
+  },
+  "dir-A-tre-numeri.dc.html": {
+   "w": 1440,
+   "h": 1596,
+   "x": 0,
+   "y": 1300,
+   "title": "2A - Sprint in alto"
+  },
+  "dir-B-tasso-centro.dc.html": {
+   "w": 1440,
+   "h": 900,
+   "x": 1520,
+   "y": 1300,
+   "title": "2B - Tasso al centro"
+  },
+  "dir-C-curve-colonna.dc.html": {
+   "w": 1440,
+   "h": 900,
+   "x": 3040,
+   "y": 1300,
+   "title": "2C - Curve in colonna"
+  },
+  "g1-A-arrivi-destra.dc.html": {
+   "h": 600,
+   "title": "G1A - Arrivi a destra",
+   "w": 1440,
+   "x": 0,
+   "y": 7300
+  },
+  "g1-B-quattro-riquadri.dc.html": {
+   "h": 600,
+   "title": "G1B - Quattro riquadri",
+   "w": 1440,
+   "x": 1520,
+   "y": 7300
+  },
+  "g1-C-una-alla-volta.dc.html": {
+   "h": 600,
+   "title": "G1C - Una alla volta",
+   "w": 1440,
+   "x": 3040,
+   "y": 7300
+  },
+  "home-1-home.dc.html": {
+   "h": 1236,
+   "title": "1 - Home",
+   "w": 1440,
+   "x": 0,
+   "y": 3600
+  },
+  "home-2-caricamento.dc.html": {
+   "h": 1236,
+   "title": "2 - Caricamento",
+   "w": 1440,
+   "x": 1520,
+   "y": 3600
+  },
+  "home-3-errore.dc.html": {
+   "h": 900,
+   "title": "3 - Errore",
+   "w": 1440,
+   "x": 3040,
+   "y": 3600
+  },
+  "home-4-vuoto.dc.html": {
+   "h": 1236,
+   "title": "4 - Sprint vuoto",
+   "w": 1440,
+   "x": 4560,
+   "y": 3600
+  },
+  "home-5-passaggio-mouse.dc.html": {
+   "h": 1236,
+   "title": "5 - Passaggio mouse",
+   "w": 1440,
+   "x": 6080,
+   "y": 3600
+  },
+  "home-6-finestra-stretta.dc.html": {
+   "h": 1924,
+   "title": "6 - Finestra stretta",
+   "w": 820,
+   "x": 7600,
+   "y": 3600
+  },
+  "prop-A-grande-sopra.dc.html": {
+   "h": 900,
+   "title": "1A - Uno grande",
+   "w": 1440,
+   "x": 0,
+   "y": 6000
+  },
+  "prop-B-colonna-margine.dc.html": {
+   "h": 900,
+   "title": "1B - Colonna e margine",
+   "w": 1440,
+   "x": 1520,
+   "y": 6000
+  },
+  "prop-C-linea-pareggio.dc.html": {
+   "h": 900,
+   "title": "1C - Linea del pareggio",
+   "w": 1440,
+   "x": 3040,
+   "y": 6000
+  }
+ },
+ "createdOnFiles": {
+  "at": "2026-10-05T21:30:00Z",
+  "v": 1
+ },
+ "designSystems": [],
+ "launch": {
+  "view": "canvas"
+ },
+ "notes": {
+  "dir": {
+   "kind": "title1",
+   "maxW": 4000,
+   "text": "Direzioni",
+   "w": 240,
+   "x": 0,
+   "y": 1000
+  },
+  "g1": {
+   "kind": "title1",
+   "maxW": 4000,
+   "text": "Grafico 1",
+   "w": 240,
+   "x": 0,
+   "y": 7000
+  },
+  "oggi": {
+   "kind": "title1",
+   "maxW": 4000,
+   "text": "Oggi",
+   "w": 240,
+   "x": 0,
+   "y": -300
+  },
+  "prop": {
+   "kind": "title1",
+   "maxW": 4000,
+   "text": "Proposte",
+   "w": 240,
+   "x": 0,
+   "y": 5700
+  },
+  "red": {
+   "kind": "title1",
+   "maxW": 4000,
+   "text": "Redesign",
+   "w": 240,
+   "x": 0,
+   "y": 3300
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "dir-A-tre-numeri.dc.html",
+  "dir-B-tasso-centro.dc.html",
+  "dir-C-curve-colonna.dc.html",
+  "g1-A-arrivi-destra.dc.html",
+  "g1-B-quattro-riquadri.dc.html",
+  "g1-C-una-alla-volta.dc.html",
+  "home-1-home.dc.html",
+  "home-2-caricamento.dc.html",
+  "home-3-errore.dc.html",
+  "home-4-vuoto.dc.html",
+  "home-5-passaggio-mouse.dc.html",
+  "home-6-finestra-stretta.dc.html",
+  "prop-A-grande-sopra.dc.html",
+  "prop-B-colonna-margine.dc.html",
+  "prop-C-linea-pareggio.dc.html"
+ ],
+ "pages": [],
+ "title": "KPI Home — direzioni"
+}

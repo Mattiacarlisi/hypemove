@@ -1,0 +1,1552 @@
+{
+ "meta": {
+  "sprint": {
+   "id": "72fe762a-8ec9-49b7-936f-4eaddd714d72",
+   "numero": 15,
+   "nome": "Sprint 15",
+   "inizio": "2026-10-04",
+   "fine": "2026-10-12",
+   "in_corso": true,
+   "giorno": 3,
+   "durata": 16,
+   "open_trials": 2,
+   "paid_eur": 0
+  },
+  "oggi": "2026-10-06",
+  "ultimo_giorno_intero": "2026-10-05",
+  "net": {
+   "year": 20.9,
+   "month": 6.9
+  },
+  "rate": {
+   "pct": 62.5,
+   "paid": 5,
+   "ended": 8,
+   "open": 7,
+   "open_cancelled": 1,
+   "started": 15
+  },
+  "breakeven_trials_per_100": 7.6555,
+  "zone": {
+   "today_from_day": 3,
+   "ads_end_day": 9
+  },
+  "expected_trials_per_euro": 0.0314
+ },
+ "sprint_day": {
+  "breakeven": 1,
+  "selected": {
+   "numero": 15,
+   "nome": "Sprint 15",
+   "points": [
+    {
+     "day": 1,
+     "v": 0.0,
+     "est": false
+    },
+    {
+     "day": 2,
+     "v": 0.0,
+     "est": false
+    },
+    {
+     "day": 3,
+     "v": 1.3117,
+     "est": true
+    },
+    {
+     "day": 4,
+     "v": 0.9042,
+     "est": true
+    },
+    {
+     "day": 5,
+     "v": 0.7504,
+     "est": true
+    },
+    {
+     "day": 6,
+     "v": 0.6695,
+     "est": true
+    },
+    {
+     "day": 7,
+     "v": 0.6197,
+     "est": true
+    },
+    {
+     "day": 8,
+     "v": 0.5859,
+     "est": true
+    },
+    {
+     "day": 9,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 10,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 11,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 12,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 13,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 14,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 15,
+     "v": 0.5615,
+     "est": true
+    },
+    {
+     "day": 16,
+     "v": 0.5615,
+     "est": true
+    }
+   ]
+  },
+  "compare": [
+   {
+    "numero": 5,
+    "nome": "Sprint 5",
+    "points": [
+     {
+      "day": 1,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 2,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 3,
+      "v": 0.3063,
+      "est": true
+     },
+     {
+      "day": 4,
+      "v": 0.6127,
+      "est": true
+     },
+     {
+      "day": 5,
+      "v": 0.6127,
+      "est": true
+     },
+     {
+      "day": 6,
+      "v": 0.6127,
+      "est": true
+     },
+     {
+      "day": 7,
+      "v": 0.6127,
+      "est": true
+     },
+     {
+      "day": 8,
+      "v": 0.6127,
+      "est": true
+     },
+     {
+      "day": 9,
+      "v": 0.6127,
+      "est": true
+     },
+     {
+      "day": 10,
+      "v": 0.7965,
+      "est": true
+     },
+     {
+      "day": 11,
+      "v": 0.9803,
+      "est": false
+     },
+     {
+      "day": 12,
+      "v": 0.9803,
+      "est": false
+     },
+     {
+      "day": 13,
+      "v": 0.9803,
+      "est": false
+     },
+     {
+      "day": 14,
+      "v": 0.9803,
+      "est": false
+     },
+     {
+      "day": 15,
+      "v": 0.9803,
+      "est": false
+     },
+     {
+      "day": 16,
+      "v": 0.9803,
+      "est": false
+     }
+    ]
+   },
+   {
+    "numero": 12,
+    "nome": "Sprint 12",
+    "points": [
+     {
+      "day": 1,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 2,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 3,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 4,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 5,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 6,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 7,
+      "v": 0.0646,
+      "est": true
+     },
+     {
+      "day": 8,
+      "v": 0.0574,
+      "est": true
+     },
+     {
+      "day": 9,
+      "v": 0.0524,
+      "est": true
+     },
+     {
+      "day": 10,
+      "v": 0.0482,
+      "est": true
+     },
+     {
+      "day": 11,
+      "v": 0.0445,
+      "est": true
+     },
+     {
+      "day": 12,
+      "v": 0.0445,
+      "est": true
+     },
+     {
+      "day": 13,
+      "v": 0.0445,
+      "est": true
+     },
+     {
+      "day": 14,
+      "v": 0.0445,
+      "est": true
+     },
+     {
+      "day": 15,
+      "v": 0.089,
+      "est": true
+     },
+     {
+      "day": 16,
+      "v": 0.089,
+      "est": true
+     }
+    ]
+   },
+   {
+    "numero": 13,
+    "nome": "Sprint 13",
+    "points": [
+     {
+      "day": 1,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 2,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 3,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 4,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 5,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 6,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 7,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 8,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 9,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 10,
+      "v": 0.2095,
+      "est": true
+     },
+     {
+      "day": 11,
+      "v": 0.3353,
+      "est": false
+     },
+     {
+      "day": 12,
+      "v": 0.3353,
+      "est": false
+     },
+     {
+      "day": 13,
+      "v": 0.3353,
+      "est": false
+     },
+     {
+      "day": 14,
+      "v": 0.3353,
+      "est": false
+     },
+     {
+      "day": 15,
+      "v": 0.3353,
+      "est": false
+     }
+    ]
+   }
+  ],
+  "final_estimate": 0.5615
+ },
+ "trial_rate": {
+  "now": {
+   "pct": 62.5,
+   "paid": 5,
+   "ended": 8
+  },
+  "points": [
+   {
+    "date": "2026-09-07",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-08",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-09",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-10",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-11",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-12",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-13",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-14",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-15",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-16",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-17",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-18",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-19",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-20",
+    "v": 100.0,
+    "paid": 2,
+    "ended": 2
+   },
+   {
+    "date": "2026-09-21",
+    "v": 66.6667,
+    "paid": 2,
+    "ended": 3
+   },
+   {
+    "date": "2026-09-22",
+    "v": 66.6667,
+    "paid": 2,
+    "ended": 3
+   },
+   {
+    "date": "2026-09-23",
+    "v": 66.6667,
+    "paid": 2,
+    "ended": 3
+   },
+   {
+    "date": "2026-09-24",
+    "v": 66.6667,
+    "paid": 2,
+    "ended": 3
+   },
+   {
+    "date": "2026-09-25",
+    "v": 75.0,
+    "paid": 3,
+    "ended": 4
+   },
+   {
+    "date": "2026-09-26",
+    "v": 75.0,
+    "paid": 3,
+    "ended": 4
+   },
+   {
+    "date": "2026-09-27",
+    "v": 75.0,
+    "paid": 3,
+    "ended": 4
+   },
+   {
+    "date": "2026-09-28",
+    "v": 80.0,
+    "paid": 4,
+    "ended": 5
+   },
+   {
+    "date": "2026-09-29",
+    "v": 80.0,
+    "paid": 4,
+    "ended": 5
+   },
+   {
+    "date": "2026-09-30",
+    "v": 80.0,
+    "paid": 4,
+    "ended": 5
+   },
+   {
+    "date": "2026-10-01",
+    "v": 83.3333,
+    "paid": 5,
+    "ended": 6
+   },
+   {
+    "date": "2026-10-02",
+    "v": 83.3333,
+    "paid": 5,
+    "ended": 6
+   },
+   {
+    "date": "2026-10-03",
+    "v": 62.5,
+    "paid": 5,
+    "ended": 8
+   },
+   {
+    "date": "2026-10-04",
+    "v": 62.5,
+    "paid": 5,
+    "ended": 8
+   },
+   {
+    "date": "2026-10-05",
+    "v": 62.5,
+    "paid": 5,
+    "ended": 8
+   }
+  ]
+ },
+ "trials_per_100": {
+  "breakeven": 7.6555,
+  "selected": {
+   "numero": 15,
+   "nome": "Sprint 15",
+   "points": [
+    {
+     "day": 1,
+     "v": null,
+     "est": false
+    },
+    {
+     "day": 2,
+     "v": 42.3729,
+     "est": false
+    },
+    {
+     "day": 3,
+     "v": 10.0421,
+     "est": true
+    },
+    {
+     "day": 4,
+     "v": 6.9225,
+     "est": true
+    },
+    {
+     "day": 5,
+     "v": 5.7444,
+     "est": true
+    },
+    {
+     "day": 6,
+     "v": 5.1255,
+     "est": true
+    },
+    {
+     "day": 7,
+     "v": 4.744,
+     "est": true
+    },
+    {
+     "day": 8,
+     "v": 4.4853,
+     "est": true
+    },
+    {
+     "day": 9,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 10,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 11,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 12,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 13,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 14,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 15,
+     "v": 4.2983,
+     "est": true
+    },
+    {
+     "day": 16,
+     "v": 4.2983,
+     "est": true
+    }
+   ]
+  },
+  "compare": [
+   {
+    "numero": 5,
+    "nome": "Sprint 5",
+    "points": [
+     {
+      "day": 1,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 2,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 3,
+      "v": 2.3452,
+      "est": false
+     },
+     {
+      "day": 4,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 5,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 6,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 7,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 8,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 9,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 10,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 11,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 12,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 13,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 14,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 15,
+      "v": 4.6904,
+      "est": false
+     },
+     {
+      "day": 16,
+      "v": 4.6904,
+      "est": false
+     }
+    ]
+   },
+   {
+    "numero": 12,
+    "nome": "Sprint 12",
+    "points": [
+     {
+      "day": 1,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 2,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 3,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 4,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 5,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 6,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 7,
+      "v": 0.4948,
+      "est": false
+     },
+     {
+      "day": 8,
+      "v": 0.4396,
+      "est": false
+     },
+     {
+      "day": 9,
+      "v": 0.4009,
+      "est": false
+     },
+     {
+      "day": 10,
+      "v": 0.3688,
+      "est": false
+     },
+     {
+      "day": 11,
+      "v": 0.3407,
+      "est": false
+     },
+     {
+      "day": 12,
+      "v": 0.3407,
+      "est": false
+     },
+     {
+      "day": 13,
+      "v": 0.3407,
+      "est": false
+     },
+     {
+      "day": 14,
+      "v": 0.3407,
+      "est": false
+     },
+     {
+      "day": 15,
+      "v": 0.6813,
+      "est": false
+     },
+     {
+      "day": 16,
+      "v": 0.6813,
+      "est": false
+     }
+    ]
+   },
+   {
+    "numero": 13,
+    "nome": "Sprint 13",
+    "points": [
+     {
+      "day": 1,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 2,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 3,
+      "v": 0.0,
+      "est": false
+     },
+     {
+      "day": 4,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 5,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 6,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 7,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 8,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 9,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 10,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 11,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 12,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 13,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 14,
+      "v": 1.6041,
+      "est": false
+     },
+     {
+      "day": 15,
+      "v": 1.6041,
+      "est": false
+     }
+    ]
+   }
+  ],
+  "final_estimate": 4.2983
+ },
+ "expected_payers": {
+  "real": [
+   {
+    "date": "2026-09-07",
+    "started": 2,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-08",
+    "started": 2,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-09",
+    "started": 2,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-10",
+    "started": 2,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-11",
+    "started": 2,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-12",
+    "started": 2,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-13",
+    "started": 3,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-14",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-15",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-16",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-17",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-18",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-19",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-20",
+    "started": 4,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-21",
+    "started": 5,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-22",
+    "started": 5,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-23",
+    "started": 5,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-24",
+    "started": 6,
+    "paid": 2
+   },
+   {
+    "date": "2026-09-25",
+    "started": 6,
+    "paid": 3
+   },
+   {
+    "date": "2026-09-26",
+    "started": 8,
+    "paid": 3
+   },
+   {
+    "date": "2026-09-27",
+    "started": 8,
+    "paid": 3
+   },
+   {
+    "date": "2026-09-28",
+    "started": 8,
+    "paid": 4
+   },
+   {
+    "date": "2026-09-29",
+    "started": 9,
+    "paid": 4
+   },
+   {
+    "date": "2026-09-30",
+    "started": 10,
+    "paid": 4
+   },
+   {
+    "date": "2026-10-01",
+    "started": 11,
+    "paid": 5
+   },
+   {
+    "date": "2026-10-02",
+    "started": 12,
+    "paid": 5
+   },
+   {
+    "date": "2026-10-03",
+    "started": 12,
+    "paid": 5
+   },
+   {
+    "date": "2026-10-04",
+    "started": 12,
+    "paid": 5
+   },
+   {
+    "date": "2026-10-05",
+    "started": 15,
+    "paid": 5
+   }
+  ],
+  "est": [
+   {
+    "date": "2026-10-05",
+    "v": 5.0
+   },
+   {
+    "date": "2026-10-06",
+    "v": 5.625
+   },
+   {
+    "date": "2026-10-07",
+    "v": 6.25
+   },
+   {
+    "date": "2026-10-08",
+    "v": 6.25
+   },
+   {
+    "date": "2026-10-09",
+    "v": 6.875
+   },
+   {
+    "date": "2026-10-10",
+    "v": 6.875
+   },
+   {
+    "date": "2026-10-11",
+    "v": 6.875
+   },
+   {
+    "date": "2026-10-12",
+    "v": 8.75
+   }
+  ],
+  "final_estimate": 8.75,
+  "expected_new": 3.75
+ },
+ "sprint_by_sprint": {
+  "breakeven": 1,
+  "points": [
+   {
+    "numero": 4,
+    "nome": "Sprint 4",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 5,
+    "nome": "Sprint 5",
+    "v": 0.98,
+    "est": false,
+    "paid_only": 0.98,
+    "selected": false
+   },
+   {
+    "numero": 6,
+    "nome": "Sprint 6",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 7,
+    "nome": "Sprint 7",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 8,
+    "nome": "Sprint 8",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 9,
+    "nome": "Sprint 9",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 10,
+    "nome": "Sprint 10",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 11,
+    "nome": "Sprint 11",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 12,
+    "nome": "Sprint 12",
+    "v": 0,
+    "est": false,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 13,
+    "nome": "Sprint 13",
+    "v": 0.335,
+    "est": false,
+    "paid_only": 0.335,
+    "selected": false
+   },
+   {
+    "numero": 14,
+    "nome": "Sprint 14",
+    "v": 0.1689,
+    "est": true,
+    "paid_only": 0,
+    "selected": false
+   },
+   {
+    "numero": 15,
+    "nome": "Sprint 15",
+    "v": 0.5615,
+    "est": true,
+    "paid_only": 0,
+    "selected": true
+   }
+  ]
+ },
+ "trials_not_cancelled": {
+  "points": [
+   {
+    "date": "2026-09-07",
+    "v": 100.0,
+    "kept": 2,
+    "started": 2
+   },
+   {
+    "date": "2026-09-08",
+    "v": 100.0,
+    "kept": 2,
+    "started": 2
+   },
+   {
+    "date": "2026-09-09",
+    "v": 100.0,
+    "kept": 2,
+    "started": 2
+   },
+   {
+    "date": "2026-09-10",
+    "v": 100.0,
+    "kept": 2,
+    "started": 2
+   },
+   {
+    "date": "2026-09-11",
+    "v": 100.0,
+    "kept": 2,
+    "started": 2
+   },
+   {
+    "date": "2026-09-12",
+    "v": 100.0,
+    "kept": 2,
+    "started": 2
+   },
+   {
+    "date": "2026-09-13",
+    "v": 100.0,
+    "kept": 3,
+    "started": 3
+   },
+   {
+    "date": "2026-09-14",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-15",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-16",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-17",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-18",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-19",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-20",
+    "v": 75.0,
+    "kept": 3,
+    "started": 4
+   },
+   {
+    "date": "2026-09-21",
+    "v": 80.0,
+    "kept": 4,
+    "started": 5
+   },
+   {
+    "date": "2026-09-22",
+    "v": 80.0,
+    "kept": 4,
+    "started": 5
+   },
+   {
+    "date": "2026-09-23",
+    "v": 80.0,
+    "kept": 4,
+    "started": 5
+   },
+   {
+    "date": "2026-09-24",
+    "v": 83.3333,
+    "kept": 5,
+    "started": 6
+   },
+   {
+    "date": "2026-09-25",
+    "v": 83.3333,
+    "kept": 5,
+    "started": 6
+   },
+   {
+    "date": "2026-09-26",
+    "v": 62.5,
+    "kept": 5,
+    "started": 8
+   },
+   {
+    "date": "2026-09-27",
+    "v": 62.5,
+    "kept": 5,
+    "started": 8
+   },
+   {
+    "date": "2026-09-28",
+    "v": 62.5,
+    "kept": 5,
+    "started": 8
+   },
+   {
+    "date": "2026-09-29",
+    "v": 66.6667,
+    "kept": 6,
+    "started": 9
+   },
+   {
+    "date": "2026-09-30",
+    "v": 70.0,
+    "kept": 7,
+    "started": 10
+   },
+   {
+    "date": "2026-10-01",
+    "v": 63.6364,
+    "kept": 7,
+    "started": 11
+   },
+   {
+    "date": "2026-10-02",
+    "v": 66.6667,
+    "kept": 8,
+    "started": 12
+   },
+   {
+    "date": "2026-10-03",
+    "v": 66.6667,
+    "kept": 8,
+    "started": 12
+   },
+   {
+    "date": "2026-10-04",
+    "v": 66.6667,
+    "kept": 8,
+    "started": 12
+   },
+   {
+    "date": "2026-10-05",
+    "v": 73.3333,
+    "kept": 11,
+    "started": 15
+   }
+  ]
+ },
+ "trials_per_100_first_opens": {
+  "from": "2026-09-07",
+  "points": [
+   {
+    "date": "2026-09-07",
+    "v": 0.0,
+    "trials": 0,
+    "first_opens": 13
+   },
+   {
+    "date": "2026-09-08",
+    "v": 0.0,
+    "trials": 0,
+    "first_opens": 43
+   },
+   {
+    "date": "2026-09-09",
+    "v": 0.0,
+    "trials": 0,
+    "first_opens": 143
+   },
+   {
+    "date": "2026-09-10",
+    "v": 0.0,
+    "trials": 0,
+    "first_opens": 280
+   },
+   {
+    "date": "2026-09-11",
+    "v": 0.0,
+    "trials": 0,
+    "first_opens": 440
+   },
+   {
+    "date": "2026-09-12",
+    "v": 0.0,
+    "trials": 0,
+    "first_opens": 592
+   },
+   {
+    "date": "2026-09-13",
+    "v": 0.1307,
+    "trials": 1,
+    "first_opens": 765
+   },
+   {
+    "date": "2026-09-14",
+    "v": 0.2294,
+    "trials": 2,
+    "first_opens": 872
+   },
+   {
+    "date": "2026-09-15",
+    "v": 0.2105,
+    "trials": 2,
+    "first_opens": 950
+   },
+   {
+    "date": "2026-09-16",
+    "v": 0.1942,
+    "trials": 2,
+    "first_opens": 1030
+   },
+   {
+    "date": "2026-09-17",
+    "v": 0.1825,
+    "trials": 2,
+    "first_opens": 1096
+   },
+   {
+    "date": "2026-09-18",
+    "v": 0.1787,
+    "trials": 2,
+    "first_opens": 1119
+   },
+   {
+    "date": "2026-09-19",
+    "v": 0.1778,
+    "trials": 2,
+    "first_opens": 1125
+   },
+   {
+    "date": "2026-09-20",
+    "v": 0.1739,
+    "trials": 2,
+    "first_opens": 1150
+   },
+   {
+    "date": "2026-09-21",
+    "v": 0.2439,
+    "trials": 3,
+    "first_opens": 1230
+   },
+   {
+    "date": "2026-09-22",
+    "v": 0.2259,
+    "trials": 3,
+    "first_opens": 1328
+   },
+   {
+    "date": "2026-09-23",
+    "v": 0.2091,
+    "trials": 3,
+    "first_opens": 1435
+   },
+   {
+    "date": "2026-09-24",
+    "v": 0.2778,
+    "trials": 4,
+    "first_opens": 1440
+   },
+   {
+    "date": "2026-09-25",
+    "v": 0.2768,
+    "trials": 4,
+    "first_opens": 1445
+   },
+   {
+    "date": "2026-09-26",
+    "v": 0.4054,
+    "trials": 6,
+    "first_opens": 1480
+   },
+   {
+    "date": "2026-09-27",
+    "v": 0.3971,
+    "trials": 6,
+    "first_opens": 1511
+   },
+   {
+    "date": "2026-09-28",
+    "v": 0.3934,
+    "trials": 6,
+    "first_opens": 1525
+   },
+   {
+    "date": "2026-09-29",
+    "v": 0.4461,
+    "trials": 7,
+    "first_opens": 1569
+   },
+   {
+    "date": "2026-09-30",
+    "v": 0.4954,
+    "trials": 8,
+    "first_opens": 1615
+   },
+   {
+    "date": "2026-10-01",
+    "v": 0.5392,
+    "trials": 9,
+    "first_opens": 1669
+   },
+   {
+    "date": "2026-10-02",
+    "v": 0.5747,
+    "trials": 10,
+    "first_opens": 1740
+   },
+   {
+    "date": "2026-10-03",
+    "v": 0.5701,
+    "trials": 10,
+    "first_opens": 1754
+   },
+   {
+    "date": "2026-10-04",
+    "v": 0.5634,
+    "trials": 10,
+    "first_opens": 1775
+   },
+   {
+    "date": "2026-10-05",
+    "v": 0.6919,
+    "trials": 13,
+    "first_opens": 1879
+   }
+  ]
+ }
+}

@@ -420,7 +420,7 @@ function saveSetting(key, value) {
 // ── STATE ─────────────────────────────────────────────────────────────
 
 let state = {
-  page: 'overview',
+  page: 'stats',
   data: null, chart: null, loading: true, lastUpdated: null, error: null,
   funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
   funnelSprintId: '',          // sprint scelto nel selettore periodo della pagina Funnel ('' = periodo libero)
@@ -2221,6 +2221,7 @@ function autoRefreshTick() {
   fetchSprints();
   if (state.page === 'overview') fetchData();
   else { state.overviewStale = true; startCountdown(); }
+  if (state.page === 'stats') fetchStats({ silent: true });
 }
 
 function startAutoRefresh() {
@@ -2315,7 +2316,7 @@ document.addEventListener('keydown', e => {
 });
 
 const PAGE_LABELS = {
-  overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
+  stats: 'Stats', overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
   premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS',
 };
 const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
@@ -2325,13 +2326,13 @@ function layout() {
   return `
     ${sidebar()}
     <div class="nav-backdrop" data-nav-close></div>
-    <div class="main">
+    <div class="main${state.page === 'stats' ? ' main-stats' : ''}">
       <div class="mtop">
         <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
         <span class="logo-mark">Hype<span>move</span></span>
         <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
       </div>
-      <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      ${state.page === 'stats' ? pageStats() : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div class="page-head-l">
           <button class="nav-toggle nav-toggle-desk" data-nav-toggle
             title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button>
@@ -2344,7 +2345,7 @@ function layout() {
           ${headerActions()}
         </div>
       </div>
-      ${state.error ? pageError() : !state.data ? pageSkeleton() : page()}
+      ${state.error ? pageError() : !state.data ? pageSkeleton() : page()}`}
     </div>
     ${deleteConfirmModal()}
     ${funnelOverwriteModal()}
@@ -2468,6 +2469,7 @@ function sidebar() {
       </a>
       <nav class="nav">
         <div class="nav-section">KPI</div>
+        ${nav('stats',     '📈', 'Stats')}
         ${nav('overview',  '📊', 'Overview')}
         ${nav('funnel',    '🎯', 'Funnel')}
         ${nav('retention', '🔄', 'Retention')}
@@ -2501,6 +2503,7 @@ function pageSkeleton() {
 
 function page() {
   switch (state.page) {
+    case 'stats':      return pageStats();
     case 'overview':   return pageOverview();
     case 'funnel':     return pageFunnel();
     case 'retention':  return pageRetention();
@@ -11529,12 +11532,14 @@ function attachEvents() {
   applyNavState();
   document.querySelectorAll('[data-nav-toggle]').forEach(el => el.addEventListener('click', toggleNav));
   document.querySelector('[data-nav-close]')?.addEventListener('click', () => { state.navOpen = false; applyNavState(); });
+  attachStatsEvents();
   // Navigazione
   document.querySelectorAll('[data-nav]').forEach(el =>
     el.addEventListener('click', () => {
       state.page = el.dataset.nav;
       state.navOpen = false;
       window.scrollTo(0, 0);
+      if (state.page === 'stats') statsOnNav();
       // L'auto-refresh salta l'Overview quando non è a schermo: tornandoci si rilegge.
       if (state.page === 'overview'   && state.overviewStale && !state.loading)              fetchData();
       if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
@@ -13505,7 +13510,9 @@ function renderSetPasswordForm() {
 
   await loadSettings();
   render();
-  fetchData();
+  if (state.page === 'overview') fetchData();
+  else { state.loading = false; state.overviewStale = true; }
+  if (state.page === 'stats') fetchStats();
   fetchSprints();
   fetchFunnelDefinitions();
   fetchFunnelPhases();

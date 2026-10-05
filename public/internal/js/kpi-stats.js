@@ -1,0 +1,531 @@
+// KPI Dashboard — pagina «Stats» (tema Notte del design system HypeMove).
+// Caricato DOPO kpi.js: usa `sb`, `state`, `render` e `esc` di quel file. Le serie arrivano
+// dalle RPC kpi_stats_sprints e kpi_stats_series (contratto in _specs/design-flows/kpi-home).
+// Le misure, i colori e i testi copiano la tavola «2A - Sprint in alto».
+
+const ST = {
+  INK: '#ffffff', MUT: '#9ca3af', TER: '#6f7683', BLU: '#4361ee', ORA: '#fb8b04',
+  GRID: '#2a2e37', CARD: '#1a1d24', PAGE: '#0f1115', PAST12: '#d1d5db',
+  FZ: 'rgba(255,255,255,0.04)', FZ2: 'rgba(255,255,255,0.05)', FZ_LEG: 'rgba(255,255,255,0.09)',
+};
+const ST_PAST_COLOR = { 5: ST.MUT, 12: ST.PAST12, 13: ST.TER };
+const ST_PAST_FALLBACK = [ST.PAST12, ST.TER, ST.MUT];
+const ST_REFRESH_STALE_MS = 5 * 60 * 1000;
+
+const stats = {
+  sprints: null,        // kpi_stats_sprints
+  sprintId: null,       // null = sprint predefinito scelto dal server
+  data: null,           // kpi_stats_series
+  loading: true, error: null, lastUpdated: null,
+  menuOpen: false, menuIdx: 0,
+  seq: 0,
+};
+let statsCharts = [];   // metadati dei grafici disegnati, per il passaggio del mouse
+
+// ── FORMATO ───────────────────────────────────────────────────────────
+const stIt = (v, d = 2) => Number(v).toFixed(d).replace('.', ',');
+const stEuro = v => (Math.abs(v) < 1e-9 ? '0' : stIt(v, 2));
+const stPct = v => { const r = Math.round(v * 10) / 10; return String(r).replace('.', ',') + '%'; };
+const stDM = iso => iso.slice(8, 10) + '/' + iso.slice(5, 7);
+const stDayN = iso => Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) / 864e5;
+const stAddDays = (iso, n) => { const d = new Date((stDayN(iso) + n) * 864e5); return d.toISOString().slice(0, 10); };
+const stNum = v => Number(v).toFixed(4).replace(/\.?0+$/, '');
+
+// ── DATI ──────────────────────────────────────────────────────────────
+async function fetchStats(opts = {}) {
+  const silent = !!opts.silent && !!stats.data;
+  const seq = ++stats.seq;
+  if (!silent) { stats.loading = true; stats.error = null; stats.data = opts.keepData ? stats.data : null; render(); }
+  try {
+    const [ser, lst] = await Promise.all([
+      sb.rpc('kpi_stats_series', stats.sprintId ? { p_sprint_id: stats.sprintId } : {}),
+      sb.rpc('kpi_stats_sprints'),
+    ]);
+    if (seq !== stats.seq) return;
+    if (ser.error) throw ser.error;
+    if (!ser.data) throw new Error('Sprint non trovato');
+    stats.data = ser.data;
+    if (!lst.error && Array.isArray(lst.data)) stats.sprints = lst.data;
+    stats.error = null;
+    stats.lastUpdated = new Date();
+  } catch (e) {
+    if (seq !== stats.seq) return;
+    stats.error = e.message || 'Errore sconosciuto';
+    if (!silent) stats.data = null;
+  }
+  stats.loading = false;
+  render();
+}
+
+function statsOnNav() {
+  const old = !stats.lastUpdated || Date.now() - stats.lastUpdated.getTime() > ST_REFRESH_STALE_MS;
+  if (!stats.loading && (!stats.data || old)) fetchStats({ silent: !!stats.data });
+}
+
+function statsSelectSprint(id) {
+  stats.menuOpen = false;
+  const pick = (stats.sprints || []).find(s => s.id === id);
+  stats.sprintId = pick && pick.predefinito ? null : id;
+  fetchStats();
+}
+
+// ── GRAFICO: motore (porta di plot() di gen5.py) ──────────────────────
+const stN = x => x.toFixed(1);
+const stText = (x, y, t, fill, w, anchor) =>
+  `<text x="${stN(x)}" y="${stN(y)}" font-size="12" font-weight="${w}" fill="${fill}" text-anchor="${anchor}">${t}</text>`;
+const stLine = (x1, y1, x2, y2, c, w = 1) =>
+  `<line x1="${stN(x1)}" y1="${stN(y1)}" x2="${stN(x2)}" y2="${stN(y2)}" stroke="${c}" stroke-width="${w}"></line>`;
+const stRect = (x, y, w, h, fill) => `<rect x="${stN(x)}" y="${stN(y)}" width="${stN(w)}" height="${stN(h)}" fill="${fill}"></rect>`;
+const stDot = (x, y, r, c) => `<circle cx="${stN(x)}" cy="${stN(y)}" r="${r}" fill="${c}"></circle>`;
+const stRing = (x, y, r = 5) => `<circle cx="${stN(x)}" cy="${stN(y)}" r="${r}" fill="${ST.CARD}" stroke="${ST.BLU}" stroke-width="3"></circle>`;
+const stPoly = (pts, c, sw, dash) =>
+  `<polyline points="${pts.map(p => stN(p[0]) + ',' + stN(p[1])).join(' ')}" fill="none" stroke="${c}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}></polyline>`;
+
+// Tratti continui: si spezza dove il valore manca o non sta nella scala (il punto non si disegna) e dove
+// cambia reale/stima (il punto di confine si ripete, così la curva non si interrompe).
+function stRuns(pts, ymax, join) {
+  const out = []; let cur = null;
+  for (const p of pts) {
+    if (p.v == null || p.v > ymax + 1e-9 || p.v < -1e-9) { cur = null; continue; }
+    if (cur && cur.est === !!p.est) cur.pts.push([p.i, p.v]);
+    else {
+      const prev = cur && join ? cur.pts[cur.pts.length - 1] : null;
+      cur = { est: !!p.est, pts: prev ? [prev, [p.i, p.v]] : [[p.i, p.v]] };
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+// Una curva: ogni tratto reale o stimato col suo colore e tratteggio. Ritorna i pezzi SVG e i punti disegnati.
+function stCurve(c, runs, spec) {
+  let s = '';
+  for (const r of runs) {
+    const col = r.est ? spec.estColor : spec.color;
+    const dash = r.est ? spec.estDash : null;
+    if (r.pts.length > 1) s += stPoly(r.pts.map(p => [c.X(p[0]), c.Y(p[1])]), col, spec.sw, dash);
+  }
+  const dots = [];
+  runs.forEach((r, ri) => {
+    r.pts.forEach((p, k) => {
+      const last = k === r.pts.length - 1;
+      const first = k === 0;
+      const kind = spec.dot ? spec.dot(p, r, { first, last, k }) : null;
+      if (kind) dots.push([p, kind, r]);
+    });
+  });
+  for (const [p, kind, r] of dots) {
+    s += kind === 'ring' ? stRing(c.X(p[0]), c.Y(p[1]), 5) : stDot(c.X(p[0]), c.Y(p[1]), 4, r.est ? spec.estColor : spec.color);
+  }
+  return s;
+}
+
+// Assi, griglia e zone. Nessuna scritta dentro l'area del grafico: i valori stanno sui bordi.
+function stBase(w, h, o) {
+  const ML = 52, MR = 14, mt = 10, mb = 30, nx = o.nx;
+  const PW = w - ML - MR, PH = h - mt - mb, ymax = o.ymax;
+  const y0 = -0.07 * ymax, y1 = ymax * 1.04;
+  const X = i => ML + PW * i / (nx - 1);
+  const Y = v => mt + PH * (1 - (v - y0) / (y1 - y0));
+  const x1 = ML + PW, lab = new Map(o.labs);
+  let s = '';
+  if (o.fz != null && o.fz < nx - 1) s += stRect(X(o.fz), mt, x1 - X(o.fz), PH, ST.FZ);
+  if (o.fz2 != null && o.fz2 < nx - 1) s += stRect(X(o.fz2), mt, x1 - X(o.fz2), PH, ST.FZ2);
+  for (const [v] of o.ticks) if (v) s += stLine(ML, Y(v), x1, Y(v), ST.GRID);
+  s += stLine(ML, Y(0), x1, Y(0), ST.INK, 1.5);
+  for (const [v, l] of o.ticks) s += stText(ML - 8, Y(v) + 4, l, ST.MUT, 600, 'end');
+  for (let i = 0; i < nx; i++) s += stLine(X(i), mt + PH, X(i), mt + PH + (lab.has(i) ? 6 : 3), ST.TER);
+  for (const [i, t] of o.labs) {
+    const today = t === 'oggi', last = i === nx - 1;
+    s += stText(X(i) + (last ? MR - 2 : 0), h - 8, t, today ? ST.INK : ST.MUT, today ? 800 : 600, last ? 'end' : 'middle');
+  }
+  if (o.par != null && o.par <= ymax) {
+    s += `<line x1="${stN(ML)}" y1="${stN(Y(o.par))}" x2="${stN(x1)}" y2="${stN(Y(o.par))}" stroke="${ST.ORA}" stroke-width="3" stroke-linecap="round"></line>`;
+  }
+  return { s, X, Y, ML, MR, mt, PW, PH, nx, w, h, ymax };
+}
+
+const stSvg = (w, h, inner) =>
+  `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;font-family:inherit" aria-hidden="true">${inner}</svg>`;
+
+// ── GRAFICO: i sei ────────────────────────────────────────────────────
+const ST_CNT = [[0, '0'], [4, '4'], [8, '8'], [12, '12'], [16, '16']];
+const ST_PCT = [[0, '0'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']];
+const ST_EU15 = [[0, '0'], [0.5, '0,50 €'], [1, '1 €'], [1.5, '1,50 €']];
+const ST_FO = [[0, '0'], [0.25, '0,25'], [0.5, '0,50'], [0.75, '0,75'], [1, '1']];
+const ST_T100 = [[0, '0'], [4, '4'], [8, '8'], [12, '12']];
+
+const stPastColor = (n, idx) => ST_PAST_COLOR[n] || ST_PAST_FALLBACK[idx % ST_PAST_FALLBACK.length];
+const stChanges = vals => vals.map((v, i) => (i > 0 && Math.abs(v - vals[i - 1]) > 1e-9 ? i : -1)).filter(i => i >= 0);
+
+// Calendario comune ai grafici sulla data: dal primo giorno disponibile alla fine dello sprint scelto.
+function stCalendar(d) {
+  const m = d.meta, from = [d.trials_per_100_first_opens && d.trials_per_100_first_opens.from, m.sprint.inizio,
+    d.trial_rate.points[0] && d.trial_rate.points[0].date].filter(Boolean).sort()[0];
+  const nx = stDayN(m.sprint.fine) - stDayN(from) + 1;
+  const last = stDayN(m.ultimo_giorno_intero) - stDayN(from);
+  const hasToday = m.oggi >= from && m.oggi <= m.sprint.fine;
+  const today = hasToday ? stDayN(m.oggi) - stDayN(from) : null;
+  const idx = iso => stDayN(iso) - stDayN(from);
+  const labs = [];
+  const stop = new Set([today, nx - 1].filter(x => x != null));
+  for (let i = 1; i < nx - 1; i += 7) if (![...stop].some(t => Math.abs(t - i) < 3)) labs.push([i, stDM(stAddDays(from, i))]);
+  if (today != null && today < nx - 1) labs.push([today, 'oggi']);
+  labs.push([nx - 1, stDM(stAddDays(from, nx - 1))]);
+  return { from, nx, last, today, idx, labs, fz: last < nx - 1 ? last + 0.5 : null, date: i => stAddDays(from, i) };
+}
+
+// Giorni dello sprint: etichette 1..n, «oggi» sul giorno in corso. Sotto i 700 px una su due.
+function stDayLabels(nd, z, w) {
+  const labs = []; for (let i = 0; i < nd; i++) labs.push([i, z && i === z.today_from_day - 1 ? 'oggi' : String(i + 1)]);
+  return w > 600 ? labs : labs.filter((_, k) => k % 2 === 0);
+}
+
+// Grafici a giorni dello sprint (1 e 3): sprint scelto + sprint di confronto.
+function stSprintDays(w, h, d, sec, o) {
+  const z = d.meta.zone, nd = d.meta.sprint.durata, inProg = !!z;
+  const c = stBase(w, h, {
+    nx: nd, ymax: o.ymax, ticks: o.ticks, par: sec.breakeven,
+    fz: z ? z.today_from_day - 1.5 : null, fz2: z ? z.ads_end_day - 1 : null, labs: stDayLabels(nd, z, w),
+  });
+  let s = c.s;
+  (sec.compare || []).forEach((cmp, k) => {
+    const col = stPastColor(cmp.numero, k);
+    const runs = stRuns(cmp.points.map(p => ({ i: p.day - 1, v: p.v, est: p.est })), o.ymax, true);
+    s += stCurve(c, runs, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && (!r.est || r === runs.at(-1)) ? 'dot' : null });
+  });
+  const sel = sec.selected.points.map(p => ({ i: p.day - 1, v: p.v, est: p.est }));
+  let selRuns;
+  if (inProg) {
+    // sprint in corso: pagato reale in bianco, poi la traccia stimata in blu tratteggiato, senza congiungerle
+    selRuns = stRuns(sel, o.ymax, false);
+    s += stCurve(c, selRuns, {
+      color: ST.INK, estColor: ST.BLU, estDash: '7 6', sw: 3,
+      dot: (p, r, e) => (!r.est && e.last) ? 'dot' : (r.est && (e.first || (e.last && selRuns.at(-1) === r)) ? 'ring' : null),
+    });
+  } else {
+    selRuns = stRuns(sel, o.ymax, true);
+    s += stCurve(c, selRuns, { color: ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3, dot: (p, r, e) => e.last && selRuns.at(-1) === r ? 'dot' : null });
+  }
+  return { svg: stSvg(w, h, s), c, sel: sec.selected.points, inProg };
+}
+
+function stBuildSprintDay(w, h, d) {
+  const sec = d.sprint_day, r = stSprintDays(w, h, d, sec, { ymax: 1.5, ticks: ST_EU15 });
+  const byDay = new Map(r.sel.map(p => [p.day, p]));
+  return {
+    svg: r.svg, c: r.c, nx: r.c.nx,
+    hov: i => { const p = byDay.get(i + 1); if (!p || p.v == null) return null;
+      return { txt: `giorno ${i + 1} · ${p.est && r.inProg ? 'stima ' : ''}${stEuro(p.v)} € per euro`, v: p.v }; },
+  };
+}
+function stBuildT100(w, h, d) {
+  const sec = d.trials_per_100, r = stSprintDays(w, h, d, sec, { ymax: 12, ticks: ST_T100 });
+  const byDay = new Map(r.sel.map(p => [p.day, p]));
+  return {
+    svg: r.svg, c: r.c, nx: r.c.nx,
+    hov: i => { const p = byDay.get(i + 1); if (!p || p.v == null) return null;
+      return { txt: `giorno ${i + 1} · ${p.est && r.inProg ? 'stima ' : ''}${stIt(p.v, 1)} prove ogni 100 €`, v: p.v }; },
+  };
+}
+
+function stBuildRate(w, h, d) {
+  const cal = stCalendar(d);
+  const c = stBase(w, h, { nx: cal.nx, ymax: 100, ticks: ST_PCT, fz: cal.fz, labs: cal.labs });
+  const pts = d.trial_rate.points.map(p => ({ i: cal.idx(p.date), v: p.v }));
+  const ch = new Set(stChanges(pts.map(p => p.v ?? 0)));
+  const runs = stRuns(pts, 100, false);
+  const s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
+  const by = new Map(d.trial_rate.points.map(p => [cal.idx(p.date), p]));
+  return { svg: stSvg(w, h, s), c, nx: cal.nx,
+    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${stPct(p.v)} delle prove finite`, v: p.v } : null; } };
+}
+
+function stBuildPayers(w, h, d) {
+  const cal = stCalendar(d), ep = d.expected_payers;
+  const c = stBase(w, h, { nx: cal.nx, ymax: 16, ticks: ST_CNT, fz: cal.fz, labs: cal.labs });
+  const started = ep.real.map(p => ({ i: cal.idx(p.date), v: p.started }));
+  const paid = ep.real.map(p => ({ i: cal.idx(p.date), v: p.paid }));
+  const est = (ep.est || []).map(p => ({ i: cal.idx(p.date), v: p.v }));
+  const chS = new Set(stChanges(started.map(p => p.v))), chP = new Set(stChanges(paid.map(p => p.v)));
+  const chE = new Set(stChanges(est.map(p => p.v)));
+  let s = c.s;
+  const rs = stRuns(started, 16, false), rp = stRuns(paid, 16, false), re = stRuns(est, 16, false);
+  s += stCurve(c, rs, { color: ST.MUT, estColor: ST.MUT, sw: 2.5, dot: p => chS.has(p[0]) ? 'dot' : null });
+  s += stCurve(c, rp, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (chP.has(p[0]) || (e.last && r === rp.at(-1))) ? 'dot' : null });
+  s += stCurve(c, re.map(r => ({ ...r, est: true })), { color: ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3,
+    dot: (p, r, e) => (!e.first && (chE.has(p[0]) || (e.last && r === re.at(-1)))) ? 'ring' : null });
+  const byR = new Map(ep.real.map(p => [cal.idx(p.date), p])), byE = new Map((ep.est || []).map(p => [cal.idx(p.date), p]));
+  return { svg: stSvg(w, h, s), c, nx: cal.nx,
+    hov: i => { const r = byR.get(i);
+      if (r) return { txt: `${stDM(cal.date(i))} · ${r.started} avviate · ${r.paid} hanno pagato`, v: r.paid };
+      const e = byE.get(i); return e ? { txt: `${stDM(cal.date(i))} · stima ${stIt(e.v, 1)} paganti`, v: e.v } : null; } };
+}
+
+function stBuildSprints(w, h, d) {
+  const sb5 = d.sprint_by_sprint, P = sb5.points, nx = Math.max(P.length, 2);
+  let lastReal = -1; P.forEach((p, i) => { if (!p.est) lastReal = i; });
+  const c = stBase(w, h, { nx, ymax: 1.5, ticks: ST_EU15, par: sb5.breakeven, fz: lastReal >= 0 && lastReal < P.length - 1 ? lastReal + 0.5 : null,
+    labs: P.map((p, i) => [i, 'S' + p.numero]) });
+  const real = P.map((p, i) => ({ i, v: p.v, est: i > lastReal }));
+  // reale in bianco con un punto per sprint; dall'ultimo reale la stima in blu tratteggiato, congiunta
+  const runs = stRuns(real, 1.5, true);
+  let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.BLU, estDash: '7 6', sw: 3,
+    dot: (p, r) => r.est ? (p[0] > lastReal ? 'ring' : null) : 'dot' });
+  P.forEach((p, i) => { if (p.selected && i !== P.length - 1 && p.v != null && p.v <= 1.5) s += stDot(c.X(i), c.Y(p.v), 6, ST.BLU); });
+  return { svg: stSvg(w, h, s), c, nx,
+    hov: i => { const p = P[i]; return p && p.v != null ? { txt: `Sprint ${p.numero} · ${p.est ? 'stima ' : ''}${stEuro(p.v)} € per euro`, v: p.v } : null; } };
+}
+
+function stBuildKeep(w, h, d) {
+  const cal = stCalendar(d), P = d.trials_not_cancelled.points;
+  const c = stBase(w, h, { nx: cal.nx, ymax: 100, ticks: ST_PCT, fz: cal.fz, labs: cal.labs });
+  const pts = P.map(p => ({ i: cal.idx(p.date), v: p.v }));
+  const ch = new Set(stChanges(pts.map(p => p.v ?? 0)));
+  const runs = stRuns(pts, 100, false);
+  const s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
+  const by = new Map(P.map(p => [cal.idx(p.date), p]));
+  return { svg: stSvg(w, h, s), c, nx: cal.nx,
+    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${stPct(p.v)} delle prove non disdette`, v: p.v } : null; } };
+}
+
+function stBuildFo(w, h, d) {
+  const cal = stCalendar(d), fo = d.trials_per_100_first_opens;
+  const c = stBase(w, h, { nx: cal.nx, ymax: 1, ticks: ST_FO, fz: cal.fz, labs: cal.labs });
+  const pts = fo.points.map(p => ({ i: cal.idx(p.date), v: p.v }));
+  const runs = stRuns(pts, 1, false);
+  const s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
+  const by = new Map(fo.points.map(p => [cal.idx(p.date), p]));
+  return { svg: stSvg(w, h, s), c, nx: cal.nx,
+    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${stIt(p.v, 2)} prove ogni 100 primi accessi`, v: p.v } : null; } };
+}
+
+// ── PAGINA ────────────────────────────────────────────────────────────
+function stLgd(c, txt, dash) {
+  return `<div class="st-lg"><svg width="26" height="12" aria-hidden="true"><line x1="2" y1="6" x2="24" y2="6" stroke="${c}" stroke-width="3" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}></line></svg><span>${txt}</span></div>`;
+}
+const stLgRect = (fill, txt) =>
+  `<div class="st-lg"><svg width="20" height="12" aria-hidden="true"><rect x="1" y="1" width="18" height="10" rx="3" fill="${fill}" stroke="${ST.GRID}" stroke-width="1"></rect></svg><span>${txt}</span></div>`;
+
+function stCardHtml(o) {
+  return `
+    <div class="st-card${o.big ? ' st-big' : ''}${o.legend ? ' st-has-leg' : ''}" data-st-card="${o.key}">
+      <div class="st-title">${o.title}</div>
+      <div class="st-num" style="color:${o.color || ST.INK}">${o.num}</div>
+      <div class="st-cap">${o.cap}</div>
+      ${o.legend ? `<div class="st-legend">${o.legend}</div>` : ''}
+      <div class="st-readout" data-st-readout></div>
+      <div class="st-chart" data-st-chart="${o.key}">${o.skeleton ? '<div class="st-sk st-sk-chart"></div>' : ''}</div>
+    </div>`;
+}
+
+function stSkeletonCard(key, title, big) {
+  return `
+    <div class="st-card${big ? ' st-big' : ''}" data-st-card="${key}">
+      <div class="st-title">${title}</div>
+      <div class="st-sk st-sk-num"></div><div class="st-sk st-sk-cap"></div>
+      <div class="st-chart"><div class="st-sk st-sk-chart"></div></div>
+    </div>`;
+}
+
+const ST_TITLES = {
+  sprint: 'Lo sprint, giorno per giorno', rate: 'Prove che poi pagano', t100: 'Prove avviate ogni 100 €',
+  payers: 'Paganti attesi', sprints: 'Sprint dopo sprint', keep: 'Prove non disdette', fo: 'Prove ogni 100 primi accessi',
+};
+const ST_ORDER = ['sprint', 'rate', 't100', 'payers', 'sprints', 'keep', 'fo'];
+
+function stCards(d) {
+  const m = d.meta, sp = m.sprint, inProg = !!m.zone;
+  const sd = d.sprint_day, selPts = sd.selected.points;
+  const empty = (d.trials_per_100.selected.points || []).every(p => p.v == null);
+  const lastPt = selPts.length ? selPts[selPts.length - 1] : null;
+  const names = (sd.compare || []).map((c, k) => stLgd(stPastColor(c.numero, k), 'Sprint ' + c.numero));
+  const legSprint = inProg
+    ? [stLgd(ST.INK, 'pagato'), stLgd(ST.BLU, 'stima', '6 5'), ...names, stLgd(ST.MUT, 'con prove aperte', '6 5'), stLgd(ST.ORA, 'pareggio'),
+       stLgRect(ST.FZ, 'da oggi'), stLgRect(ST.FZ_LEG, 'pubblicità finita')]
+    : [stLgd(ST.BLU, 'Sprint ' + sp.numero), ...names, stLgd(ST.MUT, 'con prove aperte', '6 5'), stLgd(ST.ORA, 'pareggio')];
+  const paidTxt = `${stEuro(sp.paid_eur)} € pagati finora`;
+  const c = {};
+  if (empty) c.sprint = { num: '–', cap: 'nessuna spesa ancora in questo sprint', color: ST.INK };
+  else if (inProg) c.sprint = { num: stEuro(sd.final_estimate) + ' €', cap: `stima a fine prove · ${paidTxt}`, color: ST.BLU };
+  else c.sprint = { num: (lastPt && lastPt.v != null ? stEuro(lastPt.v) : '–') + ' €',
+    cap: `${lastPt && lastPt.est ? 'stima' : 'reale'} al giorno ${lastPt ? lastPt.day : '–'} · ${stEuro(sp.paid_eur)} € pagati`, color: ST.BLU };
+  c.sprint.legend = legSprint.join('');
+
+  const r = d.trial_rate.now;
+  c.rate = r.ended > 0 ? { num: stPct(r.pct), cap: `${r.paid} prove finite su ${r.ended} hanno pagato`, color: ST.INK }
+                       : { num: '–', cap: 'nessuna prova finita ancora', color: ST.INK };
+
+  const t = d.trials_per_100, tl = t.selected.points.filter(p => p.v != null).at(-1);
+  c.t100 = t.final_estimate != null
+    ? { num: stIt(t.final_estimate, 1), cap: `stima a fine pubblicità · pareggio a ${stIt(t.breakeven, 1)}`, color: ST.BLU }
+    : { num: tl ? stIt(tl.v, 1) : '–', cap: `a fine sprint · pareggio a ${stIt(t.breakeven, 1)}`, color: ST.INK };
+
+  const ep = d.expected_payers, open = m.rate.open - m.rate.open_cancelled, canc = m.rate.open_cancelled;
+  if (ep.expected_new != null) {
+    c.payers = { num: stIt(ep.expected_new, 1), color: ST.BLU,
+      cap: `da ${open} prove aperte${canc ? `, ${canc} ${canc === 1 ? 'disdetta vale' : 'disdette valgono'} zero` : ''}` };
+  } else {
+    const lr = ep.real.at(-1);
+    c.payers = { num: lr ? String(lr.paid) : '–', cap: lr ? `hanno pagato · ${lr.started} prove avviate` : '', color: ST.INK };
+  }
+  c.payers.legend = [stLgd(ST.MUT, 'prove avviate'), stLgd(ST.INK, 'hanno pagato'), ...(ep.est && ep.est.length ? [stLgd(ST.BLU, 'stima', '6 5')] : [])].join('');
+
+  const P = d.sprint_by_sprint.points, selP = P.find(p => p.selected) || P.at(-1);
+  const prevClosed = P.filter(p => !p.est && p.numero < (selP ? selP.numero : 1e9)).at(-1);
+  c.sprints = selP ? { num: stEuro(selP.v) + ' €', color: selP.est ? ST.BLU : ST.INK,
+    cap: `${selP.est ? 'stima ' : ''}Sprint ${selP.numero}${prevClosed ? ` · ultimo chiuso ${stEuro(prevClosed.v)} €` : ''}` } : { num: '–', cap: '' };
+
+  const kp = d.trials_not_cancelled.points.filter(p => p.v != null).at(-1);
+  c.keep = kp ? { num: Math.round(kp.v) + '%', cap: `${kp.kept} prove su ${kp.started} con il rinnovo attivo`, color: ST.INK } : { num: '–', cap: '', color: ST.INK };
+
+  const fo = d.trials_per_100_first_opens, fl = fo.points.filter(p => p.v != null).at(-1);
+  c.fo = { num: fl ? stIt(fl.v, 1) : '–', cap: `dal ${stDM(fo.from)}`, color: ST.INK };
+  return { c, empty };
+}
+
+function stSprintLabel(s, withDates) {
+  const g = s.in_corso ? `giorno ${s.giorno} di ${s.durata}` : 'chiuso';
+  return `Sprint ${s.numero} · ${g}${withDates ? ` · ${stDM(s.inizio)}–${stDM(s.fine)}` : ''}`;
+}
+
+function stMenuHtml() {
+  const list = stats.sprints || (stats.data ? [stats.data.meta.sprint] : []);
+  const cur = stats.data ? stats.data.meta.sprint.id : null;
+  return `<div class="st-menu" role="listbox" aria-label="Scegli lo sprint" tabindex="-1">${list.map((s, i) => `
+      <button class="st-opt${i === stats.menuIdx ? ' st-act' : ''}${s.id === cur ? ' st-sel' : ''}" role="option" aria-selected="${s.id === cur}" data-st-opt="${s.id}" data-st-i="${i}">
+        <span class="st-optdot"></span><span class="st-optl">${stSprintLabel(s)}</span><span class="st-optd">${stDM(s.inizio)}–${stDM(s.fine)}</span>
+      </button>`).join('')}</div>`;
+}
+
+function stHeader() {
+  const sp = stats.data && stats.data.meta.sprint;
+  const upd = stats.lastUpdated ? stats.lastUpdated.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '';
+  const pill = sp
+    ? `<div class="st-pillwrap">
+         <button class="st-pill st-pill-sel" id="st-sprint-btn" aria-haspopup="listbox" aria-expanded="${stats.menuOpen}" title="Scegli lo sprint">
+           <span>${stSprintLabel(sp, true)}</span>
+           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+         </button>${stats.menuOpen ? stMenuHtml() : ''}
+       </div>${sp.open_trials > 0 ? `<div class="st-pill st-pill-blue">${sp.open_trials} ${sp.open_trials === 1 ? 'prova aperta' : 'prove aperte'}</div>` : ''}`
+    : `<div class="st-sk st-sk-pill"></div>`;
+  return `<div class="st-head">
+      <h1 class="st-h1">Stats</h1>${pill}
+      <div class="st-grow"></div>
+      <div class="st-meta">${stats.loading ? 'Caricamento…' : (upd ? 'ultimo ' + upd : '')}</div>
+      <button class="st-refresh" id="st-refresh-btn" ${stats.loading ? 'disabled' : ''}>Aggiorna</button>
+    </div>`;
+}
+
+function stErrorHtml(msg) {
+  return `<div class="st-errwrap"><div class="st-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="${ST.ORA}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="st-err-t">Errore nel caricamento</div>
+      <div class="st-err-m">${esc(msg)}</div>
+      <button class="st-err-btn" id="st-err-btn">Aggiorna</button>
+    </div></div>`;
+}
+
+function pageStats() {
+  let body;
+  if (stats.error && !stats.data) body = stErrorHtml(stats.error);
+  else if (!stats.data) body = `<div class="st-grid">${ST_ORDER.map(k => stSkeletonCard(k, ST_TITLES[k], k === 'sprint')).join('')}</div>`;
+  else {
+    const { c } = stCards(stats.data);
+    body = `<div class="st-grid">${ST_ORDER.map(k => stCardHtml({ key: k, big: k === 'sprint', title: ST_TITLES[k], ...c[k] })).join('')}</div>`;
+    if (stats.error) body = `<div class="st-banner">Aggiornamento non riuscito: ${esc(stats.error)}</div>` + body;
+  }
+  return `<div class="st-page" id="st-page">${stHeader()}${body}</div>`;
+}
+
+// ── DISEGNO E PASSAGGIO DEL MOUSE ─────────────────────────────────────
+const ST_BUILD = { sprint: stBuildSprintDay, rate: stBuildRate, t100: stBuildT100, payers: stBuildPayers, sprints: stBuildSprints, keep: stBuildKeep, fo: stBuildFo };
+
+function drawStatsCharts() {
+  statsCharts = [];
+  if (!stats.data) return;
+  document.querySelectorAll('[data-st-chart]').forEach(el => {
+    const key = el.dataset.stChart, w = Math.round(el.clientWidth), h = Math.round(el.clientHeight);
+    if (!w || !h || !ST_BUILD[key]) return;
+    let ch;
+    try { ch = ST_BUILD[key](w, h, stats.data); } catch (e) { console.error('stats chart', key, e); return; }
+    el.innerHTML = ch.svg + '<div class="st-guide"></div><div class="st-mark"></div>';
+    statsCharts.push({ el, ch, card: el.closest('.st-card') });
+  });
+}
+
+function stHover(entry, ev) {
+  const { el, ch, card } = entry, c = ch.c;
+  const r = el.getBoundingClientRect(), x = ev.clientX - r.left;
+  const guide = el.querySelector('.st-guide'), mark = el.querySelector('.st-mark'), pill = card.querySelector('[data-st-readout]');
+  const inside = x >= c.ML - 6 && x <= c.ML + c.PW + 6 && ev.clientY - r.top <= c.mt + c.PH + 4;
+  const i = Math.max(0, Math.min(c.nx - 1, Math.round((x - c.ML) / c.PW * (c.nx - 1))));
+  const hv = inside ? ch.hov(i) : null;
+  if (!hv) { stHoverOff(entry); return; }
+  guide.style.cssText = `display:block;left:${c.X(i) - 0.75}px;top:${c.mt}px;height:${c.PH}px`;
+  if (hv.v != null && hv.v >= 0 && hv.v <= c.ymax) mark.style.cssText = `display:block;left:${c.X(i) - 14}px;top:${c.Y(hv.v) - 14}px`;
+  else mark.style.display = 'none';
+  pill.textContent = hv.txt; pill.classList.add('st-on');
+}
+
+function stHoverOff(entry) {
+  entry.el.querySelectorAll('.st-guide,.st-mark').forEach(n => { n.style.display = 'none'; });
+  entry.card.querySelector('[data-st-readout]').classList.remove('st-on');
+}
+
+let stResizeObs = null;
+function attachStatsEvents() {
+  if (state.page !== 'stats') { if (stResizeObs) { stResizeObs.disconnect(); stResizeObs = null; } return; }
+  document.getElementById('st-sprint-btn')?.addEventListener('click', ev => {
+    ev.stopPropagation();
+    stats.menuOpen = !stats.menuOpen;
+    stats.menuIdx = Math.max(0, (stats.sprints || []).findIndex(s => stats.data && s.id === stats.data.meta.sprint.id));
+    render();
+  });
+  document.getElementById('st-sprint-btn')?.addEventListener('keydown', ev => {
+    if (ev.key === 'ArrowDown' && !stats.menuOpen) { ev.preventDefault(); ev.target.click(); }
+  });
+  document.querySelectorAll('[data-st-opt]').forEach(b => {
+    b.addEventListener('click', ev => { ev.stopPropagation(); statsSelectSprint(b.dataset.stOpt); });
+    b.addEventListener('mouseenter', () => { stats.menuIdx = +b.dataset.stI; document.querySelectorAll('.st-opt').forEach(o => o.classList.toggle('st-act', o === b)); });
+  });
+  const refresh = () => fetchStats({ keepData: true });
+  document.getElementById('st-refresh-btn')?.addEventListener('click', refresh);
+  document.getElementById('st-err-btn')?.addEventListener('click', refresh);
+
+  drawStatsCharts();
+  statsCharts.forEach(entry => {
+    entry.el.addEventListener('mousemove', ev => stHover(entry, ev));
+    entry.el.addEventListener('mouseleave', () => stHoverOff(entry));
+  });
+  const pageEl = document.getElementById('st-page');
+  if (stResizeObs) stResizeObs.disconnect();
+  if (pageEl && 'ResizeObserver' in window) {
+    let lastW = pageEl.clientWidth, t = null;
+    stResizeObs = new ResizeObserver(() => {
+      if (pageEl.clientWidth === lastW) return;
+      lastW = pageEl.clientWidth; clearTimeout(t);
+      t = setTimeout(() => { drawStatsCharts(); statsCharts.forEach(entry => {
+        entry.el.addEventListener('mousemove', ev => stHover(entry, ev));
+        entry.el.addEventListener('mouseleave', () => stHoverOff(entry)); }); }, 80);
+    });
+    stResizeObs.observe(pageEl);
+  }
+}
+
+// Menu dello sprint: Esc chiude, frecce scorrono, Invio sceglie; un clic fuori chiude.
+document.addEventListener('keydown', ev => {
+  if (!stats.menuOpen || state.page !== 'stats') return;
+  const list = stats.sprints || [];
+  if (ev.key === 'Escape') { ev.preventDefault(); stats.menuOpen = false; render(); document.getElementById('st-sprint-btn')?.focus(); }
+  else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    stats.menuIdx = (stats.menuIdx + (ev.key === 'ArrowDown' ? 1 : -1) + list.length) % Math.max(list.length, 1);
+    document.querySelectorAll('.st-opt').forEach((o, i) => o.classList.toggle('st-act', i === stats.menuIdx));
+  } else if (ev.key === 'Enter') {
+    const s = list[stats.menuIdx]; if (s) { ev.preventDefault(); statsSelectSprint(s.id); }
+  }
+});
+document.addEventListener('click', ev => {
+  if (stats.menuOpen && !ev.target.closest('.st-pillwrap')) { stats.menuOpen = false; render(); }
+});
