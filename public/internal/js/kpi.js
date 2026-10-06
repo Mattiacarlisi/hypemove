@@ -13396,6 +13396,8 @@ function renderOpsGate(message) {
           'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
         '<button id="ops-gate-send" style="width:100%;background:#5b4bff;border:0;color:#fff;border-radius:6px;' +
           'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Entra</button>' +
+        '<button id="ops-gate-forgot" style="width:100%;background:none;border:0;color:#9a9ab0;' +
+          'padding:14px 12px 0;font-size:13px;text-decoration:underline;cursor:pointer">Password dimenticata? Ricevi il link via email</button>' +
       '</div>' +
     '</div>';
 
@@ -13416,6 +13418,15 @@ function renderOpsGate(message) {
   };
   document.getElementById('ops-gate-send').addEventListener('click', send);
   passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  document.getElementById('ops-gate-forgot').addEventListener('click', async () => {
+    const email = (emailEl.value || '').trim();
+    if (!email) { msgEl.textContent = 'Scrivi prima la tua email, poi tocca di nuovo il link.'; emailEl.focus(); return; }
+    msgEl.textContent = 'Invio in corso…';
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    msgEl.textContent = error
+      ? 'Non ha funzionato: ' + (error.message || String(error))
+      : 'Se l\'email è di un operatore, è partito un link per scegliere una password nuova. Aprilo da questo dispositivo.';
+  });
 }
 
 // Il link "Send password recovery" di Supabase riporta qui con type=recovery
