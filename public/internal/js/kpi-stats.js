@@ -7,6 +7,7 @@ const ST = {
   INK: '#ffffff', MUT: '#9ca3af', TER: '#6f7683', BLU: '#4361ee', ORA: '#fb8b04',
   GRID: '#2a2e37', CARD: '#1a1d24', PAGE: '#0f1115', PAST12: '#d1d5db',
   FZ: 'rgba(255,255,255,0.04)', FZ2: 'rgba(255,255,255,0.05)', FZ_LEG: 'rgba(255,255,255,0.09)',
+  ADS: 'rgba(67,97,238,0.14)',   // fascia dei giorni di pubblicità, distinta dal grigio di «da oggi»
 };
 
 
@@ -140,6 +141,7 @@ function stBase(w, h, o) {
   const Y = v => mt + PH * (1 - (v - y0) / (y1 - y0));
   const x1 = ML + PW, lab = new Map(o.labs);
   let s = '';
+  if (o.ads != null) s += stRect(ML, mt, X(Math.min(o.ads, nx - 1)) - ML, PH, ST.ADS);
   if (o.fz != null && o.fz < nx - 1) s += stRect(X(o.fz), mt, x1 - X(o.fz), PH, ST.FZ);
   if (o.fz2 != null && o.fz2 < nx - 1) s += stRect(X(o.fz2), mt, x1 - X(o.fz2), PH, ST.FZ2);
   for (const [v] of o.ticks) if (v) s += stLine(ML, Y(v), x1, Y(v), ST.GRID);
@@ -232,6 +234,7 @@ function stBuildSprintDay(w, h, d) {
   const c = stBase(w, h, {
     nx: nd, ymax, ticks, par: d.sprint_curves.breakeven,
     fz: sel.today_day != null ? sel.today_day - 1.5 : null, labs: stCurveLabels(sel, nd, w),
+    ads: sel.ads_days - 0.5,   // i giorni in cui la pubblicità dello sprint in esame era attiva, anche a sprint chiuso
   });
   const pts = s => s.points.map(p => ({ i: p.day - 1, v: val(p), est: p.est }));
   let s = c.s;
@@ -399,7 +402,7 @@ function stCards(d) {
   c.sprint.legend = [
     ...(maturing ? [stLgd(ST.INK, 'pagato'), stLgd(ST.BLU, 'stima', '6 5')] : [stLgd(ST.BLU, stCurveName(sel))]),
     ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))),
-    stLgd(ST.ORA, 'pareggio'), ...(maturing ? [stLgRect(ST.FZ, 'da oggi')] : []),
+    stLgd(ST.ORA, 'pareggio'), stLgRect(ST.ADS, 'pubblicità'), ...(maturing ? [stLgRect(ST.FZ, 'da oggi')] : []),
   ].join('');
   c.sprint.tools = stSprintTools(d, cs);
 
