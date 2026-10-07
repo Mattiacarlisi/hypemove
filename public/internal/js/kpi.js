@@ -425,6 +425,7 @@ let state = {
   funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
   funnelSprintId: '',          // sprint scelto nel selettore periodo della pagina Funnel ('' = periodo libero)
   funnelLoading: false, funnelError: null,
+  premiumCache: null,          // come funnelCache, per la pagina Premium
   funnelCache: null,           // { scope, computedAt, pending } se i numeri a schermo vengono dalla cache, altrimenti null
   retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
   retSprintId: '',             // sprint scelto nel selettore periodo della pagina Retention ('' = periodo libero)
@@ -776,9 +777,9 @@ function funnelCacheScope(from, to, sprint) {
 }
 
 // Risponde { data, computed_at, pending } oppure null: se la cache non c'è o sbaglia, la pagina calcola dal vivo.
-async function funnelFromCache(scope, force) {
+async function funnelFromCache(scope, force, query = 'funnel') {
   try {
-    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'funnel', p_scope: scope, p_force: !!force });
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: query, p_scope: scope, p_force: !!force });
     return error || !data || !data.data ? null : data;
   } catch (e) { return null; }
 }
@@ -1090,26 +1091,54 @@ async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome, p_
   render();
 }
 
-async function fetchPremium() {
+// Premium usa la stessa cache di Funnel: vista di base e ogni sprint, solo con genere «Tutti».
+// Uomini, donne e date libere si calcolano dal vivo con kpi_premium, come prima.
+let premiumCacheTimer = null;
+function premiumCachePoll(scope, since) {
+  clearTimeout(premiumCacheTimer);
+  premiumCacheTimer = setTimeout(async () => {
+    const mine = () => state.premiumCache && state.premiumCache.scope === scope;
+    if (!mine()) return;
+    const c = await funnelFromCache(scope, false, 'premium');
+    if (!mine()) return;
+    const done = c && !c.pending;
+    if (!done && Date.now() - since < 5 * 60 * 1000) { premiumCachePoll(scope, since); return; }
+    if (done) state.premiumData = c.data;
+    state.premiumCache = { scope, computedAt: done ? c.computed_at : state.premiumCache.computedAt, pending: false };
+    if (state.page === 'premium') render();
+  }, 10000);
+}
+
+async function fetchPremium(opts = {}) {
+  clearTimeout(premiumCacheTimer);
+  const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+  const scope = state.premiumGender === 'all' ? funnelCacheScope(state.premiumFrom, state.premiumTo, selSprint) : null;
   state.premiumLoading = true; state.premiumError = null; state.premiumErrorTimeout = false;
   render();
   try {
-    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-    const { data, error } = await sb.rpc('kpi_premium', {
-      inizio: state.premiumFrom,
-      fine:   state.premiumTo,
-      p_gender: state.premiumGender,
-      p_start: selSprint ? sprintStartTs(selSprint) : null,
-      p_end:   selSprint ? sprintEndTs(selSprint) : null,
-    });
-    if (error) throw error;
-    state.premiumData = data;
+    const cached = scope ? await funnelFromCache(scope, opts.force, 'premium') : null;
+    if (cached) {
+      state.premiumData = cached.data;
+      state.premiumCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending };
+    } else {
+      state.premiumCache = null;
+      const { data, error } = await sb.rpc('kpi_premium', {
+        inizio: state.premiumFrom,
+        fine:   state.premiumTo,
+        p_gender: state.premiumGender,
+        p_start: selSprint ? sprintStartTs(selSprint) : null,
+        p_end:   selSprint ? sprintEndTs(selSprint) : null,
+      });
+      if (error) throw error;
+      state.premiumData = data;
+    }
   } catch (e) {
     state.premiumError = e.message || 'Errore caricamento dati premium';
     state.premiumErrorTimeout = isRpcTimeout(e);
   }
   state.premiumLoading = false;
   render();
+  if (state.premiumCache && state.premiumCache.pending) premiumCachePoll(scope, Date.now());
 }
 
 
@@ -7299,9 +7328,19 @@ function premiumHeaderBar() {
       const sel = state.sprints.find(s => s.id === state.premiumSprintId);
       const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
       return `<div style="font-size:11px;color:var(--muted);margin-bottom:16px">
-        ${win.text} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}
+        ${win.text} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}${premiumCacheNote()}
       </div>`;
     })()}`;
+}
+
+// Ora dell'ultimo calcolo, solo quando i numeri a schermo vengono dalla cache; «↻» chiede il ricalcolo.
+function premiumCacheNote() {
+  const c = state.premiumCache;
+  if (!c || !c.computedAt || !state.premiumData) return '';
+  const at = new Date(c.computedAt);
+  const when = (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
+    + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  return ` · calcolato ${when}${c.pending ? ' · ricalcolo in corso…' : ''}`;
 }
 
 function pagePremium() {
@@ -13234,8 +13273,9 @@ function attachEvents() {
     fetchPaywallPurchases();
   });
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
-    state.premiumData = null;
-    fetchPremium();
+    // vista in cache: i numeri restano a schermo mentre il database ricalcola
+    if (!state.premiumCache) state.premiumData = null;
+    fetchPremium({ force: true });
     fetchCreativesAudit();
     fetchPaywallPurchases();
   });
