@@ -114,7 +114,7 @@ Ogni sprint: `id`, `numero`, `nome`, `inizio`, `fine` (ultimo giorno di pubblici
 - Scelte che vivono solo nella pagina (`localStorage`): vista «Con tasse» (`pn`/`on`, 20,90 €, predefinita) o «Senza tasse» (`pg`/`og`, 29,99 €) e sprint di confronto (al massimo 3; senza scelta, i due precedenti).
 
 ## Cache (dal 07/10/2026)
-La pagina non chiama più `kpi_stats_series` direttamente: chiama `kpi_cache_get('stats_series', <id dello sprint> | 'default', p_force)`, che risponde `{ data, computed_at, compute_ms, live, cached }`. `data` è la risposta di `kpi_stats_series`, identica. Migrazione: `app/supabase/migrations/20261007180000_kpi_cache.sql`.
+La pagina non chiama più `kpi_stats_series` direttamente: chiama `kpi_cache_get('stats_series', <id dello sprint> | 'default', p_force)`, che risponde `{ data, computed_at, compute_ms, tier, cached, pending }` (`tier` = ritmo della riga: `live`, `hourly`, `daily`). `data` è la risposta di `kpi_stats_series`, identica. Migrazione: `app/supabase/migrations/20261007180000_kpi_cache.sql`.
 
 - Tabella `kpi_cache`, una riga per «query, sprint». Non è leggibile dall'API: si passa solo da `kpi_cache_get`, protetta da `assert_internal_operator()`.
 - Sprint vivo (`today_day` non nullo in `sprint_curves`, oppure in corso): ricalcolo ogni 10 minuti (`kpi-cache-live`). Tutti gli sprint: una volta al giorno alle 06:20 UTC, dopo l'importazione Meta (`kpi-cache-all`).
@@ -122,3 +122,9 @@ La pagina non chiama più `kpi_stats_series` direttamente: chiama `kpi_cache_get
 - Se la riga manca o è più vecchia del dovuto (30 minuti da vivo, 36 ore da maturato) `kpi_cache_get` ricalcola sul momento.
 - Su uno sprint maturato il tasso di fine prova e i grafici a calendario sono quelli dell'ultimo ricalcolo giornaliero (scelta di Danilo).
 - Per aggiungere una pagina: un ramo in `kpi_cache_compute` e le sue righe nel ciclo di `kpi_cache_refresh`.
+
+### Funnel a catalogo in cache (migrazione `20261007200000_kpi_cache_funnel.sql`)
+- Query `'funnel'`, ambito `'base'` (11/06/2026 → oggi, nessuno sprint) oppure l'id di uno sprint con le sue date e i suoi orari. Date libere, Funnel a eventi e Attivazione restano dal vivo.
+- Ritmi: sprint vivo ogni 10 minuti (`kpi-cache-funnel-live`), vista di base ogni ora (`kpi-cache-hourly`), tutto una volta al giorno (`kpi-cache-all`).
+- `kpi_funnel` dura da 4 a 32 secondi, quindi la lettura non ricalcola mai sul momento: risponde con il risultato che c'è. «Aggiorna» (`p_force`) mette la riga in coda (`requested_at`) e `kpi-cache-drain` la ricalcola entro un minuto; finché non ha finito la risposta ha `pending: true` e la pagina rilegge ogni 10 secondi, poi ridisegna da sola.
+- Se la riga non c'è ancora o la cache dà errore, la pagina chiama `kpi_funnel` dal vivo come prima.

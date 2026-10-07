@@ -425,6 +425,7 @@ let state = {
   funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
   funnelSprintId: '',          // sprint scelto nel selettore periodo della pagina Funnel ('' = periodo libero)
   funnelLoading: false, funnelError: null,
+  funnelCache: null,           // { scope, computedAt, pending } se i numeri a schermo vengono dalla cache, altrimenti null
   retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
   retSprintId: '',             // sprint scelto nel selettore periodo della pagina Retention ('' = periodo libero)
   retWeeks: 6, retMinW0: 1,
@@ -766,21 +767,66 @@ async function fetchRetentionDaily() {
   render();
 }
 
-async function fetchFunnel() {
-  state.funnelLoading = true;
+// ── CACHE DEL FUNNEL (kpi_cache_get) ─────────────────────────────────
+// In cache ci sono la vista di base (BETA_START → oggi, nessuno sprint) e ogni sprint con le sue date.
+// Ogni altro periodo si calcola dal vivo con kpi_funnel, come prima.
+function funnelCacheScope(from, to, sprint) {
+  if (sprint) return sprint.inizio === from && sprint.fine === to ? sprint.id : null;
+  return from === BETA_START && to === TODAY ? 'base' : null;
+}
+
+// Risponde { data, computed_at, pending } oppure null: se la cache non c'è o sbaglia, la pagina calcola dal vivo.
+async function funnelFromCache(scope, force) {
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'funnel', p_scope: scope, p_force: !!force });
+    return error || !data || !data.data ? null : data;
+  } catch (e) { return null; }
+}
+
+// Dopo «Aggiorna» il ricalcolo gira nel database: rileggo la cache finché non è finito, poi ridisegno da solo.
+let funnelCacheTimer = null;
+function funnelCachePoll(scope, since) {
+  clearTimeout(funnelCacheTimer);
+  funnelCacheTimer = setTimeout(async () => {
+    const mine = () => state.funnelCache && state.funnelCache.scope === scope;
+    if (!mine()) return;
+    const c = await funnelFromCache(scope, false);
+    if (!mine()) return;
+    const done = c && !c.pending;
+    if (!done && Date.now() - since < 5 * 60 * 1000) { funnelCachePoll(scope, since); return; }
+    if (done) state.funnel = c.data;
+    state.funnelCache = { scope, computedAt: done ? c.computed_at : state.funnelCache.computedAt, pending: false };
+    if (state.page === 'funnel' && state.funnelMode === 'catalog') render();
+  }, 10000);
+}
+
+async function fetchFunnel(opts = {}) {
+  clearTimeout(funnelCacheTimer);
+  // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
+  const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+  const scope = funnelCacheScope(state.funnelFrom, state.funnelTo, selSprint);
+  // «Aggiorna» sulla vista già a schermo: i numeri restano visibili mentre il database ricalcola
+  const keep = !!opts.force && !!state.funnel && !!state.funnelCache && state.funnelCache.scope === scope;
+  state.funnelLoading = !keep;
   state.funnelError = null;
   render();
   try {
-    // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
-    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
-    const p_start = selSprint ? sprintStartTs(selSprint) : null;
-    const p_end = selSprint ? sprintEndTs(selSprint) : null;
-    const res = await sb.rpc('kpi_funnel', { inizio: state.funnelFrom, fine: state.funnelTo, p_start, p_end });
-    if (res.error) throw res.error;
-    state.funnel = res.data;
+    const cached = scope ? await funnelFromCache(scope, opts.force) : null;
+    if (cached) {
+      state.funnel = cached.data;
+      state.funnelCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending };
+    } else {
+      state.funnelCache = null;
+      const p_start = selSprint ? sprintStartTs(selSprint) : null;
+      const p_end = selSprint ? sprintEndTs(selSprint) : null;
+      const res = await sb.rpc('kpi_funnel', { inizio: state.funnelFrom, fine: state.funnelTo, p_start, p_end });
+      if (res.error) throw res.error;
+      state.funnel = res.data;
+    }
   } catch (e) { state.funnelError = e.message || 'Errore sconosciuto'; }
   state.funnelLoading = false;
   render();
+  if (state.funnelCache && state.funnelCache.pending) funnelCachePoll(scope, Date.now());
   if (state.metaToken && state.funnel) fetchMetaFunnel();
 }
 
@@ -2134,10 +2180,12 @@ async function fetchSprintFunnel() {
   render();
   try {
     const selected = state.sprints.filter(s => state.sprintFunnelSel.includes(s.id));
-    const results  = await Promise.all(selected.map(s =>
-      sb.rpc('kpi_funnel', { inizio: s.inizio, fine: s.fine, p_start: sprintStartTs(s), p_end: sprintEndTs(s) })
-        .then(r => ({ id: s.id, data: r.data, error: r.error }))
-    ));
+    const results  = await Promise.all(selected.map(async s => {
+      const cached = await funnelFromCache(s.id, false);
+      if (cached) return { id: s.id, data: cached.data, error: null };
+      const r = await sb.rpc('kpi_funnel', { inizio: s.inizio, fine: s.fine, p_start: sprintStartTs(s), p_end: sprintEndTs(s) });
+      return { id: s.id, data: r.data, error: r.error };
+    }));
     const map = {};
     for (const r of results) {
       if (r.error) throw r.error;
@@ -4818,6 +4866,19 @@ function periodStrip(opts = {}) {
     </div>`;
 }
 
+// Ora dell'ultimo calcolo e tasto «Aggiorna», solo quando i numeri a schermo vengono dalla cache.
+function funnelCacheBadge() {
+  const c = state.funnelCache;
+  if (!c || !c.computedAt || state.funnelLoading || !state.funnel) return '';
+  const at = new Date(c.computedAt);
+  const when = (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
+    + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  return `<div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)">
+      <span>calcolato ${when}${c.pending ? ' · ricalcolo in corso…' : ''}</span>
+      <button id="funnel-cache-refresh" class="tab-action" ${c.pending ? 'disabled' : ''}>Aggiorna</button>
+    </div>`;
+}
+
 function pageFunnel() {
   if (state.funnelMode === 'event') return pageFunnelEvent();
   if (state.funnelMode === 'activation') return pageActivation();
@@ -4859,6 +4920,7 @@ function pageFunnel() {
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
         <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
+        ${funnelCacheBadge()}
       </div>
       ${(() => {
         const sel = state.sprints.find(s => s.id === state.funnelSprintId);
@@ -11812,6 +11874,7 @@ function attachEvents() {
     };
   }
 
+  document.getElementById('funnel-cache-refresh')?.addEventListener('click', () => fetchFunnel({ force: true }));
   // Funnel — calcola
   document.getElementById('funnel-apply')?.addEventListener('click', () => {
     const from = document.getElementById('funnel-from')?.value;
