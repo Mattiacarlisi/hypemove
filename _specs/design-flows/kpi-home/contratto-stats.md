@@ -60,8 +60,12 @@ Calendario: da `trials_per_100_first_opens.from` (= inizio dello Sprint 12, 07/0
 - `min_ended` (5, in `kpi_stats_config()`): la pagina disegna la curva solo dai punti con `ended` ≥ questo valore. Il conto resta su tutte le prove.
 - Lo stesso tasso (`meta.rate`) entra nei grafici 1, 3, 4 e 5.
 
-### 3. `trials_per_100`
-`{ breakeven, selected: {numero, nome, points: [{day, v, est}]}, compare: […], final_estimate }`. `v` = prove avviate × 100 / spesa cumulata. Per lo sprint in corso: giorni 1..2 reali (giorno 1 `v:null` perché la spesa è 0, giorno 2 = 42,37, fuori scala), dal giorno 3 stima (10,0 → 4,3). `final_estimate` = 4,2983 (fine pubblicità).
+### 3. Prove avviate ogni 100 € (dal 07/10/2026 letto da `sprint_curves`)
+La pagina non usa più `trials_per_100.selected`, `compare` e `final_estimate` (restano nella risposta, calcolati con i vecchi 16 giorni e la spesa futura stimata). Usa:
+- `sprint_curves.sprints[].points[].st` = prove avviate entro quel giorno (l'ultimo giorno raccoglie anche quelle partite dopo) e `cs` = spesa entro quel giorno. Valore del punto: `100 × st / cs`.
+- Solo dati veri: per uno sprint con `today_day` i punti si fermano a `today_day`. Nessuna stima.
+- Sprint scelto e sprint di confronto sono quelli del grafico 1 (menu «Confronta»); asse dei giorni uguale al grafico 1.
+- `trials_per_100.breakeven` = 100 / (netto annuale × tasso): la riga del pareggio. Scala 0–12, più alta solo se un valore finale la supera.
 
 ### 4. `expected_payers`
 `{ real: [{date, started, paid}], est: [{date, v}], final_estimate, expected_new }`.

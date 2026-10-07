@@ -8,8 +8,8 @@ const ST = {
   GRID: '#2a2e37', CARD: '#1a1d24', PAGE: '#0f1115', PAST12: '#d1d5db',
   FZ: 'rgba(255,255,255,0.04)', FZ2: 'rgba(255,255,255,0.05)', FZ_LEG: 'rgba(255,255,255,0.09)',
 };
-const ST_PAST_COLOR = { 5: ST.MUT, 12: ST.PAST12, 13: ST.TER };
-const ST_PAST_FALLBACK = [ST.PAST12, ST.TER, ST.MUT];
+
+
 const ST_REFRESH_STALE_MS = 5 * 60 * 1000;
 
 const stats = {
@@ -164,9 +164,9 @@ const ST_CNT = [[0, '0'], [4, '4'], [8, '8'], [12, '12'], [16, '16']];
 const ST_PCT = [[0, '0'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']];
 const ST_EU15 = [[0, '0'], [0.5, '0,50 €'], [1, '1 €'], [1.5, '1,50 €']];
 const ST_FO = [[0, '0'], [0.25, '0,25'], [0.5, '0,50'], [0.75, '0,75'], [1, '1']];
-const ST_T100 = [[0, '0'], [4, '4'], [8, '8'], [12, '12']];
 
-const stPastColor = (n, idx) => ST_PAST_COLOR[n] || ST_PAST_FALLBACK[idx % ST_PAST_FALLBACK.length];
+
+
 const stChanges = vals => vals.map((v, i) => (i > 0 && Math.abs(v - vals[i - 1]) > 1e-9 ? i : -1)).filter(i => i >= 0);
 
 // Calendario comune ai grafici sulla data: dal primo giorno disponibile alla fine dello sprint scelto.
@@ -184,41 +184,6 @@ function stCalendar(d) {
   if (today != null && today < nx - 1) labs.push([today, 'oggi']);
   labs.push([nx - 1, stDM(stAddDays(from, nx - 1))]);
   return { from, nx, last, today, idx, labs, fz: last < nx - 1 ? last + 0.5 : null, date: i => stAddDays(from, i) };
-}
-
-// Giorni dello sprint: etichette 1..n, «oggi» sul giorno in corso. Sotto i 700 px una su due.
-function stDayLabels(nd, z, w) {
-  const labs = []; for (let i = 0; i < nd; i++) labs.push([i, z && i === z.today_from_day - 1 ? 'oggi' : String(i + 1)]);
-  return w > 600 ? labs : labs.filter((_, k) => k % 2 === 0);
-}
-
-// Grafici a giorni dello sprint (1 e 3): sprint scelto + sprint di confronto.
-function stSprintDays(w, h, d, sec, o) {
-  const z = d.meta.zone, nd = d.meta.sprint.durata, inProg = !!z;
-  const c = stBase(w, h, {
-    nx: nd, ymax: o.ymax, ticks: o.ticks, par: sec.breakeven,
-    fz: z ? z.today_from_day - 1.5 : null, fz2: z ? z.ads_end_day - 1 : null, labs: stDayLabels(nd, z, w),
-  });
-  let s = c.s;
-  (sec.compare || []).forEach((cmp, k) => {
-    const col = stPastColor(cmp.numero, k);
-    const runs = stRuns(cmp.points.map(p => ({ i: p.day - 1, v: p.v, est: p.est })), o.ymax, true);
-    s += stCurve(c, runs, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && (!r.est || r === runs.at(-1)) ? 'dot' : null });
-  });
-  const sel = sec.selected.points.map(p => ({ i: p.day - 1, v: p.v, est: p.est }));
-  let selRuns;
-  if (inProg) {
-    // sprint in corso: pagato reale in bianco, poi la traccia stimata in blu tratteggiato, senza congiungerle
-    selRuns = stRuns(sel, o.ymax, false);
-    s += stCurve(c, selRuns, {
-      color: ST.INK, estColor: ST.BLU, estDash: '7 6', sw: 3,
-      dot: (p, r, e) => (!r.est && e.last) ? 'dot' : (r.est && (e.first || (e.last && selRuns.at(-1) === r)) ? 'ring' : null),
-    });
-  } else {
-    selRuns = stRuns(sel, o.ymax, true);
-    s += stCurve(c, selRuns, { color: ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3, dot: (p, r, e) => e.last && selRuns.at(-1) === r ? 'dot' : null });
-  }
-  return { svg: stSvg(w, h, s), c, sel: sec.selected.points, inProg };
 }
 
 // ── GRAFICO 1: ogni sprint dal primo giorno a maturazione ─────────────
@@ -286,13 +251,29 @@ function stBuildSprintDay(w, h, d) {
       return { txt: `giorno ${i + 1} · ${stDM(stAddDays(sel.inizio, i))} · ${p.est ? 'stima ' : ''}${stEuro(v)} € per euro`, v }; },
   };
 }
+// Grafico 3: prove avviate ogni 100 € spesi, solo dati veri fino a oggi, stessi sprint e stessi giorni del grafico 1.
+const stT100 = p => (p.cs > 0 && p.st != null ? 100 * p.st / p.cs : null);
+const stT100Real = sp => sp.points.filter(p => sp.today_day == null || p.day <= sp.today_day);
 function stBuildT100(w, h, d) {
-  const sec = d.trials_per_100, r = stSprintDays(w, h, d, sec, { ymax: 12, ticks: ST_T100 });
-  const byDay = new Map(r.sel.map(p => [p.day, p]));
+  const { sel, cmp } = stCurveSet(d), par = d.trials_per_100.breakeven;
+  const nd = Math.max(sel.days, ...cmp.map(x => x.days), 2);
+  const top = Math.max(par ?? 0, ...[sel, ...cmp].map(x => stT100(stT100Real(x).at(-1) || {}) ?? 0));
+  const ymax = Math.max(12, Math.ceil(top / 4) * 4), stepY = ymax > 24 ? 8 : 4;
+  const ticks = []; for (let v = 0; v <= ymax; v += stepY) ticks.push([v, String(v)]);
+  const c = stBase(w, h, { nx: nd, ymax, ticks, par, fz: sel.today_day != null ? sel.today_day - 0.5 : null, labs: stCurveLabels(sel, nd, w) });
+  const pts = x => stT100Real(x).map(p => ({ i: p.day - 1, v: stT100(p) }));
+  let s = c.s;
+  cmp.forEach((x, k) => {
+    const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length], runs = stRuns(pts(x), ymax, true);
+    s += stCurve(c, runs, { color: col, estColor: col, sw: 2.5, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
+  });
+  const col = sel.today_day != null ? ST.INK : ST.BLU, runs = stRuns(pts(sel), ymax, true);
+  s += stCurve(c, runs, { color: col, estColor: col, sw: 3, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
+  const byDay = new Map(stT100Real(sel).map(p => [p.day, p]));
   return {
-    svg: r.svg, c: r.c, nx: r.c.nx,
-    hov: i => { const p = byDay.get(i + 1); if (!p || p.v == null) return null;
-      return { txt: `giorno ${i + 1} · ${p.est && r.inProg ? 'stima ' : ''}${stIt(p.v, 1)} prove ogni 100 €`, v: p.v }; },
+    svg: stSvg(w, h, s), c, nx: nd,
+    hov: i => { const p = byDay.get(i + 1), v = p ? stT100(p) : null; if (v == null) return null;
+      return { txt: `giorno ${i + 1} · ${stDM(stAddDays(sel.inizio, i))} · ${p.st} prove su ${stEuro(p.cs)} € · ${stIt(v, 1)}`, v }; },
   };
 }
 
@@ -425,10 +406,13 @@ function stCards(d) {
   c.rate = r.ended > 0 ? { num: stPct(r.pct), cap: `${r.paid} pagate su ${r.ended} prove finite o disdette`, color: ST.INK }
                        : { num: '–', cap: 'nessuna prova finita ancora', color: ST.INK };
 
-  const t = d.trials_per_100, tl = t.selected.points.filter(p => p.v != null).at(-1);
-  c.t100 = t.final_estimate != null
-    ? { num: stIt(t.final_estimate, 1), cap: `stima a fine pubblicità · pareggio a ${stIt(t.breakeven, 1)}`, color: ST.BLU }
-    : { num: tl ? stIt(tl.v, 1) : '–', cap: `a fine sprint · pareggio a ${stIt(t.breakeven, 1)}`, color: ST.INK };
+  const tl = stT100Real(sel).filter(p => stT100(p) != null).at(-1), par3 = d.trials_per_100.breakeven;
+  c.t100 = { num: tl ? stIt(stT100(tl), 1) : '–', color: ST.INK,
+    cap: `${tl ? `${tl.st} ${tl.st === 1 ? 'prova' : 'prove'} su ${stEuro(tl.cs)} € spesi` : 'nessuna spesa ancora'} · pareggio a ${stIt(par3, 1)}` };
+  c.t100.legend = [
+    stLgd(maturing ? ST.INK : ST.BLU, stCurveName(sel)),
+    ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))), stLgd(ST.ORA, 'pareggio'),
+  ].join('');
 
   const ep = d.expected_payers, open = m.rate.open - m.rate.open_cancelled, canc = m.rate.open_cancelled;
   if (ep.expected_new != null) {
