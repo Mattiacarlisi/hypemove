@@ -787,7 +787,7 @@ async function funnelFromCache(scope, force, query = 'funnel') {
   } catch (e) { return null; }
 }
 
-// Il periodo rapido a schermo come lo chiama la cache: 'today' | 'yesterday' | 'cur' | 'prev' | null (periodo libero
+// Il periodo rapido a schermo come lo chiama la cache: 'today' | 'yesterday' | 'base' | 'cur' | 'prev' | null (periodo libero
 // o altro sprint). Le date devono coincidere davvero con quelle del periodo: se la testata dice «Sprint 15» ma le
 // date sono state cambiate a mano, non è più quello sprint.
 function funnelQuickPeriod() {
@@ -800,6 +800,8 @@ function funnelQuickPeriod() {
   const same = r => state.funnelFrom === r.from && state.funnelTo === r.to;
   if (same(eventFunnelPresetRange('today'))) return 'today';
   if (same(eventFunnelPresetRange('yesterday'))) return 'yesterday';
+  // il periodo intero con cui la pagina si apre: in cache solo per i funnel a eventi
+  if (state.funnelFrom === BETA_START && state.funnelTo === TODAY) return 'base';
   return null;
 }
 
