@@ -427,6 +427,8 @@ let state = {
   funnelLoading: false, funnelError: null,
   premiumCache: null,          // come funnelCache, per la pagina Premium
   funnelCache: null,           // { scope, computedAt, pending } se i numeri a schermo vengono dalla cache, altrimenti null
+  eventFunnelCache: null,      // come funnelCache, per il funnel a eventi
+  activationCache: null,       // come funnelCache, per Attivazione
   retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
   retSprintId: '',             // sprint scelto nel selettore periodo della pagina Retention ('' = periodo libero)
   retWeeks: 6, retMinW0: 1,
@@ -785,6 +787,30 @@ async function funnelFromCache(scope, force, query = 'funnel') {
   } catch (e) { return null; }
 }
 
+// Il periodo rapido a schermo come lo chiama la cache: 'today' | 'yesterday' | 'cur' | 'prev' | null (periodo libero
+// o altro sprint). Le date devono coincidere davvero con quelle del periodo: se la testata dice «Sprint 15» ma le
+// date sono state cambiate a mano, non è più quello sprint.
+function funnelQuickPeriod() {
+  if (state.funnelSprintId) {
+    const { cur, prev } = funnelQuickSprints();
+    const sp = cur && cur.id === state.funnelSprintId ? cur : prev && prev.id === state.funnelSprintId ? prev : null;
+    if (!sp || sp.inizio !== state.funnelFrom || sp.fine !== state.funnelTo) return null;
+    return sp === cur ? 'cur' : 'prev';
+  }
+  const same = r => state.funnelFrom === r.from && state.funnelTo === r.to;
+  if (same(eventFunnelPresetRange('today'))) return 'today';
+  if (same(eventFunnelPresetRange('yesterday'))) return 'yesterday';
+  return null;
+}
+
+// Forma canonica (chiavi in ordine) per confrontare i passi che la pagina manderebbe con quelli della riga in cache.
+function canonJson(v) {
+  if (Array.isArray(v)) return '[' + v.map(canonJson).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonJson(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
+const sameInstant = (a, b) => (a == null && b == null) || (a != null && b != null && new Date(a).getTime() === new Date(b).getTime());
+
 // Dopo «Aggiorna» il ricalcolo gira nel database: rileggo la cache finché non è finito, poi ridisegno da solo.
 let funnelCacheTimer = null;
 function funnelCachePoll(scope, since) {
@@ -806,6 +832,7 @@ function funnelCachePoll(scope, since) {
 // non ne è partita un'altra (cambio di periodo o di funnel). Prima non c'era nessuna protezione: la risposta lenta
 // vecchia arrivava per ultima e scriveva i suoi numeri sotto le date nuove.
 let funnelReqSeq = 0, eventFunnelReqSeq = 0, premiumReqSeq = 0, activationReqSeq = 0;
+let eventFunnelCacheTimer = null, activationCacheTimer = null;
 
 async function fetchFunnel(opts = {}) {
   clearTimeout(funnelCacheTimer);
@@ -952,18 +979,58 @@ function flattenEventFunnelConfig(cfg) {
 // Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
 // Cascata temporale: coorte = step 0 configurato, ogni step successivo è il subset che ha
 // proseguito in sequenza. Pseudo-eventi install_* esclusi dalla cascata (righe contesto).
-async function fetchEventFunnel() {
+// Funnel a eventi dalla cache (kpi_cache_get 'funnel_event'): solo per un funnel salvato, un periodo rapido, modalità
+// Coorte, sorgente «tutti» e nessun interruttore degli esclusi acceso. Torna la risposta solo se la riga è proprio
+// quella che la pagina chiederebbe adesso (stessi passi, provider, date e orari), altrimenti null e si calcola dal vivo.
+async function eventFunnelFromCache(flatSteps, force) {
+  const per = funnelQuickPeriod();
+  const f = state.activeFunnelPreset != null ? state.savedFunnels[state.activeFunnelPreset] : null;
+  if (!per || !f || !f.id || (f.tipo || 'catalog') !== 'event') return null;
+  if (state.eventFunnelMode !== 'cohort' || (state.eventFunnelSource || 'all') !== 'all') return null;
+  if (state.funnelIncludeEmulators || state.funnelIncludeTest || state.funnelIncludeBlocked || state.funnelIncludeBots) return null;
+  const scope = `${f.id}/${per}`;
+  const c = await funnelFromCache(scope, force, 'funnel_event');
+  const d = c && c.data;
+  if (!d || !d.result || !Array.isArray(d.p_steps)) return null;
+  const sel = state.sprints.find(x => x.id === state.funnelSprintId);
+  const ok = canonJson(d.p_steps) === canonJson(eventRpcSteps(flatSteps).rpcSteps)
+    && (d.provider || null) === (state.eventFunnelProvider || null)
+    && d.inizio === state.funnelFrom && d.fine === state.funnelTo
+    && sameInstant(d.p_start, sel ? sprintStartTs(sel) : null) && sameInstant(d.p_end, sel ? sprintEndTs(sel) : null);
+  return ok ? { scope, result: d.result, computedAt: c.computed_at, pending: !!c.pending } : null;
+}
+
+// Come funnelCachePoll: dopo «Aggiorna» aspetto la fine del ricalcolo e rileggo da solo, senza far sparire i numeri.
+function eventFunnelCachePoll(scope, since) {
+  clearTimeout(eventFunnelCacheTimer);
+  eventFunnelCacheTimer = setTimeout(async () => {
+    const mine = () => state.eventFunnelCache && state.eventFunnelCache.scope === scope;
+    if (!mine()) return;
+    const c = await funnelFromCache(scope, false, 'funnel_event');
+    if (!mine()) return;
+    if (c && !c.pending) { if (state.page === 'funnel' && state.funnelMode === 'event') fetchEventFunnel({ quiet: true }); return; }
+    if (Date.now() - since < 5 * 60 * 1000) { eventFunnelCachePoll(scope, since); return; }
+    state.eventFunnelCache = { ...state.eventFunnelCache, pending: false };
+    if (state.page === 'funnel' && state.funnelMode === 'event') render();
+  }, 10000);
+}
+
+async function fetchEventFunnel(opts = {}) {
+  clearTimeout(eventFunnelCacheTimer);
   const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
   state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
   const req = ++eventFunnelReqSeq;
-  if (!flatSteps.length) { state.eventFunnel = null; state.eventFunnelLoading = false; render(); return; }
-  state.eventFunnelLoading = true;
+  if (!flatSteps.length) { state.eventFunnel = null; state.eventFunnelCache = null; state.eventFunnelLoading = false; render(); return; }
+  // «Aggiorna» e il rileggere dopo il ricalcolo: i numeri restano a schermo
+  state.eventFunnelLoading = !((opts.force || opts.quiet) && !!state.eventFunnel && !!state.eventFunnelCache);
   state.eventFunnelError = null;
   render();
   try {
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
     const p_start   = selSprint ? sprintStartTs(selSprint) : null;
     const p_end     = selSprint ? sprintEndTs(selSprint) : null;
+    const hit = await eventFunnelFromCache(flatSteps, opts.force);
+    if (req !== eventFunnelReqSeq) return;
     const result = await computeEventFunnel(flatSteps, {
       inizio:   state.funnelFrom,
       fine:     state.funnelTo,
@@ -976,9 +1043,11 @@ async function fetchEventFunnel() {
       includeBlocked:   state.funnelIncludeBlocked,
       includeBots:      state.funnelIncludeBots,
       mode:             state.eventFunnelMode,
+      cachedResult:     hit ? hit.result : null,
     });
     if (req !== eventFunnelReqSeq) return;
     state.eventFunnel = result;
+    state.eventFunnelCache = hit ? { scope: hit.scope, computedAt: hit.computedAt, pending: hit.pending } : null;
     // Baseline per il delta coorte della card Parametri: la fotografo solo quando
     // nessun override è attivo, così il confronto è sempre "vs esclusioni standard".
     if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked && !state.funnelIncludeBots) {
@@ -987,6 +1056,7 @@ async function fetchEventFunnel() {
   } catch (e) { if (req !== eventFunnelReqSeq) return; state.eventFunnelError = e.message || 'Errore sconosciuto'; }
   state.eventFunnelLoading = false;
   render();
+  if (state.eventFunnelCache && state.eventFunnelCache.pending) eventFunnelCachePoll(state.eventFunnelCache.scope, Date.now());
 }
 
 // Lista nominale degli utenti esclusi dalle metriche (card Parametri).
@@ -1012,7 +1082,7 @@ async function fetchExcludedUsers() {
 // subset che ha proseguito in sequenza (monotono decrescente). Gli pseudo-step install_*
 // (aggregati esterni senza identità) NON entrano nella cascata: vengono esclusi dai p_steps
 // e ritornati come righe { context: true } + oggetto installContext per i chip di contesto.
-async function computeEventFunnel(flatSteps, opts) {
+function eventRpcSteps(flatSteps) {
   // Mappa idx_originale → step, e filtra fuori gli install per la RPC.
   const rpcSteps = [];
   const rpcToOriginal = []; // rpcIdx → originalIdx
@@ -1029,6 +1099,11 @@ async function computeEventFunnel(flatSteps, opts) {
     const rpcParent = rpcToOriginal.indexOf(s.variant_of);
     if (rpcParent >= 0) s.variant_of = rpcParent; else delete s.variant_of;
   });
+  return { rpcSteps, rpcToOriginal };
+}
+
+async function computeEventFunnel(flatSteps, opts) {
+  const { rpcSteps, rpcToOriginal } = eventRpcSteps(flatSteps);
 
   // Chiamata RPC (solo se ci sono step non-install da contare).
   let rpcSteps_out = [];
@@ -1047,7 +1122,8 @@ async function computeEventFunnel(flatSteps, opts) {
     if (opts.source && opts.source !== 'all') args.p_source = opts.source;
     // Modalità volumi: conteggi indipendenti per step, niente cascata (default RPC = 'cohort').
     if (opts.mode === 'absolute') args.p_mode = 'absolute';
-    const res = await sb.rpc('kpi_funnel_v2', args);
+    // opts.cachedResult: la risposta già pronta nella cache, per gli stessi argomenti (vedi eventFunnelFromCache)
+    const res = opts.cachedResult ? { data: opts.cachedResult } : await sb.rpc('kpi_funnel_v2', args);
     if (res.error) throw res.error;
     rpcSteps_out = (res.data && res.data.steps) || [];
     rpcMeta = {
@@ -4973,9 +5049,8 @@ function funnelTopBar() {
 }
 
 // Ora dell'ultimo calcolo e tasto «Aggiorna», solo quando i numeri a schermo vengono dalla cache.
-function funnelCacheBadge() {
-  const c = state.funnelCache;
-  if (!c || !c.computedAt || state.funnelLoading || !state.funnel) return '';
+function funnelCacheBadge(c = state.funnelCache, ready = state.funnel, loading = state.funnelLoading) {
+  if (!c || !c.computedAt || loading || !ready) return '';
   const at = new Date(c.computedAt);
   const when = (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
     + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
@@ -5085,6 +5160,7 @@ function pageFunnelEvent() {
         <div class="fun-headl">
           <div class="fun-title" title="${esc(titleTip)}">${esc(funnelActive().name)}</div>
           <div class="fun-cap">${esc(fnWindowText(sel, state.funnelFrom, state.funnelTo))}${state.eventFunnel && state.eventFunnel.cohort_size != null ? ` · ${state.eventFunnel.cohort_size} persone` : ''}${exclPill()}</div>
+          ${funnelCacheBadge(state.eventFunnelCache, state.eventFunnel, state.eventFunnelLoading)}
         </div>
         <div class="mode-toggle" role="group" aria-label="Modalità funnel">
           <button class="event-funnel-mode-btn ${state.eventFunnelMode === 'cohort' ? 'on' : ''}" data-mode="cohort"
@@ -5118,9 +5194,25 @@ const dayAfterTs = d => {
   return x.toISOString();
 };
 
-async function fetchActivation() {
+// Come eventFunnelCachePoll, per Attivazione.
+function activationCachePoll(scope, since) {
+  clearTimeout(activationCacheTimer);
+  activationCacheTimer = setTimeout(async () => {
+    const mine = () => state.activationCache && state.activationCache.scope === scope;
+    if (!mine()) return;
+    const c = await funnelFromCache(scope, false, 'activation');
+    if (!mine()) return;
+    if (c && !c.pending) { if (state.page === 'funnel' && state.funnelMode === 'activation') fetchActivation({ quiet: true }); return; }
+    if (Date.now() - since < 5 * 60 * 1000) { activationCachePoll(scope, since); return; }
+    state.activationCache = { ...state.activationCache, pending: false };
+    if (state.page === 'funnel' && state.funnelMode === 'activation') render();
+  }, 10000);
+}
+
+async function fetchActivation(opts = {}) {
+  clearTimeout(activationCacheTimer);
   const req = ++activationReqSeq;
-  state.activationLoading = true;
+  state.activationLoading = !((opts.force || opts.quiet) && !!state.activation && !!state.activationCache);
   state.activationError = null;
   render();
   try {
@@ -5134,13 +5226,26 @@ async function fetchActivation() {
     // p_include_bots solo se acceso: col chip spento vale il default della RPC (bot esclusi).
     const args = { p_start, p_end };
     if (state.funnelIncludeBots) args.p_include_bots = true;
-    const res = await sb.rpc('kpi_activation', args);
+    // dalla cache solo per sprint in corso e precedente, con i bot esclusi; la riga vale se ha la stessa finestra
+    const per = funnelQuickPeriod();
+    const scope = (per === 'cur' || per === 'prev') && !state.funnelIncludeBots ? per : null;
+    const c = scope ? await funnelFromCache(scope, opts.force, 'activation') : null;
     if (req !== activationReqSeq) return;
-    if (res.error) throw res.error;
-    state.activation = res.data;
+    const d = c && c.data;
+    if (d && d.result && sameInstant(d.p_start, p_start) && sameInstant(d.p_end, p_end)) {
+      state.activation = d.result;
+      state.activationCache = { scope, computedAt: c.computed_at, pending: !!c.pending };
+    } else {
+      state.activationCache = null;
+      const res = await sb.rpc('kpi_activation', args);
+      if (req !== activationReqSeq) return;
+      if (res.error) throw res.error;
+      state.activation = res.data;
+    }
   } catch (e) { if (req !== activationReqSeq) return; state.activationError = e.message || 'Errore sconosciuto'; }
   state.activationLoading = false;
   render();
+  if (state.activationCache && state.activationCache.pending) activationCachePoll(state.activationCache.scope, Date.now());
 }
 
 const actInt = n => Number(n || 0).toLocaleString('it-IT');
@@ -5435,8 +5540,10 @@ function pageActivation() {
           actWeeklyViz(a.weekly || {})),
       ].join('');
 
+  const badge = funnelCacheBadge(state.activationCache, a, loading);
   return `
     ${funnelTopBar()}
+    ${badge ? `<div style="margin:0 0 12px">${badge}</div>` : ''}
     ${body}`;
 }
 
@@ -11958,7 +12065,11 @@ function attachEvents() {
   document.getElementById('fn-refresh-btn')?.addEventListener('click', manualRefresh);
   document.getElementById('funnel-params-close')?.addEventListener('click', () => { state.funnelParamsOpen = false; render(); });
 
-  document.getElementById('funnel-cache-refresh')?.addEventListener('click', () => fetchFunnel({ force: true }));
+  document.getElementById('funnel-cache-refresh')?.addEventListener('click', () => {
+    if (state.funnelMode === 'event') fetchEventFunnel({ force: true });
+    else if (state.funnelMode === 'activation') fetchActivation({ force: true });
+    else fetchFunnel({ force: true });
+  });
   // Funnel — calcola
   document.getElementById('funnel-apply')?.addEventListener('click', () => {
     const from = document.getElementById('funnel-from')?.value;
