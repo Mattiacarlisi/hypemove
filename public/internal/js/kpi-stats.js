@@ -18,6 +18,7 @@ const stats = {
   sprintId: null,       // null = sprint predefinito scelto dal server
   data: null,           // kpi_stats_series
   loading: true, error: null, lastUpdated: null,
+  computedAt: null,     // ora in cui il database ha calcolato i dati in vista (cache)
   menuOpen: false, menuIdx: 0,
   seq: 0,
   gross: false,         // grafico 1: false = «Con tasse», resa netta (20,90 €); true = «Senza tasse», prezzo pieno (29,99 €)
@@ -49,14 +50,16 @@ async function fetchStats(opts = {}) {
   if (!silent) { stats.loading = true; stats.error = null; stats.data = opts.keepData ? stats.data : null; render(); }
   try {
     const [ser, lst] = await Promise.all([
-      sb.rpc('kpi_stats_series', stats.sprintId ? { p_sprint_id: stats.sprintId } : {}),
+      sb.rpc('kpi_cache_get', { p_query: 'stats_series', p_scope: stats.sprintId || 'default', p_force: !!opts.force }),
       sb.rpc('kpi_stats_sprints'),
     ]);
     if (seq !== stats.seq) return;
     if (ser.error) throw ser.error;
-    if (!ser.data) throw new Error('Sprint non trovato');
-    if (!ser.data.sprint_curves) throw new Error('Il database non restituisce ancora i dati del primo grafico: manca la migrazione kpi_stats_sprint_curves.');
-    stats.data = ser.data;
+    const data = ser.data && ser.data.data;
+    if (!data) throw new Error('Sprint non trovato');
+    if (!data.sprint_curves) throw new Error('Il database non restituisce ancora i dati del primo grafico: manca la migrazione kpi_stats_sprint_curves.');
+    stats.data = data;
+    stats.computedAt = ser.data.computed_at ? new Date(ser.data.computed_at) : null;
     if (!lst.error && Array.isArray(lst.data)) stats.sprints = lst.data;
     stats.error = null;
     stats.lastUpdated = new Date();
@@ -486,7 +489,10 @@ function stMenuHtml() {
 
 function stHeader() {
   const sp = stats.data && stats.data.meta.sprint;
-  const upd = stats.lastUpdated ? stats.lastUpdated.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '';
+  const at = stats.computedAt;
+  const upd = !at ? ''
+    : 'calcolato ' + (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
+      + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
   const pill = sp
     ? `<div class="st-pillwrap">
          <button class="st-pill st-pill-sel" id="st-sprint-btn" aria-haspopup="listbox" aria-expanded="${stats.menuOpen}" title="Scegli lo sprint">
@@ -499,7 +505,7 @@ function stHeader() {
       <button class="nav-toggle nav-toggle-desk" data-nav-toggle title="Mostra il menu" aria-label="Mostra il menu">${NAV_PANEL_ICON}</button>
       <h1 class="st-h1">Stats</h1>${pill}
       <div class="st-grow"></div>
-      <div class="st-meta">${stats.loading ? 'Caricamento…' : (upd ? 'ultimo ' + upd : '')}</div>
+      <div class="st-meta">${stats.loading ? 'Caricamento…' : upd}</div>
       <button class="st-refresh" id="st-refresh-btn" ${stats.loading ? 'disabled' : ''}>Aggiorna</button>
     </div>`;
 }
@@ -587,7 +593,7 @@ function attachStatsEvents() {
   document.getElementById('st-rate-reset')?.addEventListener('click', () => { stats.rate = null; render(); });
   document.getElementById('st-cmp-btn')?.addEventListener('click', ev => { ev.stopPropagation(); stats.cmpOpen = !stats.cmpOpen; stats.menuOpen = false; render(); });
   document.querySelectorAll('[data-st-cmp]').forEach(b => b.addEventListener('click', ev => { ev.stopPropagation(); stToggleCmp(b.dataset.stCmp); }));
-  const refresh = () => fetchStats({ keepData: true });
+  const refresh = () => fetchStats({ keepData: true, force: true });
   document.getElementById('st-refresh-btn')?.addEventListener('click', refresh);
   document.getElementById('st-err-btn')?.addEventListener('click', refresh);
 
