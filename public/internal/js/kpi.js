@@ -2393,7 +2393,7 @@ function layout() {
           ${headerActions()}
         </div>
       </div>
-      ${state.error ? pageError() : !state.data ? pageSkeleton() : page()}`}
+      ${!needsGeneralData(state.page) ? page() : state.error ? pageError() : !state.data ? pageSkeleton() : page()}`}
     </div>
     ${deleteConfirmModal()}
     ${funnelOverwriteModal()}
@@ -2533,6 +2533,9 @@ function sidebar() {
       </div>
     </div>`;
 }
+
+// Solo queste pagine leggono i dati di fetchData(); le altre hanno il loro caricamento e non devono aspettarlo.
+function needsGeneralData(p) { return p === 'overview' || p === 'metriche'; }
 
 function pageError() {
   return `<div class="empty" style="padding:80px 20px">
@@ -11603,7 +11606,7 @@ function attachEvents() {
       window.scrollTo(0, 0);
       if (state.page === 'stats') statsOnNav();
       // L'auto-refresh salta l'Overview quando non è a schermo: tornandoci si rilegge.
-      if (state.page === 'overview'   && state.overviewStale && !state.loading)              fetchData();
+      if (needsGeneralData(state.page) && (state.overviewStale || !state.data) && !state.loading) fetchData();
       if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
       if (state.page === 'funnel'     && state.funnelMode === 'activation' && !state.activation && !state.activationLoading) fetchActivation();
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
