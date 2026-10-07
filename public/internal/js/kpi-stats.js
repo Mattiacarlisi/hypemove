@@ -163,7 +163,6 @@ const stSvg = (w, h, inner) =>
 
 // ── GRAFICO: i sei ────────────────────────────────────────────────────
 const ST_PCT = [[0, '0'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']];
-const ST_EU15 = [[0, '0'], [0.5, '0,50 €'], [1, '1 €'], [1.5, '1,50 €']];
 const ST_FO = [[0, '0'], [0.25, '0,25'], [0.5, '0,50'], [0.75, '0,75'], [1, '1']];
 
 
@@ -316,19 +315,24 @@ function stBuildPayers(w, h, d) {
       const e = byE.get(i); return e ? { txt: `${stDM(cal.date(i))} · stima ${stIt(e.v, 1)} paganti`, v: e.v } : null; } };
 }
 
+// Grafico 5: un punto per sprint, lo stesso valore finale del grafico 1 (ultimo punto della curva di ogni sprint).
+function stSprintEnds(d) {
+  const { all, val } = stCurveSet(d), dup = n => all.filter(x => x.numero === n).length > 1;
+  return all.map(sp => { const p = sp.points.at(-1); return { sp, v: p ? val(p) : null, est: !!p && (p.on > 0 || p.og > 0), dup: dup(sp.numero) }; });
+}
 function stBuildSprints(w, h, d) {
-  const sb5 = d.sprint_by_sprint, P = sb5.points, nx = Math.max(P.length, 2);
-  let lastReal = -1; P.forEach((p, i) => { if (!p.est) lastReal = i; });
-  const c = stBase(w, h, { nx, ymax: 1.5, ticks: ST_EU15, par: sb5.breakeven, fz: lastReal >= 0 && lastReal < P.length - 1 ? lastReal + 0.5 : null,
-    labs: P.map((p, i) => [i, 'S' + p.numero]) });
-  const real = P.map((p, i) => ({ i, v: p.v, est: i > lastReal }));
-  // reale in bianco con un punto per sprint; dall'ultimo reale la stima in blu tratteggiato, congiunta
-  const runs = stRuns(real, 1.5, true);
-  let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.BLU, estDash: '7 6', sw: 3,
-    dot: (p, r) => r.est ? (p[0] > lastReal ? 'ring' : null) : 'dot' });
-  P.forEach((p, i) => { if (p.selected && i !== P.length - 1 && p.v != null && p.v <= 1.5) s += stDot(c.X(i), c.Y(p.v), 6, ST.BLU); });
+  const P = stSprintEnds(d), nx = Math.max(P.length, 2);
+  const top = Math.max(0, ...P.map(p => p.v ?? 0)), ymax = Math.max(1.5, Math.ceil(top / 0.5) * 0.5);
+  const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += 0.5) ticks.push([v, v === 0 ? '0' : (Number.isInteger(v) ? v : stIt(v, 2)) + ' €']);
+  // i doppioni (due sprint con lo stesso numero) si distinguono con la data di inizio
+  const lab = p => !p.dup ? 'S' + p.sp.numero : (w > 600 ? `S${p.sp.numero} ${stDM(p.sp.inizio)}` : stDM(p.sp.inizio));
+  const c = stBase(w, h, { nx, ymax, ticks, par: d.sprint_curves.breakeven, labs: P.map((p, i) => [i, lab(p)]) });
+  const runs = stRuns(P.map((p, i) => ({ i, v: p.v })), ymax, true);
+  // bianco pieno = sprint chiuso, anello blu = ci sono ancora prove aperte (stima), punto blu grande = sprint in esame
+  let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: p => (P[p[0]].est ? 'ring' : 'dot') });
+  P.forEach((p, i) => { if (p.sp.selected && p.v != null && p.v <= ymax) s += stDot(c.X(i), c.Y(p.v), 6, ST.BLU); });
   return { svg: stSvg(w, h, s), c, nx,
-    hov: i => { const p = P[i]; return p && p.v != null ? { txt: `Sprint ${p.numero} · ${p.est ? 'stima ' : ''}${stEuro(p.v)} € per euro`, v: p.v } : null; } };
+    hov: i => { const p = P[i]; return p && p.v != null ? { txt: `${stCurveName(p.sp)} · ${p.est ? 'stima ' : ''}${stEuro(p.v)} € per euro`, v: p.v } : null; } };
 }
 
 function stBuildKeep(w, h, d) {
@@ -413,10 +417,6 @@ function stCards(d) {
   const tl = stT100Real(sel).filter(p => stT100(p) != null).at(-1), par3 = d.trials_per_100.breakeven;
   c.t100 = { num: tl ? stIt(stT100(tl), 1) : '–', color: ST.INK,
     cap: `${tl ? `${tl.st} ${tl.st === 1 ? 'prova' : 'prove'} su ${stEuro(tl.cs)} € spesi` : 'nessuna spesa ancora'} · pareggio a ${stIt(par3, 1)}` };
-  c.t100.legend = [
-    stLgd(maturing ? ST.INK : ST.BLU, stCurveName(sel)),
-    ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))), stLgd(ST.ORA, 'pareggio'),
-  ].join('');
 
   const ep = d.expected_payers, E4 = stPayEst(ep), open = m.rate.open - m.rate.open_cancelled, canc = m.rate.open_cancelled;
   if (E4.length) {
@@ -428,10 +428,10 @@ function stCards(d) {
   }
   c.payers.legend = [stLgd(ST.INK, 'hanno pagato'), ...(E4.length ? [stLgd(ST.BLU, 'stima', '6 5')] : [])].join('');
 
-  const P = d.sprint_by_sprint.points, selP = P.find(p => p.selected) || P.at(-1);
-  const prevClosed = P.filter(p => !p.est && p.numero < (selP ? selP.numero : 1e9)).at(-1);
-  c.sprints = selP ? { num: stEuro(selP.v) + ' €', color: selP.est ? ST.BLU : ST.INK,
-    cap: `${selP.est ? 'stima ' : ''}Sprint ${selP.numero}${prevClosed ? ` · ultimo chiuso ${stEuro(prevClosed.v)} €` : ''}` } : { num: '–', cap: '' };
+  const P5 = stSprintEnds(d), selI = P5.findIndex(p => p.sp.selected), selP = P5[selI];
+  const prevClosed = P5.slice(0, Math.max(selI, 0)).filter(p => !p.est && p.v != null).at(-1);
+  c.sprints = selP && selP.v != null ? { num: stEuro(selP.v) + ' €', color: selP.est ? ST.BLU : ST.INK,
+    cap: `${selP.est ? 'stima · ' : ''}${stCurveName(selP.sp)}${prevClosed ? ` · ultimo chiuso ${stEuro(prevClosed.v)} €` : ''}` } : { num: '–', cap: '', color: ST.INK };
 
   const kp = d.trials_not_cancelled.points.filter(p => p.v != null).at(-1);
   c.keep = kp ? { num: Math.round(kp.v) + '%', cap: `${kp.kept} prove su ${kp.started} con il rinnovo attivo`, color: ST.INK } : { num: '–', cap: '', color: ST.INK };

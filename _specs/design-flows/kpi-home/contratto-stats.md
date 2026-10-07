@@ -75,8 +75,11 @@ La pagina non usa più `trials_per_100.selected`, `compare` e `final_estimate` (
 - `est` e `final_estimate` (fermi alla `fine` dello sprint) restano per la pagina vecchia; la nuova li usa solo se `est_full` manca.
 - Scala: da 0 al valore più alto, a passi di 2 (di 4 sopra 8).
 
-### 5. `sprint_by_sprint`
-`{ breakeven: 1, points: [{ numero, nome, v, est, paid_only, selected }] }`, dal più vecchio. `v` = valore dello sprint alla sua ultima giornata con dati (max 16 giorni): reale dove `est:false`, stima (prove aperte × tasso) dove `est:true`; lo sprint in corso usa la stima a fine pubblicità (0,5615). `paid_only` = solo il pagato. `selected` evidenzia lo sprint scelto. Contiene tutti gli sprint con spesa (oggi Sprint 4–15).
+### 5. Sprint dopo sprint (dal 07/10/2026 letto da `sprint_curves`)
+La pagina non usa più `sprint_by_sprint` (resta nella risposta, calcolato con i vecchi 16 giorni e la spesa futura stimata). Un punto per ogni sprint di `sprint_curves.sprints`, in ordine di inizio: lo stesso valore finale del grafico 1, cioè `(pagato + tasso × prove aperte) / spesa` sull'ultimo punto della curva. Segue «Con tasse / Senza tasse» e il tasso a mano del grafico 1.
+- Punto pieno = sprint senza prove aperte (valore vero); anello = lo sprint ha ancora prove aperte (stima); punto blu grande = sprint in esame.
+- Due sprint con lo stesso numero si distinguono con la data di inizio sull'asse («S15 04/10»; sul telefono solo la data).
+- Scala 0–1,50 €, più alta solo se un valore la supera; pareggio a 1 €.
 
 ### 6. `trials_not_cancelled`
 `{ points: [{date, v, kept, started}] }`: `v` = prove non disdette / prove avviate × 100. Vedi la contraddizione sotto: il grafico è nella tavola ma una frase del 06/10 dice che è stato tolto.
