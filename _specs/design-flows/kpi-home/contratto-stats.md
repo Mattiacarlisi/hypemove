@@ -2,7 +2,7 @@
 
 Corsia SQL → corsia pagina. Fixture di riferimento: `stats-fixture-sprint15.json` (stessa forma, numeri di `gen5.py` per lo Sprint 15, 06/10/2026). Migrazione: `app/supabase/migrations/20261006120000_kpi_stats_series.sql` (da applicare dopo il via di Danilo).
 
-MODIFICA: nessuna finora. Se la forma cambia, questa riga dice cosa.
+MODIFICA 07/10/2026: il grafico 1 legge la nuova chiave `sprint_curves` (sezione in fondo); `sprint_day` resta nella risposta ma la pagina non lo usa più. Migrazione: `app/supabase/migrations/20261007120000_kpi_stats_sprint_curves.sql`.
 
 ## Funzioni (tutte `rpc`, solo operatori interni: stessa protezione di `kpi_sprint_scoreboard`)
 
@@ -85,3 +85,16 @@ Traccia dello sprint in corso: spesa futura al ritmo medio dello sprint preceden
 ## Differenze note fra la fixture (numeri di gen5.py) e la funzione (dati vivi)
 - Grafico 5, Sprint 12: la fixture ha 0 (valore scritto a mano in `REAL2`), la funzione dà 0,089 con `est:true` (a 16 giorni ha 2 prove aperte, stessa formula della curva del grafico 1, dove il giorno 16 vale già 0,089). Il pagato puro è in `paid_only` (0).
 - Grafico 7: la fixture conta 1879 primi accessi al 05/10 (solo `kpi_excluded_users` esclusi), la funzione 1612 perché esclude anche le sessioni anonime virtuali o bot, come `kpi_sprint_scoreboard`. Risultato: 0,81 al posto di 0,69 («0,7» nella tavola). Se Danilo preferisce il numero della tavola basta togliere la riga `ex_s` dalla CTE `fo`.
+
+## `sprint_curves` (grafico 1, dal 07/10/2026)
+`{ breakeven: 1, rate, value: { net_year, gross_year, net_month, gross_month }, sprints: [ {…} ] }`; `rate` è il tasso di fine prova dei dati (0..1), tutti gli sprint con spesa, dal più vecchio.
+
+Ogni sprint: `id`, `numero`, `nome`, `inizio`, `fine` (ultimo giorno di pubblicità: il giorno prima dello sprint successivo se le date si sovrappongono), `matura` (ultimo giorno dell'asse), `ads_days`, `days`, `today_day` (giorno di oggi, `null` se lo sprint è maturato), `selected`, `spend`, `paid_net`, `paid_gross`, `open_trials`, `points: [{ day, cs, pn, pg, on, og, est }]`.
+
+- `days` = giorni di pubblicità + 7 di prova, allungati fino all'ultima prova avviata in ritardo, al massimo 14 in più.
+- `cs` = spesa entro il giorno. `pn` / `pg` = pagato entro il giorno, con la resa netta (20,90 € annuale, 6,90 € mensile) o a prezzo pieno (29,99 € e 9,90 €). `on` / `og` = valore delle prove aperte non disdette che scadono entro il giorno, zero prima di `today_day`.
+- La pagina calcola il valore: `(p + tasso × o) / cs`, `null` se `cs` è 0. Il tasso è `rate`, oppure quello scritto a mano nel campo «Tasso» (vale solo per il grafico 1 e non si ricorda).
+- Da `today_day` in poi `est:true`: la spesa resta quella già fatta. Nessuna spesa futura stimata.
+- L'ultimo giorno raccoglie anche ciò che arriva dopo `matura`.
+- La spesa di un giorno va a un solo sprint.
+- Scelte che vivono solo nella pagina (`localStorage`): vista «Con tasse» (`pn`/`on`, 20,90 €, predefinita) o «Senza tasse» (`pg`/`og`, 29,99 €) e sprint di confronto (al massimo 3; senza scelta, i due precedenti).

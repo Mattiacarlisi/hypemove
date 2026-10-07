@@ -63,6 +63,38 @@
 .st-big .st-legend { max-width: calc(100% - 300px); gap: 6px 11px; font-size: 12.5px; }
 .st-card:not(.st-big) .st-legend { max-width: calc(100% - 170px); }
 .st-lg { display: flex; align-items: center; gap: 6px; }
+/* grafico 1: comandi in alto a destra, legenda sotto */
+.st-tools { position: absolute; right: 24px; top: 16px; display: flex; align-items: center; gap: 10px; z-index: 3; }
+.st-seg { display: flex; padding: 3px; border-radius: 50px; background: #0f1115; border: 1.5px solid #2a2e37; }
+.st-segb {
+  font: inherit; font-size: 13px; font-weight: 700; color: #9ca3af; background: transparent; border: 0; border-radius: 50px;
+  padding: 4px 12px; cursor: pointer; white-space: nowrap;
+}
+.st-segb.st-on { background: #4361ee; color: #ffffff; }
+.st-segb:focus-visible, .st-pill-sel:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.st-cmpwrap { position: relative; }
+.st-rate {
+  display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #9ca3af; white-space: nowrap;
+  padding: 3px 12px; border-radius: 50px; background: #0f1115; border: 1.5px solid #2a2e37;
+}
+.st-rate.st-manual { border-color: #4361ee; color: #ffffff; }
+.st-rate input {
+  width: 52px; font: inherit; font-weight: 800; color: #ffffff; background: transparent; border: 0; text-align: right; padding: 4px 0;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.st-rate input::-webkit-outer-spin-button, .st-rate input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.st-rate input:focus { outline: none; }
+.st-rate:focus-within { border-color: #ffffff; }
+.st-rate-reset { font: inherit; font-size: 13px; font-weight: 700; color: #9ca3af; background: transparent; border: 0; cursor: pointer; text-decoration: underline; white-space: nowrap; padding: 4px 0; }
+.st-rate-reset:hover { color: #ffffff; }
+.st-menu.st-menu-r { left: auto; right: 0; min-width: 260px; }
+.st-menu-r .st-opt:hover { background: #262d45; }
+/* grafico 1: didascalia su più righe se serve, legenda su una riga sua sotto, poi il grafico */
+.st-card.st-big.st-has-leg { height: 508px; }
+.st-big.st-has-leg .st-cap { white-space: normal; right: 24px; }
+.st-big.st-has-leg .st-legend { top: 128px; left: 24px; right: 24px; max-width: none; justify-content: flex-start; gap: 6px 16px; }
+.st-big.st-has-leg .st-chart { top: 160px; }
+.st-big .st-readout { top: 52px; }
 .st-chart { position: absolute; left: 20px; right: 20px; top: 112px; bottom: 20px; }
 .st-big .st-chart { left: 24px; right: 24px; top: 100px; bottom: 24px; }
 .st-chart svg { position: absolute; left: 0; top: 0; }
@@ -116,11 +148,14 @@
 @media (max-width: 900px) {
   .st-page { padding: 24px 16px 40px; }
   .st-grid { grid-template-columns: 1fr; gap: 20px; }
-  .st-card.st-big { height: 500px; }
-  .st-big .st-legend { left: 24px; right: 24px; top: 100px; justify-content: flex-start; gap: 8px 18px; max-width: none; }
-  .st-big .st-chart { top: 160px; }
+  .st-card.st-big, .st-card.st-big.st-has-leg { height: 770px; }
+  .st-tools { left: 24px; right: 24px; top: 152px; flex-wrap: wrap; }
+  .st-menu.st-menu-r { left: 0; right: auto; }
+  .st-big .st-legend, .st-big.st-has-leg .st-legend { left: 24px; right: 24px; top: 294px; justify-content: flex-start; gap: 8px 18px; max-width: none; }
+
   .st-card:not(.st-big) .st-legend { left: 24px; right: 24px; top: 108px; max-width: none; justify-content: flex-start; }
   .st-card.st-has-leg .st-chart { top: 132px; }
+  .st-card.st-big .st-chart, .st-card.st-big.st-has-leg .st-chart { top: 402px; }
   .st-cap { white-space: normal; right: 24px; }
   .st-readout { top: 20px !important; right: 24px; }
 }
