@@ -337,17 +337,20 @@ function stBuildSprints(w, h, d) {
   return { svg: stSvg(w, h, s), c, nx,
     hov: i => { const p = P[i]; return p && p.v != null ? { txt: `${stCurveName(p.sp)} · ${p.est ? 'stima ' : ''}${stEuro(p.v)} € per euro`, v: p.v } : null; } };
 }
-
+// Grafico 6: prove aperte quel giorno con il rinnovo ancora attivo (la disdetta conta dal giorno in cui arriva).
 function stBuildKeep(w, h, d) {
-  const cal = stCalendar(d), P = d.trials_not_cancelled.points;
-  const c = stBase(w, h, { nx: cal.nx, ymax: 100, ticks: ST_PCT, fz: cal.fz, labs: cal.labs });
-  const pts = P.map(p => ({ i: cal.idx(p.date), v: p.v }));
-  const ch = new Set(stChanges(pts.map(p => p.v ?? 0)));
-  const runs = stRuns(pts, 100, false);
+  const cal = stCalendar(d), P = (d.open_trials && d.open_trials.points) || [];
+  const top = Math.max(1, ...P.map(p => p.active));
+  const stepY = top <= 4 ? 1 : top <= 8 ? 2 : 4, ymax = Math.ceil((top + 0.5) / stepY) * stepY;
+  const ticks = []; for (let v = 0; v <= ymax; v += stepY) ticks.push([v, String(v)]);
+  const c = stBase(w, h, { nx: cal.nx, ymax, ticks, fz: cal.fz, labs: cal.labs });
+  const pts = P.map(p => ({ i: cal.idx(p.date), v: p.active }));
+  const ch = new Set(stChanges(pts.map(p => p.v)));
+  const runs = stRuns(pts, ymax, false);
   const s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
   const by = new Map(P.map(p => [cal.idx(p.date), p]));
   return { svg: stSvg(w, h, s), c, nx: cal.nx,
-    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${stPct(p.v)} delle prove non disdette`, v: p.v } : null; } };
+    hov: i => { const p = by.get(i); return p ? { txt: `${stDM(cal.date(i))} · ${p.active} con il rinnovo attivo su ${p.open} aperte`, v: p.active } : null; } };
 }
 
 function stBuildFo(w, h, d) {
@@ -392,7 +395,7 @@ function stSkeletonCard(key, title, big) {
 
 const ST_TITLES = {
   sprint: 'Lo sprint, giorno per giorno', rate: 'Prove che poi pagano', t100: 'Prove avviate ogni 100 €',
-  payers: 'Paganti attesi', sprints: 'Sprint dopo sprint', keep: 'Prove non disdette', fo: 'Prove ogni 100 primi accessi',
+  payers: 'Paganti attesi', sprints: 'Sprint dopo sprint', keep: 'Prove aperte con il rinnovo attivo', fo: 'Prove ogni 100 primi accessi',
 };
 const ST_ORDER = ['sprint', 'rate', 't100', 'payers', 'sprints', 'keep', 'fo'];
 
@@ -436,8 +439,9 @@ function stCards(d) {
   c.sprints = selP && selP.v != null ? { num: stEuro(selP.v) + ' €', color: selP.est ? ST.BLU : ST.INK,
     cap: `${selP.est ? 'stima · ' : ''}${stCurveName(selP.sp)}${prevClosed ? ` · ultimo chiuso ${stEuro(prevClosed.v)} €` : ''}` } : { num: '–', cap: '', color: ST.INK };
 
-  const kp = d.trials_not_cancelled.points.filter(p => p.v != null).at(-1);
-  c.keep = kp ? { num: Math.round(kp.v) + '%', cap: `${kp.kept} prove su ${kp.started} con il rinnovo attivo`, color: ST.INK } : { num: '–', cap: '', color: ST.INK };
+  const ot = d.open_trials && d.open_trials.now, off = ot ? ot.open - ot.active : 0;
+  c.keep = ot ? { num: String(ot.active), color: ST.INK,
+    cap: `su ${ot.open} ${ot.open === 1 ? 'prova aperta' : 'prove aperte'} · ${off === 0 ? 'nessuna disdetta' : off === 1 ? '1 già disdetta' : off + ' già disdette'}` } : { num: '–', cap: '', color: ST.INK };
 
   const fo = d.trials_per_100_first_opens, fl = fo.points.filter(p => p.v != null).at(-1);
   c.fo = { num: fl ? stIt(fl.v, 1) : '–', cap: `dal ${stDM(fo.from)}`, color: ST.INK };
