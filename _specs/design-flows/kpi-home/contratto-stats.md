@@ -55,7 +55,10 @@ Calendario: da `trials_per_100_first_opens.from` (= inizio dello Sprint 12, 07/0
 - `compare`: gli sprint 5, 12, 13 (lista in `kpi_stats_config()`), escluso quello scelto. Punti `{day, v, est}` reali con `est:true` dove ci sono prove aperte.
 
 ### 2. `trial_rate`
-`{ now: {pct, paid, ended}, points: [{date, v, paid, ended}] }`. `v` = prove finite pagate / prove finite × 100 (%), cumulato al giorno. `real` soltanto.
+`{ now: {pct, paid, ended}, min_ended, points: [{date, v, paid, ended}] }`. `v` = prove pagate / prove finite × 100 (%), cumulato al giorno. `real` soltanto.
+- `ended` = pagate + scadute senza pagare + aperte già disdette (dal 07/10/2026). Una prova disdetta entra il giorno della disdetta: evento `SUBSCRIPTION_CANCELED` se c'è, altrimenti l'ultimo aggiornamento della riga di `play_purchases`, mai oltre la scadenza. Finché la prova è aperta quel giorno può spostarsi in avanti di qualche giorno, perché l'app riaggiorna la riga.
+- `min_ended` (5, in `kpi_stats_config()`): la pagina disegna la curva solo dai punti con `ended` ≥ questo valore. Il conto resta su tutte le prove.
+- Lo stesso tasso (`meta.rate`) entra nei grafici 1, 3, 4 e 5.
 
 ### 3. `trials_per_100`
 `{ breakeven, selected: {numero, nome, points: [{day, v, est}]}, compare: […], final_estimate }`. `v` = prove avviate × 100 / spesa cumulata. Per lo sprint in corso: giorni 1..2 reali (giorno 1 `v:null` perché la spesa è 0, giorno 2 = 42,37, fuori scala), dal giorno 3 stima (10,0 → 4,3). `final_estimate` = 4,2983 (fine pubblicità).

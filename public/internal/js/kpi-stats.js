@@ -299,13 +299,15 @@ function stBuildT100(w, h, d) {
 function stBuildRate(w, h, d) {
   const cal = stCalendar(d);
   const c = stBase(w, h, { nx: cal.nx, ymax: 100, ticks: ST_PCT, fz: cal.fz, labs: cal.labs });
-  const pts = d.trial_rate.points.map(p => ({ i: cal.idx(p.date), v: p.v }));
+  // la curva parte da quando le prove finite sono abbastanza: prima ogni punto è fatto di due o tre casi
+  const P = d.trial_rate.points.filter(p => p.ended >= (d.trial_rate.min_ended ?? 5));
+  const pts = P.map(p => ({ i: cal.idx(p.date), v: p.v }));
   const ch = new Set(stChanges(pts.map(p => p.v ?? 0)));
   const runs = stRuns(pts, 100, false);
   const s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
-  const by = new Map(d.trial_rate.points.map(p => [cal.idx(p.date), p]));
+  const by = new Map(P.map(p => [cal.idx(p.date), p]));
   return { svg: stSvg(w, h, s), c, nx: cal.nx,
-    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${stPct(p.v)} delle prove finite`, v: p.v } : null; } };
+    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${p.paid} pagate su ${p.ended} finite · ${stPct(p.v)}`, v: p.v } : null; } };
 }
 
 function stBuildPayers(w, h, d) {
@@ -420,7 +422,7 @@ function stCards(d) {
   c.sprint.tools = stSprintTools(d, cs);
 
   const r = d.trial_rate.now;
-  c.rate = r.ended > 0 ? { num: stPct(r.pct), cap: `${r.paid} prove finite su ${r.ended} hanno pagato`, color: ST.INK }
+  c.rate = r.ended > 0 ? { num: stPct(r.pct), cap: `${r.paid} pagate su ${r.ended} prove finite o disdette`, color: ST.INK }
                        : { num: '–', cap: 'nessuna prova finita ancora', color: ST.INK };
 
   const t = d.trials_per_100, tl = t.selected.points.filter(p => p.v != null).at(-1);
