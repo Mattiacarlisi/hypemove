@@ -1,0 +1,105 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-10-07T15:00:00Z"
+ },
+ "title": "KPI Funnel — redesign",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "Main.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 920,
+   "title": "1 - Funnel oggi"
+  },
+  "oggi-2-telefono.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 390,
+   "h": 844,
+   "title": "2 - Telefono oggi"
+  },
+  "prop-1A-una-riga.dc.html": {
+   "x": 0,
+   "y": 1300,
+   "w": 1440,
+   "h": 920,
+   "title": "1A - Una riga sola"
+  },
+  "prop-2A-una-riga-telefono.dc.html": {
+   "x": 1520,
+   "y": 1300,
+   "w": 390,
+   "h": 844,
+   "title": "2A - Una riga, telefono"
+  },
+  "prop-1B-elenco-sinistra.dc.html": {
+   "x": 0,
+   "y": 2340,
+   "w": 1440,
+   "h": 920,
+   "title": "1B - Elenco a sinistra"
+  },
+  "prop-2B-elenco-telefono.dc.html": {
+   "x": 1520,
+   "y": 2340,
+   "w": 390,
+   "h": 844,
+   "title": "2B - Elenco, telefono"
+  },
+  "prop-1C-confronto-dentro.dc.html": {
+   "x": 0,
+   "y": 3380,
+   "w": 1440,
+   "h": 940,
+   "title": "1C - Confronto dentro"
+  },
+  "prop-2C-confronto-telefono.dc.html": {
+   "x": 1520,
+   "y": 3380,
+   "w": 390,
+   "h": 844,
+   "title": "2C - Confronto, telefono"
+  },
+  "prop-3-chi-escluso.dc.html": {
+   "x": 0,
+   "y": 4420,
+   "w": 1440,
+   "h": 920,
+   "title": "3 - Chi è escluso"
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "oggi-2-telefono.dc.html",
+  "prop-1A-una-riga.dc.html",
+  "prop-2A-una-riga-telefono.dc.html",
+  "prop-1B-elenco-sinistra.dc.html",
+  "prop-2B-elenco-telefono.dc.html",
+  "prop-1C-confronto-dentro.dc.html",
+  "prop-2C-confronto-telefono.dc.html",
+  "prop-3-chi-escluso.dc.html"
+ ],
+ "designSystems": [],
+ "notes": {
+  "n-oggi": {
+   "x": 0,
+   "y": -260,
+   "text": "Oggi",
+   "kind": "title1",
+   "maxW": 1910
+  },
+  "n-prop": {
+   "x": 0,
+   "y": 1040,
+   "text": "Proposte",
+   "kind": "title1",
+   "maxW": 1910
+  }
+ }
+}
