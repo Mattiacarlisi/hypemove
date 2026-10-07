@@ -4817,6 +4817,12 @@ function fnSprintLabel(s) {
   return `${n ? 'Sprint ' + n : s.nome} · dal ${fnDM(s.inizio)}`;
 }
 // Sprint in corso e precedente, presi per data di inizio (non per nome).
+// Finestra per la didascalia, come nella tavola 1A: «04/10 → 12/10», con l'ora solo dove lo sprint la ritaglia.
+function fnWindowText(sel, from, to) {
+  const hs = sel && sel.inizio_ora ? ' ' + String(sel.inizio_ora).slice(0, 5) : '';
+  const he = sel && sel.fine_ora ? ' ' + String(sel.fine_ora).slice(0, 5) : '';
+  return `${fnDM(from)}${hs} → ${fnDM(to)}${he}`;
+}
 function funnelQuickSprints() {
   const all = [...state.sprints].sort((a, b) => String(b.inizio).localeCompare(String(a.inizio)));
   const started = all.filter(s => s.inizio <= TODAY);
@@ -4918,9 +4924,12 @@ function funnelExclCount() {
   const incl = { emulator: state.funnelIncludeEmulators, test: state.funnelIncludeTest, blocked: state.funnelIncludeBlocked, bot: state.funnelIncludeBots };
   const reasons = (act ? ['bot'] : ['emulator', 'test', 'blocked', 'bot']).filter(r => !incl[r]);
   if (act) return state.activation ? (state.funnelIncludeBots ? 0 : (state.activation.bots_excluded || 0)) : null;
-  if (state.excludedUsers) return state.excludedUsers.filter(u => (u.reason || '').split(',').some(r => reasons.includes(r))).length;
+  // Prima i conteggi del calcolo (limitati al periodo); l'elenco nominale è tagliato a 1000 righe e non
+  // è del periodo, quindi serve solo se i conteggi mancano.
   const c = state.eventFunnel && state.eventFunnel.excluded_counts;
-  return c ? reasons.reduce((s, r) => s + (Number(c[r]) || 0), 0) : null;
+  if (c) return reasons.reduce((s, r) => s + (Number(c[r]) || 0), 0);
+  if (state.excludedUsers) return state.excludedUsers.filter(u => (u.reason || '').split(',').some(r => reasons.includes(r))).length;
+  return null;
 }
 
 // Pillola «N esclusi»: apre il pannello laterale. Sul funnel a catalogo (Default) non c'è niente da regolare.
@@ -5060,7 +5069,7 @@ function pageFunnelEvent() {
       <div class="fun-head">
         <div class="fun-headl">
           <div class="fun-title" title="${esc(titleTip)}">${esc(funnelActive().name)}</div>
-          <div class="fun-cap">${esc(win.text)}${state.eventFunnel && state.eventFunnel.cohort_size != null ? ` · ${state.eventFunnel.cohort_size} persone` : ''}${exclPill()}</div>
+          <div class="fun-cap">${esc(fnWindowText(sel, state.funnelFrom, state.funnelTo))}${state.eventFunnel && state.eventFunnel.cohort_size != null ? ` · ${state.eventFunnel.cohort_size} persone` : ''}${exclPill()}</div>
         </div>
         <div class="mode-toggle" role="group" aria-label="Modalità funnel">
           <button class="event-funnel-mode-btn ${state.eventFunnelMode === 'cohort' ? 'on' : ''}" data-mode="cohort"
@@ -5998,9 +6007,11 @@ function funnelParamsDrawer() {
   const isActivation = state.funnelMode === 'activation';
   const fn = state.eventFunnel;
   const counts = (fn && fn.excluded_counts) || {};
-  const nOf = r => state.excludedUsers
-    ? state.excludedUsers.filter(u => (u.reason || '').split(',').includes(r)).length
-    : (counts[r] != null ? counts[r] : '–');
+  // Conteggi del calcolo per primi (del periodo); l'elenco è tagliato a 1000 righe e non è del periodo.
+  const nOf = r => counts[r] != null ? counts[r]
+    : state.excludedUsers ? state.excludedUsers.filter(u => (u.reason || '').split(',').includes(r)).length : '–';
+  const nAll = fn && fn.excluded_counts
+    ? ['emulator', 'test', 'blocked', 'bot'].reduce((t, r) => t + (Number(counts[r]) || 0), 0) : (state.excludedUsers || []).length;
 
   const act = state.activation;
   const cohortNow = isActivation
@@ -6037,7 +6048,7 @@ function funnelParamsDrawer() {
     return `<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:${c}22;color:${c};font-weight:700;margin-left:4px;white-space:nowrap">${l}</span>`;
   }).join('');
   const filtChips = [null, 'blocked', 'test', 'emulator', 'bot'].map(f => {
-    const lab = f === null ? `Tutti ${rows.length}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Prova ${nOf('test')}` : f === 'bot' ? `Bot ${nOf('bot')}` : `Emulatori ${nOf('emulator')}`;
+    const lab = f === null ? `Tutti ${nAll}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Prova ${nOf('test')}` : f === 'bot' ? `Bot ${nOf('bot')}` : `Emulatori ${nOf('emulator')}`;
     return `<button class="excl-filter fn-fchip${filt === f ? ' on' : ''}" data-filter="${f || ''}">${lab}</button>`;
   }).join('');
   const listBody = state.excludedLoading

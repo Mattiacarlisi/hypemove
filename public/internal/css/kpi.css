@@ -956,3 +956,5 @@
   .fn-page .loss .b { display: none; }
   .fn-page .loss { right: 6px; }
 }
+/* Telefono: sul Funnel il contenitore non ha padding, quindi i -14px laterali della barra in alto la facevano sporgere (scroll orizzontale della pagina). */
+@media (max-width: 900px) { .main-stats:has(.fn-page) .mtop { margin: 0; } }
