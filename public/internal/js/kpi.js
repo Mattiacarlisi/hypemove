@@ -802,8 +802,14 @@ function funnelCachePoll(scope, since) {
   }, 10000);
 }
 
+// Risposte in ritardo: ogni richiesta porta il suo numero e, tornata dal database, conta solo se nel frattempo
+// non ne è partita un'altra (cambio di periodo o di funnel). Prima non c'era nessuna protezione: la risposta lenta
+// vecchia arrivava per ultima e scriveva i suoi numeri sotto le date nuove.
+let funnelReqSeq = 0, eventFunnelReqSeq = 0, premiumReqSeq = 0, activationReqSeq = 0;
+
 async function fetchFunnel(opts = {}) {
   clearTimeout(funnelCacheTimer);
+  const req = ++funnelReqSeq;
   // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
   const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
   const scope = funnelCacheScope(state.funnelFrom, state.funnelTo, selSprint);
@@ -814,6 +820,7 @@ async function fetchFunnel(opts = {}) {
   render();
   try {
     const cached = scope ? await funnelFromCache(scope, opts.force) : null;
+    if (req !== funnelReqSeq) return;
     if (cached) {
       state.funnel = cached.data;
       state.funnelCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending };
@@ -822,10 +829,11 @@ async function fetchFunnel(opts = {}) {
       const p_start = selSprint ? sprintStartTs(selSprint) : null;
       const p_end = selSprint ? sprintEndTs(selSprint) : null;
       const res = await sb.rpc('kpi_funnel', { inizio: state.funnelFrom, fine: state.funnelTo, p_start, p_end });
+      if (req !== funnelReqSeq) return;
       if (res.error) throw res.error;
       state.funnel = res.data;
     }
-  } catch (e) { state.funnelError = e.message || 'Errore sconosciuto'; }
+  } catch (e) { if (req !== funnelReqSeq) return; state.funnelError = e.message || 'Errore sconosciuto'; }
   state.funnelLoading = false;
   render();
   if (state.funnelCache && state.funnelCache.pending) funnelCachePoll(scope, Date.now());
@@ -947,7 +955,8 @@ function flattenEventFunnelConfig(cfg) {
 async function fetchEventFunnel() {
   const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
   state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
-  if (!flatSteps.length) { state.eventFunnel = null; render(); return; }
+  const req = ++eventFunnelReqSeq;
+  if (!flatSteps.length) { state.eventFunnel = null; state.eventFunnelLoading = false; render(); return; }
   state.eventFunnelLoading = true;
   state.eventFunnelError = null;
   render();
@@ -955,7 +964,7 @@ async function fetchEventFunnel() {
     const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
     const p_start   = selSprint ? sprintStartTs(selSprint) : null;
     const p_end     = selSprint ? sprintEndTs(selSprint) : null;
-    state.eventFunnel = await computeEventFunnel(flatSteps, {
+    const result = await computeEventFunnel(flatSteps, {
       inizio:   state.funnelFrom,
       fine:     state.funnelTo,
       provider: state.eventFunnelProvider || null,
@@ -968,12 +977,14 @@ async function fetchEventFunnel() {
       includeBots:      state.funnelIncludeBots,
       mode:             state.eventFunnelMode,
     });
+    if (req !== eventFunnelReqSeq) return;
+    state.eventFunnel = result;
     // Baseline per il delta coorte della card Parametri: la fotografo solo quando
     // nessun override è attivo, così il confronto è sempre "vs esclusioni standard".
     if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked && !state.funnelIncludeBots) {
       state.funnelCohortBase = state.eventFunnel?.cohort_size ?? null;
     }
-  } catch (e) { state.eventFunnelError = e.message || 'Errore sconosciuto'; }
+  } catch (e) { if (req !== eventFunnelReqSeq) return; state.eventFunnelError = e.message || 'Errore sconosciuto'; }
   state.eventFunnelLoading = false;
   render();
 }
@@ -1112,12 +1123,14 @@ function premiumCachePoll(scope, since) {
 
 async function fetchPremium(opts = {}) {
   clearTimeout(premiumCacheTimer);
+  const req = ++premiumReqSeq;
   const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
   const scope = state.premiumGender === 'all' ? funnelCacheScope(state.premiumFrom, state.premiumTo, selSprint) : null;
   state.premiumLoading = true; state.premiumError = null; state.premiumErrorTimeout = false;
   render();
   try {
     const cached = scope ? await funnelFromCache(scope, opts.force, 'premium') : null;
+    if (req !== premiumReqSeq) return;
     if (cached) {
       state.premiumData = cached.data;
       state.premiumCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending };
@@ -1130,10 +1143,12 @@ async function fetchPremium(opts = {}) {
         p_start: selSprint ? sprintStartTs(selSprint) : null,
         p_end:   selSprint ? sprintEndTs(selSprint) : null,
       });
+      if (req !== premiumReqSeq) return;
       if (error) throw error;
       state.premiumData = data;
     }
   } catch (e) {
+    if (req !== premiumReqSeq) return;
     state.premiumError = e.message || 'Errore caricamento dati premium';
     state.premiumErrorTimeout = isRpcTimeout(e);
   }
@@ -5104,6 +5119,7 @@ const dayAfterTs = d => {
 };
 
 async function fetchActivation() {
+  const req = ++activationReqSeq;
   state.activationLoading = true;
   state.activationError = null;
   render();
@@ -5119,9 +5135,10 @@ async function fetchActivation() {
     const args = { p_start, p_end };
     if (state.funnelIncludeBots) args.p_include_bots = true;
     const res = await sb.rpc('kpi_activation', args);
+    if (req !== activationReqSeq) return;
     if (res.error) throw res.error;
     state.activation = res.data;
-  } catch (e) { state.activationError = e.message || 'Errore sconosciuto'; }
+  } catch (e) { if (req !== activationReqSeq) return; state.activationError = e.message || 'Errore sconosciuto'; }
   state.activationLoading = false;
   render();
 }
