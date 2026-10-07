@@ -450,7 +450,8 @@ let state = {
   funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2) · 'activation' = linguetta Attivazione (kpi_activation)
   activation: null,            // payload di kpi_activation: {funnel, by_workouts, weekly, sprint}
   activationLoading: false, activationError: null,
-  funnelParamsOpen: false,     // card "Parametri" in fondo alla pagina funnel (collassata di default)
+  funnelParamsOpen: false,     // pannello laterale «Chi è escluso» della pagina funnel (chiuso di default)
+  funnelMenu: null,            // menu aperto nella testata del funnel: null · 'funnel' (pillola col nome) · 'other' (Altro periodo)
   funnelIncludeEmulators: false, // override v2: reinclude gli emulatori (p_include_emulators)
   funnelIncludeTest: false,      // override v2: reinclude gli account test (p_include_test)
   funnelIncludeBlocked: false,   // override v2: reinclude gli utenti bloccati (p_include_blocked)
@@ -2159,6 +2160,7 @@ function eventFunnelPresetRange(kind) {
   const iso = d => d.toISOString().slice(0, 10);
   const to = iso(now);
   if (kind === 'today') return { from: to, to };
+  if (kind === 'yesterday') { const y = iso(new Date(now.getTime() - 864e5)); return { from: y, to: y }; }
   if (kind === 'week') {
     // lunedì della settimana corrente (getDay: 0=domenica, 1=lunedì, …)
     const dow = now.getDay();
@@ -2392,6 +2394,23 @@ document.addEventListener('keydown', e => {
   document.querySelector('.mtop [data-nav-toggle]')?.focus();
 });
 
+// Testata del funnel: Esc chiude il menu aperto o il pannello «Chi è escluso»; un clic fuori chiude il menu.
+// Il percorso del clic si legge da composedPath(): dopo un render() il bersaglio è già staccato dal DOM.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || state.page !== 'funnel') return;
+  if (state.funnelMenu) {
+    const id = state.funnelMenu === 'funnel' ? 'fn-funnel-btn' : 'fn-other-btn';
+    state.funnelMenu = null; render(); document.getElementById(id)?.focus();
+  } else if (state.funnelParamsOpen) {
+    state.funnelParamsOpen = false; render(); document.getElementById('funnel-params-toggle')?.focus();
+  }
+});
+document.addEventListener('click', e => {
+  if (state.page !== 'funnel' || !state.funnelMenu) return;
+  if (e.composedPath().some(n => n.classList && n.classList.contains('fn-pw'))) return;
+  state.funnelMenu = null; render();
+});
+
 const PAGE_LABELS = {
   stats: 'Stats', overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
   premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS',
@@ -2403,13 +2422,15 @@ function layout() {
   return `
     ${sidebar()}
     <div class="nav-backdrop" data-nav-close></div>
-    <div class="main${state.page === 'stats' ? ' main-stats' : ''}">
+    <div class="main${state.page === 'stats' || state.page === 'funnel' ? ' main-stats' : ''}">
       <div class="mtop">
         <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
         <span class="logo-mark">Hype<span>move</span></span>
         <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
       </div>
-      ${state.page === 'stats' ? pageStats() : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      ${state.page === 'stats' ? pageStats() : state.page === 'funnel'
+        ? `<div class="st-page fn-page" id="fn-page">${pageFunnel()}${funnelParamsDrawer()}</div>`
+        : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div class="page-head-l">
           <button class="nav-toggle nav-toggle-desk" data-nav-toggle
             title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button>
@@ -4711,88 +4732,6 @@ async function saveFunnelToolbarOrder(tokens) {
   else render();
 }
 
-// Barra dei funnel come TAB con underline colorata (colore custom della chip = --tab-c).
-// L'eliminazione non vive più qui: sta nell'editor chip dentro il Costruttore ("Modifica").
-// opts: { editId: id del bottone Modifica per la pagina chiamante, editing: bool per nasconderlo }.
-function savedFunnelBar(opts = {}) {
-  const { savedFunnels, activeFunnelPreset, funnelSaveOpen, funnelSaveName, chipDragOver } = state;
-
-  const dropCue = (token) => chipDragOver === token ? `box-shadow:inset 3px 0 0 var(--accent);` : '';
-
-  // wrap draggabile comune a tutte le tab; data-token identifica la tab nell'ordine
-  const wrap = (token, inner) => `
-    <div class="funnel-chip-wrap" data-token="${token}" draggable="true"
-         style="${dropCue(token)}">${inner}</div>`;
-
-  const tabBtn = ({ id, cls, dataIdx, active, accentHex, icon, name, label }) => `
-    <button ${id ? `id="${id}"` : ''} class="tab ${cls || ''} ${active ? 'on' : ''}"
-            ${dataIdx != null ? `data-preset-idx="${dataIdx}"` : ''} style="--tab-c:${accentHex}" title="Attiva funnel">
-      ${icon ? `<span class="tab-ic">${chipIconSvg(icon)}</span>` : ''}
-      <span>${esc(name)}</span>
-      ${label ? `<span class="tab-label" style="background:${accentHex}33;color:${accentHex}">${esc(label)}</span>` : ''}
-    </button>`;
-
-  // built-in Default
-  const defaultChip = () => wrap('default', tabBtn({
-    cls: 'funnel-preset-btn', dataIdx: 'default',
-    active: state.funnelMode === 'catalog' && activeFunnelPreset === null,
-    accentHex: chipColorHex('purple'), name: 'Default',
-  }));
-
-  // built-in funnel onboarding
-  const onboardingChip = () => wrap('onboarding', tabBtn({
-    id: 'funnel-onboarding-btn',
-    active: state.funnelMode === 'event' && activeFunnelPreset === null,
-    accentHex: chipColorHex('purple'), icon: 'zap', name: 'funnel onboarding',
-  }));
-
-  // built-in Attivazione — coorte matura, non è un funnel configurabile: niente editor chip.
-  const activationChip = () => wrap('activation', tabBtn({
-    id: 'funnel-activation-btn',
-    active: state.funnelMode === 'activation',
-    accentHex: chipColorHex('purple'), icon: 'rocket', name: 'Attivazione',
-  }));
-
-  // tab salvata custom
-  const savedChip = (f, i) => wrap(f.id, tabBtn({
-    cls: 'funnel-preset-btn', dataIdx: i,
-    active: activeFunnelPreset === i,
-    accentHex: chipColorHex(f.color), icon: f.icon || DEFAULT_CHIP_ICON,
-    name: f.name, label: f.label,
-  }));
-
-  // Render nell'ordine dei token
-  const chipsHtml = funnelToolbarTokens().map(token => {
-    if (token === 'default') return defaultChip();
-    if (token === 'onboarding') return onboardingChip();
-    if (token === 'activation') return activationChip();
-    const i = savedFunnels.findIndex(f => f.id === token);
-    return i === -1 ? '' : savedChip(savedFunnels[i], i);
-  }).join('');
-
-  const saveArea = funnelSaveOpen
-    ? `<div style="display:flex;align-items:center;gap:6px">
-        <input id="funnel-save-name" class="form-input" type="text" placeholder="Nome funnel…"
-          value="${esc(funnelSaveName)}" style="width:160px;padding:4px 10px;font-size:12px" autocomplete="off">
-        <button id="funnel-save-confirm" class="btn btn-primary" style="padding:4px 12px;font-size:12px">Salva</button>
-        <button id="funnel-save-cancel" class="btn btn-ghost" style="padding:4px 10px;font-size:12px">×</button>
-      </div>`
-    : `<button id="funnel-save-open" class="tab-action">+ Salva</button>`;
-
-  // Icona ingranaggio Lucide (settings) — non presente in LUCIDE_ICONS chip, inline qui.
-  const gearSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.18a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
-
-  return `
-    <div id="funnel-chips-toolbar" class="funnel-tabs">
-      ${chipsHtml}
-      <div class="tabs-actions">
-        ${state.chipReorderSaving ? `<span style="font-size:11px;color:var(--muted)">Salvo ordine…</span>` : ''}
-        ${saveArea}
-        ${opts.editId && !opts.editing ? `<button id="${opts.editId}" class="tab-action" title="Modifica gli step del funnel attivo">${gearSvg} Modifica</button>` : ''}
-      </div>
-    </div>`;
-}
-
 // Editor chip — versione compatta inline dentro il costruttore funnel.
 // Nome+etichetta stessa riga. Icona collassata (mostra solo quella corrente), la griglia si apre
 // in hover sotto forma di popover. Colori inline. Save/Annulla piccoli a destra.
@@ -4853,48 +4792,159 @@ function chipEditorPanel(idx) {
     </div>`;
 }
 
-// Striscia periodo unificata sotto le tab: preset + sprint + date + Calcola in un solo
-// contenitore. Mutua esclusività VISIVA derivata dallo state a render-time (nessun listener
-// nuovo: i handler esistenti azzerano già funnelSprintId / date quando serve).
-// opts: { calcId, showPresets, extraActions }.
-function periodStrip(opts = {}) {
+// ── TESTATA DEL FUNNEL («Una riga sola») ─────────────────────────────────────────────
+// Una riga: nome della pagina, pillola-menu col funnel aperto, periodi rapidi, «Altro periodo».
+// Sostituisce le vecchie tab dei funnel + la striscia periodo. L'ordine a trascinamento dei funnel
+// vive ancora qui: ogni voce del menu è un `.funnel-chip-wrap` con il suo data-token.
+const FN_CHEV = `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="#9ca3af" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const FN_GEAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>`;
+
+// Il funnel aperto: nome e colore per la pillola e per il titolo del riquadro.
+// `funnelMode === 'event'` con `activeFunnelPreset === null` è lo stato del vecchio funnel onboarding
+// built-in (chip tolta: era un doppione del funnel salvato «Onboarding»); lo si nomina «Onboarding».
+function funnelActive() {
+  if (state.funnelMode === 'activation') return { name: 'Attivazione', color: '#a78bfa' };
+  const f = state.activeFunnelPreset != null ? state.savedFunnels[state.activeFunnelPreset] : null;
+  if (f) return { name: f.name, color: chipColorHex(f.color) };
+  if (state.funnelMode === 'event') return { name: 'Onboarding', color: chipColorHex('purple') };
+  return { name: 'Default', color: '#9ca3af' };
+}
+
+const fnDM = iso => iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}` : '';
+// «Sprint 15 · dal 06/10»: il numero è il primo numero del nome; la data di inizio distingue gli sprint omonimi.
+function fnSprintLabel(s) {
+  const n = (String(s.nome || '').match(/\d+/) || [])[0];
+  return `${n ? 'Sprint ' + n : s.nome} · dal ${fnDM(s.inizio)}`;
+}
+// Sprint in corso e precedente, presi per data di inizio (non per nome).
+function funnelQuickSprints() {
+  const all = [...state.sprints].sort((a, b) => String(b.inizio).localeCompare(String(a.inizio)));
+  const started = all.filter(s => s.inizio <= TODAY);
+  const cur = started[0] || null, prev = started[1] || null;
+  const rest = all.filter(s => s !== cur && s !== prev);
+  return { cur, prev, rest };
+}
+
+function funnelPickerMenu() {
+  const { savedFunnels, activeFunnelPreset, chipDragOver } = state;
+  const mode = state.funnelMode;
+  const act = mode === 'activation';
+  const wrap = (token, inner) => `
+    <div class="funnel-chip-wrap" data-token="${token}" draggable="true"
+         style="${chipDragOver === token ? 'box-shadow:inset 0 3px 0 #4361ee;' : ''}">${inner}</div>`;
+  const opt = ({ token, id, cls, dataIdx, on, color, name, label }) => wrap(token, `
+      <button ${id ? `id="${id}"` : ''} class="st-opt ${cls || ''}${on ? ' st-act' : ''}" role="option" aria-selected="${on}"
+              ${dataIdx != null ? `data-preset-idx="${dataIdx}"` : ''} data-fn-close>
+        <span class="fn-dot" style="background:${color}"></span><span class="st-optl">${esc(name)}</span>
+        ${label ? `<span class="st-optd">${esc(label)}</span>` : ''}
+      </button>`);
+  const items = funnelToolbarTokens().map(token => {
+    if (token === 'onboarding') return ''; // doppione del funnel salvato «Onboarding»
+    if (token === 'default') return opt({ token, cls: 'funnel-preset-btn', dataIdx: 'default', on: mode === 'catalog' && activeFunnelPreset === null, color: '#9ca3af', name: 'Default' });
+    if (token === 'activation') return opt({ token, id: 'funnel-activation-btn', on: act, color: '#a78bfa', name: 'Attivazione' });
+    const i = savedFunnels.findIndex(f => f.id === token);
+    if (i === -1) return '';
+    const f = savedFunnels[i];
+    return opt({ token, cls: 'funnel-preset-btn', dataIdx: i, on: !act && activeFunnelPreset === i, color: chipColorHex(f.color), name: f.name, label: f.label });
+  }).join('');
+
+  const editId = mode === 'event' ? 'edit-event-funnel' : 'edit-funnel';
+  const editing = mode === 'event' ? state.editingEventFunnel : state.editingFunnel;
+  const acts = [];
+  if (!act && !editing) acts.push(`<button id="${editId}" class="st-opt fn-act" data-fn-close>Modifica i passi</button>`);
+  if (!act) acts.push(state.funnelSaveOpen
+    ? `<div class="fn-save">
+        <input id="funnel-save-name" class="form-input" type="text" placeholder="Nome funnel…" value="${esc(state.funnelSaveName)}" autocomplete="off">
+        <button id="funnel-save-confirm" class="fn-calc" data-fn-close>Salva</button>
+        <button id="funnel-save-cancel" class="fn-x" data-fn-close aria-label="Annulla">×</button>
+      </div>`
+    : `<button id="funnel-save-open" class="st-opt fn-act">Salva come nuovo</button>`);
+  if (mode === 'catalog' && state.sprints.length) acts.push(`<button id="funnel-assign-open" class="st-opt fn-act" data-fn-close>Assegna a sprint</button>`);
+  return `<div class="st-menu fn-menu" role="listbox" aria-label="Scegli il funnel">
+      ${items}
+      ${state.chipReorderSaving ? `<div class="fn-sub">Salvo l'ordine…</div>` : ''}
+      ${acts.length ? `<div class="fn-hr"></div>${acts.join('')}` : ''}
+    </div>`;
+}
+
+// Periodi rapidi: Oggi, Ieri, sprint in corso, sprint precedente. Il resto sta sotto «Altro periodo».
+function funnelPeriodBar() {
+  const act = state.funnelMode === 'activation';
+  const { cur, prev, rest } = funnelQuickSprints();
   const sprintOn = !!state.funnelSprintId;
-  let presetsHtml = '';
-  let presetOn = false;
-  if (opts.showPresets) {
-    const { from: dToday, to: tToday } = eventFunnelPresetRange('today');
-    const { from: dWeek,  to: tWeek  } = eventFunnelPresetRange('week');
-    const { from: dMonth, to: tMonth } = eventFunnelPresetRange('month');
-    const active = (from, to) => !sprintOn && state.funnelFrom === from && state.funnelTo === to;
-    presetOn = active(dToday, tToday) || active(dWeek, tWeek) || active(dMonth, tMonth);
-    const btn = (id, label, on) => `<button id="${id}" class="${on ? 'on' : ''}">${label}</button>`;
-    presetsHtml = `
-      <div class="seg">
-        ${btn('event-funnel-preset-today', 'Oggi',      active(dToday, tToday))}
-        ${btn('event-funnel-preset-week',  'Settimana', active(dWeek,  tWeek))}
-        ${btn('event-funnel-preset-month', 'Mese',      active(dMonth, tMonth))}
-      </div>
-      <div class="strip-div"></div>`;
+  const same = r => !sprintOn && state.funnelFrom === r.from && state.funnelTo === r.to;
+  const opts = [];
+  if (!act) {
+    opts.push({ id: 'fn-per-today', label: 'Oggi', on: same(eventFunnelPresetRange('today')) });
+    opts.push({ id: 'fn-per-yesterday', label: 'Ieri', on: same(eventFunnelPresetRange('yesterday')) });
   }
-  const datesOn = !sprintOn && !presetOn;
-  return `
-    <div class="period-strip">
-      ${presetsHtml}
-      ${state.sprints.length ? `
-        <select id="funnel-sprint-sel" class="sprint-sel ${sprintOn ? 'on' : ''}">
-          <option value="" ${!state.funnelSprintId ? 'selected' : ''}>— nessuno sprint —</option>
-          ${state.sprints.map(s => `<option value="${s.id}" ${state.funnelSprintId === s.id ? 'selected' : ''}>${s.nome}</option>`).join('')}
-        </select>
-        <div class="strip-div"></div>` : ''}
-      <div class="dates ${datesOn ? 'on' : ''}">
-        <input type="date" id="funnel-from" value="${state.funnelFrom}">
-        <span class="arr">→</span>
-        <input type="date" id="funnel-to" value="${state.funnelTo}">
+  [cur, prev].forEach(s => { if (s) opts.push({ sprint: s, label: fnSprintLabel(s), live: cur === s && (!s.fine || s.fine >= TODAY), on: state.funnelSprintId === s.id }); });
+  const seg = opts.map(o => `
+      <button class="fn-segb${o.on ? ' on' : ''}" ${o.id ? `id="${o.id}"` : `data-fn-sprint="${o.sprint.id}"`} data-fn-close>
+        ${o.live ? '<span class="fn-live" title="Sprint in corso"></span>' : ''}${esc(o.label)}</button>`).join('');
+
+  const otherOn = !opts.some(o => o.on);
+  const selRest = rest.find(s => s.id === state.funnelSprintId);
+  const otherLabel = selRest ? fnSprintLabel(selRest)
+    : otherOn && !sprintOn ? `${fnDM(state.funnelFrom)} → ${fnDM(state.funnelTo)}` : 'Altro periodo';
+  const openO = state.funnelMenu === 'other';
+  const calcId = state.funnelMode === 'event' ? 'event-funnel-apply' : state.funnelMode === 'activation' ? 'activation-apply' : 'funnel-apply';
+  const otherMenu = openO ? `
+    <div class="st-menu fn-menu fn-menu-other">
+      <div class="fn-dates">
+        <input type="date" id="funnel-from" value="${state.funnelFrom}" aria-label="Dal">
+        <span>→</span>
+        <input type="date" id="funnel-to" value="${state.funnelTo}" aria-label="Al">
+        <button id="${calcId}" class="fn-calc" data-fn-close>Calcola</button>
       </div>
-      <div class="strip-right">
-        ${opts.extraActions || ''}
-        <button id="${opts.calcId}" class="btn-calc">Calcola</button>
+      ${rest.length ? `<div class="fn-hr"></div><div class="fn-sub">Altri sprint</div>` + rest.map(s => `
+        <button class="st-opt${state.funnelSprintId === s.id ? ' st-act' : ''}" data-fn-sprint="${s.id}" data-fn-close>
+          <span class="st-optl">${esc(fnSprintLabel(s))}</span><span class="st-optd">${fnDM(s.inizio)}–${fnDM(s.fine)}</span>
+        </button>`).join('') : ''}
+    </div>` : '';
+  return `<div class="fn-per">
+      ${seg ? `<div class="fn-seg" role="group" aria-label="Periodo">${seg}</div>` : ''}
+      <div class="st-pillwrap fn-pw">
+        <button class="st-pill st-pill-sel${otherOn ? ' st-pill-blue' : ''}" id="fn-other-btn" aria-haspopup="true" aria-expanded="${openO}">
+          <span>${esc(otherLabel)}</span>${FN_CHEV}</button>${otherMenu}
       </div>
+    </div>`;
+}
+
+// Quante persone sono escluse adesso: i motivi con l'interruttore su «esclusi», senza contare due volte
+// chi ha più motivi. null finché non c'è né la lista né il calcolo.
+function funnelExclCount() {
+  const act = state.funnelMode === 'activation';
+  const incl = { emulator: state.funnelIncludeEmulators, test: state.funnelIncludeTest, blocked: state.funnelIncludeBlocked, bot: state.funnelIncludeBots };
+  const reasons = (act ? ['bot'] : ['emulator', 'test', 'blocked', 'bot']).filter(r => !incl[r]);
+  if (act) return state.activation ? (state.funnelIncludeBots ? 0 : (state.activation.bots_excluded || 0)) : null;
+  if (state.excludedUsers) return state.excludedUsers.filter(u => (u.reason || '').split(',').some(r => reasons.includes(r))).length;
+  const c = state.eventFunnel && state.eventFunnel.excluded_counts;
+  return c ? reasons.reduce((s, r) => s + (Number(c[r]) || 0), 0) : null;
+}
+
+// Pillola «N esclusi»: apre il pannello laterale. Sul funnel a catalogo (Default) non c'è niente da regolare.
+function exclPill() {
+  if (state.funnelMode === 'catalog') return '';
+  const n = funnelExclCount();
+  const label = state.funnelMode === 'activation' ? (n != null ? `${n} ${n === 1 ? 'bot escluso' : 'bot esclusi'}` : 'Bot') : (n != null ? `${n} ${n === 1 ? 'escluso' : 'esclusi'}` : 'Esclusi');
+  return `<button class="fn-excl" id="funnel-params-toggle" aria-haspopup="dialog" aria-expanded="${!!state.funnelParamsOpen}" title="Chi è escluso dal funnel">${FN_GEAR}${label}</button>`;
+}
+
+function funnelTopBar() {
+  const a = funnelActive();
+  const open = state.funnelMenu === 'funnel';
+  return `<div class="st-head fn-head">
+      <button class="nav-toggle nav-toggle-desk" data-nav-toggle title="Mostra il menu" aria-label="Mostra il menu">${NAV_PANEL_ICON}</button>
+      <h1 class="st-h1">Funnel</h1>
+      <div class="st-pillwrap fn-pw">
+        <button class="st-pill st-pill-sel" id="fn-funnel-btn" aria-haspopup="listbox" aria-expanded="${open}" title="Scegli il funnel">
+          <span class="fn-dot" style="background:${a.color}"></span><span>${esc(a.name)}</span>${FN_CHEV}</button>${open ? funnelPickerMenu() : ''}
+      </div>
+      ${funnelPeriodBar()}
+      <div class="st-grow"></div>
+      ${state.funnelMode === 'activation' ? exclPill() : ''}
+      <button class="st-refresh" id="fn-refresh-btn">Aggiorna</button>
     </div>`;
 }
 
@@ -4939,19 +4989,14 @@ function pageFunnel() {
     : funnelViz();
 
   return `
-    ${savedFunnelBar({ editId: 'edit-funnel', editing: state.editingFunnel })}
-    ${periodStrip({
-      calcId: 'funnel-apply',
-      showPresets: false,
-      extraActions: state.sprints.length ? `<button id="funnel-assign-open" class="tab-action">Assegna a sprint</button>` : '',
-    })}
+    ${funnelTopBar()}
 
     ${funnelAssignPanel()}
     ${editPanel}
 
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <div class="card-title" style="margin-bottom:0">Funnel di conversione</div>
+        <div class="card-title" style="margin-bottom:0">${esc(funnelActive().name)}</div>
         ${funnelCacheBadge()}
       </div>
       ${(() => {
@@ -4965,8 +5010,7 @@ function pageFunnel() {
     ${metaFunnelSection()}
     </div>
     ${sprintFunnelSection()}
-    ${sprintLeakSection()}
-    ${funnelParamsSection()}`;
+    ${sprintLeakSection()}`;
 }
 
 // ── FUNNEL A EVENTI (kpi_funnel_v2, UNION user_events + anonymous_events) ──────────
@@ -4981,7 +5025,7 @@ function pageFunnelEvent() {
     ? chipEditorPanel(state.chipEditorIdx) : '';
   const editor = state.editingEventFunnel ? `
     <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
-      <div class="card-title" style="margin-bottom:16px">Costruttore funnel onboarding</div>
+      <div class="card-title" style="margin-bottom:16px">Costruttore · ${esc(funnelActive().name)}</div>
       ${chipEditor}
       <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
         ${cfg.length ? cfg.map((row, i) => eventFunnelEditRow(row, i)).join('')
@@ -5008,14 +5052,16 @@ function pageFunnelEvent() {
   const titleTip = `${win.text} — Coorte: cascata temporale (coorte = step 1, ogni step prosegue dal precedente), esclusi bloccati. Volumi: conteggi indipendenti per step nella finestra, nessuna cascata.`;
 
   return `
-    ${savedFunnelBar({ editId: 'edit-event-funnel', editing: state.editingEventFunnel })}
-    ${periodStrip({ calcId: 'event-funnel-apply', showPresets: true })}
+    ${funnelTopBar()}
 
     ${editor}
 
     <div class="card fun-card" data-mode="${state.eventFunnelMode}">
       <div class="fun-head">
-        <div class="fun-title" title="${esc(titleTip)}">Funnel onboarding</div>
+        <div class="fun-headl">
+          <div class="fun-title" title="${esc(titleTip)}">${esc(funnelActive().name)}</div>
+          <div class="fun-cap">${esc(win.text)}${state.eventFunnel && state.eventFunnel.cohort_size != null ? ` · ${state.eventFunnel.cohort_size} persone` : ''}${exclPill()}</div>
+        </div>
         <div class="mode-toggle" role="group" aria-label="Modalità funnel">
           <button class="event-funnel-mode-btn ${state.eventFunnelMode === 'cohort' ? 'on' : ''}" data-mode="cohort"
             title="Cascata temporale: coorte = step 1, ogni step prosegue dal precedente">Coorte</button>
@@ -5025,8 +5071,7 @@ function pageFunnelEvent() {
       </div>
       ${body}
     </div>
-    ${sprintEventFunnelSection()}
-    ${funnelParamsSection()}`;
+    ${sprintEventFunnelSection()}`;
 }
 
 // ── ATTIVAZIONE ───────────────────────────────────────────────────────
@@ -5365,10 +5410,8 @@ function pageActivation() {
       ].join('');
 
   return `
-    ${savedFunnelBar({})}
-    ${periodStrip({ calcId: 'activation-apply', showPresets: false })}
-    ${body}
-    ${funnelParamsSection()}`;
+    ${funnelTopBar()}
+    ${body}`;
 }
 
 // Sub-riga con gli eventi in OR di uno step (parent o variante). Uno step multi-evento conta
@@ -5554,8 +5597,7 @@ function installContextChips(installContext, from) {
     : '';
   return `
     <div class="fun-context">
-      ${item('Install Google Play', installContext.google_play)}
-      ${item('Install Meta Ads', installContext.meta_ads)}
+      ${item('Installazioni da Meta Ads', installContext.meta_ads)}
       <span class="note" title="Aggregati esterni senza identità utente: contesto, fuori dalla cascata e dai rate">aggregati esterni senza identità</span>
       ${badge}
     </div>`;
@@ -5719,7 +5761,7 @@ function eventFunnelViz() {
     <div class="fun-cols">
       <div class="col-label">Step</div>
       <div class="col-bar"></div>
-      <div class="col-who" title="${isAbs ? `Quante identità hanno emesso l'evento, e il rapporto sul primo step (${esc(headLabel)})` : `Quante persone arrivano fin qui, in valore assoluto e come quota di ${esc(headLabel)} (${headN})`}"><span>${fIcon('users')}utenti</span><span>del totale</span></div>
+      <div class="col-who" title="${isAbs ? `Quante identità hanno emesso l'evento, e il rapporto sul primo step (${esc(headLabel)})` : `Quante persone arrivano fin qui, in valore assoluto e come quota di ${esc(headLabel)} (${headN})`}"><span>${fIcon('users')}persone</span><span>del totale</span></div>
       <div class="col-when" title="Tempo mediano per arrivare qui dallo step precedente, e tempo mediano trascorso da ${esc(headLabel)}"><span>${fIcon('clock')}passaggio</span><span>da inizio</span></div>
     </div>`;
 
@@ -5943,55 +5985,23 @@ function sprintEventFunnelSection() {
     </div>`;
 }
 
-// ── CARD PARAMETRI DEL FUNNEL ────────────────────────────────────────────────
-// Card collassabile in fondo alla pagina Funnel. Mostra SOLO dati reali del
-// funnel a eventi (kpi_funnel_v2), niente documentazione statica:
-//   1. Toggle di inclusione (emulatori / account test / bloccati / bot) → ricalcolo
-//      immediato del funnel via p_include_emulators / p_include_test /
-//      p_include_blocked / p_include_bots. Accanto a ognuno il delta reale sulla coorte.
-//      Sulla linguetta Attivazione (kpi_activation) c'è solo il toggle Bot: emulatori,
-//      test e bloccati lì sono esclusi sempre.
-//   2. Lista nominale degli esclusi (RPC kpi_excluded_users_list): email, motivo,
-//      iscrizione, eventi emessi, workout. Filtrabile per motivo.
-//   3. Parametri correnti della chiamata RPC (periodo, p_start/p_end, segmento).
-function funnelParamsSection() {
+// ── «CHI È ESCLUSO» — pannello laterale ──────────────────────────────────────
+// Era la card «Parametri» in fondo alla pagina. Ora si apre dalla pillola «N esclusi». Mostra SOLO dati
+// reali (kpi_funnel_v2 / kpi_activation):
+//   1. Interruttori di inclusione (emulatori / account di prova / bloccati / bot) → ricalcolo
+//      immediato del funnel. Accanto a ognuno quante persone riguarda.
+//      Su Attivazione c'è solo il toggle Bot: gli altri lì sono esclusi sempre.
+//   2. Lista nominale degli esclusi (RPC kpi_excluded_users_list), filtrabile per motivo.
+//   3. Periodo effettivamente calcolato e coorte.
+function funnelParamsDrawer() {
+  if (!state.funnelParamsOpen || state.funnelMode === 'catalog') return '';
   const isActivation = state.funnelMode === 'activation';
-  const nOverride = (isActivation
-    ? [state.funnelIncludeBots]
-    : [state.funnelIncludeEmulators, state.funnelIncludeTest, state.funnelIncludeBlocked, state.funnelIncludeBots]
-  ).filter(Boolean).length;
-  const hdrBadge = nOverride
-    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${nOverride} override attivi</span>` : '';
-  const headerEl = `
-    <div id="funnel-params-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:14px;font-weight:700;color:var(--text)">Parametri</span>${hdrBadge}
-      </div>
-      <span style="font-size:12px;color:var(--muted);font-weight:500">${state.funnelParamsOpen ? '▲ Chiudi' : '▼ Apri'}</span>
-    </div>`;
-  if (!state.funnelParamsOpen) return `<div class="card" style="margin-top:16px">${headerEl}</div>`;
-
-  if (state.funnelMode !== 'event' && !isActivation) {
-    return `
-      <div class="card" style="margin-top:16px">
-        ${headerEl}
-        <div style="margin-top:18px;font-size:12px;color:var(--muted);line-height:1.5">
-          I parametri sono modificabili solo sul <strong style="color:var(--text)">funnel a eventi</strong>. Il Default (kpi_funnel) ha step e filtri cablati nella RPC.
-        </div>
-      </div>`;
-  }
-
   const fn = state.eventFunnel;
-  // Conteggi per motivo: derivati dalla lista nominale (c'è anche prima di "Calcola");
-  // fallback su excluded_counts della risposta RPC.
   const counts = (fn && fn.excluded_counts) || {};
   const nOf = r => state.excludedUsers
     ? state.excludedUsers.filter(u => (u.reason || '').split(',').includes(r)).length
     : (counts[r] != null ? counts[r] : '–');
 
-  // Delta reale sulla coorte: differenza fra il calcolo corrente e la baseline
-  // salvata al primo calcolo senza override (state.funnelCohortBase).
-  // Su Attivazione la coorte arriva da kpi_activation e il delta è il numero di bot del periodo.
   const act = state.activation;
   const cohortNow = isActivation
     ? (act?.funnel?.cohort ?? null)
@@ -5999,94 +6009,62 @@ function funnelParamsSection() {
   const base = state.funnelCohortBase;
   const nBotsAct = act?.bots_excluded || 0;
   const deltaStr = isActivation
-    ? (nBotsAct ? `<span style="color:var(--muted);font-weight:400;font-size:12px">${state.funnelIncludeBots ? `di cui ${nBotsAct} bot` : `${nBotsAct} bot esclusi`}</span>` : '')
+    ? (nBotsAct ? `<span style="color:var(--muted)">${state.funnelIncludeBots ? `di cui ${nBotsAct} bot` : `${nBotsAct} bot esclusi`}</span>` : '')
     : (cohortNow != null && base != null && cohortNow !== base)
-    ? `<span style="color:${cohortNow > base ? 'var(--mattia)' : 'var(--red)'};font-weight:600">${cohortNow > base ? '+' : ''}${cohortNow - base}</span>` : '';
+    ? `<span style="color:${cohortNow > base ? 'var(--mattia)' : 'var(--red)'};font-weight:700">${cohortNow > base ? '+' : ''}${cohortNow - base}</span>` : '';
 
   const toggles = [
-    { key: 'emulators', on: state.funnelIncludeEmulators, label: 'Emulatori',    n: nOf('emulator') },
-    { key: 'test',      on: state.funnelIncludeTest,      label: 'Account test', n: nOf('test') },
-    { key: 'blocked',   on: state.funnelIncludeBlocked,   label: 'Bloccati',     n: nOf('blocked') },
-    { key: 'bots',      on: state.funnelIncludeBots,      label: 'Bot',          n: nOf('bot') },
+    { key: 'bots',      on: state.funnelIncludeBots,      label: 'Bot',              n: nOf('bot') },
+    { key: 'test',      on: state.funnelIncludeTest,      label: 'Account di prova', n: nOf('test') },
+    { key: 'emulators', on: state.funnelIncludeEmulators, label: 'Emulatori',        n: nOf('emulator') },
+    { key: 'blocked',   on: state.funnelIncludeBlocked,   label: 'Bloccati',         n: nOf('blocked') },
   ].filter(t => !isActivation || t.key === 'bots');
-  const chips = toggles.map(t => `
-    <button class="funnel-param-chip" data-param="${t.key}"
-      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
-        ${t.on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
-      ${t.on ? '✓ inclusi' : 'esclusi'} · ${t.label} <span style="opacity:.6;font-weight:400">${t.n}</span></button>`).join('');
+  const rowsTg = toggles.map(t => `
+    <div class="fn-tg">
+      <div class="fn-tg-l">${t.label} <span>${t.n}</span></div>
+      <button class="fn-tgb funnel-param-chip${t.on ? ' on' : ''}" data-param="${t.key}" aria-pressed="${t.on}">${t.on ? 'inclusi' : 'esclusi'}</button>
+    </div>`).join('');
 
-  // Riga di stato: coorte corrente + parametri effettivi della chiamata RPC. Il campo
-  // Periodo mostra già gli orari + '(Europe/Rome)' quando lo sprint ritaglia le ore, così
-  // resta un unico posto dove leggere la finestra reale su cui la RPC ha girato.
   const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
   const win = sprintWindowText(selSprint, state.funnelFrom, state.funnelTo);
-  const stat = (label, val) => `<div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">${label}</div><div style="font-size:13px;color:var(--text);font-weight:600;margin-top:2px">${val}</div></div>`;
-  const periodVal = win.text;
-  const statusRow = `
-    <div style="display:flex;flex-wrap:wrap;gap:26px;margin-bottom:16px">
-      ${stat('Coorte', cohortNow != null ? `${cohortNow} ${deltaStr}` : '—')}
-      ${stat('Periodo', periodVal)}
-    </div>`;
 
-  // ── Lista nominale degli esclusi.
   const rows = state.excludedUsers || [];
   const filt = state.excludedFilter;
   const shown = filt ? rows.filter(r => (r.reason || '').split(',').includes(filt)) : rows;
   const reasonBadge = reason => (reason || '').split(',').map(r => {
     const c = r === 'blocked' ? '#f87171' : r === 'test' ? '#fbbf24' : r === 'bot' ? '#a78bfa' : '#22d3ee';
-    const l = r === 'blocked' ? 'bloccato' : r === 'test' ? 'test' : r === 'bot' ? 'bot' : 'emulatore';
-    return `<span style="font-size:10px;padding:1px 7px;border-radius:8px;background:${c}22;color:${c};font-weight:600;margin-left:4px;white-space:nowrap">${l}</span>`;
+    const l = r === 'blocked' ? 'bloccato' : r === 'test' ? 'prova' : r === 'bot' ? 'bot' : 'emulatore';
+    return `<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:${c}22;color:${c};font-weight:700;margin-left:4px;white-space:nowrap">${l}</span>`;
   }).join('');
   const filtChips = [null, 'blocked', 'test', 'emulator', 'bot'].map(f => {
-    const lab = f === null ? `Tutti ${rows.length}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Test ${nOf('test')}` : f === 'bot' ? `Bot ${nOf('bot')}` : `Emulatori ${nOf('emulator')}`;
-    const on = filt === f;
-    return `<button class="excl-filter" data-filter="${f || ''}"
-      style="cursor:pointer;padding:3px 11px;font-size:11px;font-weight:600;border-radius:20px;border:1px solid;
-        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:transparent;border-color:#3a3a55;color:var(--muted)'}">${lab}</button>`;
+    const lab = f === null ? `Tutti ${rows.length}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Prova ${nOf('test')}` : f === 'bot' ? `Bot ${nOf('bot')}` : `Emulatori ${nOf('emulator')}`;
+    return `<button class="excl-filter fn-fchip${filt === f ? ' on' : ''}" data-filter="${f || ''}">${lab}</button>`;
   }).join('');
   const listBody = state.excludedLoading
-    ? `<div style="padding:20px 0;color:var(--muted);font-size:12px">Carico la lista…</div>`
+    ? `<div class="fn-note">Carico la lista…</div>`
     : state.excludedError
-    ? `<div style="padding:12px 0;color:var(--red);font-size:12px">⚠️ ${esc(state.excludedError)}</div>`
+    ? `<div class="fn-note" style="color:var(--red)">${esc(state.excludedError)}</div>`
     : !rows.length
-    ? `<div style="padding:12px 0;color:var(--muted);font-size:12px">Nessun utente escluso.</div>`
-    : `<div class="table-wrap" style="max-height:340px;overflow-y:auto"><table class="data-table" style="width:100%;border-collapse:collapse">
-        <thead><tr>
-          <th style="text-align:left;font-size:10px">Utente</th>
-          <th style="text-align:left;font-size:10px">Motivo</th>
-          <th style="text-align:right;font-size:10px">Iscritto</th>
-          <th style="text-align:right;font-size:10px">Eventi</th>
-          <th style="text-align:right;font-size:10px">Workout</th>
-        </tr></thead>
-        <tbody>${shown.map(r => `
-          <tr>
-            <td style="padding:5px 12px 5px 0;font-size:12px;color:var(--text);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-              ${esc(r.name || '—')} <span style="color:var(--muted);font-size:11px">${esc(r.email || '')}</span>
-            </td>
-            <td style="padding:5px 12px 5px 0;white-space:nowrap">${reasonBadge(r.reason)}</td>
-            <td style="padding:5px 0;text-align:right;font-size:11px;color:var(--muted);white-space:nowrap">${r.created_at ? r.created_at.slice(0, 10) : '—'}</td>
-            <td style="padding:5px 0 5px 12px;text-align:right;font-size:12px;color:var(--text)">${r.events_count ?? 0}</td>
-            <td style="padding:5px 0 5px 12px;text-align:right;font-size:12px;color:var(--text)">${r.workouts_count ?? 0}</td>
-          </tr>`).join('')}</tbody>
-      </table></div>`;
+    ? `<div class="fn-note">Nessun utente escluso.</div>`
+    : shown.map(r => `
+        <div class="fn-urow">
+          <div class="fn-uname">${esc(r.name || '—')} <span>${esc(r.email || '')}</span></div>
+          <div class="fn-umeta">${reasonBadge(r.reason)}<span>${r.created_at ? r.created_at.slice(0, 10) : '—'} · ${r.events_count ?? 0} eventi · ${r.workouts_count ?? 0} workout</span></div>
+        </div>`).join('');
 
   return `
-    <div class="card" style="margin-top:16px">
-      ${headerEl}
-      <div style="margin-top:18px">
-        ${statusRow}
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Chi conta nel funnel — click per ricalcolare</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
-        ${isActivation ? `<div style="margin-top:10px;font-size:11px;color:var(--muted)">Emulatori, account test e bloccati qui sono esclusi sempre.</div>` : ''}
-        <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:16px">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-            <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-right:4px">Chi è escluso</span>
-            ${filtChips}
-          </div>
-          ${listBody}
-        </div>
+    <aside class="fn-drawer" role="dialog" aria-label="Chi è escluso" id="fn-drawer">
+      <div class="fn-dhead">
+        <div class="fn-dtitle">Chi è escluso</div>
+        <button class="st-pill st-pill-sel" id="funnel-params-close">Chiudi</button>
       </div>
-    </div>`;
+      <div class="fn-dsub">Periodo calcolato: ${esc(win.text)}${cohortNow != null ? ` · ${cohortNow} persone contate ${deltaStr}` : ''}</div>
+      ${rowsTg}
+      ${isActivation ? `<div class="fn-note">Emulatori, account di prova e bloccati qui sono esclusi sempre.</div>` : ''}
+      <div class="fn-dlabel">Elenco</div>
+      <div class="fn-fchips">${filtChips}</div>
+      <div class="fn-ulist">${listBody}</div>
+    </aside>`;
 }
 
 async function fetchSprintEventFunnel() {
@@ -11916,6 +11894,42 @@ function attachEvents() {
     };
   }
 
+  // ── Testata del funnel: menu, periodi rapidi, pannello «Chi è escluso» ──────────────
+  // I bottoni con data-fn-close chiudono il menu aperto PRIMA dei gestori sotto (stesso elemento,
+  // ordine di registrazione), così il render che parte dal calcolo ridisegna la testata già chiusa.
+  document.querySelectorAll('[data-fn-close]').forEach(el =>
+    el.addEventListener('click', () => { state.funnelMenu = null; }));
+  document.getElementById('fn-funnel-btn')?.addEventListener('click', () => {
+    state.funnelMenu = state.funnelMenu === 'funnel' ? null : 'funnel';
+    render();
+  });
+  document.getElementById('fn-funnel-btn')?.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' && state.funnelMenu !== 'funnel') { e.preventDefault(); e.target.click(); }
+  });
+  document.getElementById('fn-other-btn')?.addEventListener('click', () => {
+    state.funnelMenu = state.funnelMenu === 'other' ? null : 'other';
+    render();
+  });
+  // Un periodo scelto dalla testata: oggi/ieri (periodo libero) o uno sprint. Calcola subito.
+  const applyFunnelPeriod = ({ from, to, sprintId }) => {
+    state.funnelFrom = from;
+    state.funnelTo = to;
+    state.funnelSprintId = sprintId || '';
+    if (state.funnelMode === 'event') { fetchEventFunnel(); return; }
+    if (state.funnelMode === 'activation') { fetchActivation(); return; }
+    state.funnel = null;
+    fetchFunnel();
+  };
+  document.getElementById('fn-per-today')?.addEventListener('click', () => applyFunnelPeriod(eventFunnelPresetRange('today')));
+  document.getElementById('fn-per-yesterday')?.addEventListener('click', () => applyFunnelPeriod(eventFunnelPresetRange('yesterday')));
+  document.querySelectorAll('[data-fn-sprint]').forEach(el =>
+    el.addEventListener('click', () => {
+      const sp = state.sprints.find(x => x.id === el.dataset.fnSprint);
+      if (sp) applyFunnelPeriod({ from: sp.inizio, to: sp.fine, sprintId: sp.id });
+    }));
+  document.getElementById('fn-refresh-btn')?.addEventListener('click', manualRefresh);
+  document.getElementById('funnel-params-close')?.addEventListener('click', () => { state.funnelParamsOpen = false; render(); });
+
   document.getElementById('funnel-cache-refresh')?.addEventListener('click', () => fetchFunnel({ force: true }));
   // Funnel — calcola
   document.getElementById('funnel-apply')?.addEventListener('click', () => {
@@ -11935,16 +11949,6 @@ function attachEvents() {
     fetchFunnel();
   });
 
-  // Funnel onboarding (built-in, event mode) — carica gli step canonici e calcola
-  document.getElementById('funnel-onboarding-btn')?.addEventListener('click', () => {
-    state.funnelMode = 'event';
-    state.activeFunnelPreset = null;
-    state.eventFunnelConfig = JSON.parse(JSON.stringify(ONBOARDING_FUNNEL_STEPS));
-    state.editingEventFunnel = false;
-    state.eventFunnel = null;
-    state.eventFunnelError = null;
-    fetchEventFunnel();
-  });
   // Attivazione (built-in) — coorte matura, non ha step configurabili: apre e calcola.
   document.getElementById('funnel-activation-btn')?.addEventListener('click', () => {
     state.funnelMode = 'activation';
@@ -12247,16 +12251,6 @@ function attachEvents() {
   };
   document.getElementById('event-funnel-calc')?.addEventListener('click', eventCalc);
   document.getElementById('event-funnel-apply')?.addEventListener('click', eventCalc);
-  const applyEventFunnelPreset = (kind) => {
-    const { from, to } = eventFunnelPresetRange(kind);
-    state.funnelFrom = from;
-    state.funnelTo   = to;
-    state.funnelSprintId = ''; // il preset è sempre "periodo libero"
-    fetchEventFunnel();
-  };
-  document.getElementById('event-funnel-preset-today')?.addEventListener('click', () => applyEventFunnelPreset('today'));
-  document.getElementById('event-funnel-preset-week')?.addEventListener('click',  () => applyEventFunnelPreset('week'));
-  document.getElementById('event-funnel-preset-month')?.addEventListener('click', () => applyEventFunnelPreset('month'));
   // Selettore evento → apre l'event browser puntando allo step corrente
   document.querySelectorAll('.event-funnel-pick').forEach(el =>
     el.addEventListener('click', () => openEventBrowser(+el.dataset.row)));
@@ -12488,6 +12482,7 @@ function attachEvents() {
   // Card Parametri — apri/chiudi + override esclusioni v2 (ricalcolo immediato del funnel)
   document.getElementById('funnel-params-toggle')?.addEventListener('click', () => {
     state.funnelParamsOpen = !state.funnelParamsOpen;
+    state.funnelMenu = null;
     if (state.funnelParamsOpen) fetchExcludedUsers(); // lazy: la lista serve solo a card aperta
     render();
   });
@@ -12548,20 +12543,6 @@ function attachEvents() {
       return;
     }
     doFunnelAssignSave();
-  });
-
-  // Funnel — sprint selector
-  document.getElementById('funnel-sprint-sel')?.addEventListener('change', e => {
-    state.funnelSprintId = e.target.value; // '' = periodo libero
-    const sprint = state.sprints.find(s => s.id === e.target.value);
-    if (sprint) {
-      state.funnelFrom = sprint.inizio;
-      state.funnelTo   = sprint.fine;
-    }
-    if (state.funnelMode === 'event') { fetchEventFunnel(); return; }
-    if (state.funnelMode === 'activation') { fetchActivation(); return; }
-    state.funnel = null;
-    fetchFunnel();
   });
 
   // Sprint — CRUD
