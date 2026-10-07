@@ -55,6 +55,8 @@
 .st-title { position: absolute; left: 24px; top: 20px; font-size: 15px; font-weight: 800; line-height: 20px; white-space: nowrap; }
 .st-num { position: absolute; left: 24px; top: 46px; font-size: 28px; font-weight: 800; line-height: 32px; white-space: nowrap; }
 .st-cap { position: absolute; left: 24px; top: 82px; font-size: 14px; font-weight: 600; line-height: 20px; color: #9ca3af; white-space: nowrap; }
+/* schede piccole: la didascalia non esce mai dalla scheda (il testo intero resta nel title) */
+.st-card:not(.st-big) .st-cap { right: 24px; overflow: hidden; text-overflow: ellipsis; }
 .st-legend {
   position: absolute; right: 24px; top: 22px; display: flex; gap: 14px; font-size: 13px; font-weight: 600;
   color: #9ca3af; white-space: nowrap; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 300px);

@@ -142,7 +142,13 @@ function stBase(w, h, o) {
   const y0 = -0.07 * ymax, y1 = ymax * 1.04;
   const X = i => ML + PW * i / (nx - 1);
   const Y = v => mt + PH * (1 - (v - y0) / (y1 - y0));
-  const x1 = ML + PW, lab = new Map(o.labs);
+  // o.thin: tiene l'ultima etichetta e, andando indietro, solo quelle che hanno spazio (12 px, circa 6,8 px a carattere)
+  const labs = !o.thin ? o.labs : o.labs.reduceRight((acc, [i, t]) => {
+    const tw = t.length * 6.8, r = i === nx - 1 ? X(i) + MR - 2 : X(i) + tw / 2;
+    if (r + 8 <= acc.left) { acc.out.unshift([i, t]); acc.left = r - tw; }
+    return acc;
+  }, { out: [], left: Infinity }).out;
+  const x1 = ML + PW, lab = new Map(labs);
   let s = '';
   if (o.ads != null) s += stRect(ML, mt, X(Math.min(o.ads, nx - 1)) - ML, PH, ST.ADS);
   if (o.fz != null && o.fz < nx - 1) s += stRect(X(o.fz), mt, x1 - X(o.fz), PH, ST.FZ);
@@ -151,7 +157,7 @@ function stBase(w, h, o) {
   s += stLine(ML, Y(0), x1, Y(0), ST.INK, 1.5);
   for (const [v, l] of o.ticks) s += stText(ML - 8, Y(v) + 4, l, ST.MUT, 600, 'end');
   for (let i = 0; i < nx; i++) s += stLine(X(i), mt + PH, X(i), mt + PH + (lab.has(i) ? 6 : 3), ST.TER);
-  for (const [i, t] of o.labs) {
+  for (const [i, t] of labs) {
     const today = t === 'oggi', last = i === nx - 1;
     s += stText(X(i) + (last ? MR - 2 : 0), h - 8, t, today ? ST.INK : ST.MUT, today ? 800 : 600, last ? 'end' : 'middle');
   }
@@ -328,7 +334,7 @@ function stBuildSprints(w, h, d) {
   const P = stSprintEnds(d), nx = Math.max(P.length, 2);
   const top = Math.max(0, ...P.map(p => p.v ?? 0)), ymax = Math.max(1.5, Math.ceil(top / 0.5) * 0.5);
   const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += 0.5) ticks.push([v, v === 0 ? '0' : (Number.isInteger(v) ? v : stIt(v, 2)) + ' €']);
-  const c = stBase(w, h, { nx, ymax, ticks, par: d.sprint_curves.breakeven, labs: P.map((p, i) => [i, stSprintLab(p, w)]) });
+  const c = stBase(w, h, { nx, ymax, ticks, par: d.sprint_curves.breakeven, thin: true, labs: P.map((p, i) => [i, stSprintLab(p, w)]) });
   const runs = stRuns(P.map((p, i) => ({ i, v: p.v })), ymax, true);
   // bianco pieno = sprint chiuso, anello blu = ci sono ancora prove aperte (stima), punto blu grande = sprint in esame
   let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: p => (P[p[0]].est ? 'ring' : 'dot') });
@@ -361,7 +367,7 @@ function stBuildFo(w, h, d) {
   const P = stFoPts(d), nx = Math.max(P.length, 2);
   const top = Math.max(0, ...P.map(p => p.v ?? 0)), stepY = top > 2 ? 1 : 0.5, ymax = Math.max(1, Math.ceil((top + 0.05) / stepY) * stepY);
   const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += stepY) ticks.push([v, Number.isInteger(v) ? String(v) : stIt(v, 1)]);
-  const c = stBase(w, h, { nx, ymax, ticks, labs: P.map((p, i) => [i, stSprintLab(p, w)]) });
+  const c = stBase(w, h, { nx, ymax, ticks, thin: true, labs: P.map((p, i) => [i, stSprintLab(p, w)]) });
   const runs = stRuns(P.map((p, i) => ({ i, v: p.v })), ymax, true);
   // bianco pieno = sprint maturato, anello = sprint ancora in corso, punto blu grande = sprint in esame
   let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: p => (P[p[0]].sp.today_day != null ? 'ring' : 'dot') });
@@ -382,7 +388,7 @@ function stCardHtml(o) {
     <div class="st-card${o.big ? ' st-big' : ''}${o.legend ? ' st-has-leg' : ''}" data-st-card="${o.key}">
       <div class="st-title">${o.title}</div>
       <div class="st-num" style="color:${o.color || ST.INK}">${o.num}</div>
-      <div class="st-cap">${o.cap}</div>
+      <div class="st-cap" title="${String(o.cap).replace(/"/g, '&quot;')}">${o.cap}</div>
       ${o.tools || ''}
       ${o.legend ? `<div class="st-legend">${o.legend}</div>` : ''}
       <div class="st-readout" data-st-readout></div>
@@ -430,10 +436,10 @@ function stCards(d) {
   c.t100 = { num: tl ? stIt(stT100(tl), 1) : '–', color: ST.INK,
     cap: `${tl ? `${tl.st} ${tl.st === 1 ? 'prova' : 'prove'} su ${stEuro(tl.cs)} € spesi` : 'nessuna spesa ancora'} · pareggio a ${stIt(par3, 1)}` };
 
-  const ep = d.expected_payers, E4 = stPayEst(ep), open = m.rate.open - m.rate.open_cancelled, canc = m.rate.open_cancelled;
+  const ep = d.expected_payers, E4 = stPayEst(ep), open = m.rate.open - m.rate.open_cancelled;
   if (E4.length) {
     c.payers = { num: stIt(ep.total_estimate ?? E4.at(-1).v, 1), color: ST.BLU,
-      cap: `${m.rate.paid} hanno pagato + ${stIt(ep.expected_new, 1)} attesi da ${open} ${open === 1 ? 'prova aperta' : 'prove aperte'}${canc ? ` · ${canc} ${canc === 1 ? 'disdetta vale' : 'disdette valgono'} zero` : ''}` };
+      cap: `${m.rate.paid} paganti + ${stIt(ep.expected_new, 1)} attesi da ${open} ${open === 1 ? 'prova aperta' : 'prove aperte'}` };
   } else {
     const lr = ep.real.at(-1);
     c.payers = { num: lr ? String(lr.paid) : '–', cap: lr ? 'hanno pagato' : '', color: ST.INK };
@@ -451,7 +457,7 @@ function stCards(d) {
 
   const f7 = stFoPts(d).find(p => p.sp.selected);
   c.fo = f7 && f7.v != null ? { num: stIt(f7.v, 1), color: f7.sp.today_day != null ? ST.BLU : ST.INK,
-    cap: `${f7.sp.trials} ${f7.sp.trials === 1 ? 'prova' : 'prove'} su ${f7.sp.first_opens} primi accessi · ${stCurveName(f7.sp)}` } : { num: '–', cap: '', color: ST.INK };
+    cap: `${f7.sp.trials} ${f7.sp.trials === 1 ? 'prova' : 'prove'} su ${f7.sp.first_opens} primi accessi` } : { num: '–', cap: '', color: ST.INK };
   return { c };
 }
 
@@ -545,9 +551,22 @@ function pageStats() {
 // ── DISEGNO E PASSAGGIO DEL MOUSE ─────────────────────────────────────
 const ST_BUILD = { sprint: stBuildSprintDay, rate: stBuildRate, t100: stBuildT100, payers: stBuildPayers, sprints: stBuildSprints, keep: stBuildKeep, fo: stBuildFo };
 
+function stFitBig() {
+  const card = document.querySelector('.st-card.st-big.st-has-leg');
+  if (!card) return;
+  const cap = card.querySelector('.st-cap'), leg = card.querySelector('.st-legend'), chart = card.querySelector('.st-chart');
+  leg.style.top = chart.style.top = card.style.height = '';
+  const narrow = window.matchMedia('(max-width: 900px)').matches;
+  const legTop = narrow ? leg.offsetTop : Math.max(leg.offsetTop, cap.offsetTop + cap.offsetHeight + 8);
+  const need = legTop + leg.offsetHeight + 14, grow = need - chart.offsetTop;
+  if (legTop !== leg.offsetTop) leg.style.top = legTop + 'px';
+  if (grow > 0) { card.style.height = card.offsetHeight + grow + 'px'; chart.style.top = need + 'px'; }
+}
+
 function drawStatsCharts() {
   statsCharts = [];
   if (!stats.data) return;
+  stFitBig();
   document.querySelectorAll('[data-st-chart]').forEach(el => {
     const key = el.dataset.stChart, w = Math.round(el.clientWidth), h = Math.round(el.clientHeight);
     if (!w || !h || !ST_BUILD[key]) return;
