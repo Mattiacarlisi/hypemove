@@ -68,8 +68,12 @@ La pagina non usa più `trials_per_100.selected`, `compare` e `final_estimate` (
 - `trials_per_100.breakeven` = 100 / (netto annuale × tasso): la riga del pareggio. Scala 0–12, più alta solo se un valore finale la supera.
 
 ### 4. `expected_payers`
-`{ real: [{date, started, paid}], est: [{date, v}], final_estimate, expected_new }`.
-`real` fino a `ultimo_giorno_intero`: prove avviate (grigio) e prove finite che hanno pagato (nero). `est`: curva blu tratteggiata da `ultimo_giorno_intero` (stesso valore dei pagati) a fine sprint = pagati + tasso × prove aperte non disdette che scadono entro quel giorno. `est:[]` e `final_estimate:null` per uno sprint chiuso. `expected_new` = tasso × prove aperte non disdette (3,75).
+`{ real: [{date, started, paid}], est: [{date, v}], final_estimate, expected_new, est_full: [{date, v}], total_estimate }`. Tutta la storia delle prove, non lo sprint scelto.
+- `real` fino a `ultimo_giorno_intero`: la pagina disegna solo `paid` (bianco). `started` resta nella risposta ma non si disegna più (dal 07/10/2026).
+- `est_full` (dal 07/10/2026): curva blu tratteggiata da `ultimo_giorno_intero` alla scadenza dell'ultima prova aperta non disdetta, anche oltre la `fine` dello sprint scelto. `v` = paganti entro quel giorno + tasso × prove aperte non disdette che scadono entro quel giorno. Vuota se lo sprint scelto non arriva a ieri o se non ci sono prove aperte. L'asse del grafico si allunga fino all'ultima data di `est_full`.
+- `total_estimate` = paganti di oggi + tasso × prove aperte non disdette: il numero grande. `expected_new` = solo la parte attesa.
+- `est` e `final_estimate` (fermi alla `fine` dello sprint) restano per la pagina vecchia; la nuova li usa solo se `est_full` manca.
+- Scala: da 0 al valore più alto, a passi di 2 (di 4 sopra 8).
 
 ### 5. `sprint_by_sprint`
 `{ breakeven: 1, points: [{ numero, nome, v, est, paid_only, selected }] }`, dal più vecchio. `v` = valore dello sprint alla sua ultima giornata con dati (max 16 giorni): reale dove `est:false`, stima (prove aperte × tasso) dove `est:true`; lo sprint in corso usa la stima a fine pubblicità (0,5615). `paid_only` = solo il pagato. `selected` evidenzia lo sprint scelto. Contiene tutti gli sprint con spesa (oggi Sprint 4–15).

@@ -160,7 +160,6 @@ const stSvg = (w, h, inner) =>
   `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="display:block;font-family:inherit" aria-hidden="true">${inner}</svg>`;
 
 // ── GRAFICO: i sei ────────────────────────────────────────────────────
-const ST_CNT = [[0, '0'], [4, '4'], [8, '8'], [12, '12'], [16, '16']];
 const ST_PCT = [[0, '0'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']];
 const ST_EU15 = [[0, '0'], [0.5, '0,50 €'], [1, '1 €'], [1.5, '1,50 €']];
 const ST_FO = [[0, '0'], [0.25, '0,25'], [0.5, '0,50'], [0.75, '0,75'], [1, '1']];
@@ -170,12 +169,13 @@ const ST_FO = [[0, '0'], [0.25, '0,25'], [0.5, '0,50'], [0.75, '0,75'], [1, '1']
 const stChanges = vals => vals.map((v, i) => (i > 0 && Math.abs(v - vals[i - 1]) > 1e-9 ? i : -1)).filter(i => i >= 0);
 
 // Calendario comune ai grafici sulla data: dal primo giorno disponibile alla fine dello sprint scelto.
-function stCalendar(d) {
-  const m = d.meta, from = [d.trials_per_100_first_opens && d.trials_per_100_first_opens.from, m.sprint.inizio,
+// `end`: una data oltre la fine dello sprint fino a cui allungare l'asse (grafico 4).
+function stCalendar(d, end) {
+  const m = d.meta, fine = end && end > m.sprint.fine ? end : m.sprint.fine, from = [d.trials_per_100_first_opens && d.trials_per_100_first_opens.from, m.sprint.inizio,
     d.trial_rate.points[0] && d.trial_rate.points[0].date].filter(Boolean).sort()[0];
-  const nx = stDayN(m.sprint.fine) - stDayN(from) + 1;
+  const nx = stDayN(fine) - stDayN(from) + 1;
   const last = stDayN(m.ultimo_giorno_intero) - stDayN(from);
-  const hasToday = m.oggi >= from && m.oggi <= m.sprint.fine;
+  const hasToday = m.oggi >= from && m.oggi <= fine;
   const today = hasToday ? stDayN(m.oggi) - stDayN(from) : null;
   const idx = iso => stDayN(iso) - stDayN(from);
   const labs = [];
@@ -291,24 +291,25 @@ function stBuildRate(w, h, d) {
     hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${p.paid} pagate su ${p.ended} finite · ${stPct(p.v)}`, v: p.v } : null; } };
 }
 
+// Grafico 4: chi ha pagato (vero) e dove si arriva quando scadono le prove aperte (stima), su tutta la storia.
+const stPayEst = ep => (ep.est_full && ep.est_full.length ? ep.est_full : ep.est || []);
 function stBuildPayers(w, h, d) {
-  const cal = stCalendar(d), ep = d.expected_payers;
-  const c = stBase(w, h, { nx: cal.nx, ymax: 16, ticks: ST_CNT, fz: cal.fz, labs: cal.labs });
-  const started = ep.real.map(p => ({ i: cal.idx(p.date), v: p.started }));
+  const ep = d.expected_payers, E = stPayEst(ep), cal = stCalendar(d, E.length ? E.at(-1).date : null);
+  const top = Math.max(1, ...ep.real.map(p => p.paid), ...E.map(p => p.v));
+  const stepY = top <= 8 ? 2 : 4, ymax = Math.ceil((top + 0.5) / stepY) * stepY;
+  const ticks = []; for (let v = 0; v <= ymax; v += stepY) ticks.push([v, String(v)]);
+  const c = stBase(w, h, { nx: cal.nx, ymax, ticks, fz: cal.fz, labs: cal.labs });
   const paid = ep.real.map(p => ({ i: cal.idx(p.date), v: p.paid }));
-  const est = (ep.est || []).map(p => ({ i: cal.idx(p.date), v: p.v }));
-  const chS = new Set(stChanges(started.map(p => p.v))), chP = new Set(stChanges(paid.map(p => p.v)));
-  const chE = new Set(stChanges(est.map(p => p.v)));
-  let s = c.s;
-  const rs = stRuns(started, 16, false), rp = stRuns(paid, 16, false), re = stRuns(est, 16, false);
-  s += stCurve(c, rs, { color: ST.MUT, estColor: ST.MUT, sw: 2.5, dot: p => chS.has(p[0]) ? 'dot' : null });
-  s += stCurve(c, rp, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (chP.has(p[0]) || (e.last && r === rp.at(-1))) ? 'dot' : null });
+  const est = E.map(p => ({ i: cal.idx(p.date), v: p.v }));
+  const chP = new Set(stChanges(paid.map(p => p.v))), chE = new Set(stChanges(est.map(p => p.v)));
+  const rp = stRuns(paid, ymax, false), re = stRuns(est, ymax, false);
+  let s = c.s + stCurve(c, rp, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (chP.has(p[0]) || (e.last && r === rp.at(-1))) ? 'dot' : null });
   s += stCurve(c, re.map(r => ({ ...r, est: true })), { color: ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3,
     dot: (p, r, e) => (!e.first && (chE.has(p[0]) || (e.last && r === re.at(-1)))) ? 'ring' : null });
-  const byR = new Map(ep.real.map(p => [cal.idx(p.date), p])), byE = new Map((ep.est || []).map(p => [cal.idx(p.date), p]));
+  const byR = new Map(ep.real.map(p => [cal.idx(p.date), p])), byE = new Map(E.map(p => [cal.idx(p.date), p]));
   return { svg: stSvg(w, h, s), c, nx: cal.nx,
     hov: i => { const r = byR.get(i);
-      if (r) return { txt: `${stDM(cal.date(i))} · ${r.started} avviate · ${r.paid} hanno pagato`, v: r.paid };
+      if (r) return { txt: `${stDM(cal.date(i))} · ${r.paid} hanno pagato`, v: r.paid };
       const e = byE.get(i); return e ? { txt: `${stDM(cal.date(i))} · stima ${stIt(e.v, 1)} paganti`, v: e.v } : null; } };
 }
 
@@ -414,15 +415,15 @@ function stCards(d) {
     ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))), stLgd(ST.ORA, 'pareggio'),
   ].join('');
 
-  const ep = d.expected_payers, open = m.rate.open - m.rate.open_cancelled, canc = m.rate.open_cancelled;
-  if (ep.expected_new != null) {
-    c.payers = { num: stIt(ep.expected_new, 1), color: ST.BLU,
-      cap: `da ${open} prove aperte${canc ? `, ${canc} ${canc === 1 ? 'disdetta vale' : 'disdette valgono'} zero` : ''}` };
+  const ep = d.expected_payers, E4 = stPayEst(ep), open = m.rate.open - m.rate.open_cancelled, canc = m.rate.open_cancelled;
+  if (E4.length) {
+    c.payers = { num: stIt(ep.total_estimate ?? E4.at(-1).v, 1), color: ST.BLU,
+      cap: `${m.rate.paid} hanno pagato + ${stIt(ep.expected_new, 1)} attesi da ${open} ${open === 1 ? 'prova aperta' : 'prove aperte'}${canc ? ` · ${canc} ${canc === 1 ? 'disdetta vale' : 'disdette valgono'} zero` : ''}` };
   } else {
     const lr = ep.real.at(-1);
-    c.payers = { num: lr ? String(lr.paid) : '–', cap: lr ? `hanno pagato · ${lr.started} prove avviate` : '', color: ST.INK };
+    c.payers = { num: lr ? String(lr.paid) : '–', cap: lr ? 'hanno pagato' : '', color: ST.INK };
   }
-  c.payers.legend = [stLgd(ST.MUT, 'prove avviate'), stLgd(ST.INK, 'hanno pagato'), ...(ep.est && ep.est.length ? [stLgd(ST.BLU, 'stima', '6 5')] : [])].join('');
+  c.payers.legend = [stLgd(ST.INK, 'hanno pagato'), ...(E4.length ? [stLgd(ST.BLU, 'stima', '6 5')] : [])].join('');
 
   const P = d.sprint_by_sprint.points, selP = P.find(p => p.selected) || P.at(-1);
   const prevClosed = P.filter(p => !p.est && p.numero < (selP ? selP.numero : 1e9)).at(-1);
