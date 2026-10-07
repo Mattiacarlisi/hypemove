@@ -166,7 +166,6 @@ const stSvg = (w, h, inner) =>
 
 // ── GRAFICO: i sei ────────────────────────────────────────────────────
 const ST_PCT = [[0, '0'], [25, '25%'], [50, '50%'], [75, '75%'], [100, '100%']];
-const ST_FO = [[0, '0'], [0.25, '0,25'], [0.5, '0,50'], [0.75, '0,75'], [1, '1']];
 
 
 
@@ -323,13 +322,13 @@ function stSprintEnds(d) {
   const { all, val } = stCurveSet(d), dup = n => all.filter(x => x.numero === n).length > 1;
   return all.map(sp => { const p = sp.points.at(-1); return { sp, v: p ? val(p) : null, est: !!p && (p.on > 0 || p.og > 0), dup: dup(sp.numero) }; });
 }
+// i doppioni (due sprint con lo stesso numero) si distinguono con la data di inizio
+const stSprintLab = (p, w) => !p.dup ? 'S' + p.sp.numero : (w > 600 ? `S${p.sp.numero} ${stDM(p.sp.inizio)}` : stDM(p.sp.inizio));
 function stBuildSprints(w, h, d) {
   const P = stSprintEnds(d), nx = Math.max(P.length, 2);
   const top = Math.max(0, ...P.map(p => p.v ?? 0)), ymax = Math.max(1.5, Math.ceil(top / 0.5) * 0.5);
   const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += 0.5) ticks.push([v, v === 0 ? '0' : (Number.isInteger(v) ? v : stIt(v, 2)) + ' €']);
-  // i doppioni (due sprint con lo stesso numero) si distinguono con la data di inizio
-  const lab = p => !p.dup ? 'S' + p.sp.numero : (w > 600 ? `S${p.sp.numero} ${stDM(p.sp.inizio)}` : stDM(p.sp.inizio));
-  const c = stBase(w, h, { nx, ymax, ticks, par: d.sprint_curves.breakeven, labs: P.map((p, i) => [i, lab(p)]) });
+  const c = stBase(w, h, { nx, ymax, ticks, par: d.sprint_curves.breakeven, labs: P.map((p, i) => [i, stSprintLab(p, w)]) });
   const runs = stRuns(P.map((p, i) => ({ i, v: p.v })), ymax, true);
   // bianco pieno = sprint chiuso, anello blu = ci sono ancora prove aperte (stima), punto blu grande = sprint in esame
   let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: p => (P[p[0]].est ? 'ring' : 'dot') });
@@ -353,15 +352,22 @@ function stBuildKeep(w, h, d) {
     hov: i => { const p = by.get(i); return p ? { txt: `${stDM(cal.date(i))} · ${p.active} con il rinnovo attivo su ${p.open} aperte`, v: p.active } : null; } };
 }
 
+// Grafico 7: un punto per sprint. Prove avviate da chi ha fatto il primo accesso in quello sprint, ogni 100 primi accessi.
+function stFoPts(d) {
+  const all = d.sprint_curves.sprints, dup = n => all.filter(x => x.numero === n).length > 1;
+  return all.map(sp => ({ sp, dup: dup(sp.numero), v: sp.first_opens > 0 ? 100 * sp.trials / sp.first_opens : null }));
+}
 function stBuildFo(w, h, d) {
-  const cal = stCalendar(d), fo = d.trials_per_100_first_opens;
-  const c = stBase(w, h, { nx: cal.nx, ymax: 1, ticks: ST_FO, fz: cal.fz, labs: cal.labs });
-  const pts = fo.points.map(p => ({ i: cal.idx(p.date), v: p.v }));
-  const runs = stRuns(pts, 1, false);
-  const s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
-  const by = new Map(fo.points.map(p => [cal.idx(p.date), p]));
-  return { svg: stSvg(w, h, s), c, nx: cal.nx,
-    hov: i => { const p = by.get(i); return p && p.v != null ? { txt: `${stDM(cal.date(i))} · ${stIt(p.v, 2)} prove ogni 100 primi accessi`, v: p.v } : null; } };
+  const P = stFoPts(d), nx = Math.max(P.length, 2);
+  const top = Math.max(0, ...P.map(p => p.v ?? 0)), stepY = top > 2 ? 1 : 0.5, ymax = Math.max(1, Math.ceil((top + 0.05) / stepY) * stepY);
+  const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += stepY) ticks.push([v, Number.isInteger(v) ? String(v) : stIt(v, 1)]);
+  const c = stBase(w, h, { nx, ymax, ticks, labs: P.map((p, i) => [i, stSprintLab(p, w)]) });
+  const runs = stRuns(P.map((p, i) => ({ i, v: p.v })), ymax, true);
+  // bianco pieno = sprint maturato, anello = sprint ancora in corso, punto blu grande = sprint in esame
+  let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: p => (P[p[0]].sp.today_day != null ? 'ring' : 'dot') });
+  P.forEach((p, i) => { if (p.sp.selected && p.v != null && p.v <= ymax) s += stDot(c.X(i), c.Y(p.v), 6, ST.BLU); });
+  return { svg: stSvg(w, h, s), c, nx,
+    hov: i => { const p = P[i]; return p && p.v != null ? { txt: `${stCurveName(p.sp)} · ${p.sp.trials} su ${p.sp.first_opens} primi accessi · ${stIt(p.v, 2)}`, v: p.v } : null; } };
 }
 
 // ── PAGINA ────────────────────────────────────────────────────────────
@@ -443,8 +449,9 @@ function stCards(d) {
   c.keep = ot ? { num: String(ot.active), color: ST.INK,
     cap: `su ${ot.open} ${ot.open === 1 ? 'prova aperta' : 'prove aperte'} · ${off === 0 ? 'nessuna disdetta' : off === 1 ? '1 già disdetta' : off + ' già disdette'}` } : { num: '–', cap: '', color: ST.INK };
 
-  const fo = d.trials_per_100_first_opens, fl = fo.points.filter(p => p.v != null).at(-1);
-  c.fo = { num: fl ? stIt(fl.v, 1) : '–', cap: `dal ${stDM(fo.from)}`, color: ST.INK };
+  const f7 = stFoPts(d).find(p => p.sp.selected);
+  c.fo = f7 && f7.v != null ? { num: stIt(f7.v, 1), color: f7.sp.today_day != null ? ST.BLU : ST.INK,
+    cap: `${f7.sp.trials} ${f7.sp.trials === 1 ? 'prova' : 'prove'} su ${f7.sp.first_opens} primi accessi · ${stCurveName(f7.sp)}` } : { num: '–', cap: '', color: ST.INK };
   return { c };
 }
 
