@@ -265,10 +265,13 @@ const ONBOARDING_FUNNEL_STEPS = [
     children: [
       // Il regalo dei 7 giorni si mostra SOLO se la prova è stata davvero concessa
       // (flag trial_grant_enabled + esito della RPC): non è uno step obbligato e in spina
-      // azzererebbe l'arrivo in Home ogni volta che il regalo non scatta.
+      // azzererebbe il passo successivo ogni volta che il regalo non scatta.
       { event: 'view_OnboardingTrialGift', label: '— schermata regalo (7 giorni)' },
     ] },
-  { event: 'view_Home',                    label: 'Arrivo in Home',                   vsIdx: 15 },
+  // Dal 06/10/2026 la fine dell'onboarding apre il dettaglio del primo workout e la Home si vede
+  // dopo: con «Arrivo in Home» in mezzo la cascata, che è temporale, scartava chi apre il dettaglio
+  // prima della Home (48 contati su 110 nello sprint dal 06/10). `view_Home` resta nel catalogo.
+  { event: 'view_WorkoutDetail',           label: 'Apre il dettaglio del workout',    vsIdx: 15 },
 ];
 
 const LS_OV             = 'hm_overview_keys';
