@@ -18,6 +18,7 @@ const stats = {
   sprintId: null,       // null = sprint predefinito scelto dal server
   data: null,           // kpi_stats_series
   loading: true, error: null, lastUpdated: null,
+  cachePending: false, cacheFailed: false, cacheFresh: false,   // ricalcolo in corso / non riuscito / appena arrivato
   computedAt: null,     // ora in cui il database ha calcolato i dati in vista (cache)
   menuOpen: false, menuIdx: 0,
   seq: 0,
@@ -47,29 +48,59 @@ const stNum = v => Number(v).toFixed(4).replace(/\.?0+$/, '');
 async function fetchStats(opts = {}) {
   const silent = !!opts.silent && !!stats.data;
   const seq = ++stats.seq;
+  const scope = stats.sprintId || 'default';
   if (!silent) { stats.loading = true; stats.error = null; stats.data = opts.keepData ? stats.data : null; render(); }
+  const apply = d => {
+    stats.data = d.data;
+    stats.computedAt = d.computed_at ? new Date(d.computed_at) : null;
+    stats.error = null;
+    stats.lastUpdated = new Date();
+  };
   try {
+    // 1. si legge il valore salvato (anche scaduto): si disegna subito
     const [ser, lst] = await Promise.all([
-      sb.rpc('kpi_cache_get', { p_query: 'stats_series', p_scope: stats.sprintId || 'default', p_force: !!opts.force }),
+      sb.rpc('kpi_cache_get', { p_query: 'stats_series', p_scope: scope, p_force: false }),
       sb.rpc('kpi_stats_sprints'),
     ]);
     if (seq !== stats.seq) return;
     if (ser.error) throw ser.error;
-    const data = ser.data && ser.data.data;
-    if (!data) throw new Error('Sprint non trovato');
-    if (!data.sprint_curves) throw new Error('Il database non restituisce ancora i dati del primo grafico: manca la migrazione kpi_stats_sprint_curves.');
-    stats.data = data;
-    stats.computedAt = ser.data.computed_at ? new Date(ser.data.computed_at) : null;
     if (!lst.error && Array.isArray(lst.data)) stats.sprints = lst.data;
-    stats.error = null;
-    stats.lastUpdated = new Date();
+    let d = ser.data;
+    let need = !!opts.force || !!(d && d.stale);
+    if (!d || !d.data) { d = null; need = true; }   // niente di salvato: la pagina resta in caricamento finché il ricalcolo non torna
+    if (d) {
+      apply(d);
+      stats.cacheFailed = kcFailed(d);
+      stats.cachePending = need;
+      stats.loading = false;
+      render();
+    }
+    // 2. scaduto, mancante o «Aggiorna»: UNA chiamata di ricalcolo, poi si ridisegna
+    if (need) {
+      const r = await kpiRecompute('stats_series', scope, !!opts.force || !d);
+      if (seq !== stats.seq) return;
+      if (r.data) {
+        if (!r.data.sprint_curves) throw new Error('Il database non restituisce ancora i dati del primo grafico: manca la migrazione kpi_stats_sprint_curves.');
+        apply(r);
+        stats.cacheFailed = r.failed;
+        stats.cacheFresh = !!r.recomputed;
+      } else if (!d) {
+        throw new Error(r.error || 'Sprint non trovato');
+      } else {
+        stats.cacheFailed = true;
+      }
+      stats.cachePending = false;
+    }
+    if (!stats.data.sprint_curves) throw new Error('Il database non restituisce ancora i dati del primo grafico: manca la migrazione kpi_stats_sprint_curves.');
   } catch (e) {
     if (seq !== stats.seq) return;
     stats.error = e.message || 'Errore sconosciuto';
+    stats.cachePending = false;
     if (!silent) stats.data = null;
   }
   stats.loading = false;
   render();
+  stats.cacheFresh = false;
 }
 
 function statsOnNav() {
@@ -510,9 +541,7 @@ function stMenuHtml() {
 function stHeader() {
   const sp = stats.data && stats.data.meta.sprint;
   const at = stats.computedAt;
-  const upd = !at ? ''
-    : 'calcolato ' + (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
-      + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  const upd = !at ? '' : kcMark({ computedAt: at, pending: stats.cachePending, failed: stats.cacheFailed, fresh: stats.cacheFresh });
   const pill = sp
     ? `<div class="st-pillwrap">
          <button class="st-pill st-pill-sel" id="st-sprint-btn" aria-haspopup="listbox" aria-expanded="${stats.menuOpen}" title="Scegli lo sprint">
@@ -526,7 +555,7 @@ function stHeader() {
       <h1 class="st-h1">Stats</h1>${pill}
       <div class="st-grow"></div>
       <div class="st-meta">${stats.loading ? 'Caricamento…' : upd}</div>
-      <button class="st-refresh" id="st-refresh-btn" ${stats.loading ? 'disabled' : ''}>Aggiorna</button>
+      <button class="st-refresh" id="st-refresh-btn" ${stats.loading || stats.cachePending ? 'disabled' : ''}>Aggiorna</button>
     </div>`;
 }
 

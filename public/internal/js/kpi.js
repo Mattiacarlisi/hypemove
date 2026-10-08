@@ -577,7 +577,7 @@ let state = {
   // Card «Sprint vs record» dell'Overview (kpi_sprint_curves, letta dalla cache). scoreSel = id dello sprint
   // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
   // scoreMenu = menu aperto ('sel' | 'ref' | null).
-  scoreboard: null, scoreboardError: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
+  scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
   aiConvOpen: false,
   aiSessions: null,
   aiSessionsLoading: false,
@@ -784,11 +784,55 @@ function funnelCacheScope(from, to, sprint) {
   return from === BETA_START && to === TODAY ? 'base' : null;
 }
 
-// Risponde { data, computed_at, pending } oppure null: se la cache non c'è o sbaglia, la pagina calcola dal vivo.
+// ── Cache «calcola all'entrata» ─────────────────────────────────────────
+// kpi_cache_get restituisce sempre il valore salvato (anche scaduto) e non calcola niente. Se è scaduto, o l'utente
+// preme «Aggiorna», parte UNA chiamata kpi_cache_recompute (sincrona, con il limite di tempo del database) e la scheda
+// si ridisegna quando torna. Se il ricalcolo fallisce resta il valore vecchio, con l'ora in cui era stato calcolato.
+async function kpiRecompute(query, scope, force) {
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_recompute', { p_query: query, p_scope: scope, p_force: !!force });
+    if (error) return { failed: true, error: error.message };
+    return data ? { ...data, failed: kcFailed(data) } : { failed: true, error: 'risposta vuota' };
+  } catch (e) { return { failed: true, error: (e && e.message) || 'errore' }; }
+}
+// Ricalcolo non riuscito = l'ultimo errore è più recente dell'ultimo calcolo buono (chi non prende il lock non fallisce).
+function kcFailed(d) {
+  return !!(d && d.error_at && !d.busy && (!d.computed_at || new Date(d.error_at) > new Date(d.computed_at)));
+}
+// Dicitura «calcolato alle HH:MM» uguale per tutte le schede; la linea blu e la pulsazione si agganciano al marcatore.
+function kcWhen(iso) {
+  const at = new Date(iso);
+  return (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
+    + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+}
+function kcMark(c) {
+  if (!c || !c.computedAt) return '';
+  return `<span class="kc-mark${c.pending ? ' kc-pulse' : ''}" data-busy="${c.pending ? 1 : 0}" data-fresh="${c.fresh ? 1 : 0}">calcolato ${kcWhen(c.computedAt)}${c.pending ? ' · aggiorno…' : c.failed ? ' · aggiornamento non riuscito' : ''}</span>`;
+}
+// Dopo ogni render: la scheda che si sta ricalcolando prende la linea blu, quella appena aggiornata la dissolvenza breve.
+function kcSync() {
+  const host = el => el.closest('.card, .sbr-card') || el.closest('.main') || el.parentElement;
+  document.querySelectorAll('.kc-busy').forEach(el => el.classList.remove('kc-busy'));
+  document.querySelectorAll('.kc-mark[data-busy="1"]').forEach(m => host(m).classList.add('kc-busy'));
+  document.querySelectorAll('.kc-mark[data-fresh="1"]').forEach(m => {
+    const h = host(m);
+    h.classList.add('kc-fade');
+    h.addEventListener('animationend', () => h.classList.remove('kc-fade'), { once: true });
+  });
+}
+
+// Risponde { data, computed_at, pending, failed } oppure null: se la riga non c'è nemmeno dopo un ricalcolo, la pagina
+// calcola dal vivo come prima. pending = il valore è scaduto (o c'è «Aggiorna»): chi chiama lancia il ricalcolo.
 async function funnelFromCache(scope, force, query = 'funnel') {
   try {
-    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: query, p_scope: scope, p_force: !!force });
-    return error || !data || !data.data ? null : data;
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: query, p_scope: scope, p_force: false });
+    if (error || !data) return null;
+    if (!data.data) {
+      // niente di salvato: un solo ricalcolo, e finché non torna la scheda resta in caricamento
+      const r = await kpiRecompute(query, scope, true);
+      return r && r.data ? { ...r, pending: false } : null;
+    }
+    return { ...data, pending: !!(force || data.stale), failed: kcFailed(data) };
   } catch (e) { return null; }
 }
 
@@ -818,31 +862,23 @@ function canonJson(v) {
 }
 const sameInstant = (a, b) => (a == null && b == null) || (a != null && b != null && new Date(a).getTime() === new Date(b).getTime());
 
-// Dopo «Aggiorna» il ricalcolo gira nel database: rileggo la cache finché non è finito, poi ridisegno da solo.
-let funnelCacheTimer = null;
-function funnelCachePoll(scope, since) {
-  clearTimeout(funnelCacheTimer);
-  funnelCacheTimer = setTimeout(async () => {
-    const mine = () => state.funnelCache && state.funnelCache.scope === scope;
-    if (!mine()) return;
-    const c = await funnelFromCache(scope, false);
-    if (!mine()) return;
-    const done = c && !c.pending;
-    if (!done && Date.now() - since < 5 * 60 * 1000) { funnelCachePoll(scope, since); return; }
-    if (done) state.funnel = c.data;
-    state.funnelCache = { scope, computedAt: done ? c.computed_at : state.funnelCache.computedAt, pending: false };
-    if (state.page === 'funnel' && state.funnelMode === 'catalog') render();
-  }, 10000);
+// Ricalcolo della scheda Funnel: una chiamata sola, poi si ridisegna (niente ripolling).
+async function funnelCachePoll(scope, force) {
+  const mine = () => state.funnelCache && state.funnelCache.scope === scope;
+  const r = await kpiRecompute('funnel', scope, force);
+  if (!mine()) return;
+  if (r.data) state.funnel = r.data;
+  state.funnelCache = { scope, computedAt: r.computed_at || state.funnelCache.computedAt, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  if (state.page === 'funnel' && state.funnelMode === 'catalog') render();
+  if (state.funnelCache) state.funnelCache.fresh = false;
 }
 
 // Risposte in ritardo: ogni richiesta porta il suo numero e, tornata dal database, conta solo se nel frattempo
 // non ne è partita un'altra (cambio di periodo o di funnel). Prima non c'era nessuna protezione: la risposta lenta
 // vecchia arrivava per ultima e scriveva i suoi numeri sotto le date nuove.
 let funnelReqSeq = 0, eventFunnelReqSeq = 0, premiumReqSeq = 0, activationReqSeq = 0;
-let eventFunnelCacheTimer = null, activationCacheTimer = null;
 
 async function fetchFunnel(opts = {}) {
-  clearTimeout(funnelCacheTimer);
   const req = ++funnelReqSeq;
   // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
   const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
@@ -857,7 +893,7 @@ async function fetchFunnel(opts = {}) {
     if (req !== funnelReqSeq) return;
     if (cached) {
       state.funnel = cached.data;
-      state.funnelCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending };
+      state.funnelCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending, failed: cached.failed };
     } else {
       state.funnelCache = null;
       const p_start = selSprint ? sprintStartTs(selSprint) : null;
@@ -870,7 +906,7 @@ async function fetchFunnel(opts = {}) {
   } catch (e) { if (req !== funnelReqSeq) return; state.funnelError = e.message || 'Errore sconosciuto'; }
   state.funnelLoading = false;
   render();
-  if (state.funnelCache && state.funnelCache.pending) funnelCachePoll(scope, Date.now());
+  if (state.funnelCache && state.funnelCache.pending) funnelCachePoll(scope, !!opts.force);
   if (state.metaToken && state.funnel) fetchMetaFunnel();
 }
 
@@ -1004,26 +1040,19 @@ async function eventFunnelFromCache(flatSteps, force) {
     && (d.provider || null) === (state.eventFunnelProvider || null)
     && d.inizio === state.funnelFrom && d.fine === state.funnelTo
     && sameInstant(d.p_start, sel ? sprintStartTs(sel) : null) && sameInstant(d.p_end, sel ? sprintEndTs(sel) : null);
-  return ok ? { scope, result: d.result, computedAt: c.computed_at, pending: !!c.pending } : null;
+  return ok ? { scope, result: d.result, computedAt: c.computed_at, pending: !!c.pending, failed: c.failed } : null;
 }
 
-// Come funnelCachePoll: dopo «Aggiorna» aspetto la fine del ricalcolo e rileggo da solo, senza far sparire i numeri.
-function eventFunnelCachePoll(scope, since) {
-  clearTimeout(eventFunnelCacheTimer);
-  eventFunnelCacheTimer = setTimeout(async () => {
-    const mine = () => state.eventFunnelCache && state.eventFunnelCache.scope === scope;
-    if (!mine()) return;
-    const c = await funnelFromCache(scope, false, 'funnel_event');
-    if (!mine()) return;
-    if (c && !c.pending) { if (state.page === 'funnel' && state.funnelMode === 'event') fetchEventFunnel({ quiet: true }); return; }
-    if (Date.now() - since < 5 * 60 * 1000) { eventFunnelCachePoll(scope, since); return; }
-    state.eventFunnelCache = { ...state.eventFunnelCache, pending: false };
-    if (state.page === 'funnel' && state.funnelMode === 'event') render();
-  }, 10000);
+// Come funnelCachePoll, per il funnel a eventi: un ricalcolo, poi si rilegge la riga senza rilanciarlo.
+async function eventFunnelCachePoll(scope, force) {
+  const mine = () => state.eventFunnelCache && state.eventFunnelCache.scope === scope;
+  const r = await kpiRecompute('funnel_event', scope, force);
+  if (!mine()) return;
+  if (state.page === 'funnel' && state.funnelMode === 'event') await fetchEventFunnel({ quiet: true, failed: r.failed, fresh: !!r.recomputed });
+  else state.eventFunnelCache = { ...state.eventFunnelCache, pending: false, failed: r.failed };
 }
 
 async function fetchEventFunnel(opts = {}) {
-  clearTimeout(eventFunnelCacheTimer);
   const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
   state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
   const req = ++eventFunnelReqSeq;
@@ -1054,7 +1083,7 @@ async function fetchEventFunnel(opts = {}) {
     });
     if (req !== eventFunnelReqSeq) return;
     state.eventFunnel = result;
-    state.eventFunnelCache = hit ? { scope: hit.scope, computedAt: hit.computedAt, pending: hit.pending } : null;
+    state.eventFunnelCache = hit ? { scope: hit.scope, computedAt: hit.computedAt, pending: opts.quiet ? false : hit.pending, failed: opts.quiet ? !!opts.failed : hit.failed, fresh: !!opts.fresh } : null;
     // Baseline per il delta coorte della card Parametri: la fotografo solo quando
     // nessun override è attivo, così il confronto è sempre "vs esclusioni standard".
     if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked && !state.funnelIncludeBots) {
@@ -1063,7 +1092,8 @@ async function fetchEventFunnel(opts = {}) {
   } catch (e) { if (req !== eventFunnelReqSeq) return; state.eventFunnelError = e.message || 'Errore sconosciuto'; }
   state.eventFunnelLoading = false;
   render();
-  if (state.eventFunnelCache && state.eventFunnelCache.pending) eventFunnelCachePoll(state.eventFunnelCache.scope, Date.now());
+  if (state.eventFunnelCache) state.eventFunnelCache.fresh = false;
+  if (state.eventFunnelCache && state.eventFunnelCache.pending) eventFunnelCachePoll(state.eventFunnelCache.scope, !!opts.force);
 }
 
 // Lista nominale degli utenti esclusi dalle metriche (card Parametri).
@@ -1188,24 +1218,17 @@ async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome, p_
 
 // Premium usa la stessa cache di Funnel: vista di base e ogni sprint, solo con genere «Tutti».
 // Uomini, donne e date libere si calcolano dal vivo con kpi_premium, come prima.
-let premiumCacheTimer = null;
-function premiumCachePoll(scope, since) {
-  clearTimeout(premiumCacheTimer);
-  premiumCacheTimer = setTimeout(async () => {
-    const mine = () => state.premiumCache && state.premiumCache.scope === scope;
-    if (!mine()) return;
-    const c = await funnelFromCache(scope, false, 'premium');
-    if (!mine()) return;
-    const done = c && !c.pending;
-    if (!done && Date.now() - since < 5 * 60 * 1000) { premiumCachePoll(scope, since); return; }
-    if (done) state.premiumData = c.data;
-    state.premiumCache = { scope, computedAt: done ? c.computed_at : state.premiumCache.computedAt, pending: false };
-    if (state.page === 'premium') render();
-  }, 10000);
+async function premiumCachePoll(scope, force) {
+  const mine = () => state.premiumCache && state.premiumCache.scope === scope;
+  const r = await kpiRecompute('premium', scope, force);
+  if (!mine()) return;
+  if (r.data) state.premiumData = r.data;
+  state.premiumCache = { scope, computedAt: r.computed_at || state.premiumCache.computedAt, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  if (state.page === 'premium') render();
+  if (state.premiumCache) state.premiumCache.fresh = false;
 }
 
 async function fetchPremium(opts = {}) {
-  clearTimeout(premiumCacheTimer);
   const req = ++premiumReqSeq;
   const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
   const scope = state.premiumGender === 'all' ? funnelCacheScope(state.premiumFrom, state.premiumTo, selSprint) : null;
@@ -1216,7 +1239,7 @@ async function fetchPremium(opts = {}) {
     if (req !== premiumReqSeq) return;
     if (cached) {
       state.premiumData = cached.data;
-      state.premiumCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending };
+      state.premiumCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending, failed: cached.failed };
     } else {
       state.premiumCache = null;
       const { data, error } = await sb.rpc('kpi_premium', {
@@ -1237,7 +1260,7 @@ async function fetchPremium(opts = {}) {
   }
   state.premiumLoading = false;
   render();
-  if (state.premiumCache && state.premiumCache.pending) premiumCachePoll(scope, Date.now());
+  if (state.premiumCache && state.premiumCache.pending) premiumCachePoll(scope, !!opts.force);
 }
 
 
@@ -2127,36 +2150,42 @@ async function fetchAllFeedbacks() {
   render();
 }
 
-// Le curve di tutti gli sprint arrivano dalla cache della dashboard (kpi_cache_get 'sprint_curves'): calcolarle dal vivo
-// costa più di quanto il database regge. Se la riga non c'è ancora o è in ricalcolo si riprova ogni 5 secondi (al massimo 5 minuti).
-let scoreboardTimer = null;
+// Le curve di tutti gli sprint arrivano dalla cache della dashboard (kpi_cache_get 'sprint_curves'): si disegna subito
+// il valore salvato; se è scaduto (o c'è «Aggiorna») parte un solo ricalcolo e la scheda si ridisegna quando torna.
 async function fetchScoreboard(force) {
-  clearTimeout(scoreboardTimer);
   force = force || state.scoreForce; state.scoreForce = false;
-  const since = Date.now();
-  const attempt = async f => {
-    try {
-      const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'sprint_curves', p_scope: 'all', p_force: !!f });
-      if (error) throw error;
-      if (data && Array.isArray(data.data)) {
-        state.scoreboard = data.data.map(r => ({ ...r, base: (r.elig && r.elig[0]) || 0 }));
-        state.scoreboardError = null;
-        state.scoreboardAt = data.computed_at || null;
-        render();
-        return;
-      }
-      if (data && data.pending !== false && Date.now() - since < 5 * 60 * 1000) {
-        scoreboardTimer = setTimeout(() => attempt(false), 5000);
-        return;
-      }
-      throw new Error('Confronto fra sprint non ancora disponibile');
-    } catch (e) {
-      console.error('fetchScoreboard', e);
-      state.scoreboardError = e.message || 'Errore caricamento confronto sprint';
-      render();
-    }
+  const apply = d => {
+    state.scoreboard = d.data.map(r => ({ ...r, base: (r.elig && r.elig[0]) || 0 }));
+    state.scoreboardError = null;
   };
-  await attempt(force);
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'sprint_curves', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      apply(data);
+      state.scoreboardCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      render();
+      if (!state.scoreboardCache.pending) return;
+    } else {
+      state.scoreboardCache = null;   // niente di salvato: la scheda resta in caricamento finché il ricalcolo non torna
+    }
+  } catch (e) {
+    console.error('fetchScoreboard', e);
+    state.scoreboardError = e.message || 'Errore caricamento confronto sprint';
+    render();
+    return;
+  }
+  const r = await kpiRecompute('sprint_curves', 'all', force || !state.scoreboard);
+  if (r.data && Array.isArray(r.data)) {
+    apply(r);
+    state.scoreboardCache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (state.scoreboard) {
+    state.scoreboardCache = { ...state.scoreboardCache, pending: false, failed: true, fresh: false };
+  } else {
+    state.scoreboardError = 'Confronto fra sprint non disponibile';
+  }
+  render();
+  if (state.scoreboardCache) state.scoreboardCache.fresh = false;
 }
 
 async function fetchRecentAISessions() {
@@ -2450,6 +2479,7 @@ function fmt(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0'
 function render() {
   document.getElementById('app').innerHTML = layout();
   attachEvents();
+  kcSync();
 }
 
 function updateHeaderActions() {
@@ -3158,7 +3188,8 @@ function scoreHead(rows, now, fixed) {
     <div class="pt-pillwrap sbr-w1"><button class="pt-pill" data-sbr-menu="sel" aria-haspopup="listbox" aria-expanded="${state.scoreMenu === 'sel'}" aria-label="Sprint da analizzare"><span>${esc(scoreLabel(now))}</span>${chev}</button>${menu('sel', list, now.id)}</div>
     <span class="sbr-vs">vs</span>
     <div class="pt-pillwrap sbr-w2"><button class="pt-pill sbr-pill2" data-sbr-menu="ref" aria-haspopup="listbox" aria-expanded="${state.scoreMenu === 'ref'}" aria-label="Confronta con"><span>${fixed ? esc(fixed.nome) : 'Il migliore'}</span>${chev}</button>${menu('ref', [['best', 'Il migliore'], ...list], fixed ? fixed.id : 'best')}</div>
-    <span class="sbr-pers">${now.base.toLocaleString('it-IT')} ${now.base === 1 ? 'persona' : 'persone'}${prov}</span></div>`;
+    <span class="sbr-pers">${now.base.toLocaleString('it-IT')} ${now.base === 1 ? 'persona' : 'persone'}${prov}</span>
+    ${state.scoreboardCache ? `<span class="sbr-upd">${kcMark(state.scoreboardCache)}</span>` : ''}</div>`;
 }
 
 function sprintScoreboardCard() {
@@ -5159,11 +5190,8 @@ function funnelTopBar() {
 // Ora dell'ultimo calcolo e tasto «Aggiorna», solo quando i numeri a schermo vengono dalla cache.
 function funnelCacheBadge(c = state.funnelCache, ready = state.funnel, loading = state.funnelLoading) {
   if (!c || !c.computedAt || loading || !ready) return '';
-  const at = new Date(c.computedAt);
-  const when = (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
-    + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
   return `<div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)">
-      <span>calcolato ${when}${c.pending ? ' · ricalcolo in corso…' : ''}</span>
+      ${kcMark(c)}
       <button id="funnel-cache-refresh" class="tab-action" ${c.pending ? 'disabled' : ''}>Aggiorna</button>
     </div>`;
 }
@@ -5303,22 +5331,15 @@ const dayAfterTs = d => {
 };
 
 // Come eventFunnelCachePoll, per Attivazione.
-function activationCachePoll(scope, since) {
-  clearTimeout(activationCacheTimer);
-  activationCacheTimer = setTimeout(async () => {
-    const mine = () => state.activationCache && state.activationCache.scope === scope;
-    if (!mine()) return;
-    const c = await funnelFromCache(scope, false, 'activation');
-    if (!mine()) return;
-    if (c && !c.pending) { if (state.page === 'funnel' && state.funnelMode === 'activation') fetchActivation({ quiet: true }); return; }
-    if (Date.now() - since < 5 * 60 * 1000) { activationCachePoll(scope, since); return; }
-    state.activationCache = { ...state.activationCache, pending: false };
-    if (state.page === 'funnel' && state.funnelMode === 'activation') render();
-  }, 10000);
+async function activationCachePoll(scope, force) {
+  const mine = () => state.activationCache && state.activationCache.scope === scope;
+  const r = await kpiRecompute('activation', scope, force);
+  if (!mine()) return;
+  if (state.page === 'funnel' && state.funnelMode === 'activation') await fetchActivation({ quiet: true, failed: r.failed, fresh: !!r.recomputed });
+  else state.activationCache = { ...state.activationCache, pending: false, failed: r.failed };
 }
 
 async function fetchActivation(opts = {}) {
-  clearTimeout(activationCacheTimer);
   const req = ++activationReqSeq;
   state.activationLoading = !((opts.force || opts.quiet) && !!state.activation && !!state.activationCache);
   state.activationError = null;
@@ -5342,7 +5363,7 @@ async function fetchActivation(opts = {}) {
     const d = c && c.data;
     if (d && d.result && sameInstant(d.p_start, p_start) && sameInstant(d.p_end, p_end)) {
       state.activation = d.result;
-      state.activationCache = { scope, computedAt: c.computed_at, pending: !!c.pending };
+      state.activationCache = { scope, computedAt: c.computed_at, pending: opts.quiet ? false : !!c.pending, failed: opts.quiet ? !!opts.failed : c.failed, fresh: !!opts.fresh };
     } else {
       state.activationCache = null;
       const res = await sb.rpc('kpi_activation', args);
@@ -5353,7 +5374,8 @@ async function fetchActivation(opts = {}) {
   } catch (e) { if (req !== activationReqSeq) return; state.activationError = e.message || 'Errore sconosciuto'; }
   state.activationLoading = false;
   render();
-  if (state.activationCache && state.activationCache.pending) activationCachePoll(state.activationCache.scope, Date.now());
+  if (state.activationCache) state.activationCache.fresh = false;
+  if (state.activationCache && state.activationCache.pending) activationCachePoll(state.activationCache.scope, !!opts.force);
 }
 
 const actInt = n => Number(n || 0).toLocaleString('it-IT');
@@ -7558,10 +7580,7 @@ function premiumHeaderBar() {
 function premiumCacheNote() {
   const c = state.premiumCache;
   if (!c || !c.computedAt || !state.premiumData) return '';
-  const at = new Date(c.computedAt);
-  const when = (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
-    + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
-  return ` · calcolato ${when}${c.pending ? ' · ricalcolo in corso…' : ''}`;
+  return ' · ' + kcMark(c);
 }
 
 function pagePremium() {

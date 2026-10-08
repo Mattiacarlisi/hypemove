@@ -1090,3 +1090,20 @@
 }
 @media (max-width: 700px) { .sbr-card { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { .sbr-loading .pt-sk { animation: none; } }
+
+/* ── Cache «calcola all'entrata»: animazione di aggiornamento (solo transform e opacity) ── */
+.kc-busy { position: relative; }
+.kc-busy::before {
+  content: ''; position: absolute; left: 0; top: 0; width: 35%; height: 2px; z-index: 5; pointer-events: none;
+  background: #4361ee; border-radius: 2px; transform: translateX(0); animation: kc-run 1.4s ease-in-out infinite alternate;
+}
+@keyframes kc-run { from { transform: translateX(0); } to { transform: translateX(185.7%); } }
+.kc-pulse { animation: kc-pulse 1.6s ease-in-out infinite; }
+@keyframes kc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+.kc-fade { animation: kc-in 250ms ease-out; }
+@keyframes kc-in { from { opacity: .55; } to { opacity: 1; } }
+.sbr-upd { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) {
+  .kc-busy::before { animation: none; width: 100%; opacity: .6; }
+  .kc-pulse, .kc-fade { animation: none; }
+}
