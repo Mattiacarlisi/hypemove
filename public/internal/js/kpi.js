@@ -506,7 +506,7 @@ let state = {
   extraCharts: null,
   growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
   // Card "Abbonamenti" (overview): dati da kpi_premium_timeline, periodo e confronto scelti qui.
-  premTimeline: null, premTimelineError: null, ptlFrom: null, ptlTo: null, ptlCompare: false,
+  premTimeline: null, premTimelineError: null, ptlPeriod: 'sprint', ptlSprintId: null, ptlMenu: false, ptlW: 800, ptlAnimated: '',
   sprints: [], sprintsLoading: false,
   sprintFormOpen: false, sprintEditingId: null,
   sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' },
@@ -669,7 +669,7 @@ async function fetchData() {
     state.chart = ch.data || [];
     if (!ec.error) state.extraCharts = ec.data;
     if (!lk.error) state.likedExercises = lk.data;
-    if (pt.error) state.premTimelineError = pt.error.message || 'Errore caricamento abbonamenti';
+    if (pt.error) state.premTimelineError = pt.error.message || 'Errore nel caricamento';
     else { state.premTimeline = pt.data || []; state.premTimelineError = null; }
     state.lastUpdated = new Date();
     state.overviewStale = false;
@@ -2718,32 +2718,19 @@ function page() {
 
 const GOAL_BAR_COLORS = ['#a78bfa', '#22d3ee', '#4ade80', '#f59e0b', '#f43f5e', '#60a5fa', '#fbbf24', '#34d399'];
 
-// ── Card "Abbonamenti" (overview) ─────────────────────────────────────
-// Un abbonamento Play per riga da kpi_premium_timeline (fonte play_token_facts: test e account
-// interni già esclusi); i conti si fanno qui, così cambiare periodo non richiama il DB.
-// Sopra tre risposte (paganti, prove del periodo, prove in scadenza), sotto la curva dei paganti
-// giorno per giorno.
-const PTL_PRICE_MONTH = { monthly: 9.90, yearly: 29.99 / 12 };
-const PTL = { paid: '#fbbf24', trial: '#a78bfa', lost: '#3c3c55', warn: '#fb923c', grid: '#1d1d2b', faint: '#4a4a68', surface: '#111118' };
-const PTL_OUTCOME = {
-  converted: { l: 'pagante',     c: PTL.paid },
-  lost:      { l: 'persa',       c: PTL.lost },
-  pending:   { l: 'in attesa di esito', c: PTL.trial, outline: true },
-  canceling: { l: 'già disdetta', c: PTL.warn },
-  open:      { l: 'in corso',    c: PTL.trial },
-};
-const PTL_UNITS_MAX = 24;       // oltre, i quadratini diventano una barra proporzionale
-const PTL_CAL_DAYS  = 8;        // le prove durano 7 giorni: 8 giorni coprono tutte quelle aperte
-const PTL_WEEKDAYS  = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'];
-
+// ── Sezione "Prove gratuite" (overview) ───────────────────────────────
+// Una prova per riga da kpi_premium_timeline (fonte play_token_facts: test e account interni
+// già esclusi); i conti si fanno qui, così cambiare periodo non richiama il DB.
+// Numeri a sinistra (ha pagato / pagherà / disdette), a destra una linea per prova dal giorno
+// di avvio a quello di chiusura.
+const PT_COL = { paid: '#4ade80', soon: '#4361ee', quit: '#f87171' };
+const PT_LABEL = { paid: 'Ha pagato', soon: 'Pagherà', quit: 'Disdette' };
+const PT_ORDER = ['paid', 'soon', 'quit'];
+const PT_PERIODS = [['oggi', 'Oggi'], ['settimana', 'Settimana'], ['mese', 'Mese'], ['sprint', 'Sprint']];
 const romeDay = ts => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 const addDays = (day, n) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dayDiff = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 864e5);
 const ddmm = day => day.slice(8, 10) + '/' + day.slice(5, 7);
-
-function ptlPlan(product) {
-  return /year/i.test(product || '') ? 'yearly' : /month/i.test(product || '') ? 'monthly' : null;
-}
 
 // Esito di una prova, guardando lo stato attuale del token.
 // 'pending': la prova è scaduta ma il token dice ancora "prova in corso". Google non ha ancora
@@ -2757,271 +2744,214 @@ function ptlTrialOutcome(t, now) {
   return t.status === 'cancelled' ? 'canceling' : 'open';
 }
 
-// Fine del periodo pagato. Un rimborso (revoked) chiude oggi anche se la scadenza è futura.
-function ptlPaidEnd(t, now) {
-  const exp = t.expires_at ? new Date(t.expires_at) : now;
-  return t.status === 'revoked' && exp > now ? now : exp;
-}
-
-// Periodo scelto con le due date; senza scelta, gli ultimi 30 giorni fino a oggi.
-function ptlPeriod(today) {
-  let to   = state.ptlTo && state.ptlTo < today ? state.ptlTo : today;
-  let from = state.ptlFrom || addDays(to, -29);
-  if (from > to) [from, to] = [to, from];
-  return { from, to };
-}
-
-function premiumTimelineModel() {
-  const rows  = state.premTimeline || [];
-  const now   = new Date();
-  const today = romeDay(now);
-  const first = rows.length ? romeDay(rows[0].acquired_at) : today;
-  const { from, to } = ptlPeriod(today);
-  const inPeriod = day => day >= from && day <= to;
-
-  // Paganti attivi a fine giornata, a giorni di Roma; oggi = adesso.
-  const spans = rows.filter(t => t.paid_at).map(t => ({
-    t, from: romeDay(t.paid_at), to: romeDay(ptlPaidEnd(t, now)), ended: ptlPaidEnd(t, now) <= now,
-  }));
-  const activeAt = d => d === today
-    ? spans.filter(x => !x.ended)
-    : spans.filter(x => x.from <= d && x.to > d);
-  const activeOn = d => activeAt(d).length;
-  const series = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) series.push({ day: d, v: activeOn(d) });
-
-  // Periodo precedente di pari durata, subito prima di "from".
-  const len = dayDiff(from, to) + 1;
-  const prevFrom = addDays(from, -len);
-  const inPrev = day => day >= prevFrom && day < from;
-  const prevSeries = series.map((p, i) => ({ day: p.day, v: activeOn(addDays(prevFrom, i)) }));
-  const entries = spans.filter(x => inPeriod(x.from)).map(x => ({ day: x.from, plan: ptlPlan(x.t.product), fromTrial: !!x.t.trial_at }));
-  const exits   = spans.filter(x => x.ended && inPeriod(x.to)).map(x => ({ day: x.to, plan: ptlPlan(x.t.product) }));
-
-  const trials = rows.filter(t => t.trial_at && inPeriod(romeDay(t.trial_at)))
-    .map(t => ({ outcome: ptlTrialOutcome(t, now) }));
-  const outcomes = { converted: 0, lost: 0, pending: 0, canceling: 0, open: 0 };
-  trials.forEach(t => outcomes[t.outcome]++);
-
-  // Prove arrivate a scadenza: le paganti il giorno del primo pagamento, le altre il giorno
-  // di scadenza. Contate per giorno di fine, così "perse nel periodo" vuol dire perse in quei giorni.
-  const ends = rows.filter(t => t.trial_at).map(t => {
-    const outcome = ptlTrialOutcome(t, now);
-    const end = outcome === 'converted' ? t.paid_at : t.expires_at;
-    return end && (outcome === 'converted' || outcome === 'lost' || outcome === 'pending')
-      ? { outcome, day: romeDay(end), start: romeDay(t.trial_at), plan: ptlPlan(t.product) } : null;
-  }).filter(Boolean);
-  const ended = ends.filter(e => inPeriod(e.day));
-  const lostList = ended.filter(e => e.outcome === 'lost').sort((a, b) => b.day.localeCompare(a.day));
-  const pendingList = ended.filter(e => e.outcome === 'pending');
-
-  // Prove aperte (di qualunque periodo) per giorno di scadenza.
-  const due = {};
-  rows.forEach(t => {
-    const o = ptlTrialOutcome(t, now);
-    if (!t.trial_at || (o !== 'open' && o !== 'canceling')) return;
-    const day = romeDay(t.expires_at);
-    (due[day] = due[day] || { n: 0, canceling: 0 }).n++;
-    if (o === 'canceling') due[day].canceling++;
+// Sprint della sezione: niente sprint di test, in ordine di inizio. Ognuno arriva fino al giorno
+// prima dell'inizio del successivo (l'ultimo è aperto).
+function ptSprints() {
+  const list = (state.sprints || []).filter(s => !/test/i.test(s.nome || ''))
+    .map(s => ({ id: s.id, nome: s.nome, from: String(s.inizio).slice(0, 10), fine: String(s.fine || s.inizio).slice(0, 10) }))
+    .sort((a, b) => a.from.localeCompare(b.from) || String(a.id).localeCompare(String(b.id)));
+  list.forEach(s => {
+    const next = list.find(n => n.from > s.from);
+    s.to = next ? addDays(next.from, -1) : null;
+    s.label = `${s.nome} · ${ddmm(s.from)}–${ddmm(s.fine)}`;
   });
-
-  // Paganti a fine periodo: "non rinnova" esiste solo per chi paga adesso.
-  const paying = activeAt(to);
-  const prev = {
-    trials:  rows.filter(t => t.trial_at && inPrev(romeDay(t.trial_at))).length,
-    newPaid: spans.filter(x => inPrev(x.from)).length,
-    paying:  activeOn(addDays(from, -1)),
-    lost:    ends.filter(e => e.outcome === 'lost' && inPrev(e.day)).length,
-  };
-  return {
-    today, first, from, to, series, entries, exits, trials, outcomes, due,
-    ended, lostList, pendingList,
-    payingNow: paying.length,
-    payingCanceling: to === today ? paying.filter(x => x.t.status === 'cancelled').length : 0,
-    mrr: paying.reduce((s, x) => s + (PTL_PRICE_MONTH[ptlPlan(x.t.product)] || 0), 0),
-    newPaid: entries.length,
-    prevSeries, prev,
-  };
+  return list;
 }
 
-// "+50% · da 4 a 6". Da 0 la percentuale non esiste: si scrivono solo i numeri.
-// lowerIsBetter: per le perdite, dove salire è rosso e scendere è verde.
-function ptlChange(cur, prev, lowerIsBetter) {
-  if (prev == null) return '';
-  const good = lowerIsBetter ? cur < prev : cur > prev;
-  const col = cur === prev ? 'var(--muted)' : good ? 'var(--mattia)' : 'var(--red)';
-  const pct = prev === 0 ? (cur === 0 ? '=' : 'nuovo') : (cur === prev ? '=' : (cur > prev ? '+' : '') + Math.round((cur - prev) / prev * 100) + '%');
-  return `<span style="font-family:var(--mono);font-size:11.5px;color:${col}">${pct}</span><span style="font-size:11.5px;color:var(--muted)"> · da ${prev} a ${cur}</span>`;
+// Periodo scelto: { from, to (null = fino a oggi), sprints, sprint }. null se gli sprint non ci sono ancora.
+function ptPeriod(today) {
+  const kind = state.ptlPeriod;
+  if (kind === 'oggi') return { from: today, to: today };
+  if (kind === 'settimana') return { from: addDays(today, -6), to: today };
+  if (kind === 'mese') return { from: addDays(today, -29), to: today };
+  const sprints = ptSprints();
+  if (!sprints.length) return null;
+  const cur = sprints.find(s => s.id === state.ptlSprintId)
+    || [...sprints].reverse().find(s => s.from <= today) || sprints[sprints.length - 1];
+  return { from: cur.from, to: cur.to, sprints, sprint: cur };
 }
 
-function premiumTimelineChart(m) {
-  const pts = m.series, n = pts.length;
-  if (!n) return chartPlaceholder();
-  const W = 900, L = 30, R = 34, T = 16, chartH = 150;
-  const axisY = T + chartH + 16;
-  const spanDays = Math.max(1, dayDiff(m.from, m.to));
-  const x = day => L + dayDiff(m.from, day) / spanDays * (W - L - R);
-  const ghost = state.ptlCompare && m.prevSeries ? m.prevSeries : null;
-  const maxV = Math.max(4, ...pts.map(p => p.v), ...(ghost ? ghost.map(p => p.v) : []));
-  const step = Math.max(1, Math.ceil(maxV / 3));
-  const top  = step * Math.ceil(maxV / step);
-  const y = v => T + chartH - v / top * chartH;
+function ptModel(per) {
+  const now = new Date(), today = romeDay(now);
+  const inPer = day => day >= per.from && (!per.to || day <= per.to);
+  const trials = (state.premTimeline || []).filter(t => t.trial_at && inPer(romeDay(t.trial_at))).map(t => {
+    const o = ptlTrialOutcome(t, now);
+    const start = romeDay(t.trial_at);
+    const kind = o === 'converted' ? 'paid' : (o === 'open' || o === 'pending') ? 'soon' : 'quit';
+    let end = null;
+    if (kind === 'paid') end = romeDay(t.paid_at);
+    else if (kind === 'quit') {
+      const exp = t.expires_at ? romeDay(t.expires_at) : start;
+      end = t.cancelled_at ? romeDay(t.cancelled_at) : exp;
+      if (end > exp) end = exp;
+    }
+    if (end && end < start) end = start;
+    return { kind, start, end };
+  }).sort((a, b) => a.start.localeCompare(b.start) || (a.end || '9').localeCompare(b.end || '9'));
+  const count = { paid: 0, soon: 0, quit: 0 };
+  trials.forEach(t => count[t.kind]++);
+  const toToday = !per.to || per.to >= today;
+  let last = per.from;
+  trials.forEach(t => { if (t.end && t.end > last) last = t.end; if (t.start > last) last = t.start; });
+  let axisEnd = addDays(last, 1);
+  // Una prova aperta arriva a oggi: l'asse la contiene anche se il periodo è già chiuso.
+  if ((toToday || trials.some(t => !t.end)) && axisEnd < addDays(today, 1)) axisEnd = addDays(today, 1);
+  return { today, trials, count, from: per.from, axisEnd };
+}
 
-  let grid = '';
-  for (let v = 0; v <= top; v += step) {
-    grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${PTL.grid}"/>
-             <text x="${L - 8}" y="${y(v) + 3}" font-size="9.5" text-anchor="end" fill="${PTL.faint}">${v}</text>`;
+// Grafico: X = giorni di calendario, Y = numero della prova (1 in basso).
+function ptChart(m, W, animate, loading) {
+  const narrow = W < 520;
+  const X0 = narrow ? 36 : 56, X1 = W - (narrow ? 16 : 24), T = 20;
+  const N = m.trials.length, rows = Math.max(3, N);
+  const plotH = Math.max(narrow ? 130 : 264, (rows + 0.6) * 22);
+  const Y1 = T + plotH, top = rows + 0.6;
+  const nd = dayDiff(m.from, m.axisEnd) + 1;
+  const X = d => X0 + (X1 - X0) * dayDiff(m.from, d) / (nd - 1);
+  const Y = v => Y1 - plotH * v / top;
+  const every = Math.max(1, Math.ceil(40 / ((X1 - X0) / (nd - 1))));
+  let g = `<text x="${narrow ? 0 : X0 - 12}" y="${T - 8}" class="pt-axl" text-anchor="${narrow ? 'start' : 'end'}">prova</text>`;
+  for (let i = 0; i < nd; i++) {
+    const d = addDays(m.from, i), x = X(d).toFixed(1);
+    g += `<line x1="${x}" y1="${T}" x2="${x}" y2="${Y1 + (i % every === 0 ? 6 : 3)}" class="pt-gv"/>`;
+    if (d === m.today) g += `<line x1="${x}" y1="${T}" x2="${x}" y2="${Y1}" class="pt-today"/><text x="${x}" y="${Y1 + 24}" class="pt-tick pt-tick-now" text-anchor="middle">oggi</text>`;
+    else if (i % every === 0 && Math.abs(dayDiff(d, m.today)) >= every) g += `<text x="${x}" y="${Y1 + 24}" class="pt-tick" text-anchor="middle">${narrow ? d.slice(8) : ddmm(d)}</text>`;
   }
-
-  let path = `M${x(pts[0].day)},${y(pts[0].v)}`;
-  pts.forEach((p, i) => { if (i) path += ` H${x(p.day)} V${y(p.v)}`; });
-  const area = `${path} V${y(0)} H${x(pts[0].day)} Z`;
-  const vOf = day => (pts.find(p => p.day === day) || pts[n - 1]).v;
-
-  const planTxt = p => p === 'yearly' ? 'annuale' : p === 'monthly' ? 'mensile' : 'abbonamento';
-  const marks = m.entries.map(e => `<circle cx="${x(e.day)}" cy="${y(vOf(e.day))}" r="4.5" fill="${PTL.paid}" stroke="${PTL.surface}" stroke-width="2">
-      <title>${ddmm(e.day)}: nuovo pagante, ${planTxt(e.plan)}${e.fromTrial ? ' dopo la prova' : ''}</title></circle>`).join('')
-    + m.exits.map(e => `<circle cx="${x(e.day)}" cy="${y(vOf(e.day))}" r="4.5" fill="${PTL.faint}" stroke="${PTL.surface}" stroke-width="2">
-      <title>${ddmm(e.day)}: ${planTxt(e.plan)} non rinnovato</title></circle>`).join('');
-
-  // Hover per giorno: fasce trasparenti larghe quanto un giorno.
-  const slot = (W - L - R) / spanDays;
-  const hover = pts.map(p => `<rect x="${x(p.day) - slot / 2}" y="${T}" width="${slot}" height="${chartH}" fill="transparent"><title>${ddmm(p.day)}: ${p.v} paganti${ghost ? ` (periodo precedente: ${ghost[pts.indexOf(p)].v})` : ''}</title></rect>`).join('');
-
-  const last = pts[n - 1];
-  const every = Math.max(1, Math.ceil(n / 6));
-  const xl = pts.filter((_, i) => i % every === 0 && n - 1 - i >= every / 2).concat(last)
-    .map(p => `<text x="${x(p.day)}" y="${axisY}" font-size="9.5" text-anchor="middle" fill="${p.day === m.today ? 'var(--text)' : PTL.faint}">${p.day === m.today ? 'oggi' : ddmm(p.day)}</text>`).join('');
-  const H = axisY + 6;
-
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block" xmlns="http://www.w3.org/2000/svg">
-    <defs><linearGradient id="ptl-area" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${PTL.paid}" stop-opacity=".22"/><stop offset="1" stop-color="${PTL.paid}" stop-opacity="0"/>
-    </linearGradient></defs>
-    ${grid}
-    <path d="${area}" fill="url(#ptl-area)"/>
-    ${ghost ? (() => {
-      let g = `M${x(pts[0].day)},${y(ghost[0].v)}`;
-      ghost.forEach((p, i) => { if (i) g += ` H${x(pts[i].day)} V${y(p.v)}`; });
-      return `<path d="${g}" fill="none" stroke="#7070a0" stroke-opacity=".6" stroke-width="1.5" stroke-linejoin="round"/>
-        <text x="${x(m.to) - 6}" y="${y(ghost[ghost.length - 1].v) - 6}" font-size="10" text-anchor="end" fill="#7070a0">periodo precedente</text>`;
-    })() : ''}
-    <path d="${path}" fill="none" stroke="${PTL.paid}" stroke-width="2" stroke-linejoin="round"/>
-    ${hover}${marks}
-    <circle cx="${x(last.day)}" cy="${y(last.v)}" r="5" fill="${PTL.paid}" stroke="${PTL.surface}" stroke-width="2"/>
-    <text x="${x(last.day) + 10}" y="${y(last.v) + 4}" font-size="12" font-weight="600" fill="var(--text)" font-family="var(--mono)">${last.v}</text>
-    ${xl}
+  g += `<line x1="${X0}" y1="${Y1}" x2="${X1}" y2="${Y1}" class="pt-axis"/><line x1="${X0}" y1="${T}" x2="${X0}" y2="${Y1}" class="pt-axis"/>`;
+  for (let v = 1; v <= rows; v++) {
+    g += `<line x1="${X0}" y1="${Y(v).toFixed(1)}" x2="${X1}" y2="${Y(v).toFixed(1)}" class="pt-gh"/><text x="${X0 - 12}" y="${(Y(v) + 4).toFixed(1)}" class="pt-tick ${v > N ? 'pt-tick-off' : ''}" text-anchor="end">${v}</text>`;
+  }
+  let lines = '', tips = '';
+  m.trials.forEach((t, i) => {
+    const y = Y(i + 1).toFixed(1);
+    const xa = X(t.start), xz = X(t.end || m.today);
+    const endTxt = t.end ? ddmm(t.end) : 'oggi';
+    let s = `<line x1="${xa.toFixed(1)}" y1="${y}" x2="${xz.toFixed(1)}" y2="${y}" class="pt-ln"/><circle cx="${xa.toFixed(1)}" cy="${y}" r="5" class="pt-start"/>`;
+    if (t.end) {
+      const c = PT_COL[t.kind], xe = X(addDays(t.end, 1));
+      s += `<line x1="${xz.toFixed(1)}" y1="${y}" x2="${xe.toFixed(1)}" y2="${y}" stroke="${c}" class="pt-endbar"/><circle cx="${xz.toFixed(1)}" cy="${y}" r="9" fill="${c}" class="pt-enddot"/>`;
+    }
+    const hitX = Math.min(xa, xz) - 10, hitW = Math.abs(xz - xa) + 20 + (t.end ? X(addDays(t.end, 1)) - xz : 0);
+    lines += `<g class="pt-row" data-pt-i="${i}"><rect x="${hitX.toFixed(1)}" y="${(Y(i + 1) - 11).toFixed(1)}" width="${hitW.toFixed(1)}" height="22" class="pt-hit"/>${s}`
+      + `<circle cx="${xa.toFixed(1)}" cy="${y}" r="13" class="pt-ring"/><circle cx="${xz.toFixed(1)}" cy="${y}" r="13" class="pt-ring"/></g>`;
+    const txt = `${ddmm(t.start)} – ${endTxt}`, w = txt.length * 7.6 + 28;
+    let px = xz + 24; if (px + w > W - 4) px = Math.max(4, xa - 24 - w);
+    tips += `<g class="pt-tip" data-pt-tip="${i}"><rect x="${px.toFixed(1)}" y="${(Y(i + 1) - 15).toFixed(1)}" width="${w.toFixed(1)}" height="30" rx="15"/><text x="${(px + w / 2).toFixed(1)}" y="${(Y(i + 1) + 4.5).toFixed(1)}" text-anchor="middle">${txt}</text></g>`;
+  });
+  const H = Y1 + 36;
+  const reveal = animate ? `<animate attributeName="width" from="0" to="${W}" dur="1.1s" fill="freeze" calcMode="spline" keySplines=".2 .7 .2 1" keyTimes="0;1"/>` : '';
+  return `<svg class="pt-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs><clipPath id="pt-clip"><rect x="0" y="0" width="${animate ? 0 : W}" height="${H}">${reveal}</rect></clipPath></defs>
+    ${g}<g clip-path="url(#pt-clip)">${lines}</g>${tips}
+    ${N || loading ? '' : `<text x="${(X0 + X1) / 2}" y="${(T + Y1) / 2}" class="pt-empty" text-anchor="middle">Nessuna prova</text>`}
   </svg>`;
 }
 
-function premiumTimelineCard() {
-  const shell = (inner, m) => `
-    <div class="card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-        <div class="card-title" style="margin-bottom:0" title="Abbonamenti Google Play. Un abbonamento conta una volta anche se passa su due account; acquisti di test e account interni esclusi.">Abbonamenti</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="filter-btn ${state.ptlCompare ? 'active' : ''}" data-ptl-compare title="Mostra sul grafico la curva del periodo precedente di pari durata">Confronta</button>
-          ${m ? `<span class="filter-label">Dal</span>
-          <input type="date" class="form-input" data-ptl-date="from" value="${m.from}" min="${m.first}" max="${m.today}" style="width:140px;padding:4px 8px;font-size:12px">
-          <span class="filter-label">al</span>
-          <input type="date" class="form-input" data-ptl-date="to" value="${m.to}" min="${m.first}" max="${m.today}" style="width:140px;padding:4px 8px;font-size:12px">` : ''}
-        </div>
-      </div>
-      ${inner}
-    </div>`;
+// Misura la colonna del grafico e lo ridisegna alla larghezza vera (il testo resta a misura piena).
+function ptFit() {
+  const wrap = document.querySelector('.pt-chart');
+  if (!wrap || !wrap.dataset.ptKey) return;
+  const w = Math.round(wrap.clientWidth);
+  if (!w || Math.abs(w - state.ptlW) < 6) return;
+  state.ptlW = w;
+  const per = ptPeriod(romeDay(new Date()));
+  if (!per || !state.premTimeline) return;
+  wrap.innerHTML = ptChart(ptModel(per), w, wrap.dataset.ptAnim === '1', false);
+}
 
-  if (state.premTimelineError) return shell(`<div style="color:var(--red);font-size:12px">${esc(state.premTimelineError)}</div>`);
-  if (!state.premTimeline) return shell(chartPlaceholder());
+function ptSquares(trials) {
+  const order = { paid: 0, soon: 1, quit: 2 };
+  return [...trials].sort((a, b) => order[a.kind] - order[b.kind])
+    .map(t => `<i class="pt-sq" style="background:${PT_COL[t.kind]}"></i>`).join('');
+}
 
-  const m = premiumTimelineModel();
-  const o = m.outcomes;
-  const periodTxt = `dal ${ddmm(m.from)} ${m.to === m.today ? 'a oggi' : 'al ' + ddmm(m.to)}`;
-  const prevTxt = `rispetto ai ${dayDiff(m.from, m.to) + 1} giorni prima`;
-  const tile = (inner, style = '') => `<div style="background:var(--surface2);border-radius:10px;padding:16px;display:grid;gap:10px;align-content:start;${style}">${inner}</div>`;
-  const k = t => `<div style="font-size:10.5px;color:var(--muted);letter-spacing:.07em;text-transform:uppercase">${t}</div>`;
-  const big = (v, c) => `<div style="font-family:var(--mono);font-size:32px;font-weight:600;line-height:1;color:${c}">${v}</div>`;
-  const note = t => `<div style="font-size:12px;color:var(--muted);line-height:1.5">${t}</div>`;
-  const numTxt = t => `<span style="font-family:var(--mono);color:var(--text)">${t}</span>`;
-  const vs = (html, txt) => `<div>${html} <span style="font-size:11px;color:${PTL.faint}">${txt}</span></div>`;
-  // Quadratino di un esito: pieno, oppure solo bordo per le prove ancora senza esito.
-  const fill = key => PTL_OUTCOME[key].outline
-    ? `background:transparent;box-shadow:inset 0 0 0 2px ${PTL_OUTCOME[key].c}`
-    : `background:${PTL_OUTCOME[key].c}`;
+function ptLegend() {
+  const bar = c => `<svg width="34" height="20" aria-hidden="true"><line x1="10" y1="10" x2="30" y2="10" stroke="${c}" stroke-width="8" stroke-linecap="round"/><circle cx="9" cy="10" r="8" fill="${c}"/></svg>`;
+  return `<div class="pt-legend"><span><svg width="34" height="20" aria-hidden="true"><circle cx="5" cy="10" r="4" fill="#1a1d24" stroke="${PT_COL.soon}" stroke-width="2"/><line x1="10" y1="10" x2="30" y2="10" stroke="${PT_COL.soon}" stroke-width="4" stroke-linecap="round"/></svg>prova</span>`
+    + `<span>${bar(PT_COL.paid)}pagato</span><span>${bar(PT_COL.quit)}disdetta</span></div>`;
+}
 
-  // 1 · Paganti a fine periodo
-  const paidTile = tile(`
-    ${k(m.to === m.today ? 'Paganti' : 'Paganti al ' + ddmm(m.to))}
-    ${big(m.payingNow, PTL.paid)}
-    ${vs(ptlChange(m.payingNow, m.prev.paying), `rispetto al ${ddmm(addDays(m.from, -1))}`)}
-    ${m.payingCanceling ? `<div style="display:inline-flex;width:fit-content;font-size:11px;padding:3px 9px;border-radius:99px;background:#2b1a08;color:${PTL.warn}">${m.payingCanceling === 1 ? '1 non rinnova' : m.payingCanceling + ' non rinnovano'}</div>` : ''}
-    ${note(`MRR stimato ${numTxt('€ ' + m.mrr.toFixed(2).replace('.', ','))}<br>Nuovi paganti ${periodTxt}: ${numTxt(m.newPaid)} ${ptlChange(m.newPaid, m.prev.newPaid)}`)}`);
+function ptNums(count, total, skeleton) {
+  const num = (q, c) => skeleton ? '<span class="pt-num pt-sk"></span>' : `<span class="pt-num" style="color:${q ? c : '#6b7280'}">${q}</span>`;
+  const rows = PT_ORDER.map(k => `<div class="pt-nrow">${num(count[k], k === 'quit' ? '#ffffff' : PT_COL[k])}<span class="pt-nlab"><i class="pt-dot" style="background:${PT_COL[k]}"></i>${k === 'quit' && count.quit === 1 ? 'Disdetta' : PT_LABEL[k]}</span></div>`).join('');
+  return `<div class="pt-nrow">${num(total, '#ffffff')}<span class="pt-nlab pt-nlab-t">${total === 1 ? 'prova' : 'prove'}</span></div>${rows}`;
+}
 
-  // 2a · Prove iniziate nel periodo: quadratini finché sono pochi, poi barra proporzionale.
-  const order = ['converted', 'lost', 'pending', 'canceling', 'open'];
-  const total = m.trials.length;
-  const units = total <= PTL_UNITS_MAX
-    ? `<div style="display:flex;gap:4px;flex-wrap:wrap">${order.flatMap(key => Array(o[key]).fill(`<i title="${PTL_OUTCOME[key].l}" style="width:16px;height:16px;border-radius:4px;display:block;box-sizing:border-box;${fill(key)}"></i>`)).join('')}</div>`
-    : `<div style="display:flex;gap:2px;height:14px">${order.filter(key => o[key]).map(key => `<i title="${o[key]} ${PTL_OUTCOME[key].l}" style="flex:${o[key]};border-radius:3px;${fill(key)}"></i>`).join('')}</div>`;
-  const closed = o.converted + o.lost;
-  const startedHalf = `<div style="display:grid;gap:10px;align-content:start;flex:1 1 220px">
-    ${k('Prove iniziate')}
-    ${big(total, 'var(--text)')}
-    ${vs(ptlChange(total, m.prev.trials), prevTxt)}
-    ${total ? units : ''}
-    ${total ? `<div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--muted)">${order.filter(key => o[key]).map(key =>
-      `<span style="display:inline-flex;align-items:center;gap:5px"><i style="width:8px;height:8px;border-radius:2px;display:inline-block;box-sizing:border-box;${fill(key)}"></i>${o[key]} ${PTL_OUTCOME[key].l}</span>`).join('')}</div>` : ''}
-    ${note(closed ? `Di quelle già concluse, ${numTxt(o.converted + ' su ' + closed)} ${o.converted === 1 ? 'è diventata pagante' : 'sono diventate paganti'}.` : total ? 'Nessuna prova ancora conclusa.' : 'Nessuna prova nel periodo.')}
-  </div>`;
-
-  // 2b · Prove scadute senza rinnovo, contate nel giorno in cui sono scadute.
-  const lost = m.lostList;
-  const pending = m.pendingList;
-  const endedClosed = m.ended.length - pending.length;
-  const LOST_ROWS = 5;
-  const lostRows = lost.slice(0, LOST_ROWS).map(e => `<div style="display:flex;gap:8px;font-size:12px;color:var(--muted)">
-      <span style="font-family:var(--mono);color:var(--text)">${ddmm(e.day)}</span><span>iniziata il ${ddmm(e.start)}${e.plan === 'monthly' ? ' · mensile' : e.plan === 'yearly' ? ' · annuale' : ''}</span></div>`).join('')
-    + (lost.length > LOST_ROWS ? `<div style="font-size:11px;color:${PTL.faint}">e altre ${lost.length - LOST_ROWS}</div>` : '');
-  const expiredHalf = `<div style="display:grid;gap:10px;align-content:start;flex:1 1 220px">
-    ${k('Scadute senza rinnovo')}
-    ${big(lost.length, lost.length ? 'var(--red)' : 'var(--text)')}
-    ${vs(ptlChange(lost.length, m.prev.lost, true), prevTxt)}
-    ${lost.length ? `<div style="display:grid;gap:4px">${lostRows}</div>` : ''}
-    ${pending.length ? `<div style="font-size:11.5px;color:${PTL.trial}" title="La prova è scaduta ma Google non ha ancora detto se ha fatto pagare o ha chiuso">${pending.length === 1 ? `1 scaduta il ${ddmm(pending[0].day)} aspetta ancora l'esito da Google` : `${pending.length} scadute aspettano ancora l'esito da Google`}</div>` : ''}
-    ${note(endedClosed ? `Su ${numTxt(endedClosed)} ${endedClosed === 1 ? 'prova arrivata' : 'prove arrivate'} a scadenza ${periodTxt}, ${numTxt(lost.length)} senza pagamento.` : 'Nessuna prova arrivata a scadenza nel periodo.')}
-  </div>`;
-  const trialTile = tile(`<div style="display:flex;flex-wrap:wrap;gap:16px 20px">${startedHalf}
-    <div style="width:1px;background:var(--border,#26263a);align-self:stretch"></div>${expiredHalf}</div>`, 'grid-column:span 2');
-
-  // 3 · Prove che scadono nei prossimi giorni: pallino col numero.
-  const dueTotal = Object.values(m.due).reduce((s, d) => s + d.n, 0);
-  const dueCanceling = Object.values(m.due).reduce((s, d) => s + d.canceling, 0);
-  let cal = '';
-  for (let i = 0; i < PTL_CAL_DAYS; i++) {
-    const day = addDays(m.today, i);
-    const d = m.due[day];
-    const wd = PTL_WEEKDAYS[new Date(day + 'T12:00:00Z').getUTCDay()];
-    const badge = d
-      ? `<span title="${d.n} ${d.n === 1 ? 'prova scade' : 'prove scadono'} il ${ddmm(day)}${d.canceling ? `, ${d.canceling} già disdett${d.canceling === 1 ? 'a' : 'e'}` : ''}"
-          style="min-width:20px;height:20px;padding:0 5px;box-sizing:border-box;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:#111118;background:${d.canceling === d.n ? PTL.warn : PTL.trial};${d.canceling && d.canceling < d.n ? `box-shadow:0 0 0 2px ${PTL.warn}` : ''}">${d.n}</span>`
-      : `<span style="height:20px"></span>`;
-    cal += `<div style="display:grid;gap:4px;justify-items:center;font-size:10px;color:${i === 0 ? 'var(--text)' : 'var(--muted)'}">
-      <span>${i === 0 ? 'oggi' : wd}</span><span style="font-family:var(--mono)">${day.slice(8)}</span>${badge}</div>`;
+function ptHead(per, withSeg) {
+  const seg = withSeg ? `<div class="pt-seg">${PT_PERIODS.map(([k, l]) => `<button class="pt-segb${state.ptlPeriod === k ? ' pt-on' : ''}" data-pt-period="${k}">${l}</button>`).join('')}</div>` : '';
+  let mid = '';
+  if (state.ptlPeriod === 'sprint') {
+    mid = per && per.sprint
+      ? `<div class="pt-pillwrap"><button class="pt-pill" data-pt-menu aria-haspopup="listbox" aria-expanded="${state.ptlMenu}"><span>${esc(per.sprint.label)}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`
+        + (state.ptlMenu ? `<div class="pt-menu" role="listbox">${[...per.sprints].reverse().map(s => `<button class="pt-opt${s.id === per.sprint.id ? ' pt-sel' : ''}" role="option" data-pt-sprint="${s.id}"><span class="pt-optdot"></span>${esc(s.label)}</button>`).join('')}</div>` : '') + '</div>'
+      : '<span class="pt-pill pt-pill-sk"></span>';
+  } else if (per) {
+    mid = `<span class="pt-range">${state.ptlPeriod === 'oggi' ? ddmm(per.from) : ddmm(per.from) + ' – ' + ddmm(per.to)}</span>`;
   }
-  const nextDay = Object.keys(m.due).sort()[0];
-  const dueTile = tile(`
-    ${k('Prove che scadono')}
-    ${big(dueTotal, PTL.trial)}
-    <div style="display:grid;grid-template-columns:repeat(${PTL_CAL_DAYS},1fr);gap:2px">${cal}</div>
-    ${note(dueTotal
-      ? `Alla scadenza Google fa pagare o chiude. La prossima è ${PTL_WEEKDAYS[new Date(nextDay + 'T12:00:00Z').getUTCDay()]} ${ddmm(nextDay)}.`
-        + (dueCanceling ? ` <span style="color:${PTL.warn}">${dueCanceling === 1 ? '1 è già disdetta' : dueCanceling + ' sono già disdette'}.</span>` : '')
-      : 'Nessuna prova aperta.')}`);
+  return `<div class="pt-head"><h2 class="pt-title">Prove gratuite</h2>${mid}${seg}</div>`;
+}
 
-  return shell(`
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:22px">
-      ${paidTile}${trialTile}${dueTile}
-    </div>
-    ${premiumTimelineChart(m)}`, m);
+function premiumTimelineCard() {
+  const today = romeDay(new Date());
+  const per = ptPeriod(today);
+  if (state.premTimelineError) {
+    return `<section class="pt-card">${ptHead(per, false)}<div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-pt-retry>Riprova</button></div></section>`;
+  }
+  const loading = !state.premTimeline || !per;
+  const m = loading
+    ? { today, trials: [], count: { paid: 0, soon: 0, quit: 0 }, from: addDays(today, -2), axisEnd: addDays(today, 5) }
+    : ptModel(per);
+  const key = loading ? '' : `${state.ptlPeriod}|${per.sprint ? per.sprint.id : ''}|${m.trials.length}`;
+  const animate = !loading && !PT_REDUCED() && state.ptlAnimated !== key;
+  if (!loading) state.ptlAnimated = key;
+  return `<section class="pt-card">${ptHead(per, true)}
+    <div class="pt-body${loading ? ' pt-loading' : ''}">
+      <div class="pt-left"><div class="pt-nums">${ptNums(m.count, m.trials.length, loading)}</div>
+        <div class="pt-sqs">${ptSquares(m.trials)}</div></div>
+      <div class="pt-right"><div class="pt-ctitle">Durata prove</div>
+        <div class="pt-chart" ${loading ? '' : `data-pt-key="${esc(key)}" data-pt-anim="${animate ? 1 : 0}"`}>${ptChart(m, state.ptlW, animate, loading)}</div>${ptLegend()}</div>
+    </div></section>`;
+}
+const PT_REDUCED = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Gestori della sezione: periodo, selettore sprint, "Riprova", hover (e tocco) sulle linee.
+let ptGlobals = false;
+function attachPremiumTimeline() {
+  document.querySelectorAll('[data-pt-period]').forEach(el => el.addEventListener('click', () => {
+    state.ptlPeriod = el.dataset.ptPeriod; state.ptlMenu = false; render();
+  }));
+  document.querySelector('[data-pt-menu]')?.addEventListener('click', ev => {
+    ev.stopPropagation(); state.ptlMenu = !state.ptlMenu; render();
+  });
+  document.querySelectorAll('[data-pt-sprint]').forEach(el => el.addEventListener('click', () => {
+    state.ptlSprintId = (state.sprints.find(s => String(s.id) === el.dataset.ptSprint) || {}).id; state.ptlMenu = false; render();
+  }));
+  document.querySelector('[data-pt-retry]')?.addEventListener('click', () => {
+    state.premTimelineError = null; state.premTimeline = null; render(); fetchData();
+  });
+  // L'ascolto sta sul contenitore, che resta quando ptFit ridisegna il grafico.
+  const wrap = document.querySelector('.pt-chart');
+  if (wrap) {
+    const set = (i, on) => wrap.querySelectorAll(`[data-pt-i="${i}"], [data-pt-tip="${i}"]`).forEach(el => el.classList.toggle('pt-on', on));
+    const clear = () => wrap.querySelectorAll('.pt-on').forEach(el => el.classList.remove('pt-on'));
+    wrap.addEventListener('mouseover', ev => { const r = ev.target.closest('[data-pt-i]'); clear(); if (r) set(r.dataset.ptI, true); });
+    wrap.addEventListener('mouseleave', clear);
+    wrap.addEventListener('click', ev => {
+      const r = ev.target.closest('[data-pt-i]'), was = r && r.classList.contains('pt-on');
+      clear(); if (r && !was) set(r.dataset.ptI, true);
+    });
+  }
+  ptFit();
+  if (!ptGlobals) {
+    ptGlobals = true;
+    document.addEventListener('click', ev => {
+      if (state.ptlMenu && !ev.target.closest('.pt-pillwrap')) { state.ptlMenu = false; render(); }
+    });
+    let timer;
+    window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(ptFit, 120); });
+  }
 }
 
 // ── CARD «SPRINT VS RECORD» ──────────────────────────────────────────
@@ -3192,7 +3122,8 @@ function pageOverview() {
 
     ${premiumTimelineCard()}
 
-    <div class="card" style="margin-bottom:16px">
+    <div class="grid-2" style="margin-bottom:16px;gap:16px">
+    <div class="card" style="min-width:0">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
         <div class="card-title" style="margin-bottom:0">Crescita utenti totali</div>
         <div style="display:flex;gap:4px">
@@ -3203,7 +3134,7 @@ function pageOverview() {
       ${state.extraCharts?.growth?.length ? growthChart(state.extraCharts.growth, state.growthRange) : chartPlaceholder()}
     </div>
 
-    <div class="card" style="margin-bottom:16px">
+    <div class="card" style="min-width:0">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
         <div class="card-title" style="margin-bottom:0">Workout settimanali</div>
         <div style="display:flex;gap:4px">
@@ -3212,6 +3143,7 @@ function pageOverview() {
       </div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:14px">workout totali per settimana</div>
       ${state.extraCharts?.weekly_workouts?.length ? weeklyWorkoutsChart(state.extraCharts.weekly_workouts, state.weeklyRange) : chartPlaceholder()}
+    </div>
     </div>
 
     <div class="grid-2" style="margin-top:16px">
@@ -11855,14 +11787,7 @@ function attachEvents() {
 
   // Chart range filters
   // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
-  document.querySelectorAll('[data-ptl-date]').forEach(el =>
-    el.addEventListener('change', () => {
-      if (!/^20\d\d-/.test(el.value)) return;
-      state[el.dataset.ptlDate === 'from' ? 'ptlFrom' : 'ptlTo'] = el.value; render();
-    }));
-  document.querySelector('[data-ptl-compare]')?.addEventListener('click', () => {
-    state.ptlCompare = !state.ptlCompare; render();
-  });
+  attachPremiumTimeline();
   document.querySelectorAll('[data-growth-range]').forEach(el =>
     el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));
   document.querySelectorAll('[data-weekly-range]').forEach(el =>

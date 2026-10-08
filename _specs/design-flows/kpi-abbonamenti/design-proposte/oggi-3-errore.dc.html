@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>3 - Errore</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0;background:#0a0a0f}
+</style>
+</helmet>
+<div style="width: 1280px; height: 720px; position: relative; overflow: hidden; box-sizing: border-box; background: #0a0a0f; color: #e8e8f0; font-family: Inter, sans-serif">
+<div style="position:absolute;left:16px;top:16px;width:1248px;box-sizing:border-box;background:#111118;border:1px solid #252535;border-radius:10px;padding:22px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;height:28px;margin-bottom:16px"><div style="font-size:11px;font-weight:600;color:#7070a0;letter-spacing:.08em;text-transform:uppercase">Abbonamenti</div><div style="display:flex;gap:8px;align-items:center"><div style="border:1px solid #2a2a3d;color:#7070a0;font-size:10px;padding:2px 8px;border-radius:4px">Confronta</div></div></div><div style="color:#f87171;font-size:12px">Errore caricamento abbonamenti</div></div><div style="position: absolute; left: {{tp1.x}}; top: {{tp1.y}}; width: 80px; height: 80px; border-radius: 40px; background: #ffffff; opacity: {{tp1.o}}; transform: {{tp1.tf}}; pointer-events: none"></div><div style="position: absolute; left: {{tp2.x}}; top: {{tp2.y}}; width: 80px; height: 80px; border-radius: 40px; background: #ffffff; opacity: {{tp2.o}}; transform: {{tp2.tf}}; pointer-events: none"></div><div style="position: absolute; left: {{tp3.x}}; top: {{tp3.y}}; width: 80px; height: 80px; border-radius: 40px; background: #ffffff; opacity: {{tp3.o}}; transform: {{tp3.tf}}; pointer-events: none"></div><div style="position: absolute; left: {{tp4.x}}; top: {{tp4.y}}; width: 80px; height: 80px; border-radius: 40px; background: #ffffff; opacity: {{tp4.o}}; transform: {{tp4.tf}}; pointer-events: none"></div><div style="position: absolute; left: 0; top: 0; width: 1280px; height: 720px; background: #0a0a0f; opacity: {{veil}}; pointer-events: none"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":720}}'>
+class Component extends DCLogic {
+  componentDidMount() {
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    this.t0 = performance.now();
+    const loop = () => { this.forceUpdate(); this.raf = requestAnimationFrame(loop); };
+    this.raf = requestAnimationFrame(loop);
+  }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+  renderVals() {
+    const C = {"P": 6, "TS": 2.5, "S": [1140, 630], "W": [], "T": [null, null, null, null], "M": [[99, 99], [99, 99]], "H": [[99, 99], [99, 99]], "N": 1, "SW": []};
+    const P = C.P;
+    const t = this.t0 ? ((performance.now() - this.t0) / 1000) % P : C.TS;
+    const cl = (x) => Math.max(0, Math.min(1, x));
+    const p = (a, d) => cl((t - a) / d);
+    const out = (x) => 1 - Math.pow(1 - x, 3);
+    const inout = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+    const pop = (x) => x <= 0 ? 0 : x >= 1 ? 1 : 1 - Math.exp(-6 * x) * Math.cos(9 * x);
+    const f = (x, d) => x.toFixed(d === undefined ? 3 : d);
+    const ent = (a) => { const k = out(p(a, 0.5)); return { o: f(k), tf: 'translateY(' + f(12 * (1 - k), 1) + 'px)' }; };
+    const win = (w) => f(Math.min(p(w[0], 0.18), 1 - p(w[1], 0.18)));
+    let px = C.S[0], py = C.S[1], lx = px, ly = py;
+    C.W.forEach((w) => { const g = inout(p(w[2] - 0.8, 0.8)); px += (w[0] - lx) * g; py += (w[1] - ly) * g; lx = w[0]; ly = w[1]; });
+    const tap = (a) => { const k = a ? p(a[2], 0.45) : 0; return a ? { x: (a[0] - 40) + 'px', y: (a[1] - 40) + 'px', o: k > 0 && k < 1 ? f(0.25 * (1 - k)) : 0, tf: 'scale(' + f(0.3 + 0.6 * out(k)) + ')' } : { x: '0px', y: '0px', o: 0, tf: 'none' }; };
+    const L = {}, U = {}, R = {};
+    for (let k = 0; k < C.N; k++) {
+      const a = k ? C.SW[k - 1] : -9, b = k < C.N - 1 ? C.SW[k] : 99;
+      L['k' + k] = f(Math.min(k ? p(a + 0.15, 0.35) : 1, 1 - p(b, 0.3)));
+      R['k' + k] = f((C.CW || 0) * out(p(k ? a + 0.3 : 0.9, 1.2)), 1) + 'px';
+      for (let n = 0; n < 8; n++) U['k' + k + 'n' + n] = 'scale(' + f(pop(p((k ? a + 0.3 : 0.9) + 0.07 * n, 0.6))) + ')';
+    }
+    return {
+      veil: f(Math.max(1 - p(0, 0.2), p(P - 0.3, 0.3))), L, U, R, bh: f(Math.min(p(C.BH || 99, 0.2), 1)),
+      e1: ent(0.3), e2: ent(0.45), e3: ent(0.6), e4: ent(0.75), e5: ent(0.9),
+      pt: { x: f(px, 1) + 'px', y: f(py, 1) + 'px' },
+      tp1: tap(C.T[0]), tp2: tap(C.T[1]), tp3: tap(C.T[2]), tp4: tap(C.T[3]),
+      m1: win(C.M[0]), m2: win(C.M[1]), h1: win(C.H[0]), h2: win(C.H[1]),
+      sk: f(0.55 + 0.45 * Math.sin(t * 4.2))
+    };
+  }
+}
+</script>
+</body>
+</html>

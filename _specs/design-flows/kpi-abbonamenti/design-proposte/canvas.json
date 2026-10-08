@@ -1,0 +1,144 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-10-08T12:00:00Z"
+ },
+ "title": "KPI Abbonamenti — prove gratuite",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "Main.dc.html": {
+   "w": 1280,
+   "h": 720,
+   "x": 0,
+   "y": 0,
+   "title": "1 - Abbonamenti oggi"
+  },
+  "oggi-2-caricamento.dc.html": {
+   "w": 1280,
+   "h": 720,
+   "x": 1360,
+   "y": 0,
+   "title": "2 - Caricamento"
+  },
+  "oggi-3-errore.dc.html": {
+   "w": 1280,
+   "h": 720,
+   "x": 2720,
+   "y": 0,
+   "title": "3 - Errore"
+  },
+  "oggi-4-nessun-dato.dc.html": {
+   "w": 1280,
+   "h": 720,
+   "x": 4080,
+   "y": 0,
+   "title": "4 - Nessun dato"
+  },
+  "prop-A-tre-colonne.dc.html": {
+   "w": 1280,
+   "h": 424,
+   "x": 0,
+   "y": 2300,
+   "title": "1A - Tre colonne"
+  },
+  "prop-B-una-riga.dc.html": {
+   "w": 1280,
+   "h": 664,
+   "x": 1360,
+   "y": 2300,
+   "title": "1B - Una riga per prova"
+  },
+  "prop-C-sprint-confronto.dc.html": {
+   "w": 1280,
+   "h": 668,
+   "x": 2720,
+   "y": 2300,
+   "title": "1C - Sprint a confronto"
+  },
+  "prop-D-calendario.dc.html": {
+   "w": 1280,
+   "h": 480,
+   "x": 4080,
+   "y": 2300,
+   "title": "1D - Calendario delle prove"
+  },
+  "red-1-prove.dc.html": {
+   "w": 1280,
+   "h": 544,
+   "x": 0,
+   "y": 1100,
+   "title": "1 - Prove gratuite"
+  },
+  "red-2-caricamento.dc.html": {
+   "w": 1280,
+   "h": 544,
+   "x": 1360,
+   "y": 1100,
+   "title": "2 - Caricamento"
+  },
+  "red-3-errore.dc.html": {
+   "w": 1280,
+   "h": 544,
+   "x": 2720,
+   "y": 1100,
+   "title": "3 - Errore"
+  },
+  "red-4-nessuna-prova.dc.html": {
+   "w": 1280,
+   "h": 544,
+   "x": 4080,
+   "y": 1100,
+   "title": "4 - Nessuna prova"
+  },
+  "red-5-finestra-stretta.dc.html": {
+   "w": 390,
+   "h": 696,
+   "x": 5440,
+   "y": 1100,
+   "title": "5 - Finestra stretta"
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "oggi-2-caricamento.dc.html",
+  "oggi-3-errore.dc.html",
+  "oggi-4-nessun-dato.dc.html",
+  "prop-A-tre-colonne.dc.html",
+  "prop-B-una-riga.dc.html",
+  "prop-C-sprint-confronto.dc.html",
+  "prop-D-calendario.dc.html",
+  "red-1-prove.dc.html",
+  "red-2-caricamento.dc.html",
+  "red-3-errore.dc.html",
+  "red-4-nessuna-prova.dc.html",
+  "red-5-finestra-stretta.dc.html"
+ ],
+ "notes": {
+  "oggi": {
+   "x": 0,
+   "y": -300,
+   "text": "Oggi",
+   "kind": "title1",
+   "maxW": 5360
+  },
+  "redesign": {
+   "x": 0,
+   "y": 800,
+   "text": "Redesign",
+   "kind": "title1",
+   "maxW": 5360
+  },
+  "proposte": {
+   "x": 0,
+   "y": 2000,
+   "text": "Proposte",
+   "kind": "title1",
+   "maxW": 5360
+  }
+ },
+ "designSystems": []
+}

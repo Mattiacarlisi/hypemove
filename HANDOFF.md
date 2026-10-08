@@ -38,3 +38,36 @@
 1. Dire al master in poche righe cosa cambia e cosa si toglie nel codice, poi implementare la 1A in `kpi.js` e `kpi.css` copiando misure e colori da `gen.py`.
 2. Provare su schermo grande e telefono con i dati veri, su tutte le schede (eventi, Default, Attivazione), console senza errori.
 3. Commit locale, sha ed elenco delle prove al master.
+
+## 10. Redesign sezione «Abbonamenti» della dashboard KPI — in corso (08/10/2026)
+- Richiesta di Danilo: redesign completo con `/redesign`. «Non si capisce niente». Via il grafico dei paganti nel tempo («n x tempo non ha senso»). Interessa solo: prove iniziate, chi pagherà, chi disdice. «Una disdetta è disdetta basta». La parola «scadono» è sbagliata.
+- Intervista chiusa: restano solo le prove; tre gruppi «Ha pagato», «Pagherà», «Disdetta»; periodo per sprint con il selettore di «Stats».
+- Documento: https://claude.ai/artifact/QqSrdGRVwXpap7oN1bCQRG, 13 tavole (4 «Oggi», 5 «Redesign», 4 «Proposte»). Copia, generatore `gen.py` e decisioni in `_specs/design-flows/kpi-abbonamenti/` (NON committati). Cartella di lavoro con `project/` nella scratchpad della sessione: per rigenerare basta lanciare `gen.py` in una cartella con `project/`.
+- Scelte di Danilo: i tre numeri di 1A piacciono; voleva sotto un grafico del comportamento dell'utente nello sprint (avvio prova, poi giorno del pagamento o della disdetta). Gli piaceva anche 1D.
+- BOCCIATO l'08/10: il grafico a una linea orizzontale per prova (tavola `red-1-prove` e 1D). «Queste righe non dicono niente… facciamo un grafico con un senso, con x e y sensati». Non riproporre linee per utente senza asse Y con valori.
+- Disegnato e pubblicato l'08/10 nelle tavole `red-1`, `red-2`, `red-4`, `red-5`, in attesa del giudizio di Danilo: X = giorno della prova da 0 a 7, Y = prove ancora attive; la curva scende a ogni disdetta, quello che resta al giorno 7 paga (o pagherà, in blu). Regole dei grafici in memoria: `feedback_grafici_veri.md`.
+- Dati veri dei giorni di disdetta (evento `SUBSCRIPTION_CANCELED` di `play_purchases`) sono in `gen.py`, lista `RS`.
+- Codice della dashboard (`public/internal/js/kpi.js`, `premiumTimelineCard`) NON toccato: serve l'approvazione del documento.
+- Prossimo passo, alla lettera: sentire da Danilo se il grafico proposto va bene, ridisegnare la tavola `red-1-prove` (e stati 2–5) con quel grafico al posto delle linee, fotografarla con `shoot.py`, ripubblicare.
+
+- BOCCIATO l'08/10 anche il grafico «prove ancora attive per giorno di prova»: «è solo un grafico lineare del totale delle prove».
+- Scelta di Danilo, a voce: grafico sul calendario dello sprint dove «ogni utente diventa una linea orizzontale» e si vedono chiaramente il giorno di partenza e quello di chiusura. Disegnato e pubblicato (tavole `red-1`, `red-2`, `red-4`, `red-5`): X = giorni dello sprint, Y = numero della prova (1, 2, 3…), una linea per prova dal cerchio vuoto dell'avvio al punto pieno della chiusura. Bianco = ha pagato, arancione = ha disdetto, blu pieno fino a oggi e a tratti fino al giorno in cui pagherà. In attesa del suo giudizio.
+- Scelta mia: le disdette passano da grigio ad arancione `#fb8b04`, anche nel quadratino in alto, per staccarle dalle altre linee.
+
+- Correzione di Danilo (08/10): pagare e disdire sono eventi, non colori della linea. Ogni linea è uguale per tutti («in prova», blu) e «finisce dove finisce»: il giorno del pagamento con un punto verde, il giorno della disdetta con un punto rosso. Una prova ancora aperta arriva a oggi e non ha punto finale; niente tratto atteso oltre oggi. Verde `#4ade80` e rosso `#f87171` sono quelli già nella dashboard. Pubblicato nelle tavole `red-1`, `red-2`, `red-4`, `red-5`, in attesa del suo giudizio.
+
+- Aggiunta di Danilo (08/10): oltre al punto, il giorno che chiude la prova è un tratto orizzontale lungo un giorno, verde se ha pagato e rosso se ha disdetto, subito dopo la linea blu.
+
+- Richiesta di Danilo (08/10), dopo «meglio meglio» sul grafico: oltre allo sprint, scelta del periodo «Oggi», «Settimana», «Mese». Disegnato come quattro pulsanti in alto a destra; il selettore dello sprint compare solo con «Sprint». Scelta mia da confermare: settimana = ultimi 7 giorni, mese = ultimi 30 giorni, contando le prove partite in quei giorni. Numeri veri: settimana 6 prove (0 pagate, 3 pagheranno, 3 disdette), mese 15 (3, 3, 9), oggi 0.
+- Prossimo passo: approvazione di Danilo del documento, poi il codice in `public/internal/js/kpi.js` (`premiumTimelineCard`): la funzione `kpi_premium_timeline` non restituisce il giorno della disdetta, va aggiunto.
+
+- Correzione di Danilo (08/10): troppo testo ovunque. Ogni etichetta al massimo due parole, niente frasi di spiegazione, in hover solo il dato (le due date). Tolti titolo lungo del grafico, nota della legenda, sottotitolo dell'errore.
+
+- Richiesta di Danilo (08/10): numeri a sinistra del grafico, come in 1D. Fatto: colonna con totale, «Ha pagato», «Pagherà», «Disdette»; grafico a destra; sezione alta 480 px invece di 696. Sul telefono i numeri restano sopra il grafico. Tolte le caselle sotto i numeri.
+
+- Richiesta di Danilo (08/10): sotto i numeri un contatore a quadratini, uno per prova, colorato per esito (verde, blu, rosso), senza legenda sotto perché i nomi sono già accanto ai numeri.
+
+- APPROVATO da Danilo l'08/10: «Ha molto molto senso ora… possiamo tranquillamente svilupparlo così». Fonte di verità: tavole `red-1`…`red-5` in `_specs/design-flows/kpi-abbonamenti/design-proposte/`. Implementazione affidata a un agente nella stessa sessione; a fine lavoro vanno controllati `git status`, la migrazione di `kpi_premium_timeline` (campo `cancelled_at`) e la pagina vera.
+
+- PUBBLICATO l'08/10 su `main`: sezione «Prove gratuite» in `kpi.js` (`premiumTimelineCard`) e classi `pt-*` in `kpi.css`; «Crescita utenti totali» e «Workout settimanali» affiancate su una riga. Migrazione `kpi_premium_timeline_cancelled_at` APPLICATA al database; il file SQL è in `app/supabase/migrations/20261008120000_kpi_premium_timeline_cancelled_at.sql`, SOLO LOCALE e non committato.
+- Provato solo con dati di prova in una pagina fuori dalla dashboard (foto a 1280 e 390 px, console pulita). NON provati sulla pagina vera: la funzione reale, il menu degli sprint, «Riprova», il font Nunito, le due schede affiancate.
