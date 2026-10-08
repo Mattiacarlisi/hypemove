@@ -212,6 +212,7 @@ const AIC_PT = 128, AIC_PB = 384, AIC_NEST = 106, AIC_NH = 300;
 const aicYb = v => AIC_PT + (AIC_PB - AIC_PT) * (100 - v) / 40;           // y nella scheda
 const aicYc = v => aicYb(v) - AIC_NEST;                                   // y dentro la colonna
 const aicPct = g => 100 * g.giusti / g.casi;
+const aicPctY = g => Math.max(60, aicPct(g));                             // sotto il 60% il punto resta sul fondo della scala
 const aicOk = (g, soglia) => g.giusti * 100 >= soglia * g.casi;
 
 // Una colonna: linea dei giri + punti + etichetta dell'ultimo valore. w = larghezza della colonna.
@@ -219,8 +220,8 @@ function aicBenchCol(p, w, soglia, k, anim) {
   const g = p.giri || [], n = g.length;
   if (!n) return '';
   const OFF = 14, STEP = 5;
-  const step = Math.min(STEP, (w - OFF - 34) / Math.max(1, n - 1));
-  const pts = g.map((c, i) => [OFF + i * step, aicYc(aicPct(c))]);
+  const step = Math.min(STEP, (w - OFF - 56) / Math.max(1, n - 1));
+  const pts = g.map((c, i) => [OFF + i * step, aicYc(aicPctY(c))]);
   let s = '';
   for (let i = 1; i < n; i++) {
     if (g[i].casi !== g[i - 1].casi) {
@@ -243,8 +244,8 @@ function aicBenchCol(p, w, soglia, k, anim) {
       <circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${last ? 7 : r}" fill="${ok ? AIC.GRN : AIC.BLU}" stroke="${last ? AIC.INK : AIC.NEST}" stroke-width="${last ? 2 : 1.5}"/></g>`;
   });
   const [lx, ly] = pts[n - 1], L = g[n - 1], ok = aicOk(L, soglia);
-  const near = Math.abs(aicYb(aicPct(L)) - aicYb(soglia)) < 14;
-  dots += `<text x="${(lx + (near ? 11 : 13)).toFixed(1)}" y="${(ly + (near ? 22 : 6)).toFixed(1)}" font-size="17" font-weight="800" fill="${ok ? AIC.GRN : AIC.INK}" pointer-events="none">${L.giusti}</text>`;
+  const near = Math.abs(aicYb(aicPctY(L)) - aicYb(soglia)) < 14;
+  dots += `<text x="${(lx + (near ? 11 : 13)).toFixed(1)}" y="${(ly + (near ? 22 : 6)).toFixed(1)}" font-size="17" font-weight="800" fill="${ok ? AIC.GRN : AIC.INK}" pointer-events="none">${Math.round(aicPct(L))}%</text>`;
   return `<svg width="${w}" height="${AIC_NH}" style="--d:${d}" aria-hidden="false">${s}<g class="aic-dots">${dots}</g></svg>`;
 }
 
@@ -257,7 +258,7 @@ function aicSpark(p, soglia, k) {
     <text x="0" y="${(y(100) + 8).toFixed(1)}" font-size="11" font-weight="700" fill="${AIC.TER}">100</text>
     <text x="0" y="${(y(60) + 4).toFixed(1)}" font-size="11" font-weight="700" fill="${AIC.TER}">60</text>
     <path d="M${gut - 1} ${(y(60) - 1).toFixed(1)} l3 -3 l-6 -4 l6 -4" fill="none" stroke="${AIC.SEC}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-  const pts = g.map((c, i) => [gut + 6 + i * step, y(aicPct(c))]);
+  const pts = g.map((c, i) => [gut + 6 + i * step, y(aicPctY(c))]);
   if (n > 1) s += `<polyline class="aic-line" pathLength="1" stroke-width="1.5" style="--d:${(0.3 * k).toFixed(1)}s" points="${pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ')}"/>`;
   let dots = '';
   pts.forEach((q, i) => {
