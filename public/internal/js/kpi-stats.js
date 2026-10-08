@@ -287,9 +287,12 @@ function stBuildT100(w, h, d) {
   };
 }
 
+// Soglia delle prove che pagano: sotto il 30% siamo sotto la media (Europa occidentale 29,7%, RevenueCat 2026);
+// la media del fitness è il 38%. Nessuna fonte incrocia fitness, Europa e Android.
+const ST_RATE_SOGLIA = 30;
 function stBuildRate(w, h, d) {
   const cal = stCalendar(d);
-  const c = stBase(w, h, { nx: cal.nx, ymax: 100, ticks: ST_PCT, fz: cal.fz, labs: cal.labs });
+  const c = stBase(w, h, { nx: cal.nx, ymax: 100, ticks: ST_PCT, par: ST_RATE_SOGLIA, fz: cal.fz, labs: cal.labs });
   // la curva parte da quando le prove finite sono abbastanza: prima ogni punto è fatto di due o tre casi
   const P = d.trial_rate.points.filter(p => p.ended >= (d.trial_rate.min_ended ?? 5));
   const pts = P.map(p => ({ i: cal.idx(p.date), v: p.v }));
@@ -429,8 +432,8 @@ function stCards(d) {
   c.sprint.tools = stSprintTools(d, cs);
 
   const r = d.trial_rate.now;
-  c.rate = r.ended > 0 ? { num: stPct(r.pct), cap: `${r.paid} pagate su ${r.ended} prove finite o disdette`, color: ST.INK }
-                       : { num: '–', cap: 'nessuna prova finita ancora', color: ST.INK };
+  c.rate = r.ended > 0 ? { num: stPct(r.pct), cap: `${r.paid} pagate su ${r.ended} prove finite o disdette · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK }
+                       : { num: '–', cap: `nessuna prova finita ancora · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK };
 
   const tl = stT100Real(sel).filter(p => stT100(p) != null).at(-1), par3 = d.trials_per_100.breakeven;
   c.t100 = { num: tl ? stIt(stT100(tl), 1) : '–', color: ST.INK,
