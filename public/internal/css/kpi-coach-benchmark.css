@@ -1,0 +1,31 @@
+/* Blocco «Benchmark del coach» nella pagina AI Coach. Colori dalle variabili di shared.css:
+   viola = passaggio in corso, verde = risolto, ambra = la soglia. */
+.cb-card { margin-bottom: 16px; }
+.cb-sub { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 18px; max-width: 760px; }
+.cb-sub code { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.cb-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) 200px; column-gap: 20px; align-items: center; padding: 12px 0; border-top: 1px solid var(--border); }
+.cb-row.cb-scale { border-top: 0; padding: 0 0 4px; }
+.cb-axis { position: relative; height: 16px; font-size: 11px; color: var(--muted); }
+.cb-goal-lab { position: absolute; right: calc(100% - var(--cb-goal)); color: var(--amber); font-weight: 700; white-space: nowrap; }
+.cb-step { font-size: 15px; font-weight: 700; color: var(--text); }
+.cb-model { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.cb-track { position: relative; height: 22px; border-radius: 5px; background: var(--surface2); }
+.cb-track::after { content: ''; position: absolute; left: var(--cb-goal); top: -12px; bottom: -12px; width: 2px; margin-left: -1px; background: var(--amber); }
+.cb-fill { height: 100%; border-radius: 5px 0 0 5px; background: var(--accent); }
+.cb-done .cb-fill { background: var(--mattia); border-radius: 5px; }
+.cb-off .cb-track { background: transparent; border: 1.5px dashed var(--border2); }
+.cb-val { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: baseline; }
+.cb-num { font-size: 26px; font-weight: 800; line-height: 1; color: var(--text); }
+.cb-state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cb-gap { grid-column: 1 / -1; font-size: 12px; font-weight: 700; margin-top: 4px; color: var(--purple); }
+.cb-done .cb-gap { color: var(--mattia); }
+.cb-none { grid-column: 1 / -1; font-size: 13px; font-weight: 700; color: var(--muted); }
+.cb-off .cb-state { grid-column: 1 / -1; margin-top: 2px; }
+.cb-off .cb-step { color: var(--muted); }
+.cb-hist { grid-column: 2 / -1; font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+.cb-note { color: var(--text); opacity: .8; }
+@media (max-width: 760px) {
+  .cb-row { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .cb-row.cb-scale > div:first-child, .cb-row.cb-scale > div:last-child { display: none; }
+  .cb-hist { grid-column: 1; margin-top: 0; }
+}

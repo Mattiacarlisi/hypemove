@@ -4058,7 +4058,7 @@ function pageAICoach() {
     </div>`;
   }
 
-  return `${filterBar}${kpiCard}${aiConversationsCard(d)}${promptingSection(d)}`;
+  return `${filterBar}${kpiCard}${typeof coachBenchmarkCard === 'function' ? coachBenchmarkCard() : ''}${aiConversationsCard(d)}${promptingSection(d)}`;
 }
 
 // Tab → superficie restituita da kpi_ai_sessions. La chat dentro la proposta premium gira
