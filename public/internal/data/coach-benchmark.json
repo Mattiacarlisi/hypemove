@@ -147,7 +147,22 @@
    "nome": "Compila il form",
    "modello": "gpt-5.6-luna",
    "stato": "in costruzione",
-   "giri": []
+   "giri": [
+    {
+     "quando": "2026-10-08T21:31",
+     "giusti": 40,
+     "casi": 63,
+     "errori": 0,
+     "costo": 0.0363
+    },
+    {
+     "quando": "2026-10-08T21:42",
+     "giusti": 56,
+     "casi": 63,
+     "errori": 0,
+     "costo": 0.0373
+    }
+   ]
   },
   {
    "id": "esecuzione",
