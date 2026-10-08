@@ -574,9 +574,10 @@ let state = {
   selectedFeedback: null,
   feedbackSearchQuery: '',
   recentAISessions: null,
-  // Card «Sprint vs record» dell'Overview (kpi_sprint_scoreboard). scoreSel = id dello sprint
-  // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo.
-  scoreboard: null, scoreboardError: null, scoreSel: null, scoreRef: 'best',
+  // Card «Sprint vs record» dell'Overview (kpi_sprint_curves, letta dalla cache). scoreSel = id dello sprint
+  // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
+  // scoreMenu = menu aperto ('sel' | 'ref' | null).
+  scoreboard: null, scoreboardError: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
   aiConvOpen: false,
   aiSessions: null,
   aiSessionsLoading: false,
@@ -675,7 +676,8 @@ async function fetchData() {
     state.overviewStale = false;
     // I due riquadri «ultimi feedback» e «ultime chat» arrivano dopo, ognuno col suo render:
     // prima la pagina intera aspettava kpi_ai_sessions, la RPC più lenta del gruppo.
-    Promise.all([fetchRecentFeedback(), fetchRecentAISessions(), fetchScoreboard()]).then(render);
+    fetchScoreboard();
+    Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]).then(render);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
   state.loading = false;
   render();
@@ -2125,16 +2127,36 @@ async function fetchAllFeedbacks() {
   render();
 }
 
-async function fetchScoreboard() {
-  try {
-    const { data, error } = await sb.rpc('kpi_sprint_scoreboard');
-    if (error) throw error;
-    state.scoreboard = data || [];
-    state.scoreboardError = null;
-  } catch (e) {
-    console.error('fetchScoreboard', e);
-    state.scoreboardError = e.message || 'Errore caricamento confronto sprint';
-  }
+// Le curve di tutti gli sprint arrivano dalla cache della dashboard (kpi_cache_get 'sprint_curves'): calcolarle dal vivo
+// costa più di quanto il database regge. Se la riga non c'è ancora o è in ricalcolo si riprova ogni 5 secondi (al massimo 5 minuti).
+let scoreboardTimer = null;
+async function fetchScoreboard(force) {
+  clearTimeout(scoreboardTimer);
+  force = force || state.scoreForce; state.scoreForce = false;
+  const since = Date.now();
+  const attempt = async f => {
+    try {
+      const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'sprint_curves', p_scope: 'all', p_force: !!f });
+      if (error) throw error;
+      if (data && Array.isArray(data.data)) {
+        state.scoreboard = data.data.map(r => ({ ...r, base: (r.elig && r.elig[0]) || 0 }));
+        state.scoreboardError = null;
+        state.scoreboardAt = data.computed_at || null;
+        render();
+        return;
+      }
+      if (data && data.pending !== false && Date.now() - since < 5 * 60 * 1000) {
+        scoreboardTimer = setTimeout(() => attempt(false), 5000);
+        return;
+      }
+      throw new Error('Confronto fra sprint non ancora disponibile');
+    } catch (e) {
+      console.error('fetchScoreboard', e);
+      state.scoreboardError = e.message || 'Errore caricamento confronto sprint';
+      render();
+    }
+  };
+  await attempt(force);
 }
 
 async function fetchRecentAISessions() {
@@ -2440,6 +2462,7 @@ function manualRefresh() {
   clearInterval(countdownTimer);
   // gli sprint del grafico tentativi finiti in errore si riprovano: senza, restavano in errore fino al ricarico
   state.attemptsChartErrors = {};
+  state.scoreForce = true;   // «Aggiorna» fa ricalcolare anche le curve di «Sprint vs record» (altrimenti restano quelle in cache)
   fetchData();
   // ripesca dal DB tutto ciò che è condiviso (impostazioni, funnel salvati, sprint) → vedi le modifiche
   // dell'altro utente senza ricaricare la pagina
@@ -2955,29 +2978,31 @@ function attachPremiumTimeline() {
 }
 
 // ── CARD «SPRINT VS RECORD» ──────────────────────────────────────────
-// Sette passi dello sprint analizzato contro il migliore sprint di sempre (per ogni passo) o
-// contro uno sprint scelto. Base unica: chi ha aperto l'app nella finestra dello sprint, la
-// stessa coorte del Funnel onboarding (kpi_sprint_scoreboard, verificata contro kpi_funnel_v2).
+// Un riquadro per ognuno dei sette passi: sull'asse X i giorni dal primo avvio dell'app, sull'asse Y la % di
+// persone arrivate al passo entro quel giorno. Linea bianca = lo sprint scelto, linea grigia a tratti = lo sprint
+// che detiene il record di quel passo. Base unica: chi ha aperto l'app nella finestra dello sprint, la stessa coorte
+// del Funnel onboarding. I dati sono quelli di kpi_sprint_curves (letta dalla cache): per ogni sprint e passo, giorno
+// per giorno, quanti sono arrivati al passo e quanti erano ancora osservabili.
 const SCORE_KPIS = [
-  { k: 'home',   name: 'Arrivo in Home' },
-  { k: 'detail', name: 'Dettaglio workout' },
-  { k: 'w1',     name: '1 workout' },
-  { k: 'w2',     name: '2 workout' },
-  { k: 'w3',     name: '3 workout' },
-  { k: 'trial',  name: 'Prova gratuita' },
+  { k: 'home',   name: 'Arrivo in Home',    short: 'Home' },
+  { k: 'detail', name: 'Dettaglio workout', short: 'Dettaglio' },
+  { k: 'w1',     name: '1 workout',         short: '1 workout' },
+  { k: 'w2',     name: '2 workout',         short: '2 workout' },
+  { k: 'w3',     name: '3 workout',         short: '3 workout' },
+  { k: 'trial',  name: 'Prova gratuita',    short: 'Prova' },
   // ogni passo conta entro 14 giorni dal primo avvio; il primo addebito entro 21 (fino a 14 per
   // iniziare la prova + 7 di prova). Stesso tempo per tutti: altrimenti vince lo sprint più vecchio.
-  { k: 'paid',   name: 'Premium pagante', days: 21 },
+  { k: 'paid',   name: 'Premium pagante',   short: 'Pagante', days: 21 },
 ];
 // Per fare il record uno sprint dev'essere dalla beta, con almeno 100 persone e finito da almeno
 // 14 giorni (21 per «Premium pagante»): prima la finestra di qualcuno è ancora aperta e i numeri crescono.
 const SCORE_MIN_BASE = 100;
-const scoreRate   = (s, k) => s.base ? s[k] / s.base : 0;
+// La curva di uno sprint si ferma al primo giorno in cui le persone con tanti giorni di vita sono meno di 30.
+const SCORE_MIN_CURVE = 30;
 const scoreMature = (s, kpi) => s.age_days >= (kpi.days || 14);
 const scorePct    = v => (v * 100).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-// percentuale da mostrare: con nessuno dentro lo sprint non c'è un numero, c'è «—»
-const scoreShow   = (s, k) => s.base ? scorePct(s[k] / s.base) + '%' : '—';
 const scoreDay    = d => String(d).split('-').reverse().slice(0, 2).join('/');
+const scoreLabel  = s => `${s.nome} · ${scoreDay(s.inizio)}–${scoreDay(s.fine)}`;
 // z-test a due proporzioni al 95%: true se la differenza fra i due sprint può essere solo rumore.
 // (La sovrapposizione degli intervalli di Wilson era troppo prudente: +8 punti su 257 contro 989
 // persone risultava «in linea».)
@@ -3001,83 +3026,229 @@ function scoreDefaultSel(rows) {
   return last.base < 30 && started.length > 1 ? started[started.length - 2].id : last.id;
 }
 
+// Curva di un passo: per ogni giorno d, la sopravvivenza si moltiplica per (1 − nuovi arrivati / osservabili non
+// ancora arrivati) e il valore è 1 − sopravvivenza. Così una curva non scende mai, anche per gli sprint in corso, dove
+// non tutti hanno gli stessi giorni di vita. Ogni punto è [persone arrivate, persone osservabili a quel giorno].
+function scoreCurve(s, k, xmax) {
+  const steps = (s.steps && s.steps[k]) || [];
+  const out = [];
+  let surv = 1;
+  for (let d = 0; d <= xmax; d++) {
+    const el = (s.elig && s.elig[d]) || 0;
+    if (el < SCORE_MIN_CURVE) break;
+    if (d) {
+      const p = steps[d - 1];
+      if (p && p[1] > 0) surv *= 1 - p[0] / p[1];
+    }
+    out.push([(1 - surv) * el, el]);
+  }
+  return out;
+}
+const scoreXmax = kpi => kpi.days || 14;
+// Valore finale di uno sprint già maturo (tutti hanno almeno 14 giorni di vita: la curva coincide con arrivati/persone).
+function scoreFinal(s, kpi) {
+  const c = scoreCurve(s, kpi.k, scoreXmax(kpi));
+  const last = c[c.length - 1];
+  return last ? last[0] / last[1] : 0;
+}
+// Scala Y stretta sul dato: il primo passo "tondo" che dà al massimo 4 righe.
+function scoreAxis(maxPct) {
+  const mx = Math.max(maxPct, 0.5);
+  const step = [0.25, 0.5, 1, 2, 5, 10, 20, 25, 50].find(q => mx / q <= 4) || 50;
+  return { step, top: step * Math.ceil(mx / step) };
+}
+
+// Misure del grafico di un riquadro (viewBox 270 × 122, copiate dalla tavola «1 - Giorno per giorno»).
+const SB = { w: 270, h: 122, x0: 34, x1: 264, yt: 6, yb: 94 };
+let sbNow = null;
+let sbTiles = [];   // ciò che serve al passaggio del mouse, ricostruito a ogni disegno
+
+// Costruisce il riquadro di un passo: curve, ultimo giorno con dati, scarto dal record allo stesso giorno, verdetto.
+function scoreTile(kpi, now, fixed, rows) {
+  const xmax = scoreXmax(kpi);
+  const pool = rows.filter(s => s.inizio >= BETA_START && s.base >= SCORE_MIN_BASE && scoreMature(s, kpi) && !scoreIsSub(s, rows));
+  let ref = fixed, best = -1;
+  if (!ref) for (const s of pool) { const v = scoreFinal(s, kpi); if (v > best) { best = v; ref = s; } }
+  const sc = scoreCurve(now, kpi.k, xmax);
+  const rc = ref ? scoreCurve(ref, kpi.k, xmax) : [];
+  const t = { kpi, xmax, ref, rc, sc, D: sc.length - 1, v: null, b: null, sim: null };
+  if (!sc.length) return t;
+  const [ks0, ns0] = sc[t.D];
+  t.v = ks0 / ns0;
+  if (rc.length) {
+    const [kr, nr] = rc[Math.min(t.D, rc.length - 1)];
+    t.b = kr / nr;
+    // il verdetto pesa lo sprint su chi ha almeno un giorno di vita, non sulle poche persone dell'ultimo giorno
+    const n1 = now.elig[Math.min(1, t.D)] || ns0;
+    t.sim = scoreSame(t.v * n1, n1, kr, nr) ? 'eq' : (t.v > t.b ? 'up' : 'dn');
+  }
+  return t;
+}
+
+const SB_COL = { dn: '#f87171', eq: '#ffffff', up: '#4ade80' };
+
+// SVG di un riquadro. Senza `t` (caricamento) disegna solo la griglia.
+function scoreSvg(t) {
+  const { x0, x1, yt, yb } = SB;
+  const xmax = t ? t.xmax : 14;
+  const pc = c => c.map(([a, n]) => a * 100 / n);
+  const mx = t ? Math.max(0, ...pc(t.sc), ...pc(t.rc)) : 100;
+  const { step, top } = scoreAxis(mx);
+  const x = q => x0 + q * (x1 - x0) / xmax;
+  const y = q => yb - q / top * (yb - yt);
+  let g = '';
+  for (let q = 0; q <= Math.round(top / step); q++) {
+    const yy = y(q * step).toFixed(1);
+    g += `<line x1="${x0 - 4}" x2="${x1 + 4}" y1="${yy}" y2="${yy}" class="sbr-gh"/>`
+      + `<text x="26" y="${(+yy + 4).toFixed(1)}" text-anchor="end" class="sbr-tk">${(q * step).toLocaleString('it-IT', { maximumFractionDigits: 2 })}</text>`;
+  }
+  for (let q = 0; q <= xmax; q++) {
+    g += `<line x1="${x(q).toFixed(1)}" x2="${x(q).toFixed(1)}" y1="${yb}" y2="${yb + (q % 7 === 0 ? 7 : 4)}" class="sbr-gt"/>`;
+    if (q % 7 === 0) g += `<text x="${x(q).toFixed(1)}" y="${yb + 21}" text-anchor="middle" class="sbr-tk">${q}</text>`;
+  }
+  if (!t) return `<svg class="sbr-svg" viewBox="0 0 ${SB.w} ${SB.h}" aria-hidden="true">${g}</svg>`;
+  const pts = c => c.map(([a, n], q) => `${x(q).toFixed(1)},${y(a * 100 / n).toFixed(1)}`).join(' ');
+  if (t.rc.length) g += `<polyline points="${pts(t.rc)}" class="sbr-lr"/>`;
+  if (t.sc.length) {
+    g += `<polyline points="${pts(t.sc)}" class="sbr-ls"/>`
+      + `<circle cx="${x(t.D).toFixed(1)}" cy="${y(t.v * 100).toFixed(1)}" r="6" fill="${SB_COL[t.sim || 'eq']}" class="sbr-end"/>`;
+  }
+  t.geo = { x0, x1, xmax, top };
+  return `<svg class="sbr-svg" viewBox="0 0 ${SB.w} ${SB.h}" role="img" aria-label="${esc(t.kpi.name)}: giorni dal primo avvio e percentuale di persone arrivate al passo">${g}`
+    + `<circle class="sbr-hv" r="5.5"/><rect class="sbr-hit" x="${x0 - 8}" y="${yt - 6}" width="${x1 - x0 + 16}" height="${yb - yt + 12}"/></svg>`;
+}
+
+function scoreTileHtml(t, i) {
+  const { kpi } = t;
+  let big = '—', day = '', delta = '';
+  if (t.sc.length) {
+    big = scorePct(t.v) + '%';
+    day = `giorno ${t.D}`;
+    if (t.sim === 'eq') delta = '<span class="sbr-dl sbr-eq">in linea</span>';
+    else if (t.sim) delta = `<span class="sbr-dl sbr-${t.sim}">${t.v > t.b ? '+' : '−'}${scorePct(Math.abs(t.v - t.b))} pt</span>`;
+  }
+  return `<div class="sbr-tile" data-sbr-i="${i}">
+    <div class="sbr-r1"><span class="sbr-nm">${kpi.short}</span><span class="sbr-day">${day}</span></div>
+    <div class="sbr-r2"><span class="sbr-big${t.sc.length ? '' : ' sbr-nil'}">${big}</span>${delta}</div>
+    ${scoreSvg(t)}<div class="sbr-tip"></div></div>`;
+}
+
+function scoreSummaryHtml(tiles) {
+  const n = { dn: 0, eq: 0, up: 0 };
+  tiles.forEach(t => { if (t.sim) n[t.sim]++; });
+  const dash = '<svg width="18" height="18" aria-hidden="true"><line x1="0" x2="18" y1="9" y2="9" stroke="#9ca3af" stroke-width="2.5" stroke-dasharray="5 4"/></svg>';
+  const solid = '<svg width="18" height="18" aria-hidden="true"><line x1="0" x2="18" y1="9" y2="9" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/></svg>';
+  return `<div class="sbr-tile sbr-sum">
+    <div class="sbr-sbig${n.dn ? '' : ' sbr-nil'}">${n.dn}</div><div class="sbr-slab">sotto il record</div>
+    <div class="sbr-cnt"><span><i style="background:#9ca3af"></i>${n.eq} in linea</span><span><i style="background:#4ade80"></i>${n.up} sopra</span></div>
+    <div class="sbr-leg"><span>${solid}Sprint</span><span>${dash}Record</span></div>
+    <div class="sbr-axn">Asse X: giorni dal primo avvio</div></div>`;
+}
+
+function scoreHead(rows, now, fixed) {
+  const chev = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  if (!rows || !now) {
+    return `<div class="sbr-head"><h2 class="sbr-title">Sprint vs record</h2><span class="pt-pill pt-pill-sk"></span></div>`;
+  }
+  const menu = (kind, items, cur) => state.scoreMenu === kind
+    ? `<div class="pt-menu" role="listbox">${items.map(([id, label]) => `<button class="pt-opt${id === cur ? ' pt-sel' : ''}" role="option" data-sbr-${kind}="${esc(id)}"><span class="pt-optdot"></span>${esc(label)}</button>`).join('')}</div>` : '';
+  const list = [...rows].reverse().map(s => [s.id, scoreLabel(s)]);
+  const prov = now.age_days < 14 ? ' · provvisorio' : '';
+  return `<div class="sbr-head"><h2 class="sbr-title">${fixed ? 'Sprint a confronto' : 'Sprint vs record'}</h2>
+    <div class="pt-pillwrap sbr-w1"><button class="pt-pill" data-sbr-menu="sel" aria-haspopup="listbox" aria-expanded="${state.scoreMenu === 'sel'}" aria-label="Sprint da analizzare"><span>${esc(scoreLabel(now))}</span>${chev}</button>${menu('sel', list, now.id)}</div>
+    <span class="sbr-vs">vs</span>
+    <div class="pt-pillwrap sbr-w2"><button class="pt-pill sbr-pill2" data-sbr-menu="ref" aria-haspopup="listbox" aria-expanded="${state.scoreMenu === 'ref'}" aria-label="Confronta con"><span>${fixed ? esc(fixed.nome) : 'Il migliore'}</span>${chev}</button>${menu('ref', [['best', 'Il migliore'], ...list], fixed ? fixed.id : 'best')}</div>
+    <span class="sbr-pers">${now.base.toLocaleString('it-IT')} ${now.base === 1 ? 'persona' : 'persone'}${prov}</span></div>`;
+}
+
 function sprintScoreboardCard() {
   const rows = state.scoreboard;
-  const shell = body => `<div class="card sb-card"><div class="card-title" style="margin-bottom:12px">Sprint vs record</div>${body}</div>`;
+  const shell = (head, body) => `<section class="sbr-card">${head}${body}</section>`;
   if (state.scoreboardError && !rows) {
-    return shell(`<div style="font-size:12px;color:var(--red)">${esc(state.scoreboardError)}
-      <button class="btn btn-ghost" id="sb-retry" style="font-size:11px;padding:4px 10px;margin-left:8px">↻ Riprova</button></div>`);
+    return shell(scoreHead(null), `<div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-sbr-retry>Riprova</button></div>`);
   }
-  if (!rows) return shell(`<div class="pulse" style="font-size:12px;color:var(--muted)">Calcolo del confronto fra sprint…</div>`);
-  if (!rows.length) return shell(`<div style="font-size:12px;color:var(--muted)">Nessuno sprint: creane uno dalla pagina Sprint.</div>`);
+  if (!rows) {
+    sbTiles = [];
+    const sk = SCORE_KPIS.map(kpi => `<div class="sbr-tile"><div class="sbr-r1"><span class="sbr-nm">${kpi.short}</span></div>
+      <div class="sbr-r2"><span class="pt-sk sbr-sk"></span></div>${scoreSvg(null)}</div>`).join('');
+    return shell(scoreHead(null), `<div class="sbr-grid sbr-loading" aria-busy="true">${sk}</div>`);
+  }
+  if (!rows.length) {
+    return shell(scoreHead(null), `<div class="pt-err sbr-none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <div class="pt-err-t">Nessuno sprint</div><div class="sbr-sub">Creane uno dalla pagina Sprint.</div></div>`);
+  }
 
   if (!rows.some(s => s.id === state.scoreSel)) state.scoreSel = scoreDefaultSel(rows);
   if (state.scoreRef !== 'best' && !rows.some(s => s.id === state.scoreRef)) state.scoreRef = 'best';
   const now   = rows.find(s => s.id === state.scoreSel);
   const fixed = state.scoreRef === 'best' ? null : rows.find(s => s.id === state.scoreRef);
-  const opt   = (s, cur) => `<option value="${s.id}" ${s.id === cur ? 'selected' : ''}>${esc(s.nome)} · ${scoreDay(s.inizio)}–${scoreDay(s.fine)}</option>`;
+  const tiles = SCORE_KPIS.map(kpi => scoreTile(kpi, now, fixed, rows));
+  sbTiles = tiles; sbNow = now;
+  let note = '';
+  if (!now.base) note = 'Nessuno ha ancora aperto l’app in questo sprint: i grafici si riempiono con le prime persone.';
+  else if (now.base < SCORE_MIN_CURVE) note = `Meno di ${SCORE_MIN_CURVE} persone: il grafico parte quando sono abbastanza.`;
+  return shell(scoreHead(rows, now, fixed), (note ? `<div class="sbr-note">${note}</div>` : '')
+    + `<div class="sbr-grid">${tiles.map((t, i) => scoreTileHtml(t, i)).join('')}${scoreSummaryHtml(tiles)}</div>`);
+}
 
-  const boxes = SCORE_KPIS.map(kpi => {
-    const pool = rows.filter(s => s.inizio >= BETA_START && s.base >= SCORE_MIN_BASE && scoreMature(s, kpi) && !scoreIsSub(s, rows));
-    const ref = fixed || pool.reduce((a, s) => (!a || scoreRate(s, kpi.k) > scoreRate(a, kpi.k) ? s : a), null);
-    const v = scoreRate(now, kpi.k);
-    const right = `<div class="sb-side">
-        <span class="sb-who"><b>${esc(now.nome)}</b></span>
-        <span class="sb-val sb-c-STATUS">${scoreShow(now, kpi.k)}</span>
-        <span class="sb-n">${now[kpi.k]}/${now.base}</span>
-      </div>`;
-    // Nessun confronto possibile: nessuno sprint fa ancora il record, oppure lo sprint scelto non
-    // ha nessuno dentro (uno sprint futuro). Niente verdetto, solo i numeri che ci sono.
-    if (!ref || !now.base || !ref.base) {
-      const left = ref
-        ? `<span class="sb-who">${fixed ? 'Confronto' : 'Record'} · <b>${esc(ref.nome)}</b></span>
-           <span class="sb-val sb-c-ref">${scoreShow(ref, kpi.k)}</span><span class="sb-n">${ref[kpi.k]}/${ref.base}</span>`
-        : `<span class="sb-who">Record</span><span class="sb-val sb-c-none">—</span><span class="sb-n">nessuno sprint confrontabile</span>`;
-      return `<div class="sb-box"><div class="sb-head"><span class="sb-title">${kpi.name}</span></div>
-        <div class="sb-duo"><div class="sb-side">${left}</div>${right.replace('STATUS', 'none')}</div></div>`;
-    }
-    const b = scoreRate(ref, kpi.k);
-    const noise = scoreSame(now[kpi.k], now.base, ref[kpi.k], ref.base);
-    // Stessa regola col migliore e con uno sprint fissato: sopra solo se la differenza è vera
-    // (z-test), altrimenti in linea; sotto: vicino (≥ 75%) o lontano. Uno sprint in corso con poche
-    // persone non «batte il record» per caso.
-    let st, badge;
-    if (ref.id === now.id)     { st = 'good'; badge = fixed ? '≈ stesso sprint' : '▲ record'; }
-    else if (v > b && !noise)  { st = 'good'; badge = fixed ? `▲ +${scorePct(v - b)} pt` : '▲ nuovo record'; }
-    else if (noise)            { st = 'even'; badge = '≈ in linea'; }
-    else                       { st = v / b >= 0.75 ? 'mid' : 'bad'; badge = `▼ ${scorePct(b - v)} pt`; }
-    if (fixed && ref.id === now.id) st = 'even';
-    const refLbl = fixed ? 'Confronto' : (st === 'good' && ref.id !== now.id ? 'Ex record' : 'Record');
-    return `<div class="sb-box">
-      <div class="sb-head"><span class="sb-title">${kpi.name}</span><span class="sb-badge sb-b-${st}">${badge}</span></div>
-      <div class="sb-duo">
-        <div class="sb-side">
-          <span class="sb-who">${refLbl} · <b>${esc(ref.nome)}</b></span>
-          <span class="sb-val sb-c-ref">${scorePct(b)}%</span>
-          <span class="sb-n">${ref[kpi.k]}/${ref.base}</span>
-        </div>
-        ${right.replace('STATUS', st)}
-      </div>
-    </div>`;
-  }).join('');
-
-  const prov = now.age_days < 14 ? ' · sprint in corso o chiuso da meno di 14 giorni, valori provvisori' : '';
-  return `<div class="card sb-card">
-    <div class="sb-top">
-      <div>
-        <div class="card-title" style="margin-bottom:3px">${fixed ? 'Sprint a confronto' : 'Sprint vs record'}</div>
-        <div class="sb-note">% su chi ha aperto l'app · ${now.base.toLocaleString('it-IT')} persone${prov}</div>
-      </div>
-      <div class="sb-pick">
-        <select id="sb-sel" class="form-input" aria-label="Sprint da analizzare">${rows.map(s => opt(s, now.id)).join('')}</select>
-        <span class="sb-vs">vs</span>
-        <select id="sb-ref" class="form-input sb-ref" aria-label="Confronta con">
-          <option value="best" ${fixed ? '' : 'selected'}>Il migliore</option>${rows.map(s => opt(s, fixed?.id)).join('')}
-        </select>
-      </div>
-    </div>
-    <div class="sb-grid">${boxes}</div>
-  </div>`;
+// Gestori della card: menu degli sprint, «Riprova» e dato al passaggio del mouse (o al tocco) sul grafico.
+let sbGlobals = false;
+function attachSprintRecord() {
+  document.querySelectorAll('[data-sbr-menu]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation(); const k = el.dataset.sbrMenu; state.scoreMenu = state.scoreMenu === k ? null : k; render();
+  }));
+  document.querySelectorAll('[data-sbr-sel]').forEach(el => el.addEventListener('click', () => {
+    state.scoreSel = el.dataset.sbrSel; state.scoreMenu = null; render();
+  }));
+  document.querySelectorAll('[data-sbr-ref]').forEach(el => el.addEventListener('click', () => {
+    state.scoreRef = el.dataset.sbrRef; state.scoreMenu = null; render();
+  }));
+  document.querySelector('[data-sbr-retry]')?.addEventListener('click', () => {
+    state.scoreboardError = null; state.scoreboard = null; render(); fetchScoreboard(true);
+  });
+  const grid = document.querySelector('.sbr-grid');
+  if (grid) {
+    const clear = () => grid.querySelectorAll('.sbr-on').forEach(el => el.classList.remove('sbr-on'));
+    const move = ev => {
+      const hit = ev.target.closest && ev.target.closest('.sbr-hit');
+      clear();
+      if (!hit) return;
+      const tile = hit.closest('.sbr-tile'), t = sbTiles[+tile.dataset.sbrI];
+      if (!t || !t.geo) return;
+      const svg = hit.ownerSVGElement, r = svg.getBoundingClientRect(), tr = tile.getBoundingClientRect();
+      const k = SB.w / r.width, { x0, x1, xmax, top } = t.geo;
+      const sx = (ev.clientX - r.left) * k, sy = (ev.clientY - r.top) * k;
+      const d = Math.max(0, Math.min(xmax, Math.round((sx - x0) / ((x1 - x0) / xmax))));
+      const yOf = c => SB.yb - (c[0] * 100 / c[1]) / top * (SB.yb - SB.yt);
+      // il punto più vicino al cursore fra la linea dello sprint e quella del record
+      const cand = [];
+      if (t.sc[d]) cand.push({ c: t.sc[d], name: sbNow.nome, rec: false });
+      if (t.rc[d]) cand.push({ c: t.rc[d], name: t.ref.nome, rec: true });
+      if (!cand.length) return;
+      cand.sort((a, b) => Math.abs(yOf(a.c) - sy) - Math.abs(yOf(b.c) - sy));
+      const pick = cand[0], px = x0 + d * (x1 - x0) / xmax, py = yOf(pick.c);
+      const hv = svg.querySelector('.sbr-hv');
+      hv.setAttribute('cx', px.toFixed(1)); hv.setAttribute('cy', py.toFixed(1)); hv.classList.add('sbr-on');
+      const tip = tile.querySelector('.sbr-tip');
+      tip.innerHTML = `<b>Giorno ${d} · ${scorePct(pick.c[0] / pick.c[1])}%</b><span>${pick.rec ? 'Record · ' : ''}${esc(pick.name)}</span>`;
+      tip.classList.add('sbr-on');
+      const tw = tip.offsetWidth, left = (r.left - tr.left) + px / k + 14;
+      tip.style.left = Math.max(0, Math.min(left, tr.width - tw)) + 'px';
+      tip.style.top = Math.max(0, (r.top - tr.top) + py / k - 58) + 'px';
+    };
+    grid.addEventListener('mousemove', move);
+    grid.addEventListener('click', move);
+    grid.addEventListener('mouseleave', clear);
+  }
+  if (!sbGlobals) {
+    sbGlobals = true;
+    document.addEventListener('click', ev => {
+      if (state.scoreMenu && !ev.target.closest('.sbr-head .pt-pillwrap')) { state.scoreMenu = null; render(); }
+    });
+  }
 }
 
 function pageOverview() {
@@ -11788,6 +11959,7 @@ function attachEvents() {
   // Chart range filters
   // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
   attachPremiumTimeline();
+  attachSprintRecord();
   document.querySelectorAll('[data-growth-range]').forEach(el =>
     el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));
   document.querySelectorAll('[data-weekly-range]').forEach(el =>
@@ -11920,11 +12092,6 @@ function attachEvents() {
   document.getElementById('refresh-btn')?.addEventListener('click', manualRefresh);
 
   // Overview — personalizza
-  document.getElementById('sb-sel')?.addEventListener('change', e => { state.scoreSel = e.target.value; render(); });
-  document.getElementById('sb-ref')?.addEventListener('change', e => { state.scoreRef = e.target.value; render(); });
-  document.getElementById('sb-retry')?.addEventListener('click', () => {
-    state.scoreboardError = null; render(); fetchScoreboard().then(render);
-  });
   document.getElementById('edit-overview')?.addEventListener('click', () => {
     state.editingOverview = !state.editingOverview;
     render();

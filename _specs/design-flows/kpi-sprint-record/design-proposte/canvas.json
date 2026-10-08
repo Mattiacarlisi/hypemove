@@ -1,0 +1,120 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-10-08T16:00:00Z"
+ },
+ "title": "KPI Home — Sprint vs record",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "Main.dc.html": {
+   "w": 1280,
+   "h": 560,
+   "x": 0,
+   "y": 0,
+   "title": "1 - Sprint vs record"
+  },
+  "oggi-2-caricamento.dc.html": {
+   "w": 1280,
+   "h": 160,
+   "x": 1360,
+   "y": 0,
+   "title": "2 - Caricamento"
+  },
+  "oggi-3-errore.dc.html": {
+   "w": 1280,
+   "h": 160,
+   "x": 2720,
+   "y": 0,
+   "title": "3 - Errore"
+  },
+  "oggi-4-nessuno-sprint.dc.html": {
+   "w": 1280,
+   "h": 160,
+   "x": 4080,
+   "y": 0,
+   "title": "4 - Nessuno sprint"
+  },
+  "oggi-5-finestra-stretta.dc.html": {
+   "w": 390,
+   "h": 1130,
+   "x": 5440,
+   "y": 0,
+   "title": "5 - Finestra stretta"
+  },
+  "prop-A-percorso.dc.html": {
+   "w": 1280,
+   "h": 536,
+   "x": 0,
+   "y": 2900,
+   "title": "1A - Il percorso"
+  },
+  "prop-B-nel-tempo.dc.html": {
+   "w": 1280,
+   "h": 448,
+   "x": 1360,
+   "y": 2900,
+   "title": "1B - Nel tempo"
+  },
+  "prop-C-riga-per-passo.dc.html": {
+   "w": 1280,
+   "h": 568,
+   "x": 2720,
+   "y": 2900,
+   "title": "1C - Una riga per passo"
+  },
+  "prop-D-riquadri-puliti.dc.html": {
+   "w": 1280,
+   "h": 372,
+   "x": 4080,
+   "y": 2900,
+   "title": "1D - Riquadri puliti"
+  },
+  "red-1-giorno-per-giorno.dc.html": {
+   "w": 1280,
+   "h": 592,
+   "x": 0,
+   "y": 1700,
+   "title": "1 - Giorno per giorno"
+  }
+ },
+ "order": [
+  "Main.dc.html",
+  "oggi-2-caricamento.dc.html",
+  "oggi-3-errore.dc.html",
+  "oggi-4-nessuno-sprint.dc.html",
+  "oggi-5-finestra-stretta.dc.html",
+  "prop-A-percorso.dc.html",
+  "prop-B-nel-tempo.dc.html",
+  "prop-C-riga-per-passo.dc.html",
+  "prop-D-riquadri-puliti.dc.html",
+  "red-1-giorno-per-giorno.dc.html"
+ ],
+ "notes": {
+  "oggi": {
+   "x": 0,
+   "y": -300,
+   "text": "Oggi",
+   "kind": "title1",
+   "maxW": 5360
+  },
+  "redesign": {
+   "x": 0,
+   "y": 1400,
+   "text": "Redesign",
+   "kind": "title1",
+   "maxW": 5360
+  },
+  "proposte": {
+   "x": 0,
+   "y": 2600,
+   "text": "Proposte",
+   "kind": "title1",
+   "maxW": 5360
+  }
+ },
+ "designSystems": []
+}
