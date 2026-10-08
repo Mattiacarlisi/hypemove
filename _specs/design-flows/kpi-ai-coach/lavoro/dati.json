@@ -1,0 +1,762 @@
+{
+ "benchmark": {
+  "soglia": 99,
+  "passaggi": [
+   {
+    "id": "categorie",
+    "nome": "Quali categorie",
+    "modello": "Jev",
+    "giri": [
+     {
+      "quando": "2026-10-08T19:21",
+      "giusti": 31,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0042
+     },
+     {
+      "quando": "2026-10-08T19:28",
+      "giusti": 34,
+      "casi": 50,
+      "errori": 1,
+      "costo": 0.0028
+     },
+     {
+      "quando": "2026-10-08T19:46",
+      "giusti": 34,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0033
+     },
+     {
+      "quando": "2026-10-08T20:06",
+      "giusti": 36,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.005
+     },
+     {
+      "quando": "2026-10-08T20:09",
+      "giusti": 38,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0053
+     },
+     {
+      "quando": "2026-10-08T20:10",
+      "giusti": 45,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0057
+     },
+     {
+      "quando": "2026-10-08T20:12",
+      "giusti": 46,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0057
+     },
+     {
+      "quando": "2026-10-08T20:13",
+      "giusti": 47,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0058
+     },
+     {
+      "quando": "2026-10-08T20:15",
+      "giusti": 46,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0058
+     },
+     {
+      "quando": "2026-10-08T20:16",
+      "giusti": 47,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0058
+     },
+     {
+      "quando": "2026-10-08T20:17",
+      "giusti": 48,
+      "casi": 50,
+      "errori": 0,
+      "costo": 0.0058
+     },
+     {
+      "quando": "2026-10-08T20:23",
+      "giusti": 86,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.0126
+     },
+     {
+      "quando": "2026-10-08T20:32",
+      "giusti": 93,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.013
+     },
+     {
+      "quando": "2026-10-08T20:33",
+      "giusti": 93,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.013
+     }
+    ]
+   },
+   {
+    "id": "strumenti",
+    "nome": "Quali strumenti",
+    "modello": "Jev",
+    "nota": "Jev sceglie davvero in 29 casi su 100: lì il primo giro era al 79%.",
+    "giri": [
+     {
+      "quando": "2026-10-08T20:45",
+      "giusti": 94,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.0032
+     },
+     {
+      "quando": "2026-10-08T20:56",
+      "giusti": 98,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.0034
+     },
+     {
+      "quando": "2026-10-08T21:18",
+      "giusti": 100,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.0029
+     },
+     {
+      "quando": "2026-10-08T21:20",
+      "giusti": 100,
+      "casi": 100,
+      "errori": 0,
+      "costo": 0.0029
+     }
+    ]
+   },
+   {
+    "id": "form",
+    "nome": "Compila il form",
+    "modello": "gpt-5.6-luna",
+    "stato": "in costruzione",
+    "giri": [
+     {
+      "quando": "2026-10-08T21:31",
+      "giusti": 40,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0363
+     },
+     {
+      "quando": "2026-10-08T21:42",
+      "giusti": 56,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0373
+     }
+    ]
+   },
+   {
+    "id": "esecuzione",
+    "nome": "Ogni strumento esegue",
+    "modello": "dipende dallo strumento",
+    "giri": []
+   },
+   {
+    "id": "risposta",
+    "nome": "Scrive la risposta",
+    "modello": "da decidere",
+    "giri": []
+   },
+   {
+    "id": "giudice",
+    "nome": "Il giudice",
+    "modello": "Jev",
+    "giri": []
+   },
+   {
+    "id": "ciclo",
+    "nome": "Il ciclo intero",
+    "modello": "tutti i passaggi insieme",
+    "giri": []
+   }
+  ]
+ },
+ "benchmark_esiti_per_caso": {
+  "categorie": [
+   {
+    "ora": "19:21",
+    "esiti": "gsggssgssggggssgggsgggggggsggsgssggsggggssggssgssg"
+   },
+   {
+    "ora": "19:28",
+    "esiti": "gggessgggggggsggggsgsggggsgsgsgsssgggggggsggssgsgg"
+   },
+   {
+    "ora": "19:46",
+    "esiti": "ggggssggggsgssggggggsggggsgggsgsgsgsgggggssgssgsgg"
+   },
+   {
+    "ora": "20:06",
+    "esiti": "ggggsgggggsgssgggggggggggsgsgggsgsgsgggggssgssgsgg"
+   },
+   {
+    "ora": "20:09",
+    "esiti": "ssgggsgssggggssggggggggggggsgsgsggggggggsggsgggggg"
+   },
+   {
+    "ora": "20:10",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgsgggggggggsgggggg"
+   },
+   {
+    "ora": "20:12",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgggggggggggsgggggg"
+   },
+   {
+    "ora": "20:13",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgggggggggggggggggg"
+   },
+   {
+    "ora": "20:15",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgggsgggggggggggggg"
+   },
+   {
+    "ora": "20:16",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgggggggggggggggggg"
+   },
+   {
+    "ora": "20:17",
+    "esiti": "gggggggggggggsgggggggggggggggggsgggggggggggggggggg"
+   },
+   {
+    "ora": "20:23",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgggsgggggggggggggggggggggggsssgggggsggggggsggggsssgsgsgggggggggggggg"
+   },
+   {
+    "ora": "20:32",
+    "esiti": "gggggggggggggsgggggggggggggsgggsgggggggggggggggggggggggggggsssggggggggggggggggggggggggggggggsggggggg"
+   },
+   {
+    "ora": "20:33",
+    "esiti": "gggggggggggggsgggggggggggggggggsgggggggggggggggggggggggggggsssgggggsggggggggggggggggggggggggsggggggg"
+   }
+  ],
+  "form": [
+   {
+    "ora": "21:31",
+    "esiti": "sgggsgssssgggsgggssgggsgsggsggggsggggsgssggssgsgsggsgggggsgggsg"
+   },
+   {
+    "ora": "21:42",
+    "esiti": "sggggggsgggggggggssggggggggggggggggggggggggssggggggsggggggggggg"
+   }
+  ],
+  "strumenti": [
+   {
+    "ora": "20:45",
+    "esiti": "ggggggggsgggggsggggggggggggggggggsggggggggggggggggsgggggggggggggggsgggggggggggsggggggggggggggggggggg"
+   },
+   {
+    "ora": "20:56",
+    "esiti": "ggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggsgggggggggggsggggggggggggggggggggg"
+   },
+   {
+    "ora": "21:18",
+    "esiti": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+   },
+   {
+    "ora": "21:20",
+    "esiti": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+   }
+  ]
+ },
+ "legenda_esiti": "g giusto, s sbagliato, e errore di chiamata; una lettera per caso, in ordine di numero del caso",
+ "uso": {
+  "periodo": "08/09/2026 – 08/10/2026 (30 giorni, predefinito della pagina; l'08/10 è oggi, giorno ancora in corso)",
+  "totali": {
+   "chiamate": 17464,
+   "token_in": 301852930,
+   "token_out": 10154319,
+   "costo_usd": 86.825,
+   "utenti_unici": 1872,
+   "sessioni_mostrate": 17,
+   "errori": 480
+  },
+  "nota_sessioni": "Il riquadro «Sessioni» conta i context_key distinti (17 tipi di chiamata), non le sessioni: difetto vero del programma, resta visibile nella fila Oggi.",
+  "giorni_colonne": [
+   "giorno",
+   "chiamate",
+   "utenti",
+   "costo_usd",
+   "errori"
+  ],
+  "giorni": [
+   [
+    "08/09",
+    157,
+    33,
+    1.049,
+    0
+   ],
+   [
+    "09/09",
+    531,
+    100,
+    2.835,
+    0
+   ],
+   [
+    "10/09",
+    713,
+    126,
+    3.346,
+    0
+   ],
+   [
+    "11/09",
+    633,
+    143,
+    2.837,
+    1
+   ],
+   [
+    "12/09",
+    909,
+    161,
+    4.469,
+    0
+   ],
+   [
+    "13/09",
+    875,
+    195,
+    4.672,
+    0
+   ],
+   [
+    "14/09",
+    727,
+    187,
+    3.886,
+    0
+   ],
+   [
+    "15/09",
+    723,
+    186,
+    4.131,
+    0
+   ],
+   [
+    "16/09",
+    635,
+    169,
+    3.302,
+    1
+   ],
+   [
+    "17/09",
+    605,
+    143,
+    3.227,
+    0
+   ],
+   [
+    "18/09",
+    420,
+    110,
+    2.204,
+    0
+   ],
+   [
+    "19/09",
+    355,
+    75,
+    1.868,
+    0
+   ],
+   [
+    "20/09",
+    305,
+    74,
+    1.807,
+    0
+   ],
+   [
+    "21/09",
+    548,
+    163,
+    3.803,
+    0
+   ],
+   [
+    "22/09",
+    641,
+    170,
+    4.367,
+    1
+   ],
+   [
+    "23/09",
+    675,
+    182,
+    4.557,
+    0
+   ],
+   [
+    "24/09",
+    256,
+    84,
+    1.317,
+    0
+   ],
+   [
+    "25/09",
+    456,
+    78,
+    2.443,
+    0
+   ],
+   [
+    "26/09",
+    428,
+    84,
+    2.644,
+    0
+   ],
+   [
+    "27/09",
+    350,
+    77,
+    2.071,
+    0
+   ],
+   [
+    "28/09",
+    472,
+    87,
+    2.848,
+    0
+   ],
+   [
+    "29/09",
+    367,
+    96,
+    2.355,
+    0
+   ],
+   [
+    "30/09",
+    709,
+    123,
+    3.227,
+    179
+   ],
+   [
+    "01/10",
+    499,
+    117,
+    3.259,
+    1
+   ],
+   [
+    "02/10",
+    497,
+    119,
+    2.941,
+    9
+   ],
+   [
+    "03/10",
+    239,
+    51,
+    1.336,
+    0
+   ],
+   [
+    "04/10",
+    434,
+    65,
+    1.964,
+    1
+   ],
+   [
+    "05/10",
+    768,
+    150,
+    2.317,
+    56
+   ],
+   [
+    "06/10",
+    922,
+    141,
+    2.081,
+    69
+   ],
+   [
+    "07/10",
+    887,
+    127,
+    2.051,
+    71
+   ],
+   [
+    "08/10",
+    728,
+    126,
+    1.614,
+    91
+   ]
+  ],
+  "chiamate_per_contesto": {
+   "roadmap-premium": 8416,
+   "workout-coach-note": 3176,
+   "workout-feedback": 1843,
+   "plan_fill_jev": 796,
+   "workout-details": 733,
+   "home": 564,
+   "plan-module": 519,
+   "plan-outline": 432,
+   "paywall-giorno-zero": 347,
+   "meal-scan": 221,
+   "plan_fill_schema": 160,
+   "plan_recalibrate": 66,
+   "plan-module-rewrite": 61,
+   "memory-review": 46,
+   "coach-checkin": 44,
+   "memory": 32,
+   "profile": 8
+  },
+  "chiamate_per_modello": {
+   "google/gemini-3.1-flash-lite": 13584,
+   "openai/gpt-5.6-luna": 1754,
+   "google/gemini-2.5-flash": 1352,
+   "typesafe/jev-1.13": 1335
+  },
+  "funnel_feedback": {
+   "workout_feedback_notification_scheduled": 495,
+   "workout_feedback_shown": 2043,
+   "workout_feedback_replied": 700
+  },
+  "sessioni_chat_prima_voce": {
+   "coach": 988,
+   "utente": 211
+  }
+ },
+ "chat_vere_senza_nomi": [
+  {
+   "id": 1,
+   "schermata": null,
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Ciao, cosa vorresti fare oggi?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Caffè con zucchero e 1 cornetto frutti di bosco"
+    }
+   ]
+  },
+  {
+   "id": 2,
+   "schermata": null,
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Ciao, cosa vorresti fare oggi?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Non mi piace lo squat"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "schermata": null,
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Workout interrotto — colpa mia che l'ho fatto troppo tosto, o è successo qualcosa?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Come faccio ad attivare l'allenamento quando ho il tempo di farlo… resta memorizzato?"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "schermata": null,
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Sei uscito prima di iniziare — c'era qualcosa che ti ha bloccato?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Oggi ho infiammata cervicale"
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "schermata": null,
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Com'è andato il workout di oggi?…"
+    },
+    {
+     "chi": "utente",
+     "testo": "Ti chiederei di cambiare la durata, il workout deve essere 10 Min circa…"
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "schermata": null,
+   "chat": [
+    {
+     "chi": "utente",
+     "testo": "Vorrei una scheda allenamento di 45 minuti al giorno. Primo giorno braccia e schiena…"
+    }
+   ]
+  },
+  {
+   "id": 11,
+   "schermata": "workout-feedback",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Ti sei fermato proprio su Neck Rotation… troppo duro o semplicemente non ti andava?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Sono fuori mi alleno al mattino"
+    }
+   ]
+  },
+  {
+   "id": 12,
+   "schermata": "workout-feedback",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Ti sei fermato proprio su Cat Cow… troppo duro o semplicemente non ti andava?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Inizio domani"
+    }
+   ]
+  },
+  {
+   "id": 13,
+   "schermata": "home",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Ti andrebbe di fare un secondo workout? Oppure hai qualche domanda per me?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Non sono riuscita a fare i crunch"
+    },
+    {
+     "chi": "coach",
+     "testo": "Va bene, per ora niente crunch. Ti davano dolore oppure erano semplicemente troppo difficili da eseguire?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Nn riuscivo ad alzarmi"
+    }
+   ]
+  },
+  {
+   "id": 14,
+   "schermata": "workout-feedback",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Sei uscito prima di iniziare — c'era qualcosa che ti ha bloccato?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Lo avevo già fatto prndova si fosdrre esercizi nuovo visto che ho tempo per farne altri"
+    }
+   ]
+  },
+  {
+   "id": 15,
+   "schermata": "workout-details",
+   "chat": [
+    {
+     "chi": "utente",
+     "testo": "Oggi fammelo con la sedia"
+    }
+   ]
+  },
+  {
+   "id": 16,
+   "schermata": "workout-feedback",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Primo allenamento chiuso 💪 Sincero: com'era la difficoltà?"
+    },
+    {
+     "chi": "utente",
+     "testo": "La difficoltà era giusta"
+    }
+   ]
+  },
+  {
+   "id": 17,
+   "schermata": "workout-feedback",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Sei uscito prima di iniziare — c'era qualcosa che ti ha bloccato?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Ora non posso ci sentiamo alle 18.00"
+    },
+    {
+     "chi": "coach",
+     "testo": "Va bene: alle 18 ripartiamo con calma, senza cambiare nulla del programma."
+    },
+    {
+     "chi": "utente",
+     "testo": "Ok alle 18.00 ci sarò"
+    }
+   ]
+  },
+  {
+   "id": 18,
+   "schermata": "home",
+   "chat": [
+    {
+     "chi": "coach",
+     "testo": "Ciao, cosa vorresti fare oggi?"
+    },
+    {
+     "chi": "utente",
+     "testo": "Ho 5 minuti, dammi un workout"
+    }
+   ]
+  }
+ ]
+}

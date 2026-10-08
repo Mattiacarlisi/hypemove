@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>2 - Caricamento</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0;background:#0a0a0f}
+
+.kb{--bg:#0a0a0f;--surface:#111118;--surface2:#1a1a24;--border:#252535;--border2:#333345;--text:#e8e8f0;--muted:#7070a0;--mattia:#4ade80;--red:#f87171;--amber:#fbbf24;--purple:#a78bfa;--accent:#7c3aed;--accent-lo:#1e1030;--radius:10px;--mono:'JetBrains Mono',monospace;
+font-family:'Inter',sans-serif;font-size:14px;line-height:1.5;background:#0a0a0f;color:#e8e8f0;position:relative;overflow:hidden}
+.kb *,.kb *::before,.kb *::after{box-sizing:border-box;margin:0;padding:0}
+.kb code{font-family:monospace}
+.kb .sidebar{position:absolute;top:0;left:0;bottom:0;width:220px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100}
+.kb .sidebar-logo{padding:20px 20px 16px;border-bottom:1px solid var(--border);display:block}
+.kb .logo-mark{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--text);letter-spacing:-0.5px}
+.kb .logo-mark span{color:var(--purple)}
+.kb .logo-sub{font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-top:2px}
+.kb .nav{padding:12px 10px;flex:1}
+.kb .nav-section{font-size:10px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;padding:8px 10px 6px}
+.kb .nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:7px;font-size:13px;color:var(--muted);margin-bottom:2px;border:none;background:none;width:100%;text-align:left}
+.kb .nav-item.active{background:var(--accent-lo);color:var(--purple)}
+.kb .nav-item .icon{font-size:15px;width:20px;text-align:center}
+.kb .main{position:absolute;top:0;left:220px;width:1060px;max-width:1200px;padding:0 32px}
+.kb .scr{padding-top:28px;padding-bottom:40px}
+.kb .page-header{margin-bottom:28px}
+.kb .page-title{font-size:22px;font-weight:700;color:var(--text)}
+.kb .page-sub{color:var(--muted);font-size:13px;margin-top:4px}
+.kb .page-head-l{display:flex;align-items:center;gap:12px;min-width:0}
+.kb .nav-toggle{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;width:34px;height:34px;border-radius:8px;background:var(--surface);border:1px solid var(--border);color:var(--muted)}
+.kb .refresh-meta{display:flex;align-items:center;gap:10px;font-size:11px;color:#4a4a68}
+.kb .btn-refresh{display:inline-flex;align-items:center;gap:6px;font-family:inherit;font-size:11.5px;padding:5px 12px;background:transparent;border:1px solid var(--border);border-radius:7px;color:var(--muted)}
+.kb .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px}
+.kb .card-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:14px}
+.kb .filter-bar{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.kb .filter-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}
+.kb .form-input{background:var(--surface2);border:1px solid var(--border2);border-radius:7px;color:var(--text);font-size:13px;padding:9px 12px;font-family:'Inter',sans-serif;display:flex;align-items:center;justify-content:space-between}
+.kb .form-input.ph{color:var(--muted)}
+.kb .btn{padding:9px 18px;border-radius:7px;font-size:13px;font-weight:600;border:none;font-family:'Inter',sans-serif}
+.kb .btn-primary{background:var(--accent);color:#fff}
+.kb .pulse{}
+.kb .cb-card{margin-bottom:16px}
+.kb .cb-sub{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:18px;max-width:760px}
+.kb .cb-sub code{font-family:var(--mono);font-size:12px;color:var(--text)}
+.kb .cb-row{display:grid;grid-template-columns:210px minmax(0,1fr) 200px;column-gap:20px;align-items:center;padding:12px 0;border-top:1px solid var(--border)}
+.kb .cb-row.cb-scale{border-top:0;padding:0 0 4px}
+.kb .cb-axis{position:relative;height:16px;font-size:11px;color:var(--muted)}
+.kb .cb-goal-lab{position:absolute;right:calc(100% - var(--cb-goal));color:var(--amber);font-weight:700;white-space:nowrap}
+.kb .cb-step{font-size:15px;font-weight:700;color:var(--text)}
+.kb .cb-model{font-size:12px;color:var(--muted);margin-top:2px}
+.kb .cb-track{position:relative;height:22px;border-radius:5px;background:var(--surface2)}
+.kb .cb-track::after{content:'';position:absolute;left:var(--cb-goal);top:-12px;bottom:-12px;width:2px;margin-left:-1px;background:var(--amber)}
+.kb .cb-fillw{height:100%;overflow:hidden;border-radius:5px 0 0 5px}
+.kb .cb-fill{height:100%;border-radius:5px 0 0 5px;background:var(--accent)}
+.kb .cb-done .cb-fill{background:var(--mattia);border-radius:5px}
+.kb .cb-off .cb-track{background:transparent;border:1.5px dashed var(--border2)}
+.kb .cb-val{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:baseline}
+.kb .cb-num{font-size:26px;font-weight:800;line-height:1;color:var(--text)}
+.kb .cb-state{font-size:12px;color:var(--muted);white-space:nowrap}
+.kb .cb-gap{grid-column:1/-1;font-size:12px;font-weight:700;margin-top:4px;color:var(--purple)}
+.kb .cb-done .cb-gap{color:var(--mattia)}
+.kb .cb-none{grid-column:1/-1;font-size:13px;font-weight:700;color:var(--muted)}
+.kb .cb-off .cb-state{grid-column:1/-1;margin-top:2px}
+.kb .cb-off .cb-step{color:var(--muted)}
+.kb .cb-hist{grid-column:2/-1;font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+.kb .cb-note{color:var(--text);opacity:.8}
+.kb .mtop{display:flex;align-items:center;gap:10px;position:absolute;top:0;left:0;right:0;z-index:90;padding:10px 14px;background:rgba(10,10,15,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.kb .mtop .logo-mark{font-size:15px}
+.kb .mtop-page{margin-left:auto;font-size:12px;color:var(--muted)}
+.kb summary{list-style:none}
+.kb .ai-conv-tab{cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid}
+
+</style>
+</helmet>
+<div class="kb" style="width: 1280px; height: 720px">
+<div class="sidebar"><div class="sidebar-logo"><div class="logo-mark">Hype<span>move</span></div><div class="logo-sub">KPI</div></div><nav class="nav"><div class="nav-section">KPI</div><button class="nav-item"><span class="icon">📈</span>Stats</button><button class="nav-item"><span class="icon">📊</span>Overview</button><button class="nav-item"><span class="icon">🎯</span>Funnel</button><button class="nav-item"><span class="icon">🔄</span>Retention</button><button class="nav-item"><span class="icon">🏃</span>Sprint</button><button class="nav-item"><span class="icon">💎</span>Premium</button><button class="nav-item active"><span class="icon">🤖</span>AI Coach</button><button class="nav-item"><span class="icon">🖱️</span>Comportamento</button><div class="nav-section" style="margin-top:8px">Marketing</div><button class="nav-item"><span class="icon">📣</span>Meta ADS</button></nav><div style="padding:14px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">Mattia &amp; Danilo · 50/50</div></div><div class="main"><div class="scr" style="transform:translateY(-{{sy}})"><div style="opacity:{{e1.o}};transform:{{e1.tf}}"><div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap"><div class="page-head-l"><button class="nav-toggle nav-toggle-desk"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg></button><div><div class="page-title">KPI Dashboard</div><div class="page-sub">Metriche prodotto HypeMove · live da Supabase</div></div></div><div class="refresh-meta"><span>agg. tra {{cd}}</span><span>ultimo 21:47</span><button class="btn-refresh"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg> Aggiorna</button></div></div></div><div style="opacity:{{e2.o}};transform:{{e2.tf}}"><div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:6px;align-items:center"><span class="filter-label">Periodo</span><div class="form-input" style="width:145px;padding:5px 10px;font-size:12px;height:29px"><span>08/09/2026</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1f1f1f" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg></div><span style="color:var(--muted)">→</span><div class="form-input" style="width:145px;padding:5px 10px;font-size:12px;height:29px"><span>08/10/2026</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1f1f1f" stroke-width="2" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path></svg></div><div id="agg" style="position:relative"><button class="btn btn-primary" style="padding:6px 16px;font-size:12px">Aggiorna</button><div style="position:absolute;inset:0;border-radius:7px;background:#6d28d9;opacity:{{hv}};display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:600;font-family:Inter,sans-serif;pointer-events:none">Aggiorna</div></div></div></div><div style="opacity:{{e3.o}};transform:{{e3.tf}}"><div id="kcard_l" class="card" style="margin-bottom:16px;"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px;opacity:{{pu}}">Caricamento statistiche…</div></div></div><div style="opacity:{{e4.o}};transform:{{e4.tf}}"><div id="bench" class="card cb-card" style="--cb-goal:99%"><div class="card-title" style="margin-bottom:4px">Benchmark del coach a flusso unico</div><div class="cb-sub">Casi giusti nell'ultimo giro di ogni passaggio, nell'ordine del flusso. Un passaggio è risolto al 99%.
+ Misurati 3 su 7, risolti 1.</div><div class="cb-rows"><div class="cb-row cb-scale"><div></div><div class="cb-axis"><span>0%</span><span class="cb-goal-lab">99% · risolto</span></div><div></div></div><div class="cb-row"><div class="cb-name"><div class="cb-step">Quali categorie</div><div class="cb-model">Jev</div></div><div class="cb-track"><div class="cb-fill" style="width:{{bw0}}"></div></div><div class="cb-val"><div class="cb-num">93%</div><div class="cb-state">93 giusti su 100</div><div class="cb-gap">Mancano 6 casi</div></div><div class="cb-hist">Stesso risultato negli ultimi 2 giri · 14 giri in tutto, il primo al 62% su 50 casi · ultimo giro il 08/10 alle 20:33</div></div><div class="cb-row cb-done"><div class="cb-name"><div class="cb-step">Quali strumenti</div><div class="cb-model">Jev</div></div><div class="cb-track"><div class="cb-fill" style="width:{{bw1}}"></div></div><div class="cb-val"><div class="cb-num">100%</div><div class="cb-state">100 giusti su 100</div><div class="cb-gap">Risolto</div></div><div class="cb-hist">Stesso risultato negli ultimi 2 giri · 4 giri in tutto, il primo al 94% su 100 casi · ultimo giro il 08/10 alle 21:20<div class="cb-note">Jev sceglie davvero in 29 casi su 100: lì il primo giro era al 79%.</div></div></div><div class="cb-row"><div class="cb-name"><div class="cb-step">Compila il form</div><div class="cb-model">gpt-5.6-luna</div></div><div class="cb-track"><div class="cb-fill" style="width:{{bw2}}"></div></div><div class="cb-val"><div class="cb-num">89%</div><div class="cb-state">56 giusti su 63</div><div class="cb-gap">Mancano 7 casi</div></div><div class="cb-hist">2 giri in tutto, il primo al 63% su 63 casi · ultimo giro il 08/10 alle 21:42</div></div><div class="cb-row cb-off"><div class="cb-name"><div class="cb-step">Ogni strumento esegue</div><div class="cb-model">dipende dallo strumento</div></div><div class="cb-track"></div><div class="cb-val"><div class="cb-none">Non ancora misurato</div><div class="cb-state">da costruire</div></div></div><div class="cb-row cb-off"><div class="cb-name"><div class="cb-step">Scrive la risposta</div><div class="cb-model">da decidere</div></div><div class="cb-track"></div><div class="cb-val"><div class="cb-none">Non ancora misurato</div><div class="cb-state">da costruire</div></div></div><div class="cb-row cb-off"><div class="cb-name"><div class="cb-step">Il giudice</div><div class="cb-model">Jev</div></div><div class="cb-track"></div><div class="cb-val"><div class="cb-none">Non ancora misurato</div><div class="cb-state">da costruire</div></div></div><div class="cb-row cb-off"><div class="cb-name"><div class="cb-step">Il ciclo intero</div><div class="cb-model">tutti i passaggi insieme</div></div><div class="cb-track"></div><div class="cb-val"><div class="cb-none">Non ancora misurato</div><div class="cb-state">da costruire</div></div></div></div></div></div><div style="opacity:{{e5.o}};transform:{{e5.tf}}"><div id="conv" class="card" style="padding:0;overflow:hidden;margin-bottom:16px"><div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #1e1e30;flex-wrap:wrap"><div class="card-title" style="margin-bottom:0">Conversazioni</div><div style="display:flex;gap:6px"><button class="ai-conv-tab" style="background:var(--accent-lo);border-color:var(--accent);color:var(--purple)">Spontanee</button><button class="ai-conv-tab" style="background:var(--surface2);border-color:#3a3a55;color:var(--text)">Feedback post-workout</button><button class="ai-conv-tab" style="background:var(--surface2);border-color:#3a3a55;color:var(--text)">Dopo il primo workout</button></div><div class="form-input ph" style="width:220px;font-size:12px;padding:5px 10px;margin-left:auto;height:29px">Cerca utente…</div></div><div style="display:flex;height:560px;min-height:0"><div style="width:300px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto"><div style="padding:20px;color:var(--muted);font-size:12px;opacity:{{pu}}">Caricamento sessioni…</div></div><div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden"><div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px">Seleziona una conversazione</div></div></div></div></div></div></div><div style="position:absolute;left:{{tp1.x}};top:{{tp1.y}};width:80px;height:80px;border-radius:40px;background:#ffffff;opacity:{{tp1.o}};transform:{{tp1.tf}};pointer-events:none"></div><div style="position:absolute;left:{{tp2.x}};top:{{tp2.y}};width:80px;height:80px;border-radius:40px;background:#ffffff;opacity:{{tp2.o}};transform:{{tp2.tf}};pointer-events:none"></div><div style="position:absolute;left:0;top:0;width:1280px;height:720px;background:#0a0a0f;opacity:{{veil}};pointer-events:none;z-index:400"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":720}}'>
+class Component extends DCLogic {
+  componentDidMount() {
+    if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    this.t0 = performance.now();
+    const loop = () => { this.forceUpdate(); this.raf = requestAnimationFrame(loop); };
+    this.raf = requestAnimationFrame(loop);
+  }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); }
+  renderVals() {
+    const C = {"BP": [93.0, 100.0, 88.88888888888889, 0, 0, 0, 0], "P": 6, "TS": 2, "S": [1000, 600], "W": [], "T": [null, null], "SC": [], "CD": 272};
+    const MM = (typeof window !== 'undefined' && window.__M);
+    const P = C.P;
+    const t = this.t0 ? ((performance.now() - this.t0) / 1000) % P : C.TS;
+    const cl = (x) => Math.max(0, Math.min(1, x));
+    const p = (a, d) => cl((t - a) / d);
+    const out = (x) => 1 - Math.pow(1 - x, 3);
+    const inout = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+    const f = (x, d) => x.toFixed(d === undefined ? 3 : d);
+    const ent = (a) => { const k = MM ? 1 : out(p(a, 0.5)); return { o: f(k), tf: 'translateY(' + f(12 * (1 - k), 1) + 'px)' }; };
+    const mix = (a, b, k) => 'rgba(' + [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * k)).join(',') + ',' + f(a[3] + (b[3] - a[3]) * k) + ')';
+    let px = C.S[0], py = C.S[1], lx = px, ly = py;
+    C.W.forEach((w) => { const g = inout(p(w[2] - 0.8, 0.8)); px += (w[0] - lx) * g; py += (w[1] - ly) * g; lx = w[0]; ly = w[1]; });
+    const tap = (a) => { const k = a ? p(a[2], 0.45) : 0; return a ? { x: (a[0] - 40) + 'px', y: (a[1] - 40) + 'px', o: k > 0 && k < 1 ? f(0.3 * (1 - k)) : 0, tf: 'scale(' + f(0.3 + 0.6 * out(k)) + ')' } : { x: '0px', y: '0px', o: 0, tf: 'none' }; };
+    let sy = 0; C.SC.forEach((s) => { sy += (s[1] - s[0]) * inout(p(s[2], s[3])); sy -= 0; });
+    if (MM) sy = 0;
+    const secs = Math.max(0, C.CD - Math.floor(t));
+    const V = {
+      veil: MM ? 0 : f(Math.max(1 - p(0, 0.2), p(P - 0.3, 0.3))),
+      pt: { x: f(px - 2, 1) + 'px', y: f(py - 2, 1) + 'px' }, tp1: tap(C.T[0]), tp2: tap(C.T[1]),
+      sy: f(sy, 1) + 'px', pu: f(0.7 + 0.3 * Math.cos(2 * Math.PI * t / 1.2)),
+      cd: Math.floor(secs / 60) + ':' + ('0' + (secs % 60)).slice(-2),
+      ub: 'rgb(30,30,48)', uc: 'rgb(232,232,240)', ud: '1', uu: '0', e1: ent(0.2), e2: ent(0.35), e3: ent(0.5), e4: ent(0.65), e5: ent(0.8), hv: '0'
+    };
+    for (let i = 0; i < 7; i++) V['bw' + i] = f(C.BP[i] * (MM ? 1 : out(p(0.9 + 0.08 * i, 0.7))), 1) + '%';
+    
+    return V;
+  }
+}
+</script>
+</body>
+</html>

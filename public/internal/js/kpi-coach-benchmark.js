@@ -1,23 +1,24 @@
 // KPI Dashboard — blocco «Benchmark del coach» della pagina AI Coach.
-// Caricato DOPO kpi.js: usa `state`, `render` ed `esc` di quel file.
-// I dati sono un file statico (data/coach-benchmark.json) scritto da
-// `npm run embed:coach-benchmarks` in app/: i risultati dei benchmark non passano dal database.
-// Passaggi e giri nuovi arrivano dal file: qui non c'è nessun elenco.
+// Caricato DOPO kpi.js: usa `sb`, `state`, `render` ed `esc` di quel file.
+// I dati vengono dal database (RPC kpi_coach_benchmark): una riga per giro, scritta dallo
+// script del benchmark a fine giro. Passaggi e giri nuovi arrivano da lì: qui non c'è nessun elenco.
 
-const coachBench = { data: null, error: null };
+const coachBench = { data: null, error: null, loading: false };
 
+// Parte al primo disegno della pagina, quando la sessione dell'operatore c'è già.
 async function fetchCoachBenchmark() {
+  coachBench.loading = true;
   try {
-    const res = await fetch('data/coach-benchmark.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
+    const { data, error } = await sb.rpc('kpi_coach_benchmark');
+    if (error) throw error;
     if (!data || !Array.isArray(data.passaggi)) throw new Error('forma inattesa');
     coachBench.data = data;
   } catch (e) {
     console.error('fetchCoachBenchmark', e);
     coachBench.error = e.message || String(e);
   }
-  if (typeof state !== 'undefined' && state.opsSession && state.page === 'ai-coach') render();
+  coachBench.loading = false;
+  if (state.opsSession && state.page === 'ai-coach') render();
 }
 
 const cbDay = q => { const [d, t] = String(q).split('T'); return d.split('-').reverse().slice(0, 2).join('/') + ' alle ' + t; };
@@ -54,10 +55,13 @@ function cbRow(p, soglia) {
 function coachBenchmarkCard() {
   const head = '<div class="card-title" style="margin-bottom:4px">Benchmark del coach a flusso unico</div>';
   if (coachBench.error) {
-    return `<div class="card cb-card">${head}<div class="cb-sub">Manca il file <code>data/coach-benchmark.json</code>. Si rigenera con <code>npm run embed:coach-benchmarks</code> in <code>app/</code>.</div></div>`;
+    return `<div class="card cb-card">${head}<div class="cb-sub">I giri non si leggono dal database: ${esc(coachBench.error)}</div></div>`;
   }
   const d = coachBench.data;
-  if (!d) return `<div class="card cb-card">${head}<div class="cb-sub pulse">Caricamento…</div></div>`;
+  if (!d) {
+    if (!coachBench.loading) fetchCoachBenchmark();
+    return `<div class="card cb-card">${head}<div class="cb-sub pulse">Caricamento…</div></div>`;
+  }
   const soglia = d.soglia || 99;
   const misurati = d.passaggi.filter(p => (p.giri || []).length);
   const risolti = misurati.filter(p => { const u = p.giri[p.giri.length - 1]; return u.giusti >= Math.ceil(soglia / 100 * u.casi); });
@@ -70,5 +74,3 @@ function coachBenchmarkCard() {
     </div>
   </div>`;
 }
-
-fetchCoachBenchmark();
