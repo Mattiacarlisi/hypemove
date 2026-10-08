@@ -162,6 +162,62 @@
       "casi": 63,
       "errori": 0,
       "costo": 0.0373
+     },
+     {
+      "quando": "2026-10-08T21:47",
+      "giusti": 51,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0219
+     },
+     {
+      "quando": "2026-10-08T22:08",
+      "giusti": 57,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0411
+     },
+     {
+      "quando": "2026-10-08T22:09",
+      "giusti": 59,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0232
+     },
+     {
+      "quando": "2026-10-08T22:09",
+      "giusti": 60,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0224
+     },
+     {
+      "quando": "2026-10-08T22:11",
+      "giusti": 62,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0431
+     },
+     {
+      "quando": "2026-10-08T22:12",
+      "giusti": 61,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0239
+     },
+     {
+      "quando": "2026-10-08T22:13",
+      "giusti": 61,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.0243
+     },
+     {
+      "quando": "2026-10-08T22:15",
+      "giusti": 62,
+      "casi": 63,
+      "errori": 0,
+      "costo": 0.024
      }
     ]
    },

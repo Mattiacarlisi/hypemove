@@ -345,16 +345,6 @@ const OLD_PREMIUM_FUN_CFG_V1 = [
   { stepIdx: 4, vsIdx: 2 }, { stepIdx: 8, vsIdx: 3 },
 ];
 
-// Eventi del funnel feedback post-workout (unico funnel rimasto nella pagina AI Coach, in
-// versione compatta dentro il tab Feedback delle Conversazioni). Passati a kpi_events_by_name
-// (conteggio per nome SENZA il LIMIT 50 di kpi_events_summary, che tagliava fuori gli eventi rari).
-// Il funnel AI Coach configurabile e il confronto sprint vivono nella sezione Funnel (pageFunnelEvent).
-const FEEDBACK_FUNNEL_EVENT_NAMES = [
-  'workout_feedback_notification_scheduled',
-  'workout_feedback_shown',
-  'workout_feedback_replied',
-];
-
 function loadLS(key, def) {
   try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
 }
@@ -586,16 +576,6 @@ let state = {
   aiSessionMessages: null,
   aiSessionMessagesLoading: false,
   aiSearchQuery: '',
-  aiStatsData: null,
-  aiStatsLoading: false,
-  aiStatsUsers: null,
-  aiStatsUsersLoading: false,
-  aiStatsUsersOpen: false,
-  aiStatsFrom: new Date(Date.now()-30*864e5).toISOString().slice(0,10),
-  aiStatsTo: TODAY,
-  // Tab del browser conversazioni AI Coach: 'spontanee' | 'feedback' | 'paywall'.
-  aiConvTab: 'spontanee',
-  feedbackFunnelEvents: null, feedbackFunnelLoading: false, feedbackFunnelError: null,
   metaToken: localStorage.getItem(LS_META_TOKEN) || '',
   settingsLoadError: false,
   metaTokenSaveError: false,
@@ -631,19 +611,7 @@ let state = {
   likedShowAll: false,
   likedGender: 'all',     // 'all' | 'male' | 'female'
   likedAge: 'all',        // 'all' | '18-24' | '25-34' | '35-44' | '45-54' | '55-'
-  // Tab "Prompt AI": snapshot statico (ai-prompts-dashboard.json) generato da
-  // npm run embed:ai-prompts. Vista read-only sul system prompt composto + tool
-  // whitelist per contesto/schermata (SSOT = supabase/functions/ai-chat/).
-  promptAI: null, promptAILoading: false, promptAIError: null,
-  promptAIRaw: false,
-  // F2: override runtime dei prompt (tabella ai_prompt_overrides + edge admin-set/get-active).
-  // La dashboard fa merge lato client: snapshot embedded resta baseline, override vincono.
-  promptOverrides: null, promptOverridesLoading: false, promptOverridesError: null,
-  promptEditOpen: false, promptEditFragmentId: null, promptEditContent: '',
-  promptEditNote: '', promptEditSaving: false, promptEditError: null,
-  promptEditVersions: null, promptEditVersionsLoading: false, promptEditRestoredFromId: null,
-  // Sessione ops per l'edit (email+password Supabase Auth). Anon-only nella dashboard,
-  // ma per scrivere override serve JWT + gate PROMPT_EDIT_USER_IDS lato edge.
+  // Sessione operatore (email+password Supabase Auth): senza, ogni RPC della dashboard risponde 403.
   opsSession: null, opsSessionCheckedOnce: false,
   opsEmailInput: '', opsPasswordInput: '', opsAuthError: null,
 };
@@ -1704,50 +1672,6 @@ async function fetchBehavior() {
   render();
 }
 
-// F2 — helpers override runtime + auth ops.
-// URL edge functions Supabase.
-const FN_URL = (name) => `${SUPABASE_URL}/functions/v1/${name}`;
-
-async function fetchActiveOverrides() {
-  state.promptOverridesLoading = true;
-  state.promptOverridesError = null;
-  try {
-    const res = await fetch(FN_URL('get-active-overrides'), {
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    state.promptOverrides = Array.isArray(data.overrides) ? data.overrides : [];
-  } catch (e) {
-    console.error('fetchActiveOverrides', e);
-    state.promptOverridesError = e.message || String(e);
-    state.promptOverrides = [];
-  }
-  state.promptOverridesLoading = false;
-  render();
-}
-
-// Storico versioni di un fragment (RLS read pubblica → sb anon diretto, no edge).
-async function fetchPromptEditVersions(fragmentId) {
-  state.promptEditVersionsLoading = true;
-  render();
-  try {
-    const { data, error } = await sb
-      .from('ai_prompt_overrides')
-      .select('id, fragment_id, content, note, author_auth_id, created_at, is_active')
-      .eq('fragment_id', fragmentId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (error) throw error;
-    state.promptEditVersions = data || [];
-  } catch (e) {
-    console.error('fetchPromptEditVersions', e);
-    state.promptEditVersions = [];
-  }
-  state.promptEditVersionsLoading = false;
-  render();
-}
-
 // Sessione ops: verifica al boot se c'è già un JWT persistito da Supabase Auth JS.
 async function refreshOpsSession() {
   try {
@@ -1780,120 +1704,6 @@ async function opsLogout() {
     state.opsSession = null;
     render();
   } catch (e) { console.error('opsLogout', e); }
-}
-
-// Salva un override: chiama admin-set-prompt-override con JWT ops.
-async function savePromptOverride() {
-  const token = state.opsSession?.access_token;
-  if (!token) { state.promptEditError = 'Sessione ops scaduta, rifai login'; render(); return; }
-  if (!state.promptEditContent.trim()) { state.promptEditError = 'Il testo non può essere vuoto'; render(); return; }
-  if (!state.promptEditNote.trim()) { state.promptEditError = 'Un changelog è obbligatorio'; render(); return; }
-  state.promptEditSaving = true;
-  state.promptEditError = null;
-  render();
-  try {
-    const res = await fetch(FN_URL('admin-set-prompt-override'), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        fragment_id: state.promptEditFragmentId,
-        content: state.promptEditContent,
-        note: state.promptEditNote,
-      }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = body.message || body.error || `HTTP ${res.status}`;
-      state.promptEditError = msg;
-      state.promptEditSaving = false;
-      render();
-      return;
-    }
-    // Successo: chiudi modale, refetcha override attivi.
-    state.promptEditOpen = false;
-    state.promptEditFragmentId = null;
-    state.promptEditContent = '';
-    state.promptEditNote = '';
-    state.promptEditVersions = null;
-    state.promptEditRestoredFromId = null;
-    state.promptEditSaving = false;
-    render();
-    await fetchActiveOverrides();
-  } catch (e) {
-    console.error('savePromptOverride', e);
-    state.promptEditError = e.message || String(e);
-    state.promptEditSaving = false;
-    render();
-  }
-}
-
-async function purgePromptCache() {
-  const token = state.opsSession?.access_token;
-  if (!token) return;
-  try {
-    await fetch(FN_URL('purge-prompt-cache'), {
-      method: 'POST',
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
-    });
-    await fetchActiveOverrides();
-  } catch (e) { console.error('purgePromptCache', e); }
-}
-
-// Apre il modale con l'attuale content (embedded o override) pre-caricato.
-function openPromptEdit(fragmentId, currentContent) {
-  state.promptEditOpen = true;
-  state.promptEditFragmentId = fragmentId;
-  state.promptEditContent = currentContent || '';
-  state.promptEditNote = '';
-  state.promptEditError = null;
-  state.promptEditVersions = null;
-  state.promptEditRestoredFromId = null;
-  render();
-  fetchPromptEditVersions(fragmentId);
-}
-
-function closePromptEdit() {
-  state.promptEditOpen = false;
-  state.promptEditFragmentId = null;
-  state.promptEditContent = '';
-  state.promptEditNote = '';
-  state.promptEditError = null;
-  state.promptEditVersions = null;
-  state.promptEditRestoredFromId = null;
-  render();
-}
-
-// Restituisce il content da rendere per un dato fragment_id: override attivo se
-// presente, altrimenti l'embedded del snapshot statico.
-function overrideForFragment(fragmentId) {
-  const arr = state.promptOverrides;
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  return arr.find(o => o.fragment_id === fragmentId) || null;
-}
-
-// Carica lo snapshot statico dei prompt (data/ai-prompts-dashboard.json).
-// Generato al build da scripts/embed-ai-chat-prompts.ts: se il file è assente
-// o malformato mostro l'errore in-page invece di crashare la dashboard.
-async function fetchPromptAI() {
-  state.promptAILoading = true;
-  state.promptAIError = null;
-  render();
-  try {
-    const res = await fetch('data/ai-prompts-dashboard.json', { cache: 'no-cache' });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (!data || !data.contexts) throw new Error('shape inattesa');
-    state.promptAI = data;
-  } catch (e) {
-    console.error('fetchPromptAI', e);
-    state.promptAIError = e.message || String(e);
-  }
-  state.promptAILoading = false;
-  render();
 }
 
 function metaDateParams() {
@@ -2217,49 +2027,6 @@ async function fetchAISessionsFull(surfaceFilter = null) {
   render();
 }
 
-async function fetchAIStats() {
-  state.aiStatsLoading = true;
-  render();
-  try {
-    const from = state.aiStatsFrom ? new Date(state.aiStatsFrom).toISOString() : null;
-    const to   = state.aiStatsTo   ? new Date(state.aiStatsTo).toISOString()   : null;
-    const { data, error } = await sb.rpc('kpi_ai_stats', { p_from: from, p_to: to });
-    if (error) throw error;
-    state.aiStatsData = Array.isArray(data) ? (data[0]?.kpi_ai_stats ?? data[0]) : data;
-  } catch (e) { console.error('fetchAIStats', e); }
-  state.aiStatsLoading = false;
-  render();
-}
-
-async function fetchAIStatsUsers() {
-  state.aiStatsUsersLoading = true;
-  render();
-  try {
-    const from = state.aiStatsFrom ? new Date(state.aiStatsFrom).toISOString() : null;
-    const to   = state.aiStatsTo   ? new Date(state.aiStatsTo).toISOString()   : null;
-    const { data, error } = await sb.rpc('kpi_ai_users', { p_from: from, p_to: to });
-    if (error) throw error;
-    state.aiStatsUsers = data || [];
-  } catch (e) { console.error('fetchAIStatsUsers', e); state.aiStatsUsers = []; }
-  state.aiStatsUsersLoading = false;
-  render();
-}
-
-// Conta i 3 eventi del funnel feedback post-workout nel periodo della pagina AI Coach.
-// Il funnel AI Coach completo (con kpi_ai_chat_workout_events) vive nella sezione Funnel.
-async function fetchFeedbackFunnelEvents() {
-  state.feedbackFunnelLoading = true; state.feedbackFunnelError = null;
-  render();
-  try {
-    const range = { p_from: state.aiStatsFrom || null, p_to: state.aiStatsTo || null };
-    const { data, error } = await sb.rpc('kpi_events_by_name', { ...range, p_events: FEEDBACK_FUNNEL_EVENT_NAMES });
-    if (error) throw error;
-    state.feedbackFunnelEvents = data || [];
-  } catch (e) { state.feedbackFunnelError = e.message || 'Errore caricamento funnel feedback'; }
-  state.feedbackFunnelLoading = false;
-  render();
-}
-
 async function fetchAISessionMessages(session) {
   state.aiSelectedSession    = session;
   state.aiSessionMessages    = null;
@@ -2571,13 +2338,13 @@ function layout() {
   return `
     ${sidebar()}
     <div class="nav-backdrop" data-nav-close></div>
-    <div class="main${state.page === 'stats' || state.page === 'funnel' ? ' main-stats' : ''}">
+    <div class="main${state.page === 'stats' || state.page === 'funnel' || state.page === 'ai-coach' ? ' main-stats' : ''}">
       <div class="mtop">
         <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
         <span class="logo-mark">Hype<span>move</span></span>
         <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
       </div>
-      ${state.page === 'stats' ? pageStats() : state.page === 'funnel'
+      ${state.page === 'stats' ? pageStats() : state.page === 'ai-coach' ? pageAICoach() : state.page === 'funnel'
         ? `<div class="st-page fn-page" id="fn-page">${pageFunnel()}${funnelParamsDrawer()}</div>`
         : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div class="page-head-l">
@@ -4088,221 +3855,6 @@ function aiChatsCard() {
   </div>`;
 }
 
-// Griglia KPI delle statistiche AI (chiamate, token, costo, utenti, sessioni, errori).
-// Estratta come helper puro per essere riusata sia dalla pagina AI Coach sia altrove.
-function aiStatsKpiRow(d) {
-  const fmt = n => Number(n).toLocaleString('it-IT');
-  const fmtK = n => n >= 1000 ? (n/1000).toFixed(1) + 'K' : String(n);
-  const errPct = d.total_calls > 0 ? ((d.errors / d.total_calls) * 100).toFixed(1) : '0.0';
-
-  const kpis = [
-    { label: 'Chiamate AI',    value: fmt(d.total_calls),   sub: 'totale' },
-    { label: 'Token totali',   value: fmtK(d.total_tokens), sub: `${fmtK(d.tokens_in)} in · ${fmtK(d.tokens_out)} out` },
-    { label: 'Costo totale',   value: '$' + Number(d.cost_usd).toFixed(3), sub: `~$${Number(d.avg_cost_per_user).toFixed(3)} / utente` },
-    { label: 'Utenti unici',   value: fmt(d.unique_users),  sub: 'distinti', id: 'ai-stats-users-toggle', clickable: true },
-    { label: 'Sessioni',       value: fmt(d.sessions),       sub: 'context univoci' },
-    { label: 'Errori',         value: fmt(d.errors),         sub: errPct + '% delle chiamate', accent: d.errors > 0 ? '#e05555' : null },
-  ];
-
-  const usersOpen = state.aiStatsUsersOpen;
-  return kpis.map(k => {
-    const active = k.clickable && usersOpen;
-    return `<div ${k.id ? `id="${k.id}"` : ''} style="background:#12121e;border:1px solid ${active ? 'var(--accent)' : '#1e1e30'};border-radius:12px;padding:16px 18px;flex:1;min-width:130px;${k.clickable ? 'cursor:pointer;user-select:none' : ''}">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${k.label}${k.clickable ? ` <span style="font-size:10px;color:${active ? 'var(--accent)' : 'var(--muted)'}">${active ? '▲' : '▼'}</span>` : ''}</div>
-      <div style="font-size:22px;font-weight:700;color:${active ? 'var(--accent)' : (k.accent || 'var(--fg)')};">${k.value}</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:3px">${k.sub}</div>
-    </div>`;
-  }).join('');
-}
-
-// Tabella utenti unici espandibile (toggle dalla card "Utenti unici").
-function aiStatsUsersTable() {
-  if (!state.aiStatsUsersOpen) return '';
-  if (state.aiStatsUsersLoading) {
-    return `<div style="padding:12px 0;color:var(--muted);font-size:12px" class="pulse">Caricamento utenti…</div>`;
-  }
-  const users = state.aiStatsUsers || [];
-  return `
-    <div style="margin-bottom:24px;background:#12121e;border:1px solid var(--accent);border-radius:12px;overflow:hidden">
-      <table style="width:100%;border-collapse:collapse">
-        <thead>
-          <tr style="background:#1e1a3d">
-            <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">#</th>
-            <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">Nome</th>
-            <th style="text-align:left;padding:10px 16px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;font-weight:600">Email</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${users.map((u, i) => `
-            <tr style="border-top:1px solid #1e1e30">
-              <td style="padding:9px 16px;font-size:11px;color:var(--muted)">${i + 1}</td>
-              <td style="padding:9px 16px;font-size:13px;color:var(--fg);font-weight:500">${esc(u.name || '—')}</td>
-              <td style="padding:9px 16px;font-size:12px;color:var(--muted);font-family:monospace">${esc(u.email || '—')}</td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
-}
-
-// Barre dei tool più usati dall'AI Coach. tools = [{tool, cnt}] ordinati per cnt desc
-// (aggregato top_tools o per-contesto top_tools_by_context[ctx] da kpi_ai_stats).
-function aiToolsBlock(tools) {
-  tools = tools || [];
-  const maxCnt = Math.max(...tools.map(t => Number(t.cnt) || 0), 1);
-  const TOOL_NICE = {
-    get_exercises: 'Cerca esercizi', get_user_profile: 'Legge profilo',
-    get_user_workouts: 'Guarda allenamenti', create_workout: 'Crea workout',
-    save_coach_note: 'Salva nota', propose_workout: 'Propone workout',
-    get_roadmap: 'Legge roadmap', get_user_state: 'Stato utente',
-  };
-  return !tools.length
-    ? `<div style="color:var(--muted);font-size:12px">Nessun tool usato nel periodo</div>`
-    : tools.map(t => {
-        const pct = Math.round((t.cnt / maxCnt) * 100);
-        const label = TOOL_NICE[t.tool] || t.tool;
-        return `<div style="margin-bottom:10px">
-          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-            <span style="color:var(--fg)">${esc(label)}</span>
-            <span style="color:var(--muted)">${t.cnt}</span>
-          </div>
-          <div style="background:#1e1e30;border-radius:4px;height:6px;overflow:hidden">
-            <div style="width:${pct}%;height:100%;background:var(--accent);border-radius:4px;transition:width .4s ease"></div>
-          </div>
-        </div>`;
-      }).join('');
-}
-
-// Healthcheck persistenza transcript AI (spec bug--ai-chat-transcript-persistence-dead, R7):
-// pill compatta nell'header della card Conversazioni, visibile SOLO quando la chain è sospetta
-// (persist_chat_error > 0 nelle 24h, oppure send > 0 con ai_chat_message ferma da >48h).
-// Sostituisce il vecchio banner a tutta pagina: stessa logica, stessi campi di kpi_ai_stats.
-function transcriptHealthPill(d) {
-  if (!d) return '';
-  const lastAt = d.transcript_last_msg_at ? new Date(d.transcript_last_msg_at) : null;
-  const sends24h = Number(d.chat_sends_24h || 0);
-  const persistErr24h = Number(d.persist_errors_24h || 0);
-  const stale = lastAt && (Date.now() - lastAt.getTime()) > 48 * 3600 * 1000;
-  const broken = persistErr24h > 0 || (stale && sends24h > 0);
-  if (!broken) return '';
-  const lastAtStr = lastAt ? lastAt.toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'mai';
-  const tip = `Persistenza transcript AI sospetta — ultimo messaggio in ai_chat_message: ${lastAtStr} · ai_chat_send 24h: ${sends24h} · persist_chat_error 24h: ${persistErr24h}. Vedi _specs/ai/bug--ai-chat-transcript-persistence-dead/`;
-  return `<span title="${esc(tip)}" style="font-size:10px;background:rgba(220,50,50,0.12);border:1px solid var(--red);color:var(--red);padding:2px 9px;border-radius:20px;font-weight:600;white-space:nowrap;cursor:help">⚠ persistenza transcript</span>`;
-}
-
-// Funnel compatto della chat di FEEDBACK post-workout (3 step), mostrato sopra il transcript
-// nel tab Feedback del browser conversazioni. Flusso separato dalla chat principale: dopo un
-// workout abbandonato l'app schedula una notifica "+2 min", poi mostra la chat di feedback
-// (in app o da notifica) e l'utente può rispondere. Eventi da kpi_events_by_name.
-function aiFeedbackFunnelCompact() {
-  if (state.feedbackFunnelLoading) {
-    return `<div style="padding:12px 18px;border-bottom:1px solid #1e1e30;color:var(--muted);font-size:12px" class="pulse">Caricamento funnel feedback…</div>`;
-  }
-  if (state.feedbackFunnelError) {
-    return `<div style="padding:12px 18px;border-bottom:1px solid #1e1e30;color:var(--red);font-size:12px">⚠️ ${esc(state.feedbackFunnelError)}</div>`;
-  }
-  const eventsMap = {};
-  (state.feedbackFunnelEvents || []).forEach(e => { eventsMap[e.event_name] = e; });
-  const steps = [
-    { label: 'Notifica schedulata', event: 'workout_feedback_notification_scheduled', color: '#fbbf24' },
-    { label: 'Feedback mostrato',   event: 'workout_feedback_shown',                  color: '#a78bfa' },
-    { label: 'Risposta utente',     event: 'workout_feedback_replied',                color: '#34d399' },
-  ].map(s => ({ ...s, n: Number(eventsMap[s.event]?.total ?? 0), users: Number(eventsMap[s.event]?.unique_users ?? 0) }));
-
-  const boxes = steps.map((s, i) => {
-    const vsN = i > 0 ? steps[i - 1].n : null;
-    const conv = (vsN !== null && vsN > 0) ? (s.n / vsN * 100).toFixed(0) + '%' : null;
-    return `
-      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:36px">
-        ${conv !== null ? `<div style="font-size:9px;color:var(--muted);font-weight:700;white-space:nowrap">${conv}</div>` : ''}
-        <div style="font-size:15px;color:#2a2a3d;margin-top:-2px">→</div>
-      </div>` : ''}
-      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:8px;padding:8px 10px;text-align:center;min-width:0" title="${esc(s.event)}">
-        <div style="font-size:17px;font-weight:800;color:${s.color};line-height:1">${s.n}</div>
-        <div style="font-size:10px;color:var(--fg);margin-top:3px;font-weight:500">${s.label}</div>
-        <div style="font-size:9px;color:var(--muted);margin-top:1px">${s.users} utent${s.users === 1 ? 'e' : 'i'}</div>
-      </div>`;
-  }).join('');
-
-  return `<div style="padding:12px 18px;border-bottom:1px solid #1e1e30;background:#0d0d17">
-    <div style="display:flex;align-items:center;gap:0">${boxes}</div>
-  </div>`;
-}
-
-// ── PAGINA AI COACH ───────────────────────────────────────────────────
-// Struttura (spec _specs/dashboard/ai-coach-page-restructure/): KPI in cima →
-// Conversazioni con tab Spontanee/Feedback (funnel feedback compatto dentro il tab) →
-// sezione Prompting (viewer statico system prompt + tool per contesto).
-// Il funnel AI Coach configurabile e il confronto sprint vivono nella sezione Funnel.
-function pageAICoach() {
-  const d = state.aiStatsData;
-
-  const filterBar = `
-    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:6px;align-items:center">
-      <span class="filter-label">Periodo</span>
-      <input id="ai-stats-from" type="date" class="form-input" value="${esc(state.aiStatsFrom)}"
-        style="width:145px;padding:5px 10px;font-size:12px">
-      <span style="color:var(--muted)">→</span>
-      <input id="ai-stats-to" type="date" class="form-input" value="${esc(state.aiStatsTo)}"
-        style="width:145px;padding:5px 10px;font-size:12px">
-      <button id="ai-stats-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Aggiorna</button>
-    </div>`;
-
-  // 1. KPI north-star
-  let kpiCard;
-  if (state.aiStatsLoading) {
-    kpiCard = `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento statistiche…</div></div>`;
-  } else if (!d) {
-    kpiCard = `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px">Nessun dato nel periodo selezionato.</div></div>`;
-  } else {
-    kpiCard = `<div class="card" style="margin-bottom:16px">
-      <div style="display:flex;flex-wrap:wrap;gap:10px;${state.aiStatsUsersOpen ? 'margin-bottom:14px' : ''}">${aiStatsKpiRow(d)}</div>
-      ${aiStatsUsersTable()}
-    </div>`;
-  }
-
-  return `${filterBar}${kpiCard}${typeof coachBenchmarkCard === 'function' ? coachBenchmarkCard() : ''}${aiConversationsCard(d)}${promptingSection(d)}`;
-}
-
-// Tab → superficie restituita da kpi_ai_sessions. La chat dentro la proposta premium gira
-// sullo stesso contesto 'workout-feedback' del feedback post-workout ma è un'altra cosa:
-// compare SOLO alla fine del primo allenamento e mai più — dal secondo in poi non si vede.
-// Il trigger è il primo workout, non l'iscrizione: chi si allena a una settimana dalla
-// registrazione la incontra allora (il componente si chiama PaywallGiornoZero, ma quel
-// nome descrive l'atto commerciale, non il giorno di calendario).
-// La RPC la riconosce dal marker `surface` sul turno (e, per lo storico, dall'evento
-// paywall_chat_reply a ridosso).
-const AI_CONV_SURFACE = { spontanee: 'spontanea', feedback: 'feedback', paywall: 'paywall' };
-
-// Card Conversazioni con tab Spontanee / Feedback post-workout / Dopo il primo workout. Nel tab
-// Feedback compare il funnel 3-step compatto sopra il transcript. Limite noto: nel raro
-// overlap temporale fra due superfici dello stesso utente il transcript può interlacciarle
-// (solo l'evento 'start' porta ctx in ai_debug_log, split server-side impossibile).
-function aiConversationsCard(d) {
-  const tab = state.aiConvTab;
-  const tabBtn = (key, label) => `<button class="ai-conv-tab" data-tab="${key}"
-    style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;transition:all .15s;
-      ${tab === key ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">${label}</button>`;
-
-  return `<div class="card" style="padding:0;overflow:hidden;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #1e1e30;flex-wrap:wrap">
-      <div class="card-title" style="margin-bottom:0">Conversazioni</div>
-      <div style="display:flex;gap:6px">
-        ${tabBtn('spontanee', 'Spontanee')}
-        ${tabBtn('feedback', 'Feedback post-workout')}
-        ${tabBtn('paywall', 'Dopo il primo workout')}
-      </div>
-      ${transcriptHealthPill(d)}
-      <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
-        value="${esc(state.aiSearchQuery)}" class="form-input" style="width:220px;font-size:12px;padding:5px 10px;margin-left:auto">
-    </div>
-    ${tab === 'feedback' ? aiFeedbackFunnelCompact() : ''}
-    <div style="display:flex;height:560px;min-height:0">
-      <div style="width:300px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">${aiSessionListHtml()}</div>
-      <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden">${aiChatPanel()}</div>
-    </div>
-  </div>`;
-}
-
 // Lista delle sessioni di chat AI (filtrata per ricerca). Riusata sia dal modal solo-lettura
 // in Overview sia dal browser conversazioni della pagina AI Coach.
 function aiSessionListHtml() {
@@ -4366,7 +3918,7 @@ function aiConversationsModal() {
           <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
             value="${esc(state.aiSearchQuery)}"
             class="form-input" style="width:200px;font-size:12px;padding:5px 10px">
-          <button id="ai-conv-goto-page" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;white-space:nowrap" title="Apri la pagina AI Coach (statistiche, conversazioni per tab, prompting)">📊 Pagina AI Coach →</button>
+          <button id="ai-conv-goto-page" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;white-space:nowrap" title="Apri la pagina AI Coach (benchmark, uso, conversazioni)">📊 Pagina AI Coach →</button>
           <button id="ai-conv-close" style="
             background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
             padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
@@ -11428,257 +10980,7 @@ function pageMetaAds() {
     tokenSection + dateBar + kpiCards + campTable + sprintPanel;
 }
 
-// ── PROMPT AI (viewer + editor override) ─────────────────────────────
-// Legge lo snapshot statico ai-prompts-dashboard.json generato da
-// npm run embed:ai-prompts. Riflette SSOT app/supabase/functions/ai-chat/.
-//
-// Framework v2: il Coach ha UN system prompt chat (master + 16 skills,
-// entry unico dalla Home) + UN flow server-driven per roadmap-premium
-// (auto-contenuto, non eredita il master). Niente più prompt per-schermata.
-// pt/data sono kind runtime-only (utente reale) e non compaiono nello snapshot.
-
-const PROMPT_AI_KIND_ORDER = ['master', 'skills', 'flow'];
-const PROMPT_AI_KIND_LABEL = {
-  master: 'Master',
-  skills: 'Skills',
-  flow:   'Flow',
-};
-
-function promptAIRenderParameters(params) {
-  // Rende leggibile un JSON Schema (formato OpenAI tools). Priorità testo: elenco parametri
-  // con `nome: type — description`, required in grassetto, enum inline. Fallback su JSON raw
-  // solo se lo schema non è nel formato atteso.
-  if (!params || typeof params !== 'object') {
-    return '<div style="font-size:12px;color:var(--muted)">Nessun parametro dichiarato.</div>';
-  }
-  const props = params.properties || {};
-  const keys = Object.keys(props);
-  if (keys.length === 0) {
-    return '<div style="font-size:12px;color:var(--muted)">Nessun parametro (tool sempre disponibile senza args).</div>';
-  }
-  const required = new Set(Array.isArray(params.required) ? params.required : []);
-  const rows = keys.map(k => {
-    const p = props[k] || {};
-    const isReq = required.has(k);
-    const type = p.type || (Array.isArray(p.enum) ? 'enum' : '?');
-    const enumHtml = Array.isArray(p.enum)
-      ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">valori: ${esc(p.enum.join(' | '))}</div>`
-      : '';
-    const itemsHtml = p.items && p.items.type
-      ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">items: ${esc(p.items.type)}</div>`
-      : '';
-    const desc = p.description ? `<div style="font-size:12px;color:var(--text);margin-top:4px;line-height:1.45">${esc(p.description)}</div>` : '';
-    const reqBadge = isReq
-      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px">required</span>'
-      : '<span style="font-size:10px;color:var(--muted);margin-left:6px">opzionale</span>';
-    return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--bg)">
-      <div><code style="font-size:12px;font-weight:600">${esc(k)}</code> <span style="font-size:11px;color:var(--muted)">: ${esc(type)}</span>${reqBadge}</div>
-      ${desc}${enumHtml}${itemsHtml}
-    </div>`;
-  }).join('');
-  return rows;
-}
-
-function promptAIRenderTools(tools) {
-  if (!Array.isArray(tools) || tools.length === 0) {
-    return '<div style="color:var(--muted);font-size:13px">Nessun tool disponibile in questo contesto.</div>';
-  }
-  // Ogni tool = <details> chiuso di default. Summary con nome + short-desc.
-  return tools.map(t => {
-    const missingBadge = t.missing
-      ? '<span style="font-size:10px;background:var(--red);color:#fff;padding:2px 8px;border-radius:4px;margin-left:8px">non trovato</span>'
-      : '';
-    const shortDesc = (t.description || '').slice(0, 80) + ((t.description || '').length > 80 ? '…' : '');
-    return `<details class="card" style="padding:0;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
-      <summary style="padding:10px 14px;cursor:pointer;list-style:none;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
-        <span style="font-size:10px;color:var(--muted)">▸</span>
-        <code style="font-size:13px;font-weight:700">${esc(t.name)}</code>
-        ${missingBadge}
-        <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">${esc(shortDesc)}</span>
-      </summary>
-      <div style="padding:0 14px 14px 14px;border-top:1px solid var(--border)">
-        <div style="font-size:13px;color:var(--text);line-height:1.5;margin:12px 0 10px 0">${esc(t.description || '')}</div>
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Parametri</div>
-        ${promptAIRenderParameters(t.parameters)}
-      </div>
-    </details>`;
-  }).join('');
-}
-
-// I part con kind pt/data sono dinamici (PT context, contextData snippet) — non
-// sono fragment_id di sources.ts, non sono editabili. Solo master/skills/flow lo sono.
-const PROMPT_AI_EDITABLE_KINDS = new Set(['master', 'skills', 'flow']);
-
-function promptAIRenderParts(parts) {
-  if (!Array.isArray(parts) || parts.length === 0) {
-    return '<div style="color:var(--muted);font-size:13px">Nessuna sezione composta.</div>';
-  }
-  // Raggruppa per kind, mantenendo l'ordine originale delle parti dentro ogni gruppo.
-  // Ogni PART è un <details> chiuso di default → utente vede solo i titoli, apre solo
-  // le sezioni che gli interessano. Il titolo di gruppo (kind) resta come separatore.
-  // Merge override attivi (F2): se un fragment_id ha override attivo, sostituisce
-  // content ed espone badge; bottone [Modifica] visibile solo se opsSession loggata.
-  const groups = {};
-  for (const p of parts) {
-    if (!groups[p.kind]) groups[p.kind] = [];
-    groups[p.kind].push(p);
-  }
-  const kindOrder = PROMPT_AI_KIND_ORDER.filter(k => groups[k]);
-  const canEdit = !!state.opsSession;
-  return kindOrder.map(kind => {
-    const arr = groups[kind];
-    // Ricalcolo char considerando override.
-    const effective = arr.map(p => {
-      const ov = overrideForFragment(p.id);
-      const content = ov ? ov.content : (p.content || '');
-      return {
-        p,
-        content,
-        chars: content.length,
-        override: ov,
-      };
-    });
-    const kindChars = effective.reduce((acc, e) => acc + e.chars, 0);
-    const items = effective.map(({ p, content, chars, override }) => {
-      const editable = PROMPT_AI_EDITABLE_KINDS.has(p.kind);
-      const overrideBadge = override
-        ? `<span style="font-size:10px;background:var(--amber);color:#000;padding:1px 6px;border-radius:4px;margin-left:6px" title="Override runtime attivo · ${esc(override.note || '')}">⚡ override</span>`
-        : '';
-      const editBtn = (editable && canEdit)
-        ? `<button data-prompt-edit-open data-prompt-edit-fragment="${esc(p.id)}" style="font-size:11px;padding:4px 10px;border:1px solid var(--border);background:var(--surface,#fff);border-radius:4px;cursor:pointer;color:var(--text)">✎ Modifica</button>`
-        : '';
-      return `
-      <details style="margin-bottom:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);overflow:hidden">
-        <summary style="padding:8px 12px;cursor:pointer;list-style:none;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:12.5px">
-          <span style="display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap">
-            <span style="font-size:10px;color:var(--muted)">▸</span>
-            <span style="font-weight:600">${esc(p.label || p.id)}</span>
-            ${overrideBadge}
-          </span>
-          <span style="display:inline-flex;align-items:baseline;gap:8px">
-            <span style="font-size:11px;color:var(--muted)">${chars.toLocaleString('it-IT')} char</span>
-            ${editBtn}
-          </span>
-        </summary>
-        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:12.5px;line-height:1.55;background:var(--surface, #fff);border-top:1px solid var(--border);padding:12px 14px;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--text)">${esc(content)}</pre>
-      </details>`;
-    }).join('');
-    return `<div class="card" style="padding:14px 16px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-        <div style="font-size:13px;font-weight:700">${esc(PROMPT_AI_KIND_LABEL[kind] || kind)} <span style="font-weight:400;color:var(--muted);font-size:11px;margin-left:6px">${arr.length} ${arr.length === 1 ? 'sezione' : 'sezioni'}</span></div>
-        <div style="font-size:11px;color:var(--muted)">${kindChars.toLocaleString('it-IT')} char totali</div>
-      </div>
-      ${items}
-    </div>`;
-  }).join('');
-}
-
-function promptAIRenderSourceFiles(sourceFiles) {
-  if (!Array.isArray(sourceFiles) || sourceFiles.length === 0) {
-    return '<div style="color:var(--muted);font-size:13px">Nessun file sorgente.</div>';
-  }
-  const items = sourceFiles.map(s => `<li style="margin-bottom:4px">
-    <code style="font-size:12px">${esc(s.rel)}</code>
-    <span style="font-size:11px;color:var(--muted);margin-left:8px">${esc(s.id)}</span>
-  </li>`).join('');
-  return `<ul style="list-style:none;padding:0;margin:0">${items}</ul>`;
-}
-
-// ── F2 ops: toolbar login/logout + purga + banner override attivi + modale edit
-
-function promptingOpsToolbar() {
-  const session = state.opsSession;
-  if (session && session.user) {
-    const email = session.user.email || session.user.id;
-    return `
-      <span style="font-size:11px;color:var(--muted)">👤 ${esc(email)}</span>
-      <button data-purge-cache class="btn-outline" style="font-size:12px;padding:6px 12px" title="Invalida la cache override sull'istanza corrente (best-effort)">Purga cache</button>
-      <button data-ops-logout class="btn-outline" style="font-size:12px;padding:6px 12px">Logout ops</button>`;
-  }
-  return `
-    <button data-ops-login-open class="btn-outline" style="font-size:12px;padding:6px 12px" title="Login ops per editare i prompt (Supabase Auth)">🔑 Login ops</button>`;
-}
-
-function promptingOverridesBanner() {
-  const arr = state.promptOverrides;
-  if (!Array.isArray(arr) || arr.length === 0) return '';
-  const now = Date.now();
-  const items = arr.map(o => {
-    const daysAgo = Math.max(0, Math.floor((now - new Date(o.created_at).getTime()) / 86400000));
-    const ago = daysAgo === 0 ? 'oggi' : (daysAgo === 1 ? 'ieri' : `${daysAgo}gg fa`);
-    return `<code style="background:rgba(0,0,0,0.05);padding:1px 6px;border-radius:3px">${esc(o.fragment_id)}</code> <span style="color:var(--muted);font-size:11px">(${ago})</span>`;
-  }).join(', ');
-  return `
-    <div style="background:rgba(251,191,36,0.12);border:1px solid var(--amber);border-radius:8px;padding:10px 14px;margin-bottom:14px">
-      <div style="font-size:12px;color:var(--text);line-height:1.5">
-        <strong style="color:var(--amber)">⚡ ${arr.length} override attivi non promossi in git:</strong> ${items}
-      </div>
-    </div>`;
-}
-
-function promptEditModal() {
-  if (!state.promptEditOpen) return '';
-  const fragmentId = state.promptEditFragmentId || '';
-  const authorEmail = state.opsSession?.user?.email || state.opsSession?.user?.id || '?';
-  const versions = state.promptEditVersions;
-  const versionsHtml = state.promptEditVersionsLoading
-    ? `<div style="color:var(--muted);font-size:12px;padding:8px" class="pulse">Caricamento versioni…</div>`
-    : (Array.isArray(versions) && versions.length > 0
-      ? versions.map(v => {
-        const isActive = v.is_active;
-        const badge = isActive ? '<span style="font-size:10px;background:var(--green);color:#fff;padding:1px 6px;border-radius:4px;margin-left:6px">attiva</span>' : '';
-        return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--bg)">
-          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:4px">
-            <div style="font-size:12px;color:var(--text)">${esc(v.created_at.slice(0, 19).replace('T', ' '))} · <code style="font-size:11px">${esc(v.author_auth_id.slice(0, 8))}</code>${badge}</div>
-            <button data-prompt-edit-restore data-restore-id="${esc(v.id)}" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);background:var(--surface,#fff);border-radius:4px;cursor:pointer">↩︎ Ripristina</button>
-          </div>
-          <div style="font-size:12px;color:var(--muted);font-style:italic">${esc(v.note || '')}</div>
-        </div>`;
-      }).join('')
-      : `<div style="color:var(--muted);font-size:12px;padding:8px">Nessuna versione precedente per questo fragment.</div>`);
-  const restoredNote = state.promptEditRestoredFromId
-    ? `<div style="font-size:11px;color:var(--amber);margin-top:6px">↩︎ Testo caricato da versione precedente — rivedi e salva per attivare.</div>`
-    : '';
-  return `
-    <div class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px">
-      <div class="modal" style="background:var(--surface,#fff);border-radius:12px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);overflow:hidden">
-        <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:15px;font-weight:700">Modifica prompt · <code>${esc(fragmentId)}</code></div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">Ops: ${esc(authorEmail)}</div>
-          </div>
-          <button data-prompt-edit-close style="font-size:18px;background:transparent;border:none;cursor:pointer;color:var(--muted);padding:4px 8px">✕</button>
-        </div>
-        <div style="padding:14px 20px;background:rgba(251,191,36,0.10);border-bottom:1px solid var(--amber)">
-          <div style="font-size:12px;color:var(--text);line-height:1.5">
-            ⚠︎ Un edit qui <strong>bypassa il benchmark HypeMove Coach (132 casi)</strong>. Verifica manualmente il contesto rilevante in chat prima di lasciare attivo l'override. La baseline resta il <code>.md</code> in git.
-          </div>
-        </div>
-        <div style="flex:1;overflow-y:auto;padding:16px 20px">
-          <div class="pe-grid" style="display:grid;grid-template-columns:1fr 320px;gap:20px">
-            <div>
-              <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Contenuto</label>
-              <textarea data-prompt-edit-content style="width:100%;min-height:400px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.55;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical">${esc(state.promptEditContent || '')}</textarea>
-              ${restoredNote}
-              <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin:12px 0 6px 0">Changelog (obbligatorio)</label>
-              <input data-prompt-edit-note type="text" value="${esc(state.promptEditNote || '')}" placeholder="perché stai facendo questo edit?" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px" />
-              ${state.promptEditError ? `<div style="color:var(--red);font-size:12px;margin-top:8px">⚠️ ${esc(state.promptEditError)}</div>` : ''}
-            </div>
-            <div>
-              <label style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Versioni precedenti</label>
-              <div style="max-height:480px;overflow-y:auto">${versionsHtml}</div>
-            </div>
-          </div>
-        </div>
-        <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-          <button data-prompt-edit-close class="btn-outline" style="font-size:13px;padding:8px 16px">Annulla</button>
-          <button data-prompt-edit-save ${state.promptEditSaving ? 'disabled' : ''} style="font-size:13px;padding:8px 16px;border-radius:6px;border:none;background:var(--green);color:#fff;cursor:pointer;font-weight:600">
-            ${state.promptEditSaving ? 'Salvataggio…' : '💾 Salva override'}
-          </button>
-        </div>
-      </div>
-    </div>`;
-}
+// ── Login ops (gestori in attachEvents)
 
 function opsLoginModal() {
   if (state.opsAuthError === null && state.opsEmailInput === '' && !state._opsLoginOpen) return '';
@@ -11701,175 +11003,6 @@ function opsLoginModal() {
     </div>`;
 }
 
-// ── SEZIONE PROMPTING (in fondo alla pagina AI Coach) ─────────────────
-// Viewer statico del system prompt composto + tool whitelist per contesto/schermata
-// (snapshot data/ai-prompts-dashboard.json generato da npm run embed:ai-prompts,
-// SSOT app/supabase/functions/ai-chat/). Include "Tool più usati" nel periodo della
-// pagina, filtrato sul contesto attivo quando kpi_ai_stats espone top_tools_by_context.
-// Card CHAT COACH: master + 16 skills, prompt unico (entry solo dalla Home).
-// chatCtx = data.contexts.home (o prima chat key non-flow come fallback).
-function promptAIRenderChatCard(chatCtx, budget, d) {
-  const total = chatCtx.totalChars || 0;
-  let budgetColor = 'var(--green)';
-  if (total >= (budget.failChars || Infinity)) budgetColor = 'var(--red)';
-  else if (total >= (budget.warnChars || Infinity)) budgetColor = 'var(--amber)';
-  const partsCount = (chatCtx.parts || []).length;
-
-  const usageTools = (d && d.top_tools) || [];
-  const usagePanel = usageTools.length
-    ? `<details style="margin-top:10px">
-        <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ Tool più usati nel periodo</summary>
-        <div style="max-width:520px;margin-top:8px">${aiToolsBlock(usageTools)}</div>
-      </details>`
-    : '';
-
-  return `<div class="card" style="padding:16px 18px;margin-bottom:16px">
-    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px">
-      <div>
-        <div style="font-size:15px;font-weight:700">Chat Coach · master + 16 skills</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">
-          Prompt unico — la chat AI si apre solo dalla Home. ${partsCount} sezioni.
-        </div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:20px;font-weight:800;color:${budgetColor}">${total.toLocaleString('it-IT')}</div>
-        <div style="font-size:11px;color:var(--muted)">char totali</div>
-      </div>
-    </div>
-
-    ${promptAIRenderParts(chatCtx.parts)}
-
-    <div style="margin-top:14px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Tool whitelist (${(chatCtx.tools || []).length})</div>
-      ${promptAIRenderTools(chatCtx.tools)}
-    </div>
-
-    <details style="margin-top:10px">
-      <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ Nota contesto (contexts.ts)</summary>
-      <div style="font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:1.55;margin-top:8px">${esc(chatCtx.contextNote || '')}</div>
-    </details>
-
-    ${usagePanel}
-
-    <div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
-      ℹ A runtime al prompt vengono concatenati il PT context e il contextData snippet
-      dell'utente corrente — dinamici, non presenti in questo snapshot.
-    </div>
-  </div>`;
-}
-
-// Card ROADMAP PREMIUM: flow server-driven auto-contenuto (NON eredita master né
-// skills — deliberato, il flow file contiene identità/safety inline).
-function promptAIRenderFlowCard(rpCtx) {
-  if (!rpCtx) return '';
-  const total = rpCtx.totalChars || 0;
-  return `<div class="card" style="padding:16px 18px;margin-bottom:16px">
-    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:4px">
-      <div>
-        <div style="font-size:15px;font-weight:700">Roadmap Premium · flow server-driven</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">
-          Generazione workout real-time (non chat). Auto-contenuto: non eredita master né skills.
-        </div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:20px;font-weight:800;color:var(--green)">${total.toLocaleString('it-IT')}</div>
-        <div style="font-size:11px;color:var(--muted)">char totali</div>
-      </div>
-    </div>
-
-    ${promptAIRenderParts(rpCtx.parts)}
-
-    <div style="margin-top:14px">
-      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Tool whitelist (${(rpCtx.tools || []).length})</div>
-      ${promptAIRenderTools(rpCtx.tools)}
-    </div>
-
-    <details style="margin-top:10px">
-      <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ Nota contesto (contexts.ts)</summary>
-      <div style="font-size:12.5px;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px;line-height:1.55;margin-top:8px">${esc(rpCtx.contextNote || '')}</div>
-    </details>
-  </div>`;
-}
-
-function promptingSection(d) {
-  const header = (sub) => `
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin:26px 0 14px;flex-wrap:wrap">
-      <div>
-        <div style="font-size:16px;font-weight:700;color:var(--fg)">Prompting</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:2px">${sub}</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        ${promptingOpsToolbar()}
-        ${state.promptAI ? `<button class="btn-outline" data-prompt-ai-raw style="font-size:12px;padding:6px 14px">
-          ${state.promptAIRaw ? '↩︎ Nascondi raw' : '{ } Vedi raw'}
-        </button>` : ''}
-      </div>
-    </div>`;
-  const subDefault = 'System prompt del Coach (framework v2) · SSOT <code>app/supabase/functions/ai-chat/</code>';
-
-  if (state.promptAILoading) {
-    return header(subDefault) + `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Caricamento snapshot prompt…</div></div>`;
-  }
-  if (state.promptAIError) {
-    return header('Errore caricamento snapshot') + `<div class="card" style="margin-bottom:16px">
-      <div style="padding:24px;text-align:center">
-        <div style="font-size:13px;color:var(--red);margin-bottom:6px">⚠️ ${esc(state.promptAIError)}</div>
-        <div style="font-size:12px;color:var(--muted)">
-          Manca il file <code>data/ai-prompts-dashboard.json</code>?
-          Rigenera con <code>npm run embed:ai-prompts</code> in <code>app/</code>.
-        </div>
-      </div>
-    </div>`;
-  }
-  if (!state.promptAI) {
-    return header(subDefault) + `<div class="card" style="margin-bottom:16px"><div style="padding:30px;text-align:center;color:var(--muted);font-size:12px">Snapshot non caricato.</div></div>`;
-  }
-
-  const data = state.promptAI;
-  const budget = data.budget || { warnChars: 0, failChars: 0 };
-  const hashShort = (data.promptsHash || '').slice(0, 12);
-  const generatedShort = (data.generatedAt || '').slice(0, 19).replace('T', ' ');
-
-  // Chat = contesto home (entry unico). Fallback difensivo su prima chat key
-  // non-flow se lo snapshot non avesse home (snapshot vecchio/malformato).
-  const chatCtx = data.contexts.home
-    || data.contexts[Object.keys(data.contexts).find(k => !data.contexts[k].isFlow)];
-  const rpCtx = data.contexts['roadmap-premium'];
-
-  const rawPanel = state.promptAIRaw
-    ? `<div class="card" style="padding:12px 14px;margin-top:12px">
-        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
-          JSON grezzo · snapshot completo
-        </div>
-        <pre style="white-space:pre-wrap;word-wrap:break-word;font-size:11px;line-height:1.45;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;margin:0;max-height:400px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${esc(JSON.stringify({ promptVersion: data.promptVersion, promptsHash: data.promptsHash, budget, chat: chatCtx, roadmapPremium: rpCtx }, null, 2))}</pre>
-      </div>`
-    : '';
-
-  return header(subDefault) + `
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--muted)">
-      <div>Versione: <code style="color:var(--text)">${esc(data.promptVersion || '?')}</code></div>
-      <div>Hash: <code style="color:var(--text)">${esc(hashShort)}</code></div>
-      <div>Generato: <span style="color:var(--text)">${esc(generatedShort)}</span></div>
-      <div>Budget: <span style="color:var(--text)">warn ${(budget.warnChars || 0).toLocaleString('it-IT')} · fail ${(budget.failChars || 0).toLocaleString('it-IT')}</span></div>
-    </div>
-
-    ${promptingOverridesBanner()}
-
-    ${chatCtx ? promptAIRenderChatCard(chatCtx, budget, d) : '<div class="card" style="padding:20px;margin-bottom:16px;color:var(--red);font-size:13px">⚠️ Contesto chat assente dallo snapshot — rigenera con <code>npm run embed:ai-prompts</code>.</div>'}
-
-    ${promptAIRenderFlowCard(rpCtx)}
-
-    <details style="margin-bottom:12px">
-      <summary style="cursor:pointer;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;list-style:none">▸ File sorgente (${((chatCtx && chatCtx.sourceFiles) || []).length})</summary>
-      <div class="card" style="padding:12px 16px;margin-top:8px">${promptAIRenderSourceFiles(chatCtx && chatCtx.sourceFiles)}</div>
-    </details>
-
-    ${rawPanel}
-
-    ${promptEditModal()}
-    ${opsLoginModal()}`;
-}
-
 // ── EVENTS ────────────────────────────────────────────────────────────
 
 function attachEvents() {
@@ -11877,6 +11010,7 @@ function attachEvents() {
   document.querySelectorAll('[data-nav-toggle]').forEach(el => el.addEventListener('click', toggleNav));
   document.querySelector('[data-nav-close]')?.addEventListener('click', () => { state.navOpen = false; applyNavState(); });
   attachStatsEvents();
+  if (state.page === 'ai-coach') aicAttach();
   // Navigazione
   document.querySelectorAll('[data-nav]').forEach(el =>
     el.addEventListener('click', () => {
@@ -11894,14 +11028,8 @@ function attachEvents() {
       if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
       if (state.page === 'premium'    && !state.purchases      && !state.purchasesLoading)      fetchPaywallPurchases();
       if (state.page === 'ai-coach') {
-        if (!state.aiStatsData          && !state.aiStatsLoading)       fetchAIStats();
-        if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
-        // Refetch anche se la lista esiste ma è stata caricata con un altro filtro
-        // (es. il modal Overview carica senza filtro, la pagina è per-tab).
-        const wantFilter = AI_CONV_SURFACE[state.aiConvTab];
-        if ((!state.aiSessions || state.aiSessionsFilter !== wantFilter) && !state.aiSessionsLoading) fetchAISessionsFull(wantFilter);
-        if (!state.promptAI             && !state.promptAILoading)      fetchPromptAI();
-        if (!state.promptOverrides      && !state.promptOverridesLoading) fetchActiveOverrides();
+        // pagina AI Coach: i suoi dati li carica kpi-ai-coach.js
+        aicEnter();
         if (!state.opsSessionCheckedOnce) { state.opsSessionCheckedOnce = true; refreshOpsSession(); }
       }
       if (state.page === 'behavior'   && !state.behaviorData  && !state.behaviorLoading)  fetchBehavior();
@@ -11909,46 +11037,6 @@ function attachEvents() {
       render();
     }));
 
-  // Sezione Prompting (pagina AI Coach) — toggle vista raw.
-  document.querySelectorAll('[data-prompt-ai-raw]').forEach(el =>
-    el.addEventListener('click', () => {
-      state.promptAIRaw = !state.promptAIRaw;
-      render();
-    }));
-
-  // F2 — edit override runtime + auth ops.
-  document.querySelectorAll('[data-prompt-edit-open]').forEach(el =>
-    el.addEventListener('click', () => {
-      const fragmentId = el.dataset.promptEditFragment;
-      // Content corrente: override se attivo, altrimenti il testo del part nello snapshot.
-      const ov = overrideForFragment(fragmentId);
-      let current = ov ? ov.content : '';
-      if (!current && state.promptAI) {
-        for (const key of Object.keys(state.promptAI.contexts)) {
-          const p = (state.promptAI.contexts[key].parts || []).find(x => x.id === fragmentId);
-          if (p) { current = p.content || ''; break; }
-        }
-      }
-      openPromptEdit(fragmentId, current);
-    }));
-  document.querySelectorAll('[data-prompt-edit-close]').forEach(el =>
-    el.addEventListener('click', () => closePromptEdit()));
-  document.querySelectorAll('[data-prompt-edit-content]').forEach(el =>
-    el.addEventListener('input', () => { state.promptEditContent = el.value; }));
-  document.querySelectorAll('[data-prompt-edit-note]').forEach(el =>
-    el.addEventListener('input', () => { state.promptEditNote = el.value; }));
-  document.querySelectorAll('[data-prompt-edit-save]').forEach(el =>
-    el.addEventListener('click', () => savePromptOverride()));
-  document.querySelectorAll('[data-prompt-edit-restore]').forEach(el =>
-    el.addEventListener('click', () => {
-      const id = el.dataset.restoreId;
-      const versions = state.promptEditVersions || [];
-      const target = versions.find(v => v.id === id);
-      if (!target) return;
-      state.promptEditContent = target.content || '';
-      state.promptEditRestoredFromId = id;
-      render();
-    }));
   document.querySelectorAll('[data-ops-login-open]').forEach(el =>
     el.addEventListener('click', () => { state._opsLoginOpen = true; render(); }));
   document.querySelectorAll('[data-ops-login-close]').forEach(el =>
@@ -11972,8 +11060,6 @@ function attachEvents() {
     }));
   document.querySelectorAll('[data-ops-logout]').forEach(el =>
     el.addEventListener('click', () => opsLogout()));
-  document.querySelectorAll('[data-purge-cache]').forEach(el =>
-    el.addEventListener('click', () => purgePromptCache()));
 
   // Chart range filters
   // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
@@ -13399,12 +12485,7 @@ function attachEvents() {
   document.getElementById('ai-conv-goto-page')?.addEventListener('click', () => {
     state.aiConvOpen = false;
     state.page = 'ai-coach';
-    // Il modal carica le sessioni senza filtro: sulla pagina la lista è per-tab → refetch.
-    state.aiSessions = null;
-    if (!state.aiStatsData          && !state.aiStatsLoading)        fetchAIStats();
-    if (!state.feedbackFunnelEvents && !state.feedbackFunnelLoading) fetchFeedbackFunnelEvents();
-    if (!state.promptAI             && !state.promptAILoading)       fetchPromptAI();
-    fetchAISessionsFull(AI_CONV_SURFACE[state.aiConvTab]);
+    aicEnter();
     render();
   });
 
@@ -13437,41 +12518,6 @@ function attachEvents() {
     state.aiSearchQuery = e.target.value;
     render();
     document.getElementById('ai-conv-search')?.focus();
-  });
-
-  // AI stats — date inputs (pagina AI Coach)
-  document.getElementById('ai-stats-from')?.addEventListener('change', e => { state.aiStatsFrom = e.target.value; });
-  document.getElementById('ai-stats-to')?.addEventListener('change',   e => { state.aiStatsTo   = e.target.value; });
-
-  // AI stats — apply: ricalcola KPI e funnel feedback insieme sul nuovo periodo.
-  document.getElementById('ai-stats-apply')?.addEventListener('click', () => {
-    state.aiStatsData = null;
-    state.aiStatsUsers = null;
-    state.aiStatsUsersOpen = false;
-    state.feedbackFunnelEvents = null;
-    fetchAIStats();
-    fetchFeedbackFunnelEvents();
-  });
-
-  // AI Coach — tab Conversazioni (Spontanee / Feedback post-workout / Dopo il primo workout): reset
-  // lista e refetch con filtro server-side p_surface.
-  document.querySelectorAll('.ai-conv-tab').forEach(el =>
-    el.addEventListener('click', () => {
-      const t = el.dataset.tab;
-      if (state.aiConvTab === t) return;
-      state.aiConvTab         = t;
-      state.aiSessions        = null;
-      state.aiSelectedSession = null;
-      state.aiSessionMessages = null;
-      render();
-      fetchAISessionsFull(AI_CONV_SURFACE[t]);
-    }));
-
-  // AI stats — utenti unici card click
-  document.getElementById('ai-stats-users-toggle')?.addEventListener('click', () => {
-    state.aiStatsUsersOpen = !state.aiStatsUsersOpen;
-    if (state.aiStatsUsersOpen && !state.aiStatsUsers) fetchAIStatsUsers();
-    else render();
   });
 
   // AI modal — session selection
