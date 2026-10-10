@@ -2606,13 +2606,19 @@ function ptModel(per) {
       if (end > exp) end = exp;
     }
     if (end && end < start) end = start;
-    return { kind, start, end };
+    // Fine stimata delle prove che stanno per pagare: scadenza del token se futura, sennò inizio + 7 giorni.
+    let est = null;
+    if (kind === 'soon') {
+      est = t.expires_at && new Date(t.expires_at) > now ? romeDay(t.expires_at) : addDays(start, 7);
+      if (est <= today) est = null;
+    }
+    return { kind, start, end, est };
   }).sort((a, b) => a.start.localeCompare(b.start) || (a.end || '9').localeCompare(b.end || '9'));
   const count = { paid: 0, soon: 0, quit: 0 };
   trials.forEach(t => count[t.kind]++);
   const toToday = !per.to || per.to >= today;
   let last = per.from;
-  trials.forEach(t => { if (t.end && t.end > last) last = t.end; if (t.start > last) last = t.start; });
+  trials.forEach(t => { if (t.end && t.end > last) last = t.end; if (t.est && t.est > last) last = t.est; if (t.start > last) last = t.start; });
   let axisEnd = addDays(last, 1);
   // Una prova aperta arriva a oggi: l'asse la contiene anche se il periodo è già chiuso.
   if ((toToday || trials.some(t => !t.end)) && axisEnd < addDays(today, 1)) axisEnd = addDays(today, 1);
@@ -2645,17 +2651,18 @@ function ptChart(m, W, animate, loading) {
   m.trials.forEach((t, i) => {
     const y = Y(i + 1).toFixed(1);
     const xa = X(t.start), xz = X(t.end || m.today);
-    const endTxt = t.end ? ddmm(t.end) : 'oggi';
-    let s = `<line x1="${xa.toFixed(1)}" y1="${y}" x2="${xz.toFixed(1)}" y2="${y}" class="pt-ln"/><circle cx="${xa.toFixed(1)}" cy="${y}" r="5" class="pt-start"/>`;
+    const endTxt = t.end ? ddmm(t.end) : t.est ? `oggi · fine ~${ddmm(t.est)}` : 'oggi';
+    const xr = t.est ? X(t.est) : xz;
+    let s = (t.est ? `<line x1="${xz.toFixed(1)}" y1="${y}" x2="${xr.toFixed(1)}" y2="${y}" class="pt-est"/>` : '') + `<line x1="${xa.toFixed(1)}" y1="${y}" x2="${xz.toFixed(1)}" y2="${y}" class="pt-ln"/><circle cx="${xa.toFixed(1)}" cy="${y}" r="5" class="pt-start"/>`;
     if (t.end) {
       const c = PT_COL[t.kind], xe = X(addDays(t.end, 1));
       s += `<line x1="${xz.toFixed(1)}" y1="${y}" x2="${xe.toFixed(1)}" y2="${y}" stroke="${c}" class="pt-endbar"/><circle cx="${xz.toFixed(1)}" cy="${y}" r="9" fill="${c}" class="pt-enddot"/>`;
     }
-    const hitX = Math.min(xa, xz) - 10, hitW = Math.abs(xz - xa) + 20 + (t.end ? X(addDays(t.end, 1)) - xz : 0);
+    const hitX = Math.min(xa, xz) - 10, hitW = Math.abs(xr - xa) + 20 + (t.end ? X(addDays(t.end, 1)) - xz : 0);
     lines += `<g class="pt-row" data-pt-i="${i}"><rect x="${hitX.toFixed(1)}" y="${(Y(i + 1) - 11).toFixed(1)}" width="${hitW.toFixed(1)}" height="22" class="pt-hit"/>${s}`
       + `<circle cx="${xa.toFixed(1)}" cy="${y}" r="13" class="pt-ring"/><circle cx="${xz.toFixed(1)}" cy="${y}" r="13" class="pt-ring"/></g>`;
     const txt = `${ddmm(t.start)} – ${endTxt}`, w = txt.length * 7.6 + 28;
-    let px = xz + 24; if (px + w > W - 4) px = Math.max(4, xa - 24 - w);
+    let px = xr + 24; if (px + w > W - 4) px = Math.max(4, xa - 24 - w);
     tips += `<g class="pt-tip" data-pt-tip="${i}"><rect x="${px.toFixed(1)}" y="${(Y(i + 1) - 15).toFixed(1)}" width="${w.toFixed(1)}" height="30" rx="15"/><text x="${(px + w / 2).toFixed(1)}" y="${(Y(i + 1) + 4.5).toFixed(1)}" text-anchor="middle">${txt}</text></g>`;
   });
   const H = Y1 + 36;
@@ -2688,6 +2695,7 @@ function ptSquares(trials) {
 function ptLegend() {
   const bar = c => `<svg width="34" height="20" aria-hidden="true"><line x1="10" y1="10" x2="30" y2="10" stroke="${c}" stroke-width="8" stroke-linecap="round"/><circle cx="9" cy="10" r="8" fill="${c}"/></svg>`;
   return `<div class="pt-legend"><span><svg width="34" height="20" aria-hidden="true"><circle cx="5" cy="10" r="4" fill="#1a1d24" stroke="${PT_COL.soon}" stroke-width="2"/><line x1="10" y1="10" x2="30" y2="10" stroke="${PT_COL.soon}" stroke-width="4" stroke-linecap="round"/></svg>prova</span>`
+    + `<span><svg width="34" height="20" aria-hidden="true"><line x1="4" y1="10" x2="30" y2="10" class="pt-est"/></svg>fine prova stimata</span>`
     + `<span>${bar(PT_COL.paid)}pagato</span><span>${bar(PT_COL.quit)}disdetta</span></div>`;
 }
 

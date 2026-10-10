@@ -975,6 +975,7 @@
 .pt-gv { stroke: #23272f; stroke-width: 1; }
 .pt-gh { stroke: #2a2e37; stroke-width: 1; }
 .pt-today { stroke: #ffffff; stroke-width: 1.5; }
+.pt-est { stroke: #4361ee; stroke-width: 4; stroke-dasharray: 2 8; stroke-linecap: round; opacity: .55; }
 .pt-empty { font-size: 16px; font-weight: 700; fill: #9ca3af; }
 .pt-ln { stroke: #4361ee; stroke-width: 4; stroke-linecap: round; }
 .pt-start { fill: #1a1d24; stroke: #4361ee; stroke-width: 2; }
