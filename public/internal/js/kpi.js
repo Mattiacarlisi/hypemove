@@ -7302,7 +7302,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20261004b';
+const PAYWALL_SHOT_V = '20261010a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7338,9 +7338,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'onboarding_trial',
     name: 'Paywall di partenza · con la prova',
-    rotation: 'live',
-    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home. Anche in anteprima /dev.',
-    when: 'Dal 26/09/2026, al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding: la vede una volta sola chi installa. Ha preso il posto di onboarding_start (in pausa): per confrontarle, le due righe vanno lette per data, non sommate.',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (voce «Paywall di partenza · con la prova (in pausa)»). Dal 26/09 al 09/10/2026: pagina intera (/inizia), non un overlay, prima della Home.',
+    when: 'IN PAUSA dal 10/10/2026. Dal 26/09 al 09/10/2026 era la schermata di /inizia, subito dopo l\'ultima domanda dell\'onboarding, e la vedeva una volta sola chi installava. Il 10/10 Mattia l\'ha sostituita con la v2 (onboarding_trial_v2), che cambia solo titolo, sottotitolo e titolino: non è cancellata, resta in /dev, e i suoi eventi restano righe a sé — leggi questa riga come i numeri di quelle giornate.',
     exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nel paywall di partenza.',
     what: 'La schermata del paywall di partenza, identica in tutto — titolo coi minuti scelti, grafico che si disegna, benefici per obiettivo, recensioni che scorrono, chiusura sul numero degli allenamenti, le stesse due schede dei piani, «Ripristina acquisti». Cambia solo la scheda dell\'annuale: in cima una fascia oro «7 giorni gratis» col pacchettino, a destra in grande «0 € oggi», da solo, al posto del prezzo, e sotto il nome, in piccolo, il listino sbarrato e il totale: «59,99 € 29,99 € l\'anno» (il barrato solo in euro, come sulla scheda del paywall di partenza). La rata «poi 2,50 €/mese», che c\'era, l\'ha tolta Mattia il 25/09/2026: quattro cifre in una scheda erano troppe. Niente «Il più scelto»: la fascia fa da etichetta. Il mensile è quello di sempre, senza prova. Prima versione dello stesso giorno (bottone unico «Prova 7 giorni gratis» al posto delle due schede) scartata da Mattia: cambia solo la parte dei prezzi.',
     cta: 'Come nel paywall di partenza il bottone È la scheda, e un tocco apre il pagamento di Google. La scheda dell\'annuale compra l\'offerta `freetrial-7d` NOMINATA, passata identica al catalogo e all\'acquisto: i giorni e le cifre scritti sono quelli dell\'offerta che il tocco paga. Il mensile, dove quel nome non esiste, compra il suo piano di sempre. Se il catalogo di quel telefono non ha la prova — account che l\'ha già consumata, o offerta spenta su Console — la scheda dell\'annuale torna identica a quella del paywall di partenza e la schermata non nomina la prova. `cta_copy`: `onboarding_start.trial.band` sul tocco della scheda con la prova, le chiavi di sempre (`plans_v2.annual.label` / `plans_v2.monthly.label`) negli altri casi. ⚠️ Limite noto: senza la prova il ripiego è la scala generica di `pickPreferredOffer` — oggi il piano base 29,99 €/anno, ma se un giorno comparissero le rate o `discount-19` senza la prova, la scheda venderebbe quelle.',
@@ -7348,6 +7348,21 @@ const CREATIVE_REGISTRY = [
     file: 'app/src/pages/OnboardingTrialPaywall/OnboardingTrialPaywall.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, e in basso le due schede — l\'annuale con «7 giorni gratis» e «0 € oggi»' },
+    ],
+  },
+  {
+    variant: 'onboarding_trial_v2',
+    name: 'Paywall di partenza · prova v2',
+    rotation: 'live',
+    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home. Anche in anteprima /dev (due voci: donna/dimagrire/principiante e uomo/tonificare/intermedio).',
+    when: 'Dal 10/10/2026, al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding: la vede una volta sola chi installa. Ha preso il posto di onboarding_trial (in pausa): per confrontarle, le due righe vanno lette per data, non sommate.',
+    exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nella v1.',
+    what: 'La schermata di onboarding_trial al pixel — grafico, benefici per obiettivo, recensioni, chiusura, scheda dell\'annuale con «7 giorni gratis» e «0 € oggi» — dove cambiano SOLO tre testi, scritti su chi guarda. Titolo sul livello: principiante «Un percorso pensato per chi ricomincia.», intermedio e avanzato «Un percorso pensato per chi vuole di più.». Sottotitolo su obiettivo e genere: «Sarai seguita/seguito dal coach a ogni allenamento, e ti aiuterà a…» + sgonfiare la pancia e sentirti più leggera/o (dimagrire), avere un corpo più tonico e più forte (tonificare), sciogliere il corpo e muoverti con più facilità (mobilità), sciogliere le tensioni e rinforzare la schiena (mal di schiena), restare forte e autonoma/o negli anni (longevità). Titolino dei benefici: «Stare bene con soli N minuti al giorno.», coi minuti scelti — il vecchio titolo grande, sceso sopra la lista. Il sottotitolo non nomina più il prezzo.',
+    cta: 'Identica alla v1: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy` uguale (`onboarding_start.trial.band` sulla scheda con la prova).',
+    note: 'Ripieghi: livello ignoto → «per chi ricomincia» (il livello più scelto); genere ignoto → maschile, come in tutto l\'onboarding; obiettivo ignoto → «ti aiuterà ad arrivare al tuo obiettivo». Livello e genere arrivano con lo stato di fine onboarding, e dal profilo se mancano. Copy nato il 10/10/2026 da tre ricerche e cinque copywriter, poi la proposta di Mattia rifinita insieme. Stesso KPI di guardia — primo allenamento entro 48h.',
+    file: 'app/src/pages/OnboardingTrialPaywallV2/OnboardingTrialPaywallV2.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'come la v1, con i tre testi scritti su livello, obiettivo e genere (nello scatto: donna, dimagrire, principiante, 10 minuti)' },
     ],
   },
   {
@@ -8554,6 +8569,7 @@ const CREATIVE_LABELS = {
   onboarding_start: 'Paywall di partenza',
   app_open: 'Paywall apertura app',
   onboarding_trial: 'Paywall di partenza · con la prova',
+  onboarding_trial_v2: 'Paywall di partenza · prova v2',
   welcome_offer: 'Offerta di benvenuto',
   daily_limit_sheet: 'Limite giornaliero · prima versione',
   daily_limit_done: 'Limite giornaliero · gratuito completato',
