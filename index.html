@@ -90,7 +90,9 @@
           gtag('js', new Date());
           gtag('config', 'G-VC77BXKJVM');
         }
-        if (!stored) banner.classList.add('show');
+        // Sulla pagina dei link della bio il banner coprirebbe i bottoni: lì niente banner,
+        // GA resta col consenso negato (le visite le conta link_page_events, senza cookie).
+        if (!stored && document.body.dataset.page !== '/link') banner.classList.add('show');
         document.getElementById('hm-accept').addEventListener('click', function () { save('granted'); enableGA(); hide(); });
         document.getElementById('hm-decline').addEventListener('click', function () { save('denied'); gtag('consent', 'update', { analytics_storage: 'denied' }); hide(); });
         if (stored === 'granted') enableGA();

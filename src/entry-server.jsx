@@ -20,6 +20,7 @@ import Workout10MinutiCasa, { meta as dieciMeta } from "./pages/Workout10MinutiC
 import ResetPassword from "./pages/ResetPassword.jsx";
 import Unsubscribe from "./pages/Unsubscribe.jsx";
 import Open from "./pages/Open.jsx";
+import Link, { meta as linkMeta } from "./pages/Link.jsx";
 import { confronti } from "./data/confronti.js";
 
 // Esportati per scripts/prerender.mjs (che legge solo questo modulo compilato).
@@ -48,6 +49,7 @@ export const routes = [
   { path: "/benefici-camminata-tempo", Component: BeneficiCamminataTempo, meta: camminataMeta },
   { path: "/iphone", Component: Iphone, meta: iphoneMeta },
   { path: "/iphone/grazie", Component: IphoneGrazie, meta: grazieMeta },
+  { path: "/link", Component: Link, meta: linkMeta },
   { path: "/404", Component: NotFound, meta: notFoundMeta, output: "404.html" },
   { path: "/reset-password", Component: ResetPassword, meta: { ...PRIVATE, title: "Reimposta password | Hypemove", description: "Reimposta la password del tuo account Hypemove." }, hydrate: true },
   { path: "/unsubscribe", Component: Unsubscribe, meta: { ...PRIVATE, title: "Disiscrizione email | Hypemove", description: "Gestisci la disiscrizione dalle email di Hypemove." }, hydrate: true },
