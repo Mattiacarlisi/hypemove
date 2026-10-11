@@ -241,6 +241,7 @@ function stBuildSprintDay(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, rate = sc.rate, g = stats.gross;
   const all = d.sprint_curves.sprints, oggi = d.meta.oggi;
   const W = stWindow(all, sel.inizio, sel.matura, g);
+  const dc = stHasDc(all);
   const nd = Math.max(W.days.length, ...cmp.map(sp => stDayN(sp.matura) - stDayN(sp.inizio) + 1), 2);
   const val = (S, k, r) => {
     const s = S.spend[k], p = S.paid[k], o = S.open[k];
@@ -273,7 +274,9 @@ function stBuildSprintDay(w, h, d) {
     hov: i => {
       if (i < 0 || i >= W.days.length) return null;
       const v = val(W, i, rate);
-      return v == null ? null : { txt: `${stDM(W.days[i])}${W.open[i] > 0 ? ' · stima' : ''} · ${stEuro(v)} € per euro`, v };
+      if (v == null) return null;
+      const ab = dc ? ` · ${W.offers[i]} ${(W.offers[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
+      return { txt: `${stDM(W.days[i])}${W.open[i] > 0 ? ' · stima' : ''} · ${stEuro(v)} € per euro${ab}`, v };
     } };
 }
 const stEuroTick = v => v === 0 ? '€0' : '€' + String(Math.round(v * 100) / 100).replace('.', ',');
@@ -306,10 +309,12 @@ function stWindow(all, w0, w1, g) {
     let t = 0;
     return inc.map(v => (t += v));
   };
-  const spend = flow('cs'), paid = flow(pkey), trials = flow('st');
+  const spend = flow('cs'), paid = flow(pkey), trials = flow('st'), offers = flow('dc');
   const open = days.map(dt => { let o = 0; for (const sp of all) o += stRowCum(sp, dt, okey); return o; });
-  return { days, spend, paid, trials, open };
+  return { days, spend, paid, trials, open, offers };
 }
+// la finestra ha il conteggio delle offerte (chiave dc: solo dopo la migrazione direct_offers)
+const stHasDc = all => (all || []).some(sp => (sp.points || []).some(p => p && ('dc' in p)));
 // etichette di calendario, diradate se la finestra è lunga
 function stDateLabs(days) {
   const n = days.length, step = n > 16 ? 2 : 1, out = [];
@@ -332,6 +337,7 @@ function stBuildMoney(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, g = stats.gross;
   const all = d.sprint_curves.sprints;
   const W = stWindow(all, sel.inizio, sel.matura, g);
+  const dc = stHasDc(all);
   const nd = Math.max(W.days.length, 2);
   const top = Math.max(10, W.spend.at(-1) ?? 0, W.paid.at(-1) ?? 0);
   const pow = Math.pow(10, Math.floor(Math.log10(top))), norm = top / pow;
@@ -353,7 +359,8 @@ function stBuildMoney(w, h, d) {
     svg: stSvg(w, h, s), c, nx: nd,
     hov: i => {
       if (i < 0 || i >= W.days.length) return null;
-      return { txt: `${stDM(W.days[i])} · spesi ${stEuro(W.spend[i])} € · incassati ${stEuro(W.paid[i])} €`, v: W.spend[i] };
+      const ab = dc ? ` · ${W.offers[i]} ${(W.offers[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
+      return { txt: `${stDM(W.days[i])} · spesi ${stEuro(W.spend[i])} € · incassati ${stEuro(W.paid[i])} €${ab}`, v: W.spend[i] };
     },
   };
 }
@@ -365,7 +372,9 @@ function stBuildTrials(w, h, d) {
   const all = d.sprint_curves.sprints;
   const W = stWindow(all, sel.inizio, sel.matura, stats.gross);
   const nx = Math.max(W.days.length, 2);
-  const top = Math.max(2, W.trials.at(-1) ?? 0, ...cmp.flatMap(sp => stWindow(all, sp.inizio, sp.matura, stats.gross).trials));
+  const dc = stHasDc(all);
+  const top = Math.max(2, W.trials.at(-1) ?? 0, dc ? (W.offers.at(-1) ?? 0) : 0,
+    ...cmp.flatMap(sp => stWindow(all, sp.inizio, sp.matura, stats.gross).trials));
   const stepY = top <= 8 ? 2 : top <= 20 ? 4 : top <= 40 ? 8 : 20;
   const ymax = Math.ceil((top + 0.5) / stepY) * stepY;
   const ticks = []; for (let v = 0; v <= ymax; v += stepY) ticks.push([v, String(v)]);
@@ -379,9 +388,11 @@ function stBuildTrials(w, h, d) {
     s += stCurve(c, cr, { color: col, estColor: col, sw: 2.5, dot: (p, r, e) => e.last && r === cr.at(-1) ? 'dot' : null });
   });
   s += stCurve(c, runs, { color: ST.BLU, estColor: ST.BLU, sw: 3, dot: () => 'dot' });
+  if (dc) s += stCurve(c, stRuns(W.offers.map((v, i) => ({ i, v })), ymax, true),
+    { color: ST.VER, estColor: ST.VER, sw: 3, dot: () => 'dot' });
   return { svg: stSvg(w, h, s), c, nx,
     hov: i => (i >= 0 && i < W.days.length)
-      ? { txt: `${stDM(W.days[i])} · ${W.trials[i]} ${(W.trials[i] ?? 0) === 1 ? 'prova' : 'prove'}`, v: W.trials[i] } : null };
+      ? { txt: `${stDM(W.days[i])} · ${W.trials[i]} ${(W.trials[i] ?? 0) === 1 ? 'prova' : 'prove'}${dc ? ` · ${W.offers[i]} ${(W.offers[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : ''}`, v: W.trials[i] } : null };
 }
 
 // Soglia delle prove che pagano: sotto il 30% siamo sotto la media (Europa occidentale 29,7%, RevenueCat 2026);
@@ -393,7 +404,9 @@ const ST_RATE_SOGLIA = 30;
 // finestra: la stessa regola degli altri grafici. Soglia del 30% come prima.
 function stBuildRate(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp;
+  const all = d.sprint_curves.sprints, dc = stHasDc(all);
   const R = stRateWindow(d.trial_rate.points, sel.inizio, sel.matura);
+  const off = dc ? stWindow(all, sel.inizio, sel.matura, stats.gross).offers : null;
   const real = (d.expected_payers && d.expected_payers.real) || [];
   const atS = dt => { let v = 0; for (const p of real) { if (p.date <= dt) v = p.started; else break; } return v; };
   const b0 = stAddDays(sel.inizio, -1);
@@ -419,7 +432,8 @@ function stBuildRate(w, h, d) {
   return { svg: stSvg(w, h, s), c, nx: nd,
     hov: i => { const r = R[i]; if (!r || tot <= 0) return null;
       const open = Math.max(0, starts[i] - r.ended);
-      return { txt: `${stDM(r.date)} · ${r.paid} pagate · ${Math.max(0, r.ended - r.paid)} perse · ${open} aperte (su ${tot})`, v: pp(r, tot) }; } };
+      const ab = off ? ` · ${off[i]} ${(off[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
+      return { txt: `${stDM(r.date)} · ${r.paid} pagate · ${Math.max(0, r.ended - r.paid)} perse · ${open} aperte (su ${tot})${ab}`, v: pp(r, tot) }; } };
 }
 
 // ── PAGINA ────────────────────────────────────────────────────────────
@@ -463,29 +477,35 @@ function stCards(d) {
   const c = {};
   // Spesa e incassi per data di calendario sulla finestra: gli stessi giorni per tutti.
   {
-    const g = stats.gross;
-    const W = stWindow(d.sprint_curves.sprints, sel.inizio, sel.matura, g);
+    const g = stats.gross, all = d.sprint_curves.sprints, dc = stHasDc(all);
+    const W = stWindow(all, sel.inizio, sel.matura, g);
     const spend = W.spend.at(-1) ?? 0, earn = W.paid.at(-1) ?? 0;
     const div = earn - spend, kind = g ? 'lordi' : 'netti';
     const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
+    const off = dc ? (W.offers.at(-1) ?? 0) : null;
     c.money = { num: stEuro(div) + ' €', color: ST.INK,
-      cap: `il divario fra investimento e ricavi · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind} · ${per}` };
+      cap: `il divario fra investimento e ricavi · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind}${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} · ${per}` };
     c.money.legend = [stLgd(ST.BLU, 'Spesa ads cumulata'), stLgd(ST.VER, `Incassi ${kind} cumulati`),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x) + ' · incassi'))].join('');
   }
-  // Prove avviate per data di avvio dentro la finestra.
+  // Prove avviate per data di avvio dentro la finestra, con le offerte pagate in parallelo.
   {
-    const W = stWindow(d.sprint_curves.sprints, sel.inizio, sel.matura, stats.gross);
-    const tot = W.trials.at(-1) ?? 0;
+    const all = d.sprint_curves.sprints, dc = stHasDc(all);
+    const W = stWindow(all, sel.inizio, sel.matura, stats.gross);
+    const tot = W.trials.at(-1) ?? 0, off = dc ? (W.offers.at(-1) ?? 0) : null;
     const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
-    c.trials = { num: String(tot), color: ST.INK, cap: `prove avviate nel ${per}` };
+    c.trials = { num: off == null ? String(tot) : `${tot} + ${off}`, color: ST.INK,
+      cap: off == null ? `prove avviate nel ${per}` : `${tot} ${tot === 1 ? 'prova avviata' : 'prove avviate'} · ${off} ${off === 1 ? 'offerta pagata' : 'offerte pagate'} nel ${per}` };
     c.trials.legend = [stLgd(ST.BLU, 'Prove avviate'),
+      ...(off == null ? [] : [stLgd(ST.VER, 'Offerte pagate')]),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x)))].join('');
   }
   // Euro per euro sugli stessi giorni delle altre schede: stesso denominatore.
   {
-    const W = stWindow(d.sprint_curves.sprints, sel.inizio, sel.matura, stats.gross);
+    const all = d.sprint_curves.sprints, dc = stHasDc(all);
+    const W = stWindow(all, sel.inizio, sel.matura, stats.gross);
     const hasOpen = (W.open.at(-1) ?? 0) > 0;
+    const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const ti = W.days.findIndex(x => x >= d.meta.oggi);
     const fval = k => { const s = W.spend[k], p = W.paid[k], o = W.open[k]; return s > 0 ? (p + cs.rate * o) / s : ((p + o === 0) ? 0 : null); };
     const finals = W.days.map((dt, k) => fval(k)).filter(v => v != null);
@@ -493,7 +513,7 @@ function stCards(d) {
     const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
     c.sprint = fv == null ? { num: '–', cap: `nessuna spesa ancora · ${per}`, color: ST.INK }
       : { num: stEuro(fv) + ' €', color: hasOpen ? ST.BLU : ST.INK,
-          cap: `${hasOpen ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${stEuro(W.paid.at(-1) ?? 0)} € pagati su ${stEuro(W.spend.at(-1) ?? 0)} € spesi · ${per}` };
+          cap: `${hasOpen ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${stEuro(W.paid.at(-1) ?? 0)} € pagati${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} su ${stEuro(W.spend.at(-1) ?? 0)} € spesi · ${per}` };
     c.sprint.legend = [
       ...(hasOpen ? [stLgd(ST.INK, 'pagato'), stLgd(ST.BLU, 'stima', '6 5')] : [stLgd(ST.INK, stCurveName(sel))]),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))),
