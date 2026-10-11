@@ -4,7 +4,7 @@
 // Le misure, i colori e i testi copiano la tavola «2A - Sprint in alto».
 
 const ST = {
-  INK: '#ffffff', MUT: '#9ca3af', TER: '#6f7683', BLU: '#4361ee', ORA: '#fb8b04',
+  INK: '#ffffff', MUT: '#9ca3af', TER: '#6f7683', BLU: '#4361ee', ORA: '#fb8b04', VER: '#3fb950',
   GRID: '#2a2e37', CARD: '#1a1d24', PAGE: '#0f1115', PAST12: '#d1d5db',
   FZ: 'rgba(255,255,255,0.04)', FZ2: 'rgba(255,255,255,0.05)', FZ_LEG: 'rgba(255,255,255,0.09)',
   ADS: 'rgba(67,97,238,0.14)',   // fascia dei giorni di pubblicità, distinta dal grigio di «da oggi»
@@ -318,6 +318,51 @@ function stBuildT100(w, h, d) {
   };
 }
 
+// ── GRAFICO «Spesa cumulata e incassi»: stessi dati e stesso asse giorni del grafico 1 ──
+// Blu = spesa ads cumulata (cs), verde = incassi cumulati (pg lordi con «Senza tasse», pn netti
+// con «Con tasse»). Solo dati veri: dopo oggi entrambe le curve restano piatte, nessuna stima.
+const stEuroTick = v => v === 0 ? '€0' : '€' + String(Math.round(v * 100) / 100).replace('.', ',');
+function stBuildMoney(w, h, d) {
+  const { sel } = stCurveSet(d), g = stats.gross;
+  const spend = p => p.cs ?? null, earn = p => (g ? p.pg : p.pn) ?? null;
+  const nd = sel.points.length || sel.days || 2;
+  const top = Math.max(10, ...sel.points.flatMap(p => [spend(p) ?? 0, earn(p) ?? 0]));
+  const pow = Math.pow(10, Math.floor(Math.log10(top))), norm = top / pow;
+  const ymax = (norm <= 1 ? 1 : norm <= 1.25 ? 1.25 : norm <= 1.5 ? 1.5 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * pow;
+  const ticks = [0, ymax / 4, ymax / 2, 3 * ymax / 4, ymax].map(v => [v, stEuroTick(v)]);
+  const c = stBase(w, h, { nx: nd, ymax, ticks, labs: stCurveLabels(sel, nd, w) });
+  const sPts = sel.points.map(p => ({ i: p.day - 1, v: spend(p) }));
+  const ePts = sel.points.map(p => ({ i: p.day - 1, v: earn(p) }));
+  let s = c.s;
+  s += stCurve(c, stRuns(sPts, ymax, true), { color: ST.BLU, estColor: ST.BLU, sw: 3, dot: () => 'dot' });
+  s += stCurve(c, stRuns(ePts, ymax, true), { color: ST.VER, estColor: ST.VER, sw: 3, dot: () => 'dot' });
+  const byDay = new Map(sel.points.map(p => [p.day, p]));
+  return {
+    svg: stSvg(w, h, s), c, nx: nd,
+    hov: i => { const p = byDay.get(i + 1); if (!p) return null;
+      const cs = spend(p), pg = earn(p); if (cs == null || pg == null) return null;
+      return { txt: `${stDM(stAddDays(sel.inizio, i))} · spesi ${stEuro(cs)} € · incassati ${stEuro(pg)} €`, v: cs }; },
+  };
+}
+
+// ── GRAFICO «Prove avviate — totale cumulato»: stesso sprint e stessi giorni del grafico 1 ──
+// Un'unica curva blu con il conteggio cumulato (st). Solo dati veri, nessuna stima, nessun tasso.
+function stBuildTrials(w, h, d) {
+  const { sel } = stCurveSet(d);
+  const pts = sel.points.map(p => ({ i: p.day - 1, v: p.st ?? null }));
+  const top = Math.max(2, ...pts.map(p => p.v ?? 0));
+  const stepY = top <= 8 ? 2 : top <= 20 ? 4 : top <= 40 ? 8 : 20;
+  const ymax = Math.ceil((top + 0.5) / stepY) * stepY;
+  const ticks = []; for (let v = 0; v <= ymax; v += stepY) ticks.push([v, String(v)]);
+  const c = stBase(w, h, { nx: pts.length || 2, ymax, ticks, labs: stCurveLabels(sel, pts.length || 2, w) });
+  const runs = stRuns(pts, ymax, true);
+  const s = c.s + stCurve(c, runs, { color: ST.BLU, estColor: ST.BLU, sw: 3, dot: () => 'dot' });
+  const byDay = new Map(sel.points.map(p => [p.day, p]));
+  return { svg: stSvg(w, h, s), c, nx: pts.length || 2,
+    hov: i => { const p = byDay.get(i + 1); return p && p.st != null
+      ? { txt: `${stDM(stAddDays(sel.inizio, i))} · ${p.st} ${p.st === 1 ? 'prova' : 'prove'}`, v: p.st } : null; } };
+}
+
 // Soglia delle prove che pagano: sotto il 30% siamo sotto la media (Europa occidentale 29,7%, RevenueCat 2026);
 // la media del fitness è il 38%. Nessuna fonte incrocia fitness, Europa e Android.
 const ST_RATE_SOGLIA = 30;
@@ -440,10 +485,12 @@ function stSkeletonCard(key, title, big) {
 }
 
 const ST_TITLES = {
+  money: 'Spesa cumulata e incassi', trials: 'Prove avviate — totale cumulato',
   sprint: 'Lo sprint, giorno per giorno', rate: 'Prove che poi pagano', t100: 'Prove avviate ogni 100 €',
   payers: 'Paganti attesi', sprints: 'Sprint dopo sprint', keep: 'Prove aperte con il rinnovo attivo', fo: 'Prove ogni 100 primi accessi',
 };
-const ST_ORDER = ['sprint', 'rate', 't100', 'payers', 'sprints', 'keep', 'fo'];
+const ST_ORDER = ['money', 'trials', 'sprint', 'rate', 't100', 'payers', 'sprints', 'keep', 'fo'];
+const ST_BIG = ['money', 'trials', 'sprint'];
 
 function stCards(d) {
   const m = d.meta;
@@ -452,6 +499,22 @@ function stCards(d) {
   const when = `pubblicità ${stDM(sel.inizio)}–${stDM(sel.fine)} · matura il ${stDM(sel.matura)}`;
   const money = `${stEuro(stats.gross ? sel.paid_gross : sel.paid_net)} € pagati su ${stEuro(sel.spend)} € spesi`;
   const c = {};
+  // Vista principale: il divario fra investimento e ricavi. Il numero grande è il divario
+  // (incassi − spesa); gli incassi seguono «Con tasse / Senza tasse» come il grafico 1.
+  {
+    const g = stats.gross, spend = sel.spend ?? 0, earn = g ? (sel.paid_gross ?? 0) : (sel.paid_net ?? 0);
+    const div = earn - spend, kind = g ? 'lordi' : 'netti';
+    c.money = { num: stEuro(div) + ' €', color: ST.INK,
+      cap: `il divario fra investimento e ricavi · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind} · ${when}` };
+    c.money.legend = [stLgd(ST.BLU, 'Spesa ads cumulata'), stLgd(ST.VER, `Incassi ${kind} cumulati`)].join('');
+  }
+  // Totale cumulato delle prove avviate nello sprint scelto, dall'inizio del periodo.
+  {
+    const tot = sel.trials ?? sel.points.map(p => p.st ?? 0).reduce((a, b) => Math.max(a, b), 0);
+    c.trials = { num: String(tot), color: ST.INK,
+      cap: `numero totale di prove avviate dall'inizio del periodo · ${when}` };
+    c.trials.legend = [stLgd(ST.BLU, 'Prove avviate')].join('');
+  }
   c.sprint = !lastPt ? { num: '–', cap: `nessuna spesa ancora · ${when}`, color: ST.INK }
     : { num: stEuro(cs.val(lastPt)) + ' €', color: maturing ? ST.BLU : ST.INK,
         cap: `${maturing ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${money} · ${when}` };
@@ -571,21 +634,20 @@ function stErrorHtml(msg) {
 function pageStats() {
   let body;
   if (stats.error && !stats.data) body = stErrorHtml(stats.error);
-  else if (!stats.data) body = `<div class="st-grid">${ST_ORDER.map(k => stSkeletonCard(k, ST_TITLES[k], k === 'sprint')).join('')}</div>`;
+  else if (!stats.data) body = `<div class="st-grid">${ST_ORDER.map(k => stSkeletonCard(k, ST_TITLES[k], ST_BIG.includes(k))).join('')}</div>`;
   else {
     const { c } = stCards(stats.data);
-    body = `<div class="st-grid">${ST_ORDER.map(k => stCardHtml({ key: k, big: k === 'sprint', title: ST_TITLES[k], ...c[k] })).join('')}</div>`;
+    body = `<div class="st-grid">${ST_ORDER.map(k => stCardHtml({ key: k, big: ST_BIG.includes(k), title: ST_TITLES[k], ...c[k] })).join('')}</div>`;
     if (stats.error) body = `<div class="st-banner">Aggiornamento non riuscito: ${esc(stats.error)}</div>` + body;
   }
   return `<div class="st-page" id="st-page">${stHeader()}${body}</div>`;
 }
 
 // ── DISEGNO E PASSAGGIO DEL MOUSE ─────────────────────────────────────
-const ST_BUILD = { sprint: stBuildSprintDay, rate: stBuildRate, t100: stBuildT100, payers: stBuildPayers, sprints: stBuildSprints, keep: stBuildKeep, fo: stBuildFo };
+const ST_BUILD = { money: stBuildMoney, trials: stBuildTrials, sprint: stBuildSprintDay, rate: stBuildRate, t100: stBuildT100, payers: stBuildPayers, sprints: stBuildSprints, keep: stBuildKeep, fo: stBuildFo };
 
 function stFitBig() {
-  const card = document.querySelector('.st-card.st-big.st-has-leg');
-  if (!card) return;
+  document.querySelectorAll('.st-card.st-big.st-has-leg').forEach(card => {
   const cap = card.querySelector('.st-cap'), leg = card.querySelector('.st-legend'), chart = card.querySelector('.st-chart');
   leg.style.top = chart.style.top = card.style.height = '';
   const narrow = window.matchMedia('(max-width: 900px)').matches;
@@ -593,6 +655,7 @@ function stFitBig() {
   const need = legTop + leg.offsetHeight + 14, grow = need - chart.offsetTop;
   if (legTop !== leg.offsetTop) leg.style.top = legTop + 'px';
   if (grow > 0) { card.style.height = card.offsetHeight + grow + 'px'; chart.style.top = need + 'px'; }
+  });
 }
 
 function drawStatsCharts() {
