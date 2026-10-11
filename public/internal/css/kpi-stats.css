@@ -65,8 +65,9 @@
 .st-big .st-legend { max-width: calc(100% - 300px); gap: 6px 11px; font-size: 12.5px; }
 .st-card:not(.st-big) .st-legend { max-width: calc(100% - 170px); }
 .st-lg { display: flex; align-items: center; gap: 6px; }
+/* barra globale sopra i grafici: stessi controlli del vecchio grafico 1, una riga sua */
+.st-bar { position: relative; z-index: 4; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
 /* grafico 1: comandi in alto a destra, legenda sotto */
-.st-tools { position: absolute; right: 24px; top: 16px; display: flex; align-items: center; gap: 10px; z-index: 3; }
 .st-seg { display: flex; padding: 3px; border-radius: 50px; background: #0f1115; border: 1.5px solid #2a2e37; }
 .st-segb {
   font: inherit; font-size: 13px; font-weight: 700; color: #9ca3af; background: transparent; border: 0; border-radius: 50px;
@@ -151,7 +152,6 @@
   .st-page { padding: 24px 16px 40px; }
   .st-grid { grid-template-columns: 1fr; gap: 20px; }
   .st-card.st-big, .st-card.st-big.st-has-leg { height: 770px; }
-  .st-tools { left: 24px; right: 24px; top: 152px; flex-wrap: wrap; }
   .st-menu.st-menu-r { left: 0; right: auto; }
   .st-big .st-legend, .st-big.st-has-leg .st-legend { left: 24px; right: 24px; top: 294px; justify-content: flex-start; gap: 8px 18px; max-width: none; }
 
