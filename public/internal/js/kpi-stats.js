@@ -234,50 +234,48 @@ function stToggleCmp(id) {
   render();
 }
 
-// Asse dei giorni: le date di inizio, fine pubblicità e maturazione dello sprint in esame, «oggi», e i numeri dove c'è posto.
-function stCurveLabels(sel, nd, w) {
-  const step = (w - 66) / Math.max(nd - 1, 1), near = (a, b) => Math.abs(a - b) * step < 44;
-  const keys = [];
-  const add = (i, t) => { if (i >= 0 && i < nd && !keys.some(k => near(k[0], i))) keys.push([i, t]); };
-  if (sel.today_day != null) add(sel.today_day - 1, 'oggi');
-  add(0, stDM(sel.inizio)); add(sel.days - 1, stDM(sel.matura)); add(sel.ads_days - 1, stDM(sel.fine));
-  const every = step < 24 ? 2 : 1, labs = [...keys];
-  if (w > 600) for (let i = 0; i < nd; i++) if (i % every === 0 && !keys.some(k => near(k[0], i) && k[0] !== i || k[0] === i)) labs.push([i, String(i + 1)]);
-  return labs.sort((a, b) => a[0] - b[0]);
-}
-
+// ── GRAFICO «ROI»: euro per euro sugli stessi giorni ──
+// (incassi + tasso × prove in scadenza) / spesa, per data di calendario sulla finestra.
+// Stessi totali delle altre schede: il denominatore è tutta la spesa del periodo.
 function stBuildSprintDay(w, h, d) {
-  const { sel, cmp, val } = stCurveSet(d);
-  const nd = Math.max(sel.days, ...cmp.map(s => s.days), 2);
-  const top = Math.max(0, ...[sel, ...cmp].flatMap(s => s.points.map(p => val(p) ?? 0)));
+  const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, rate = sc.rate, g = stats.gross;
+  const all = d.sprint_curves.sprints, oggi = d.meta.oggi;
+  const W = stWindow(all, sel.inizio, sel.matura, g);
+  const nd = Math.max(W.days.length, ...cmp.map(sp => stDayN(sp.matura) - stDayN(sp.inizio) + 1), 2);
+  const val = (S, k, r) => {
+    const s = S.spend[k], p = S.paid[k], o = S.open[k];
+    if (s == null || p == null || o == null) return null;
+    if (s > 0) return (p + r * o) / s;
+    return (p + o === 0 ? 0 : null);
+  };
+  const top = Math.max(0, ...W.days.map((dt, k) => val(W, k, rate) ?? 0),
+    ...cmp.flatMap(sp => { const C = stWindow(all, sp.inizio, sp.matura, g); return C.days.map((dt, k) => val(C, k, rate) ?? 0); }));
   const stepY = top <= 2 ? 0.5 : 1, ymax = Math.max(1.5, Math.ceil(top / stepY) * stepY);
-  const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += stepY) ticks.push([v, v === 0 ? '0' : (Number.isInteger(v) ? v : stIt(v, 2)) + ' €']);
-  const c = stBase(w, h, {
-    nx: nd, ymax, ticks, par: d.sprint_curves.breakeven,
-    fz: sel.today_day != null ? sel.today_day - 1.5 : null, labs: stCurveLabels(sel, nd, w),
-    ads: sel.ads_days - 0.5,   // i giorni in cui la pubblicità dello sprint in esame era attiva, anche a sprint chiuso
-  });
-  const pts = s => s.points.map(p => ({ i: p.day - 1, v: val(p), est: p.est }));
+  const ticks = []; for (let v = 0; v <= ymax + 1e-9; v += 0.5) ticks.push([v, v === 0 ? '0' : (Number.isInteger(v) ? v : stIt(v, 2)) + ' €']);
+  const ti = W.days.findIndex(x => x >= oggi);
+  const lastSpend = W.days.reduce((a, dt, k) => ((W.spend[k] - (k ? W.spend[k - 1] : 0)) > 0 ? k : a), -1);
+  const c = stBase(w, h, { nx: nd, ymax, ticks, par: 1,
+    fz: ti > 0 ? ti - 0.5 : null, labs: stDateLabs(W.days), ads: lastSpend >= 0 ? lastSpend + 0.5 : null });
+  const pts = W.days.map((dt, k) => ({ i: k, v: val(W, k, rate), est: W.open[k] > 0 }));
+  const runs = stRuns(pts, ymax, true);
   let s = c.s;
   cmp.forEach((sp, k) => {
-    const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length], runs = stRuns(pts(sp), ymax, true);
-    s += stCurve(c, runs, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
+    const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length];
+    const C = stWindow(all, sp.inizio, sp.matura, g);
+    const cr = stRuns(C.days.map((dt, j) => ({ i: j, v: val(C, j, rate) })), ymax, true);
+    s += stCurve(c, cr, { color: col, estColor: col, sw: 2.5, dot: (p, r, e) => e.last && r === cr.at(-1) ? 'dot' : null });
   });
-  const maturing = sel.today_day != null, runs = stRuns(pts(sel), ymax, true);
   s += stCurve(c, runs, {
-    color: maturing ? ST.INK : ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3,
+    color: ST.INK, estColor: ST.BLU, estDash: '7 6', sw: 3,
     dot: (p, r, e) => !e.last ? null : (r.est ? (r === runs.at(-1) ? 'ring' : null) : 'dot'),
   });
-  const byDay = new Map(sel.points.map(p => [p.day, p]));
-  return {
-    svg: stSvg(w, h, s), c, nx: nd,
-    hov: i => { const p = byDay.get(i + 1), v = p ? val(p) : null; if (v == null) return null;
-      return { txt: `giorno ${i + 1} · ${stDM(stAddDays(sel.inizio, i))} · ${p.est ? 'stima ' : ''}${stEuro(v)} € per euro`, v }; },
-  };
+  return { svg: stSvg(w, h, s), c, nx: nd,
+    hov: i => {
+      if (i < 0 || i >= W.days.length) return null;
+      const v = val(W, i, rate);
+      return v == null ? null : { txt: `${stDM(W.days[i])}${W.open[i] > 0 ? ' · stima' : ''} · ${stEuro(v)} € per euro`, v };
+    } };
 }
-// ── GRAFICO «Spesa cumulata e incassi»: stessi dati e stesso asse giorni del grafico 1 ──
-// Blu = spesa ads cumulata (cs), verde = incassi cumulati (pg lordi con «Senza tasse», pn netti
-// con «Con tasse»). Solo dati veri: dopo oggi entrambe le curve restano piatte, nessuna stima.
 const stEuroTick = v => v === 0 ? '€0' : '€' + String(Math.round(v * 100) / 100).replace('.', ',');
 
 // ── PERIODO: aggregati di calendario sulla finestra [inizio, matura] ──
@@ -360,9 +358,6 @@ function stBuildMoney(w, h, d) {
   };
 }
 
-// ── GRAFICO «Prove avviate — totale cumulato»: stesso sprint e stessi giorni del grafico 1 ──
-// Un'unica curva blu con il conteggio cumulato (st). Solo dati veri, nessuna stima, nessun tasso.
-
 // ── GRAFICO «Prove avviate — totale cumulato»: partenze per data di avvio ──
 // Conteggi per data di calendario dentro la finestra, sommati su tutte le righe.
 function stBuildTrials(w, h, d) {
@@ -399,23 +394,32 @@ const ST_RATE_SOGLIA = 30;
 function stBuildRate(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp;
   const R = stRateWindow(d.trial_rate.points, sel.inizio, sel.matura);
-  const minE = d.trial_rate.min_ended ?? 5;
+  const real = (d.expected_payers && d.expected_payers.real) || [];
+  const atS = dt => { let v = 0; for (const p of real) { if (p.date <= dt) v = p.started; else break; } return v; };
+  const b0 = stAddDays(sel.inizio, -1);
+  const tot = atS(sel.matura) - atS(b0);
+  const starts = R.map(r => atS(r.date) - atS(b0));
   const nd = Math.max(R.length, 2);
   const c = stBase(w, h, { nx: nd, ymax: 100, ticks: ST_PCT, par: ST_RATE_SOGLIA, labs: stDateLabs(R.map(r => r.date)) });
-  const pct = r => (r.ended > 0 ? 100 * r.paid / r.ended : null);
-  const pts = R.map((r, i) => ({ i, v: r.ended >= minE ? pct(r) : null }));
+  const pp = (r, t) => (t > 0 ? 100 * r.paid / t : null);
+  const lp = (r, t) => (t > 0 ? 100 * Math.max(0, r.ended - r.paid) / t : null);
+  const pts = R.map((r, i) => ({ i, v: pp(r, tot) }));
   const ch = new Set(stChanges(pts.map(p => p.v ?? 0)));
   const runs = stRuns(pts, 100, false);
-  let s = c.s + stCurve(c, runs, { color: ST.INK, estColor: ST.INK, sw: 3, dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
+  let s = c.s + stCurve(c, runs, { color: ST.VER, estColor: ST.VER, sw: 3, dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
+  const rl = stRuns(R.map((r, i) => ({ i, v: lp(r, tot) })), 100, false);
+  s += stCurve(c, rl, { color: ST.MUT, estColor: ST.MUT, sw: 2.5, dot: (p, r, e) => e.last && r === rl.at(-1) ? 'dot' : null });
   cmp.forEach((sp, k) => {
     const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length];
     const C = stRateWindow(d.trial_rate.points, sp.inizio, sp.matura);
-    const cr = stRuns(C.map((r, i) => ({ i, v: r.ended >= minE ? pct(r) : null })), 100, false);
+    const t2 = atS(sp.matura) - atS(stAddDays(sp.inizio, -1));
+    const cr = stRuns(C.map((r, i) => ({ i, v: pp(r, t2) })), 100, false);
     s += stCurve(c, cr, { color: col, estColor: col, sw: 2.5, dot: (p, r, e) => e.last && r === cr.at(-1) ? 'dot' : null });
   });
   return { svg: stSvg(w, h, s), c, nx: nd,
-    hov: i => { const r = R[i]; return r && r.ended > 0
-      ? { txt: `${stDM(r.date)} · ${r.paid} pagate su ${r.ended} finite · ${stPct(100 * r.paid / r.ended)}`, v: 100 * r.paid / r.ended } : null; } };
+    hov: i => { const r = R[i]; if (!r || tot <= 0) return null;
+      const open = Math.max(0, starts[i] - r.ended);
+      return { txt: `${stDM(r.date)} · ${r.paid} pagate · ${Math.max(0, r.ended - r.paid)} perse · ${open} aperte (su ${tot})`, v: pp(r, tot) }; } };
 }
 
 // ── PAGINA ────────────────────────────────────────────────────────────
@@ -455,10 +459,7 @@ const ST_ORDER = ['money', 'trials', 'sprint', 'rate'];
 const ST_BIG = ['money', 'trials', 'sprint'];
 
 function stCards(d) {
-  const cs = stCurveSet(d), sel = cs.sel, maturing = sel.today_day != null;
-  const lastPt = sel.points.filter(p => cs.val(p) != null).at(-1);
-  const when = `pubblicità ${stDM(sel.inizio)}–${stDM(sel.fine)} · matura il ${stDM(sel.matura)}`;
-  const money = `${stEuro(stats.gross ? sel.paid_gross : sel.paid_net)} € pagati su ${stEuro(sel.spend)} € spesi`;
+  const cs = stCurveSet(d), sel = cs.sel;
   const c = {};
   // Spesa e incassi per data di calendario sulla finestra: gli stessi giorni per tutti.
   {
@@ -481,18 +482,35 @@ function stCards(d) {
     c.trials.legend = [stLgd(ST.BLU, 'Prove avviate'),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x)))].join('');
   }
-  c.sprint = !lastPt ? { num: '–', cap: `nessuna spesa ancora · ${when}`, color: ST.INK }
-    : { num: stEuro(cs.val(lastPt)) + ' €', color: maturing ? ST.BLU : ST.INK,
-        cap: `${maturing ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${money} · ${when}` };
-  c.sprint.legend = [
-    ...(maturing ? [stLgd(ST.INK, 'pagato'), stLgd(ST.BLU, 'stima', '6 5')] : [stLgd(ST.BLU, stCurveName(sel))]),
-    ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))),
-    stLgd(ST.ORA, 'pareggio'), stLgRect(ST.ADS, 'pubblicità'), ...(maturing ? [stLgRect(ST.FZ, 'da oggi')] : []),
-  ].join('');
+  // Euro per euro sugli stessi giorni delle altre schede: stesso denominatore.
+  {
+    const W = stWindow(d.sprint_curves.sprints, sel.inizio, sel.matura, stats.gross);
+    const hasOpen = (W.open.at(-1) ?? 0) > 0;
+    const ti = W.days.findIndex(x => x >= d.meta.oggi);
+    const fval = k => { const s = W.spend[k], p = W.paid[k], o = W.open[k]; return s > 0 ? (p + cs.rate * o) / s : ((p + o === 0) ? 0 : null); };
+    const finals = W.days.map((dt, k) => fval(k)).filter(v => v != null);
+    const fv = finals.at(-1);
+    const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
+    c.sprint = fv == null ? { num: '–', cap: `nessuna spesa ancora · ${per}`, color: ST.INK }
+      : { num: stEuro(fv) + ' €', color: hasOpen ? ST.BLU : ST.INK,
+          cap: `${hasOpen ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${stEuro(W.paid.at(-1) ?? 0)} € pagati su ${stEuro(W.spend.at(-1) ?? 0)} € spesi · ${per}` };
+    c.sprint.legend = [
+      ...(hasOpen ? [stLgd(ST.INK, 'pagato'), stLgd(ST.BLU, 'stima', '6 5')] : [stLgd(ST.INK, stCurveName(sel))]),
+      ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))),
+      stLgd(ST.ORA, 'pareggio'), stLgRect(ST.ADS, 'pubblicità'), ...(ti > 0 ? [stLgRect(ST.FZ, 'da oggi')] : []),
+    ].join('');
+  }
 
   const Rw = stRateWindow(d.trial_rate.points, sel.inizio, sel.matura).at(-1) ?? { paid: 0, ended: 0 };
-  c.rate = Rw.ended > 0 ? { num: stPct(100 * Rw.paid / Rw.ended), cap: `${Rw.paid} pagate su ${Rw.ended} prove finite o disdette nel periodo · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK }
-                        : { num: '–', cap: `nessuna prova finita nel periodo · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK };
+  const Rreal = (d.expected_payers && d.expected_payers.real) || [];
+  const RatS = dt => { let v = 0; for (const p of Rreal) { if (p.date <= dt) v = p.started; else break; } return v; };
+  const Rb0 = stAddDays(sel.inizio, -1);
+  const Rtot = RatS(sel.matura) - RatS(Rb0);
+  const Rlost = Math.max(0, Rw.ended - Rw.paid), Ropen = Math.max(0, Rtot - Rw.ended);
+  c.rate = Rtot > 0 ? { num: stPct(100 * Rw.paid / Rtot), cap: `${Rw.paid} pagate su ${Rtot} avviate nel periodo · ${Rlost} concluse senza pagare · ${Ropen} ancora aperte · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK }
+                    : { num: '–', cap: `nessuna prova avviata nel periodo · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK };
+  c.rate.legend = [stLgd(ST.VER, 'pagate'), stLgd(ST.MUT, 'concluse senza pagare'), stLgd(ST.ORA, 'soglia'),
+    ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x)))].join('');
 
   return { c };
 }
