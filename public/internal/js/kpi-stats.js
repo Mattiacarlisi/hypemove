@@ -548,55 +548,82 @@ const ST_RATE_SOGLIA = 30;
 // Cumulato delle conclusioni (pagamenti, scadenze, disdette) con data di fine dentro la
 // finestra: la stessa regola degli altri grafici. Soglia del 30% come prima.
 
+// Serie della coorte (chiavi cohort): partenze e fati giorno per giorno dentro la finestra.
+// Senza chiavi (cache vecchia) si ripiega sui cumulati globali: le disdette restano dentro
+// le concluse e il confronto resta per riga. Con le chiavi il confronto non si applica
+// (segue una sola coorte: quella dello sprint scelto).
+function stCohort(d, S, w1) {
+  const C = d.cohort, CP = d.cohort_points;
+  if (C && Array.isArray(CP) && CP.length) {
+    const idx = CP.map((p, k) => k).filter(k => CP[k].date <= w1);
+    const gg = arr => idx.map(k => arr[k]);
+    return { split: true, tot: C.started ?? 0, days: gg(CP.map(p => p.date)),
+      started: gg(CP.map(p => p.started ?? 0)),
+      paid: gg(CP.map(p => p.paid ?? 0)), canc: gg(CP.map(p => p.cancelled ?? 0)), lost: gg(CP.map(p => p.lost ?? 0)),
+      openEnd: Math.max(0, (C.started ?? 0) - (C.paid ?? 0) - (C.cancelled ?? 0) - (C.lost ?? 0)) };
+  }
+  const R = stRateWindow(d.trial_rate.points, S.w0, w1);
+  const Wall = stWindow(d.sprint_curves.sprints, S.w0, w1, stats.gross);
+  const tot = Wall.trials.at(-1) ?? 0;
+  const paidEnd = R.length ? R[R.length - 1].paid : 0;
+  const lostEnd = R.length ? Math.max(0, R[R.length - 1].ended - R[R.length - 1].paid) : 0;
+  return { split: false, tot, days: R.map(r => r.date), started: Wall.trials,
+    paid: R.map(r => r.paid), canc: R.map(() => 0), lost: R.map(r => Math.max(0, r.ended - r.paid)),
+    openEnd: Math.max(0, tot - paidEnd - lostEnd) };
+}
 function stBuildRate(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp;
   const all = d.sprint_curves.sprints, oggi = d.meta.oggi, dc = stHasDc(all);
   const AE = stAxisEnd(d);
   const S = stScope(d);
   const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
-  const R = stRateWindow(d.trial_rate.points, S.w0, w1);
-  const W = stWindow(all, S.w0, w1, stats.gross);
-  const tot = W.trials.at(-1) ?? 0;
-  const open = R.map((r, i) => Math.max(0, (W.trials[i] ?? 0) - r.ended));
-  const rT = sc.rate;
-  const proj = i => tot > 0 ? 100 * (R[i].paid + rT * open[i]) / tot : null;
-  const nd = Math.max(R.length, 2);
-  const c = stBase(w, h, { nx: nd, ymax: 100, ticks: ST_PCT, par: ST_RATE_SOGLIA, labs: stDateLabs(R.map(r => r.date)) });
-  const pp = (r, t) => (t > 0 ? 100 * r.paid / t : null);
-  const lp = (r, t) => (t > 0 ? 100 * Math.max(0, r.ended - r.paid) / t : null);
-  const estD = i => R[i].date > oggi;
-  const pts = R.map((r, i) => ({ i, v: pp(r, tot), est: estD(i) }));
+  const K = stCohort(d, S, w1);
+  const nd = Math.max(K.days.length, 2);
+  const c = stBase(w, h, { nx: nd, ymax: 100, ticks: ST_PCT, par: ST_RATE_SOGLIA, labs: stDateLabs(K.days) });
+  const pp = (pa, t) => (t > 0 ? 100 * pa / t : null);
+  const pts = K.paid.map((v, i) => ({ i, v: pp(v, K.tot), est: K.days[i] > oggi }));
   const ch = new Set(stChanges(pts.map(p => p.v ?? 0)));
   const runs = stRuns(pts, 100, true);
   let s = c.s + stCurve(c, runs, { color: ST.VER, estColor: ST.VER, estDash: '7 6', sw: 3,
     dot: (p, r, e) => (ch.has(p[0]) || (e.last && r === runs.at(-1))) ? 'dot' : null });
-  const rl = stRuns(R.map((r, i) => ({ i, v: lp(r, tot), est: estD(i) })), 100, true);
-  s += stCurve(c, rl, { color: ST.MUT, estColor: ST.MUT, estDash: '7 6', sw: 2.5,
+  const lostCol = K.split ? ST.TER : ST.MUT;
+  const rl = stRuns(K.lost.map((v, i) => ({ i, v: pp(v, K.tot), est: K.days[i] > oggi })), 100, true);
+  s += stCurve(c, rl, { color: lostCol, estColor: lostCol, estDash: '7 6', sw: 2.5,
     dot: (p, r, e) => e.last && r === rl.at(-1) ? 'dot' : null });
-  if (stats.proj) {
-    const fi = R.findIndex(r => r.date >= oggi), from = fi < 0 ? R.length : Math.max(0, fi - 1);
-    if (from < R.length - 1) {
-      const rp = stRuns(R.slice(from).map((r, j) => ({ i: from + j, v: proj(from + j), est: true })), 100, true);
+  if (K.split) {
+    const rc = stRuns(K.canc.map((v, i) => ({ i, v: pp(v, K.tot), est: K.days[i] > oggi })), 100, true);
+    s += stCurve(c, rc, { color: ST.MUT, estColor: ST.MUT, estDash: '7 6', sw: 2.5,
+      dot: (p, r, e) => e.last && r === rc.at(-1) ? 'dot' : null });
+  } else {
+    cmp.forEach((sp, k) => {
+      const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length];
+      const w1c = stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi);
+      const C = stRateWindow(d.trial_rate.points, sp.inizio, w1c);
+      const Cw = stWindow(all, sp.inizio, w1c, stats.gross);
+      const t2 = Cw.trials.at(-1) ?? 0;
+      const cr = stRuns(C.map((r, i) => ({ i, v: pp(r.paid, t2), est: C[i].date > oggi })), 100, true);
+      s += stCurve(c, cr, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && r === cr.at(-1) ? 'dot' : null });
+    });
+  }
+  const rT = sc.rate;
+  const proj = stats.proj && K.tot > 0 ? 100 * ((K.paid.at(-1) ?? 0) + rT * K.openEnd) / K.tot : null;
+  if (stats.proj && proj != null) {
+    const fi = K.days.findIndex(x => x >= oggi), from = fi < 0 ? K.days.length : Math.max(0, fi - 1);
+    if (from < K.days.length - 1) {
+      const rp = stRuns(K.days.slice(from).map((dt, j) => ({ i: from + j, v: proj, est: true })), 100, true);
       s += stCurve(c, rp, { color: ST.INK, estColor: ST.INK, estDash: '7 6', sw: 2.5,
         dot: (p, r, e) => e.last && r === rp.at(-1) ? 'ring' : null });
     }
   }
-  cmp.forEach((sp, k) => {
-    const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length];
-    const w1c = stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi);
-    const C = stRateWindow(d.trial_rate.points, sp.inizio, w1c);
-    const Cw = stWindow(all, sp.inizio, w1c, stats.gross);
-    const t2 = Cw.trials.at(-1) ?? 0;
-    const cr = stRuns(C.map((r, i) => ({ i, v: pp(r, t2), est: C[i].date > oggi })), 100, true);
-    s += stCurve(c, cr, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && r === cr.at(-1) ? 'dot' : null });
-  });
+  const off = dc ? stWindow(all, S.w0, w1, stats.gross).offers : null;
   return { svg: stSvg(w, h, s), c, nx: nd,
-    hov: i => { const r = R[i]; if (!r || tot <= 0) return null;
-      const ab = dc ? ` · ${W.offers[i]} ${(W.offers[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
-      const pj = stats.proj ? ` · proiezione ${stPct(proj(i) ?? 0)}` : '';
-      return { txt: `${stDM(r.date)} · ${r.paid} pagate · ${Math.max(0, r.ended - r.paid)} perse · ${open[i]} aperte (su ${tot})${ab}${pj}`, v: pp(r, tot) }; } };
+    hov: i => { if (i < 0 || i >= K.days.length || K.tot <= 0) return null;
+      const ab = dc ? ` · ${off[i]} ${(off[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
+      const pj = stats.proj && proj != null ? ` · proiezione ${stPct(proj)}` : '';
+      const open = Math.max(0, (K.started[i] ?? 0) - K.paid[i] - K.canc[i] - K.lost[i]);
+      const det = K.split ? ` · ${K.canc[i]} disdette` : '';
+      return { txt: `${stDM(K.days[i])} · ${K.paid[i]} pagate${det} · ${K.lost[i]} ${K.split ? 'scadute' : 'perse'} · ${open} aperte (su ${K.tot})${ab}${pj}`, v: pp(K.paid[i], K.tot) }; } };
 }
-
 // ── PAGINA ────────────────────────────────────────────────────────────
 function stLgd(c, txt, dash) {
   return `<div class="st-lg"><svg width="26" height="12" aria-hidden="true"><line x1="2" y1="6" x2="24" y2="6" stroke="${c}" stroke-width="3" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}></line></svg><span>${txt}</span></div>`;
@@ -636,11 +663,13 @@ const ST_BIG = ['money', 'trials', 'sprint'];
 function stCards(d) {
   const cs = stCurveSet(d), sel = cs.sel;
   const S = stScope(d);
+  const AE = stAxisEnd(d);
+  const w1 = stats.proj ? AE : (S.w1 < d.meta.oggi ? S.w1 : d.meta.oggi);
   const c = {};
   // Spesa e incassi per data di calendario sulla finestra: gli stessi giorni per tutti.
   {
     const g = stats.gross, all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, S.w0, S.w1, g);
+    const W = stWindow(all, S.w0, w1, g);
     const spend = W.spend.at(-1) ?? 0, earn = W.paid.at(-1) ?? 0;
     const div = earn - spend, kind = g ? 'lordi' : 'netti';
     const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
@@ -656,7 +685,7 @@ function stCards(d) {
   // Prove avviate per data di avvio dentro la finestra, con le offerte pagate in parallelo.
   {
     const all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, S.w0, S.w1, stats.gross);
+    const W = stWindow(all, S.w0, w1, stats.gross);
     const tot = W.trials.at(-1) ?? 0, off = dc ? (W.offers.at(-1) ?? 0) : null;
     const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
     c.trials = { num: off == null ? String(tot) : `${tot} + ${off}`, color: ST.INK,
@@ -669,7 +698,7 @@ function stCards(d) {
   // Euro per euro sugli stessi giorni delle altre schede: stesso denominatore.
   {
     const all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, S.w0, S.w1, stats.gross);
+    const W = stWindow(all, S.w0, w1, stats.gross);
     const hasOpen = (W.open.at(-1) ?? 0) > 0;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const ti = W.days.findIndex(x => x >= d.meta.oggi);
@@ -688,18 +717,20 @@ function stCards(d) {
     ].join('');
   }
 
-  const Wall = stWindow(d.sprint_curves.sprints, S.w0, S.w1, stats.gross);
-  const Rtot = Wall.trials.at(-1) ?? 0;
-  const Rw = stRateWindow(d.trial_rate.points, S.w0, S.w1).at(-1) ?? { paid: 0, ended: 0 };
-  const Rlost = Math.max(0, Rw.ended - Rw.paid), Ropen = Math.max(0, Rtot - Rw.ended);
+  const K = stCohort(d, S, w1);
+  const Kp = K.paid.at(-1) ?? 0, Kc = K.canc.at(-1) ?? 0, Kl = K.lost.at(-1) ?? 0;
+  const Ko = Math.max(0, K.tot - Kp - Kc - Kl);
   const rT = cs.rate;
-  const Rproj = Rtot > 0 ? 100 * (Rw.paid + rT * Ropen) / Rtot : null;
-  const Rnow = Rtot > 0 ? 100 * Rw.paid / Rtot : null;
-  c.rate = Rtot > 0 ? { num: stPct(stats.proj ? Rproj ?? 0 : Rnow ?? 0), cap: `${Rw.paid} pagate su ${Rtot} avviate nel periodo · ${Rlost} concluse senza pagare · ${Ropen} ancora aperte · soglia ${ST_RATE_SOGLIA}%${stats.proj ? ` · proiezione ${stPct(Rproj ?? 0)}` : ''}`, color: ST.INK }
+  const Kproj = K.tot > 0 ? 100 * (Kp + rT * Ko) / K.tot : null;
+  const Know = K.tot > 0 ? 100 * Kp / K.tot : null;
+  const det = K.split ? ` · ${Kc} disdette` : '';
+  const lostTxt = K.split ? 'scadute senza pagare' : 'concluse senza pagare';
+  c.rate = K.tot > 0 ? { num: stPct(stats.proj ? Kproj ?? 0 : Know ?? 0), cap: `${Kp} pagate su ${K.tot} avviate nel periodo${det} · ${Kl} ${lostTxt} · ${Ko} ancora aperte · soglia ${ST_RATE_SOGLIA}%${stats.proj ? ` · proiezione ${stPct(Kproj ?? 0)}` : ''}`, color: ST.INK }
                     : { num: '–', cap: `nessuna prova avviata nel periodo · soglia ${ST_RATE_SOGLIA}%`, color: ST.INK };
-  c.rate.legend = [stLgd(ST.VER, 'pagate'), stLgd(ST.MUT, 'concluse senza pagare'), stLgd(ST.ORA, 'soglia'),
-    ...(stats.proj ? [stLgd(ST.INK, 'proiezione', '7 6')] : []),
-    ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x)))].join('');
+  c.rate.legend = [stLgd(ST.VER, 'pagate'),
+    ...(K.split ? [stLgd(ST.MUT, 'disdette'), stLgd(ST.TER, 'scadute senza pagare')] : [stLgd(ST.MUT, 'concluse senza pagare')]),
+    stLgd(ST.ORA, 'soglia'),
+    ...(stats.proj ? [stLgd(ST.INK, 'proiezione', '7 6')] : [])].join('');
 
   return { c };
 }
