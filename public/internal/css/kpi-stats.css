@@ -45,6 +45,14 @@
 .st-opt.st-sel .st-optdot { background: #4361ee; }
 .st-optl { flex: 1; }
 .st-optd { color: #9ca3af; font-weight: 600; }
+.st-optrow { display: flex; align-items: center; gap: 2px; }
+.st-optrow .st-opt { flex: 1; min-width: 0; }
+.st-opt.st-sub { padding-left: 26px; }
+.st-exp {
+  flex-shrink: 0; width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent;
+  color: #9ca3af; font-size: 13px; cursor: pointer;
+}
+.st-exp:hover { background: #262d45; color: #ffffff; }
 
 .st-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .st-card {
