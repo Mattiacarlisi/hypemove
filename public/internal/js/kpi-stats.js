@@ -363,6 +363,51 @@ function stBuildTrials(w, h, d) {
       ? { txt: `${stDM(stAddDays(sel.inizio, i))} · ${p.st} ${p.st === 1 ? 'prova' : 'prove'}`, v: p.st } : null; } };
 }
 
+// ── GRAFICO «Incassi attesi giorno per giorno»: stessi giorni del grafico 1, forchetta A/B ──
+// Blu = spesa cumulata (cs, piatta dopo oggi), verde = incassi reali cumulati (pg lordi con
+// «Senza tasse», pn netti con «Con tasse»). Tratteggi: ipotesi A (50% delle prove aperte paga)
+// e B (33%): reale + tasso × valore delle prove aperte in scadenza entro il giorno (og/on).
+// Prima di oggi le prove in scadenza sono zero, quindi le tre curve coincidono sul passato e
+// la forchetta si apre solo sul futuro, a gradini nei giorni di scadenza.
+const ST_EXP_A = 0.5, ST_EXP_B = 1 / 3;
+function stBuildExpect(w, h, d) {
+  const { sel } = stCurveSet(d), g = stats.gross;
+  const spend = p => p.cs ?? null, real = p => (g ? p.pg : p.pn) ?? null, open = p => (g ? p.og : p.on) ?? 0;
+  const valA = p => { const r = real(p); return r == null ? null : r + ST_EXP_A * open(p); };
+  const valB = p => { const r = real(p); return r == null ? null : r + ST_EXP_B * open(p); };
+  const nd = sel.points.length || sel.days || 2;
+  const last = sel.points.at(-1), hasOpen = !!(last && open(last) > 0);
+  const top = Math.max(10, sel.spend ?? 0, ...sel.points.flatMap(p => [spend(p) ?? 0, valA(p) ?? 0]));
+  const pow = Math.pow(10, Math.floor(Math.log10(top))), norm = top / pow;
+  const ymax = (norm <= 1 ? 1 : norm <= 1.25 ? 1.25 : norm <= 1.5 ? 1.5 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * pow;
+  const ticks = [0, ymax / 4, ymax / 2, 3 * ymax / 4, ymax].map(v => [v, stEuroTick(v)]);
+  const tot = sel.spend ?? 0;
+  const c = stBase(w, h, { nx: nd, ymax, ticks, par: tot > 0 ? tot : null, labs: stCurveLabels(sel, nd, w) });
+  let s = c.s;
+  s += stCurve(c, stRuns(sel.points.map(p => ({ i: p.day - 1, v: spend(p) })), ymax, true),
+    { color: ST.BLU, estColor: ST.BLU, sw: 3, dot: () => 'dot' });
+  s += stCurve(c, stRuns(sel.points.map(p => ({ i: p.day - 1, v: real(p) })), ymax, true),
+    { color: ST.VER, estColor: ST.VER, sw: 3, dot: () => 'dot' });
+  if (hasOpen) {
+    // le stime partono dal giorno prima di oggi, ripetendo l'ultimo punto reale (come gen5.py)
+    const from = Math.max(1, (sel.today_day ?? 1) - 1);
+    const runsA = stRuns(sel.points.filter(p => p.day >= from).map(p => ({ i: p.day - 1, v: valA(p), est: true })), ymax, true);
+    s += stCurve(c, runsA, { color: ST.INK, estColor: ST.INK, estDash: '7 6', sw: 3,
+      dot: (p, r, e) => e.last && r === runsA.at(-1) ? 'ring' : null });
+    const runsB = stRuns(sel.points.filter(p => p.day >= from).map(p => ({ i: p.day - 1, v: valB(p), est: true })), ymax, true);
+    s += stCurve(c, runsB, { color: ST.VER, estColor: ST.VER, estDash: '7 6', sw: 2.5,
+      dot: (p, r, e) => e.last && r === runsB.at(-1) ? 'ring' : null });
+  }
+  const byDay = new Map(sel.points.map(p => [p.day, p]));
+  return {
+    svg: stSvg(w, h, s), c, nx: nd,
+    hov: i => { const p = byDay.get(i + 1); if (!p) return null;
+      const cs = spend(p), pg = real(p); if (cs == null || pg == null) return null;
+      const ab = hasOpen ? ` · A ${stEuro(valA(p))} € · B ${stEuro(valB(p))} €` : '';
+      return { txt: `${stDM(stAddDays(sel.inizio, i))} · spesi ${stEuro(cs)} € · incassati ${stEuro(pg)} €${ab}`, v: pg }; },
+  };
+}
+
 // Soglia delle prove che pagano: sotto il 30% siamo sotto la media (Europa occidentale 29,7%, RevenueCat 2026);
 // la media del fitness è il 38%. Nessuna fonte incrocia fitness, Europa e Android.
 const ST_RATE_SOGLIA = 30;
@@ -485,12 +530,12 @@ function stSkeletonCard(key, title, big) {
 }
 
 const ST_TITLES = {
-  money: 'Spesa cumulata e incassi', trials: 'Prove avviate — totale cumulato',
+  money: 'Spesa cumulata e incassi', trials: 'Prove avviate — totale cumulato', expect: 'Incassi attesi giorno per giorno',
   sprint: 'Lo sprint, giorno per giorno', rate: 'Prove che poi pagano', t100: 'Prove avviate ogni 100 €',
   payers: 'Paganti attesi', sprints: 'Sprint dopo sprint', keep: 'Prove aperte con il rinnovo attivo', fo: 'Prove ogni 100 primi accessi',
 };
-const ST_ORDER = ['money', 'trials', 'sprint', 'rate', 't100', 'payers', 'sprints', 'keep', 'fo'];
-const ST_BIG = ['money', 'trials', 'sprint'];
+const ST_ORDER = ['money', 'trials', 'expect', 'sprint', 'rate', 't100', 'payers', 'sprints', 'keep', 'fo'];
+const ST_BIG = ['money', 'trials', 'expect', 'sprint'];
 
 function stCards(d) {
   const m = d.meta;
@@ -514,6 +559,28 @@ function stCards(d) {
     c.trials = { num: String(tot), color: ST.INK,
       cap: `numero totale di prove avviate dall'inizio del periodo · ${when}` };
     c.trials.legend = [stLgd(ST.BLU, 'Prove avviate')].join('');
+  }
+  // Forchetta degli incassi a maturazione: A (50% delle prove aperte paga) e B (33%).
+  // Segue «Con tasse / Senza tasse» come il grafico 1. Il numero grande è la forchetta.
+  {
+    const g = stats.gross, spend = sel.spend ?? 0, lp = sel.points.at(-1);
+    const rTot = g ? (sel.paid_gross ?? lp?.pg ?? 0) : (sel.paid_net ?? lp?.pn ?? 0);
+    const oTot = lp ? (g ? (lp.og ?? 0) : (lp.on ?? 0)) : 0;
+    const aFin = rTot + ST_EXP_A * oTot, bFin = rTot + ST_EXP_B * oTot;
+    const kind = g ? 'lordi' : 'netti';
+    const cross = f => { if (!(spend > 0)) return null;
+      const k = sel.points.findIndex(p => { const r = g ? p.pg : p.pn; return r != null && r + f * (g ? (p.og ?? 0) : (p.on ?? 0)) >= spend; });
+      return k < 0 ? null : stDM(stAddDays(sel.inizio, k)); };
+    const cA = cross(ST_EXP_A), cB = cross(ST_EXP_B);
+    const pari = oTot > 0 ? ` · A ${cA ? 'in pari dal ' + cA : 'sotto il pareggio'}, B ${cB ? 'in pari dal ' + cB : 'sotto il pareggio'}` : '';
+    c.expect = oTot > 0
+      ? { num: `${stEuro(bFin)}–${stEuro(aFin)} €`, color: ST.INK,
+          cap: `forchetta a maturazione · A 50% / B 33% · ${stEuro(spend)} € spesi, ${stEuro(rTot)} € incassati ${kind}${pari}` }
+      : { num: stEuro(rTot) + ' €', color: ST.INK,
+          cap: `incassati ${kind} · ${stEuro(spend)} € spesi · nessuna prova aperta` };
+    c.expect.legend = [stLgd(ST.BLU, 'Spesa cumulata'), stLgd(ST.VER, `Incassi reali ${kind}`),
+      ...(oTot > 0 ? [stLgd(ST.INK, 'Ipotesi A · 50%', '7 6'), stLgd(ST.VER, 'Ipotesi B · 33%', '7 6')] : []),
+      ...(spend > 0 ? [stLgd(ST.ORA, 'pareggio')] : [])].join('');
   }
   c.sprint = !lastPt ? { num: '–', cap: `nessuna spesa ancora · ${when}`, color: ST.INK }
     : { num: stEuro(cs.val(lastPt)) + ' €', color: maturing ? ST.BLU : ST.INK,
@@ -644,7 +711,7 @@ function pageStats() {
 }
 
 // ── DISEGNO E PASSAGGIO DEL MOUSE ─────────────────────────────────────
-const ST_BUILD = { money: stBuildMoney, trials: stBuildTrials, sprint: stBuildSprintDay, rate: stBuildRate, t100: stBuildT100, payers: stBuildPayers, sprints: stBuildSprints, keep: stBuildKeep, fo: stBuildFo };
+const ST_BUILD = { money: stBuildMoney, trials: stBuildTrials, expect: stBuildExpect, sprint: stBuildSprintDay, rate: stBuildRate, t100: stBuildT100, payers: stBuildPayers, sprints: stBuildSprints, keep: stBuildKeep, fo: stBuildFo };
 
 function stFitBig() {
   document.querySelectorAll('.st-card.st-big.st-has-leg').forEach(card => {
