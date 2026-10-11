@@ -25,7 +25,7 @@ const stats = {
   gross: false,         // globale «Con tasse / Senza tasse» dalla barra sopra i grafici: false = resa netta (20,90 €), true = prezzo pieno (29,99 €). Vale per i grafici in euro
   cmp: null,            // globale «Confronta» dalla barra: id degli sprint di confronto scelti; null = i due precedenti. Vale per i grafici per sprint
   cmpOpen: false,
-  rate: null,           // globale «Tasso» dalla barra: tasso di fine prova impostato a mano (0..1); null = quello dei dati. Vale per «Lo sprint» e «Incassi attesi». Non si ricorda fra le visite
+  rate: null,           // globale «Tasso» dalla barra: tasso di fine prova impostato a mano (0..1); null = quello dei dati. Vale per il ROI. Non si ricorda fra le visite
 };
 const ST_LS = { gross: 'kpi.stats.gross', cmp: 'kpi.stats.compare' };
 const stLsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
@@ -389,66 +389,6 @@ function stBuildTrials(w, h, d) {
       ? { txt: `${stDM(W.days[i])} · ${W.trials[i]} ${(W.trials[i] ?? 0) === 1 ? 'prova' : 'prove'}`, v: W.trials[i] } : null };
 }
 
-// ── GRAFICO «Incassi attesi giorno per giorno»: stessi giorni del ROI, forchetta A/B ──
-// Blu = spesa cumulata (cs, piatta dopo oggi), verde = incassi reali cumulati (pg lordi con
-// «Senza tasse», pn netti con «Con tasse»). Tratteggi: ipotesi A = tasso globale, B = due terzi
-// di A: reale + tasso × valore delle prove aperte in scadenza entro il giorno (og/on).
-// Prima di oggi le prove in scadenza sono zero, quindi le tre curve coincidono sul passato e
-// la forchetta si apre solo sul futuro, a gradini nei giorni di scadenza.
-
-// ── GRAFICO «Incassi attesi giorno per giorno»: gli stessi giorni, con la forchetta ──
-// Reale + ipotesi A (tasso globale) e B (due terzi): le prove in scadenza sono zero prima
-// di oggi, quindi la forchetta si apre solo sul futuro, a gradini nei giorni di scadenza.
-function stBuildExpect(w, h, d) {
-  const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, rA = sc.rate, rB = sc.rate * 2 / 3, g = stats.gross;
-  const all = d.sprint_curves.sprints, oggi = d.meta.oggi;
-  const W = stWindow(all, sel.inizio, sel.matura, g);
-  const valA = k => W.paid[k] + rA * W.open[k];
-  const valB = k => W.paid[k] + rB * W.open[k];
-  const nd = Math.max(W.days.length, 2);
-  const hasOpen = (W.open.at(-1) ?? 0) > 0;
-  const top = Math.max(10, W.spend.at(-1) ?? 0, ...W.paid.map((v, k) => valA(k)),
-    ...cmp.flatMap(sp => { const C = stWindow(all, sp.inizio, sp.matura, g); return C.paid.map((v, k) => v + rA * C.open[k]); }));
-  const pow = Math.pow(10, Math.floor(Math.log10(top))), norm = top / pow;
-  const ymax = (norm <= 1 ? 1 : norm <= 1.25 ? 1.25 : norm <= 1.5 ? 1.5 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * pow;
-  const ticks = [0, ymax / 4, ymax / 2, 3 * ymax / 4, ymax].map(v => [v, stEuroTick(v)]);
-  const tot = W.spend.at(-1) ?? 0;
-  const c = stBase(w, h, { nx: nd, ymax, ticks, par: tot > 0 ? tot : null, labs: stDateLabs(W.days) });
-  const forkFrom = days => { const k = days.findIndex(x => x >= oggi); return k < 0 ? days.length : Math.max(0, k - 1); };
-  let s = c.s;
-  cmp.forEach((sp, k) => {
-    const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length];
-    const C = stWindow(all, sp.inizio, sp.matura, g);
-    if (!((C.open.at(-1) ?? 0) > 0)) return;
-    const from = forkFrom(C.days);
-    if (from >= C.days.length - 1) return;
-    const runs = stRuns(C.days.slice(from).map((dt, j) => ({ i: from + j, v: C.paid[from + j] + rA * C.open[from + j], est: true })), ymax, true);
-    s += stCurve(c, runs, { color: col, estColor: col, estDash: '7 6', sw: 2.5,
-      dot: (p, r, e) => e.last && r === runs.at(-1) ? 'ring' : null });
-  });
-  s += stCurve(c, stRuns(W.spend.map((v, i) => ({ i, v })), ymax, true),
-    { color: ST.BLU, estColor: ST.BLU, sw: 3, dot: () => 'dot' });
-  s += stCurve(c, stRuns(W.paid.map((v, i) => ({ i, v })), ymax, true),
-    { color: ST.VER, estColor: ST.VER, sw: 3, dot: () => 'dot' });
-  const from = forkFrom(W.days), showFork = hasOpen && from < W.days.length - 1;
-  if (showFork) {
-    const runsA = stRuns(W.days.slice(from).map((dt, j) => ({ i: from + j, v: valA(from + j), est: true })), ymax, true);
-    s += stCurve(c, runsA, { color: ST.INK, estColor: ST.INK, estDash: '7 6', sw: 3,
-      dot: (p, r, e) => e.last && r === runsA.at(-1) ? 'ring' : null });
-    const runsB = stRuns(W.days.slice(from).map((dt, j) => ({ i: from + j, v: valB(from + j), est: true })), ymax, true);
-    s += stCurve(c, runsB, { color: ST.VER, estColor: ST.VER, estDash: '7 6', sw: 2.5,
-      dot: (p, r, e) => e.last && r === runsB.at(-1) ? 'ring' : null });
-  }
-  return {
-    svg: stSvg(w, h, s), c, nx: nd,
-    hov: i => {
-      if (i < 0 || i >= W.days.length) return null;
-      const ab = showFork ? ` · A ${stEuro(valA(i))} € · B ${stEuro(valB(i))} €` : '';
-      return { txt: `${stDM(W.days[i])} · spesi ${stEuro(W.spend[i])} € · incassati ${stEuro(W.paid[i])} €${ab}`, v: W.paid[i] };
-    },
-  };
-}
-
 // Soglia delle prove che pagano: sotto il 30% siamo sotto la media (Europa occidentale 29,7%, RevenueCat 2026);
 // la media del fitness è il 38%. Nessuna fonte incrocia fitness, Europa e Android.
 const ST_RATE_SOGLIA = 30;
@@ -508,11 +448,11 @@ function stSkeletonCard(key, title, big) {
 }
 
 const ST_TITLES = {
-  money: 'Spesa cumulata e incassi', trials: 'Prove avviate — totale cumulato', expect: 'Incassi attesi giorno per giorno',
+  money: 'Spesa cumulata e incassi', trials: 'Prove avviate — totale cumulato',
   sprint: 'ROI', rate: 'Prove che poi pagano',
 };
-const ST_ORDER = ['money', 'trials', 'expect', 'sprint', 'rate'];
-const ST_BIG = ['money', 'trials', 'expect', 'sprint'];
+const ST_ORDER = ['money', 'trials', 'sprint', 'rate'];
+const ST_BIG = ['money', 'trials', 'sprint'];
 
 function stCards(d) {
   const cs = stCurveSet(d), sel = cs.sel, maturing = sel.today_day != null;
@@ -541,30 +481,6 @@ function stCards(d) {
     c.trials.legend = [stLgd(ST.BLU, 'Prove avviate'),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x)))].join('');
   }
-  // Forchetta degli incassi sugli stessi giorni: A = tasso globale, B = due terzi di A.
-  {
-    const g = stats.gross;
-    const W = stWindow(d.sprint_curves.sprints, sel.inizio, sel.matura, g);
-    const spend = W.spend.at(-1) ?? 0, rTot = W.paid.at(-1) ?? 0, oTot = W.open.at(-1) ?? 0;
-    const rA = cs.rate, rB = cs.rate * 2 / 3;
-    const aFin = rTot + rA * oTot, bFin = rTot + rB * oTot;
-    const kind = g ? 'lordi' : 'netti', labA = stPct(rA * 100), labB = stPct(rB * 100);
-    const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
-    const cross = f => { if (!(spend > 0)) return null;
-      const k = W.days.findIndex((dt, i) => W.paid[i] + f * W.open[i] >= spend);
-      return k < 0 ? null : stDM(W.days[k]); };
-    const cA = cross(rA), cB = cross(rB);
-    const pari = oTot > 0 ? ` · A ${cA ? 'in pari dal ' + cA : 'sotto il pareggio'}, B ${cB ? 'in pari dal ' + cB : 'sotto il pareggio'}` : '';
-    c.expect = oTot > 0
-      ? { num: `${stEuro(bFin)}–${stEuro(aFin)} €`, color: ST.INK,
-          cap: `forchetta a maturazione · A ${labA} / B ${labB} · ${stEuro(spend)} € spesi, ${stEuro(rTot)} € incassati ${kind} · ${per}${pari}` }
-      : { num: stEuro(rTot) + ' €', color: ST.INK,
-          cap: `incassati ${kind} · ${stEuro(spend)} € spesi · nessuna prova aperta · ${per}` };
-    c.expect.legend = [stLgd(ST.BLU, 'Spesa cumulata'), stLgd(ST.VER, `Incassi reali ${kind}`),
-      ...(oTot > 0 ? [stLgd(ST.INK, `Ipotesi A · ${labA}`, '7 6'), stLgd(ST.VER, `Ipotesi B · ${labB}`, '7 6')] : []),
-      ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x))),
-      ...(spend > 0 ? [stLgd(ST.ORA, 'pareggio')] : [])].join('');
-  }
   c.sprint = !lastPt ? { num: '–', cap: `nessuna spesa ancora · ${when}`, color: ST.INK }
     : { num: stEuro(cs.val(lastPt)) + ' €', color: maturing ? ST.BLU : ST.INK,
         cap: `${maturing ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${money} · ${when}` };
@@ -582,7 +498,7 @@ function stCards(d) {
 }
 
 // Barra globale sopra i grafici: quanto vale un abbonamento, tasso di conversione e sprint di confronto.
-// Vale per tutti i grafici per sprint (tasse anche per quelli in euro, tasso per ROI e Attesi).
+// Vale per tutti i grafici per sprint (tasse anche per quelli in euro, tasso per il ROI).
 function stToolbarHtml(d, cs) {
   const val = d.sprint_curves.value, ids = cs.cmp.map(s => s.id);
   const seg = (on, g, txt, tip) => `<button class="st-segb${on ? ' st-on' : ''}" data-st-gross="${g}" aria-pressed="${on}" title="${tip}">${txt}</button>`;
@@ -595,7 +511,7 @@ function stToolbarHtml(d, cs) {
         ${seg(!stats.gross, 0, 'Con tasse', `Tolte IVA e commissione di Google: un annuale ci lascia ${stEuro(val.net_year)} €`)}
         ${seg(stats.gross, 1, 'Senza tasse', `Senza togliere niente: un annuale vale il prezzo pieno, ${stEuro(val.gross_year)} €`)}
       </div>
-      <label class="st-rate${cs.manual ? ' st-manual' : ''}" title="Quante prove finite diventano pagamenti. Dai dati: ${stPct(cs.dataRate * 100)}. Vale per ROI e Incassi attesi">
+      <label class="st-rate${cs.manual ? ' st-manual' : ''}" title="Quante prove finite diventano pagamenti. Dai dati: ${stPct(cs.dataRate * 100)}. Vale per il ROI">
         <span>Tasso</span><input id="st-rate-in" type="number" min="0" max="100" step="1" inputmode="decimal" value="${Math.round(cs.rate * 1000) / 10}" aria-label="Tasso di fine prova, in percentuale"><span>%</span>
       </label>
       ${cs.manual ? `<button class="st-rate-reset" id="st-rate-reset" title="Torna al tasso calcolato dai dati">dai dati ${stPct(cs.dataRate * 100)}</button>` : ''}
@@ -669,7 +585,7 @@ function pageStats() {
 }
 
 // ── DISEGNO E PASSAGGIO DEL MOUSE ─────────────────────────────────────
-const ST_BUILD = { money: stBuildMoney, trials: stBuildTrials, expect: stBuildExpect, sprint: stBuildSprintDay, rate: stBuildRate };
+const ST_BUILD = { money: stBuildMoney, trials: stBuildTrials, sprint: stBuildSprintDay, rate: stBuildRate };
 
 function stFitBig() {
   document.querySelectorAll('.st-card.st-big.st-has-leg').forEach(card => {
