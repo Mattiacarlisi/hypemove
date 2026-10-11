@@ -377,6 +377,8 @@ async function loadSettings(retry = true) {
         localStorage.setItem(LS_META_TOKEN, row.value);
       }
       if (row.key === 'premium_funnel' && Array.isArray(row.value) && row.value.length) state.premiumFunnelConfig = row.value;
+      // obiettivi della pagina «Goal»: si scrivono solo con kpi_goal_set, mai con saveSetting (riga intera)
+      if (row.key === 'goals' && row.value && typeof row.value === 'object' && !Array.isArray(row.value)) state.goals = row.value;
     }
     state.settingsLoadError = false;
   } catch (e) {
@@ -568,6 +570,10 @@ let state = {
   // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
   // scoreMenu = menu aperto ('sel' | 'ref' | null).
   scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
+  // Pagina «Goal» (kpi_goal_board, letta dalla cache). goals = kpi_settings.goals, uguale per tutti gli operatori;
+  // goalEdit = { k, text, saving, fresh } mentre un obiettivo è in modifica.
+  goalBoard: null, goalBoardError: null, goalCache: null, goalLoading: false, goalForce: false,
+  goalSel: null, goalRef: 'best', goals: {}, goalEdit: null, goalToast: null,
   aiConvOpen: false,
   aiSessions: null,
   aiSessionsLoading: false,
@@ -1998,6 +2004,44 @@ async function fetchScoreboard(force) {
   if (state.scoreboardCache) state.scoreboardCache.fresh = false;
 }
 
+// Pagina «Goal»: stesso schema di fetchScoreboard sulla voce di cache 'goal_board'/'all' (kpi_goal_board).
+async function fetchGoalBoard(force) {
+  if (state.goalLoading) return;
+  state.goalLoading = true;
+  force = force || state.goalForce; state.goalForce = false;
+  const apply = d => { state.goalBoard = d.data; state.goalBoardError = null; };
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'goal_board', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      apply(data);
+      state.goalCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      if (!state.goalCache.pending) { state.goalLoading = false; render(); return; }
+      render();
+    } else {
+      state.goalCache = null;   // niente di salvato: la pagina resta in caricamento finché il ricalcolo non torna
+    }
+  } catch (e) {
+    console.error('fetchGoalBoard', e);
+    state.goalBoardError = e.message || 'Errore caricamento obiettivi';
+    state.goalLoading = false;
+    render();
+    return;
+  }
+  const r = await kpiRecompute('goal_board', 'all', force || !state.goalBoard);
+  if (r.data && Array.isArray(r.data)) {
+    apply(r);
+    state.goalCache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (state.goalBoard) {
+    state.goalCache = { ...state.goalCache, pending: false, failed: true, fresh: false };
+  } else {
+    state.goalBoardError = 'Numeri degli obiettivi non disponibili';
+  }
+  state.goalLoading = false;
+  render();
+  if (state.goalCache) state.goalCache.fresh = false;
+}
+
 async function fetchRecentAISessions() {
   try {
     const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 5 });
@@ -2215,6 +2259,7 @@ function autoRefreshTick() {
   if (state.page === 'overview') fetchData();
   else { state.overviewStale = true; startCountdown(); }
   if (state.page === 'stats') fetchStats({ silent: true });
+  if (state.page === 'goal') fetchGoalBoard();
 }
 
 function startAutoRefresh() {
@@ -2272,6 +2317,7 @@ function manualRefresh() {
     else if (state.funnelMode === 'activation') fetchActivation();
     else fetchFunnel();
   }
+  if (state.page === 'goal') fetchGoalBoard(true);   // gli obiettivi dell'altro operatore arrivano con loadSettings
 }
 
 // ── BARRA LATERALE APRIBILE ───────────────────────────────────────────
@@ -2328,7 +2374,7 @@ document.addEventListener('click', e => {
 });
 
 const PAGE_LABELS = {
-  stats: 'Stats', overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
+  stats: 'Stats', goal: 'Goal', overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
   premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS',
 };
 const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
@@ -2484,6 +2530,7 @@ function sidebar() {
       <nav class="nav">
         <div class="nav-section">KPI</div>
         ${nav('stats',     '📈', 'Stats')}
+        ${nav('goal',      '🏁', 'Goal')}
         ${nav('overview',  '📊', 'Overview')}
         ${nav('funnel',    '🎯', 'Funnel')}
         ${nav('retention', '🔄', 'Retention')}
@@ -2522,6 +2569,7 @@ function page() {
   switch (state.page) {
     case 'stats':      return pageStats();
     case 'overview':   return pageOverview();
+    case 'goal':       return pageGoal();
     case 'funnel':     return pageFunnel();
     case 'retention':  return pageRetention();
     case 'metriche':   return pageMetriche();
@@ -3054,6 +3102,267 @@ function attachSprintRecord() {
     document.addEventListener('click', ev => {
       if (state.scoreMenu && !ev.target.closest('.sbr-head .pt-pillwrap')) { state.scoreMenu = null; render(); }
     });
+  }
+}
+
+// ── PAGINA «GOAL» ───────────────────────────────────────────────────────
+// Per ogni passo: il record (o lo sprint scelto nel «vs»), lo sprint analizzato e l'obiettivo, con le persone sotto.
+// Numeri da kpi_goal_board (cache 'goal_board'/'all'), stessa coorte e stesse finestre di «Sprint vs record».
+// L'obiettivo è uno per tutti gli operatori: vive in kpi_settings.goals e si cambia al clic sul numero
+// (kpi_goal_set aggiorna un passo alla volta, così due modifiche contemporanee non si cancellano).
+// Senza obiettivo salvato vale la proposta, tratteggiata: la media delle app di fitness dove c'è una fonte
+// primaria, altrimenti il record migliorato del 10%. Il bollino ha solo due esiti: obiettivo raggiunto oppure
+// i punti che mancano (decisione di Mattia, 11/10/2026: niente «in linea», niente «in corso»).
+const GOAL_GROUPS = [
+  { name: 'Attivazione', kpis: [
+    { k: 'ob_done', name: 'Finiscono il questionario' },
+    { k: 'home',    name: 'Arrivano in Home' },
+    { k: 'detail',  name: 'Vedono il workout' },
+    { k: 'start',   name: 'Iniziano il workout' },
+    { k: 'w1',      name: 'Finiscono il 1° workout' },
+  ] },
+  { name: 'Pagamento', kpis: [
+    { k: 'trial', name: 'Iniziano la prova' },
+    { k: 'paid',  name: 'Pagano' },
+  ] },
+  { name: 'Abitudine', kpis: [
+    { k: 'd1',    name: 'Tornano il giorno dopo' },
+    { k: 'd7',    name: 'Tornano il 7° giorno' },
+    { k: 'coach', name: 'Scrivono al coach' },
+    { k: 'w2',    name: 'Finiscono il 2° workout' },
+    { k: 'w3',    name: 'Finiscono il 3° workout' },
+    { k: 'meal',  name: 'Scansionano i pasti' },
+  ] },
+];
+// Mediane di settore, solo fonti primarie: RevenueCat «State of Subscription Apps 2026» (Health & Fitness,
+// installazione → prova; installazione → pagamento su Google Play) e AppsFlyer Benchmarks (Fitness, Android,
+// Italia, media di 4 trimestri fino a giugno 2026) per il ritorno al giorno 1 e al giorno 7.
+const GOAL_INDUSTRY = { trial: 0.069, paid: 0.0157, d1: 0.216, d7: 0.101 };
+let glToastTimer = null;
+
+const glRate = (s, k) => (s && s[k] != null && s.base ? s[k] / s.base : null);
+const glPct  = v => (v * 100).toLocaleString('it-IT', { minimumFractionDigits: v > 0 && v < 0.01 ? 2 : 1, maximumFractionDigits: v > 0 && v < 0.01 ? 2 : 1 }) + '%';
+const glGoalPct = v => (v * 100).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%';
+const glPt  = d => (d * 100).toLocaleString('it-IT', { minimumFractionDigits: d < 0.01 ? 2 : 1, maximumFractionDigits: d < 0.01 ? 2 : 1 });
+const glNum = n => Number(n).toLocaleString('it-IT');
+// «S12». Un sotto-sprint con lo stesso numero di quello che lo contiene (es. «sprint 15 - Post onboarding» dentro
+// «Sprint 15») prende anche la data d'inizio, così i due non si confondono; lo sprint principale resta «S15».
+function glShort(s, rows) {
+  const n = (String(s.nome || '').match(/\d+/) || [])[0];
+  if (!n) return esc(s.nome);
+  const twin = scoreIsSub(s, rows) && rows.some(o => o.id !== s.id && (String(o.nome || '').match(/\d+/) || [])[0] === n);
+  return 'S' + n + (twin ? ' · dal ' + fnDM(s.inizio) : '');
+}
+// Record = lo sprint migliore fra quelli della beta con almeno 100 persone e che non stanno dentro un altro sprint.
+// Senza attesa di maturazione: conta il numero di oggi (a parità vince il più recente).
+function glRecord(rows, k) {
+  let best = null;
+  for (const s of rows) {
+    if (s.inizio < BETA_START || s.base < SCORE_MIN_BASE || scoreIsSub(s, rows) || s[k] == null || !(s[k] > 0)) continue;
+    const v = glRate(s, k);
+    if (!best || v > best.v || (v === best.v && s.inizio > best.s.inizio)) best = { s, v };
+  }
+  return best;
+}
+function glGoal(k, rec) {
+  const g = state.goals && state.goals[k];
+  if (g && typeof g.v === 'number') return { v: g.v, saved: true };
+  if (GOAL_INDUSTRY[k] != null) return { v: GOAL_INDUSTRY[k], saved: false };
+  return rec ? { v: Math.min(1, Math.ceil(rec.v * 1.1 * 1000) / 1000), saved: false } : null;
+}
+function glStatus(v, g) {
+  if (v == null) return { st: 'none', badge: 'non misurato' };
+  if (g == null) return { st: 'none', badge: 'senza obiettivo' };
+  if (v >= g) return { st: 'good', badge: '✓ obiettivo' };
+  return { st: v / g >= 0.75 ? 'mid' : 'bad', badge: '▼ ' + glPt(g - v) + ' pt' };
+}
+
+function glTile(kpi, now, fixed, rows) {
+  const k = kpi.k, v = glRate(now, k), rec = glRecord(rows, k), goal = glGoal(k, rec);
+  const ref = fixed ? { s: fixed, v: glRate(fixed, k) } : rec;
+  const st = glStatus(v, goal && goal.v);
+  const left = ref && ref.s
+    ? `<span class="gl-who">${fixed ? 'Confronto' : 'Record'} · <b>${glShort(ref.s, rows)}</b></span>
+       <span class="gl-val ${ref.v == null ? 'gl-c-none' : 'gl-c-ref'}">${ref.v == null ? '—' : glPct(ref.v)}</span>
+       <span class="gl-n">${ref.v == null ? 'non misurato' : `${glNum(ref.s[k])}/${glNum(ref.s.base)}`}</span>`
+    : `<span class="gl-who">Record</span><span class="gl-val gl-c-none">—</span><span class="gl-n">nessuno sprint</span>`;
+  const editing = state.goalEdit && state.goalEdit.k === k;
+  const goalCell = editing
+    ? `<span class="gl-edit"><input id="gl-goal-input" class="gl-input" type="text" inputmode="decimal" autocomplete="off"
+         value="${esc(state.goalEdit.text)}" aria-label="Obiettivo per «${esc(kpi.name)}», in percentuale"><span class="gl-suf">%</span></span>`
+    : `<button type="button" class="gl-goal${goal && !goal.saved ? ' gl-goal-prop' : ''}" data-gl-edit="${k}"
+         title="${goal && goal.saved ? 'Clic per cambiare l\'obiettivo' : 'Proposta: clic per fissarla o cambiarla'}"
+         aria-label="Obiettivo per «${esc(kpi.name)}»: ${goal ? glGoalPct(goal.v) : 'nessuno'}. Modifica">${goal ? glGoalPct(goal.v) : '—'}</button>`;
+  let need = '', foot = '';
+  if (goal && v != null && now.base) {
+    const want = Math.ceil(goal.v * now.base - 1e-9), d = want - now[k];
+    need = `${glNum(want)}/${glNum(now.base)}`;
+    foot = d > 0 ? `Mancano <b>${glNum(d)}</b> ${d === 1 ? 'persona' : 'persone'} all'obiettivo`
+      : d === 0 ? 'Obiettivo preso in pieno'
+      : `<b>${glNum(-d)}</b> ${-d === 1 ? 'persona' : 'persone'} oltre l'obiettivo`;
+  }
+  return `<div class="gl-tile">
+    <div class="gl-head"><span class="gl-title">${esc(kpi.name)}</span><span class="gl-badge gl-b-${st.st}">${st.badge}</span></div>
+    <div class="gl-trio">
+      <div class="gl-side">${left}</div>
+      <div class="gl-side">
+        <span class="gl-who"><b>${glShort(now, rows)}</b></span>
+        <span class="gl-val gl-c-${st.st}">${v == null ? '—' : glPct(v)}</span>
+        <span class="gl-n">${v == null ? 'non misurato' : `${glNum(now[k])}/${glNum(now.base)}`}</span>
+      </div>
+      <div class="gl-side">
+        <span class="gl-who">Obiettivo</span>
+        ${goalCell}
+        <span class="gl-n">${editing ? 'Invio per salvare' : need}</span>
+      </div>
+    </div>
+    ${foot ? `<div class="gl-foot">${foot}</div>` : ''}
+  </div>`;
+}
+
+// Chi ha cambiato l'ultimo obiettivo e quando: la prova che i numeri sono gli stessi per tutti e due.
+function glLastLine() {
+  const g = state.goals || {};
+  const n = GOAL_GROUPS.flatMap(x => x.kpis).filter(x => g[x.k] && typeof g[x.k].v === 'number').length;
+  if (!n && !g._last) return 'Nessun obiettivo fissato: quelli tratteggiati sono proposte, clicca il numero per fissarlo';
+  let txt = `${n} ${n === 1 ? 'obiettivo fissato' : 'obiettivi fissati'}, uguali per tutti`;
+  const last = g._last;
+  if (last && last.at) {
+    const who = String(last.by || '').split('@')[0] || 'qualcuno';
+    const at = new Date(last.at);
+    txt += ` · ultima modifica di ${esc(who)} il ${at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })} alle ${at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return txt;
+}
+
+function pageGoal() {
+  if (state.goalBoardError && !state.goalBoard) {
+    return `<div class="card gl-headcard"><div class="card-title">Goal</div>
+      <div class="gl-note">${esc(state.goalBoardError)}</div>
+      <button class="btn-refresh gl-retry" data-gl-retry>Riprova</button></div>`;
+  }
+  if (!state.goalBoard) {
+    return `<div class="card gl-headcard"><div class="card-title">Goal</div><div class="gl-note pulse">Calcolo degli obiettivi…</div></div>`;
+  }
+  const rows = [...state.goalBoard].sort((a, b) => (a.inizio === b.inizio ? String(a.nome).localeCompare(String(b.nome)) : a.inizio < b.inizio ? -1 : 1));
+  if (!rows.length) return `<div class="card gl-headcard"><div class="card-title">Goal</div><div class="gl-note">Nessuno sprint dal 1° giugno.</div></div>`;
+  if (!rows.some(s => s.id === state.goalSel)) {
+    // di default lo sprint principale iniziato più di recente
+    const main = rows.filter(s => s.inizio <= TODAY && s.base > 0 && !scoreIsSub(s, rows));
+    state.goalSel = (main[main.length - 1] || rows[rows.length - 1]).id;
+  }
+  if (state.goalRef !== 'best' && !rows.some(s => s.id === state.goalRef)) state.goalRef = 'best';
+  const now = rows.find(s => s.id === state.goalSel);
+  const fixed = state.goalRef === 'best' ? null : rows.find(s => s.id === state.goalRef);
+  const newest = [...rows].reverse();
+  const opts = sel => newest.map(s => `<option value="${s.id}"${s.id === sel ? ' selected' : ''}>${esc(scoreLabel(s))}</option>`).join('');
+
+  let ok = 0, measured = 0;
+  for (const g of GOAL_GROUPS) for (const kpi of g.kpis) {
+    const v = glRate(now, kpi.k), goal = glGoal(kpi.k, glRecord(rows, kpi.k));
+    if (v == null || !goal) continue;
+    measured++;
+    if (v >= goal.v) ok++;
+  }
+
+  return `<div class="card gl-headcard">
+      <div class="gl-top">
+        <div class="gl-pick">
+          <select id="gl-sel" class="form-input" aria-label="Sprint da guardare">${opts(state.goalSel)}</select>
+          <span class="gl-vs">vs</span>
+          <select id="gl-ref" class="form-input gl-refsel" aria-label="Confronta con">
+            <option value="best"${state.goalRef === 'best' ? ' selected' : ''}>Il migliore</option>${opts(state.goalRef)}
+          </select>
+        </div>
+        <div class="gl-tally">
+          <span class="gl-tally-n${ok ? ' gl-c-good' : ''}">${ok}</span><span>su ${measured} obiettivi raggiunti</span>
+          ${measured - ok ? `<span class="gl-badge gl-b-bad">▼ ${measured - ok} sotto</span>` : ''}
+        </div>
+      </div>
+      <div class="gl-note">% su chi ha aperto l'app · ${glNum(now.base)} persone</div>
+      <div class="gl-note gl-last"><span>${glLastLine()}</span>${state.goalCache ? `<span>${kcMark(state.goalCache)}</span>` : ''}</div>
+    </div>
+    ${GOAL_GROUPS.map(g => `<div class="card gl-card">
+      <div class="card-title">${g.name}</div>
+      <div class="gl-grid" data-n="${g.kpis.length}">${g.kpis.map(kpi => glTile(kpi, now, fixed, rows)).join('')}</div>
+    </div>`).join('')}
+    ${state.goalToast ? `<div class="toast ${state.goalToast.err ? 'error' : 'success'}" role="status">${esc(state.goalToast.msg)}</div>` : ''}`;
+}
+
+function glToast(msg, err) {
+  state.goalToast = { msg, err: !!err };
+  render();
+  clearTimeout(glToastTimer);
+  glToastTimer = setTimeout(() => { state.goalToast = null; if (state.page === 'goal') render(); }, 2800);
+}
+
+// Scrittura dell'obiettivo: «6,9» o «6.9» = 6,9%; vuoto = si torna alla proposta. Resta in modifica se il numero non va.
+async function glSave(k, text) {
+  if (!state.goalEdit || state.goalEdit.k !== k || state.goalEdit.saving) return;
+  let raw = String(text || '').replace(/[%\s]/g, '');
+  if (raw.includes(',')) raw = raw.replace(/\./g, '').replace(',', '.');
+  let value = null;
+  if (raw !== '') {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 100) { state.goalEdit.text = text; glToast('Scrivi una percentuale fra 0 e 100, per esempio 6,9', true); return; }
+    value = Math.round(n * 1000) / 100000;   // al centesimo di punto
+  }
+  const cur = state.goals && state.goals[k] && typeof state.goals[k].v === 'number' ? state.goals[k].v : null;
+  if (value === cur) { state.goalEdit = null; render(); return; }
+  // alla fine si chiude solo questo campo: nel frattempo può essersene aperto un altro
+  const edit = state.goalEdit;
+  edit.saving = true;
+  const { data, error } = await sb.rpc('kpi_goal_set', { p_kpi: k, p_value: value });
+  if (state.goalEdit === edit) state.goalEdit = null;
+  if (error) {
+    console.error('kpi_goal_set', error);
+    glToast('Obiettivo non salvato: riprova', true);
+    return;
+  }
+  state.goals = data && typeof data === 'object' ? data : {};
+  glToast(value == null ? 'Tornato alla proposta, per tutti' : 'Obiettivo salvato per tutti');
+}
+
+function attachGoal() {
+  if (state.page !== 'goal') return;
+  document.getElementById('gl-sel')?.addEventListener('change', e => { state.goalSel = e.target.value; state.goalEdit = null; render(); });
+  document.getElementById('gl-ref')?.addEventListener('change', e => { state.goalRef = e.target.value; render(); });
+  document.querySelector('[data-gl-retry]')?.addEventListener('click', () => {
+    state.goalBoardError = null; state.goalBoard = null; render(); fetchGoalBoard(true);
+  });
+  document.querySelectorAll('[data-gl-edit]').forEach(el => el.addEventListener('click', async () => {
+    const k = el.dataset.glEdit;
+    // un altro obiettivo era in modifica: prima si salva quello (se il numero non va, si resta lì)
+    const open = state.goalEdit;
+    if (open && open.k !== k && !open.saving) {
+      await glSave(open.k, open.text);
+      if (state.goalEdit === open) return;
+    }
+    const rows = state.goalBoard || [];
+    const goal = glGoal(k, glRecord(rows, k));
+    state.goalEdit = { k, text: goal ? (goal.v * 100).toLocaleString('it-IT', { maximumFractionDigits: 2 }) : '', saving: false, fresh: true };
+    render();
+  }));
+  // Un ridisegno (auto-refresh, dati arrivati) ricrea il campo con il testo già scritto: si rimette il cursore in fondo.
+  const input = document.getElementById('gl-goal-input');
+  if (input && state.goalEdit) {
+    const k = state.goalEdit.k;
+    input.focus();
+    if (state.goalEdit.fresh) { input.select(); state.goalEdit.fresh = false; }
+    else input.setSelectionRange(input.value.length, input.value.length);
+    input.addEventListener('input', () => { if (state.goalEdit) state.goalEdit.text = input.value; });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); glSave(k, input.value); }
+      if (e.key === 'Escape') { e.preventDefault(); state.goalEdit = null; render(); }
+    });
+    // Uscire dal campo salva (Escape azzera goalEdit prima, così il blur che segue non salva). Un ridisegno sostituisce il
+    // campo e il browser segnala il blur di quello vecchio: si guarda un attimo dopo, e se c'è già il campo nuovo non si salva.
+    input.addEventListener('blur', () => setTimeout(() => {
+      if (!state.goalEdit || state.goalEdit.k !== k || state.goalEdit.saving) return;
+      const live = document.getElementById('gl-goal-input');
+      if (live && (live !== input || document.activeElement === input)) return;
+      glSave(k, state.goalEdit.text);
+    }, 0));
   }
 }
 
@@ -11046,6 +11355,7 @@ function attachEvents() {
       if (needsGeneralData(state.page) && (state.overviewStale || !state.data) && !state.loading) fetchData();
       if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
       if (state.page === 'funnel'     && state.funnelMode === 'activation' && !state.activation && !state.activationLoading) fetchActivation();
+      if (state.page === 'goal'       && !state.goalBoard     && !state.goalLoading)      fetchGoalBoard();
       if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
@@ -11089,6 +11399,7 @@ function attachEvents() {
   // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
   attachPremiumTimeline();
   attachSprintRecord();
+  attachGoal();
   document.querySelectorAll('[data-growth-range]').forEach(el =>
     el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));
   document.querySelectorAll('[data-weekly-range]').forEach(el =>
@@ -12936,6 +13247,7 @@ function renderSetPasswordForm() {
   if (state.page === 'overview') fetchData();
   else { state.loading = false; state.overviewStale = true; }
   if (state.page === 'stats') fetchStats();
+  if (state.page === 'goal') fetchGoalBoard();
   fetchSprints();
   fetchFunnelDefinitions();
   fetchFunnelPhases();
