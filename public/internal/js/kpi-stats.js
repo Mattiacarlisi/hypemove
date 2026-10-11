@@ -20,7 +20,8 @@ const stats = {
   loading: true, error: null, lastUpdated: null,
   cachePending: false, cacheFailed: false, cacheFresh: false,   // ricalcolo in corso / non riuscito / appena arrivato
   computedAt: null,     // ora in cui il database ha calcolato i dati in vista (cache)
-  menuOpen: false, menuIdx: 0,
+  menuOpen: false, menuIdx: 0, grpOpen: null,
+  scopeKey: null,   // gruppo (g:15) o dettaglio di riga (r:uuid); null = default dal server
   seq: 0,
   gross: false,         // globale «Con tasse / Senza tasse» dalla barra sopra i grafici: false = resa netta (20,90 €), true = prezzo pieno (29,99 €). Vale per i grafici in euro
   cmp: null,            // globale «Confronta» dalla barra: id degli sprint di confronto scelti; null = i due precedenti. Vale per i grafici per sprint
@@ -28,12 +29,13 @@ const stats = {
   rate: null,           // globale «Tasso» dalla barra: tasso di fine prova impostato a mano (0..1); null = quello dei dati. Vale per il ROI e le proiezioni. Non si ricorda fra le visite
   proj: true,           // globale «Con proiezione»: assi estesi all'ultima scadenza, stime col tasso
 };
-const ST_LS = { gross: 'kpi.stats.gross', cmp: 'kpi.stats.compare', proj: 'kpi.stats.proj' };
+const ST_LS = { gross: 'kpi.stats.gross', cmp: 'kpi.stats.compare', proj: 'kpi.stats.proj', scope: 'kpi.stats.scope' };
 const stLsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
 const stLsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* senza memoria la scelta vale per la visita */ } };
 stats.gross = stLsGet(ST_LS.gross) === true;
 stats.proj = stLsGet(ST_LS.proj) !== false;
 { const c = stLsGet(ST_LS.cmp); if (Array.isArray(c)) stats.cmp = c; }
+stLoadScope();
 const ST_CMP_MAX = 3;
 let statsCharts = [];   // metadati dei grafici disegnati, per il passaggio del mouse
 
@@ -50,6 +52,11 @@ const stNum = v => Number(v).toFixed(4).replace(/\.?0+$/, '');
 async function fetchStats(opts = {}) {
   const silent = !!opts.silent && !!stats.data;
   const seq = ++stats.seq;
+  if (!stats.sprints) {
+    // primo giro: serve l'elenco per convalidare il gruppo salvato prima di chiedere i dati
+    try { const l = await sb.rpc('kpi_stats_sprints'); if (!l.error && Array.isArray(l.data)) stats.sprints = l.data; } catch (e) { /* riprova sotto */ }
+  }
+  stSanitizeScope();
   const scope = stats.sprintId || 'default';
   if (!silent) { stats.loading = true; stats.error = null; stats.data = opts.keepData ? stats.data : null; render(); }
   const apply = d => {
@@ -110,13 +117,115 @@ function statsOnNav() {
   if (!stats.loading && (!stats.data || old)) fetchStats({ silent: !!stats.data });
 }
 
-function statsSelectSprint(id) {
-  stats.menuOpen = false;
+function statsSelectSprint(id) {  // dettaglio di riga
+  stats.menuOpen = false; stats.grpOpen = null;
   const pick = (stats.sprints || []).find(s => s.id === id);
-  stats.sprintId = pick && pick.predefinito ? null : id;
-  fetchStats();
+  if (!pick) return;
+  stats.scopeKey = 'r:' + id; stats.sprintId = id;
+  stSaveScope(); fetchStats();
 }
 
+// ── GRUPPI: righe con stesso numero = un esperimento ──
+// Il selettore mostra un gruppo solo; il dettaglio di riga resta scegliibile.
+const stGroupKey = s => (s.numero == null ? 'r:' + s.id : 'g:' + s.numero);
+function stGroups(list) {
+  const map = new Map();
+  for (const s of list || []) {
+    const k = stGroupKey(s);
+    if (!map.has(k)) map.set(k, { key: k, numero: s.numero, rows: [] });
+    map.get(k).rows.push(s);
+  }
+  const out = [...map.values()];
+  out.forEach(gr => {
+    gr.rows.sort((a, b) => (a.inizio < b.inizio ? 1 : a.inizio > b.inizio ? -1 : 0));
+    gr.w0 = gr.rows.at(-1).inizio;
+    gr.fine = gr.rows.map(s => s.fine).sort().at(-1);
+  });
+  out.sort((a, b) => (a.w0 < b.w0 ? 1 : a.w0 > b.w0 ? -1 : 0));
+  return out;
+}
+function stRepRow(gr) {
+  const rs = [...gr.rows].sort((a, b) => (a.fine < b.fine ? 1 : a.fine > b.fine ? -1 : (a.inizio < b.inizio ? 1 : -1)));
+  return rs[0];
+}
+// finestra in esame: dettaglio di riga oppure unione del gruppo
+function stScope(d) {
+  const list = stats.sprints || [];
+  const curves = (d && d.sprint_curves.sprints) || [];
+  const mat = id => { const x = curves.find(y => y.id === id); return (x && x.matura) || null; };
+  if (stats.scopeKey && stats.scopeKey[0] === 'r') {
+    const id = stats.scopeKey.slice(2);
+    const s = list.find(x => x.id === id) || ((d && d.meta.sprint.id === id) ? d.meta.sprint : null);
+    if (s) return { kind: 'row', key: stats.scopeKey, rows: [s], row: s, w0: s.inizio, w1: mat(s.id) || s.fine };
+  }
+  const groups = stGroups(list.length ? list : (d ? [d.meta.sprint] : []));
+  const gr = (stats.scopeKey && stats.scopeKey[0] === 'g' && groups.find(g => g.key === stats.scopeKey))
+    || groups.find(g => g.rows.some(s => d && s.id === d.meta.sprint.id)) || groups[0] || null;
+  if (!gr) return null;
+  return { kind: 'group', key: gr.key, rows: gr.rows, numero: gr.numero, w0: gr.w0,
+    w1: gr.rows.map(s => mat(s.id) || s.fine).sort().at(-1), fine: gr.fine };
+}
+function stScopeLabel() {
+  const S = stats.data && stScope(stats.data);
+  if (!S) return '';
+  const t = stats.data.meta.oggi;
+  const g = (t >= S.w0 && t <= S.w1) ? `giorno ${stDayN(t) - stDayN(S.w0) + 1} di ${stDayN(S.w1) - stDayN(S.w0) + 1}` : 'chiuso';
+  if (S.kind === 'row') return `${stSprintLabel(S.row, true)} · dettaglio`;
+  const name = S.numero != null ? `Sprint ${S.numero}` : S.rows[0].nome;
+  return `${name} · ${g} · ${stDM(S.w0)}–${stDM(S.fine)}`;
+}
+// voce di menu piatta (gruppi espandibili) per mouse e tastiera
+function stMenuItems() {
+  const groups = stGroups(stats.sprints || (stats.data ? [stats.data.meta.sprint] : []));
+  const S = stats.data ? stScope(stats.data) : null;
+  const out = [];
+  groups.forEach(gr => {
+    const multi = gr.rows.length > 1;
+    if (!multi) {
+      const s = gr.rows[0];
+      out.push({ type: 'row', key: 'r:' + s.id, s, sel: S && S.key === 'r:' + s.id });
+      return;
+    }
+    out.push({ type: 'group', key: gr.key, gr, sel: S && S.kind === 'group' && S.key === gr.key });
+    if (stats.grpOpen === gr.key) {
+      gr.rows.forEach(s => {
+        out.push({ type: 'row', key: 'r:' + s.id, s, sub: true, sel: S && S.kind === 'row' && S.key === 'r:' + s.id });
+      });
+    }
+  });
+  return out;
+}
+function stSaveScope() { stLsSet(ST_LS.scope, stats.scopeKey); }
+function stLoadScope() {
+  const k = stLsGet(ST_LS.scope);
+  stats.scopeKey = typeof k === 'string' ? k : null;
+}
+function stSanitizeScope() {
+  const list = stats.sprints || [];
+  if (stats.scopeKey && !(stGroups(list).some(g => g.key === stats.scopeKey)
+    || list.some(s => 'r:' + s.id === stats.scopeKey))) stats.scopeKey = null;
+  stats.sprintId = stScopeRpcId();
+}
+function stScopeRpcId() {
+  const list = stats.sprints || [];
+  if (!stats.scopeKey) return null;
+  if (stats.scopeKey[0] === 'r') {
+    const id = stats.scopeKey.slice(2);
+    return list.some(s => s.id === id) ? id : null;
+  }
+  const gr = stGroups(list).find(g => g.key === stats.scopeKey);
+  if (!gr) return null;
+  if (gr.rows.some(s => s.predefinito)) return null;
+  return stRepRow(gr).id;
+}
+function statsSelectGroup(key) {
+  stats.menuOpen = false; stats.grpOpen = null;
+  const gr = stGroups(stats.sprints || []).find(g => g.key === key);
+  if (!gr) return;
+  stats.scopeKey = key;
+  stats.sprintId = stScopeRpcId();
+  stSaveScope(); fetchStats();
+}
 // ── GRAFICO: motore (porta di plot() di gen5.py) ──────────────────────
 const stN = x => x.toFixed(1);
 const stText = (x, y, t, fill, w, anchor) =>
@@ -243,9 +352,10 @@ function stToggleCmp(id) {
 function stBuildSprintDay(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, rate = sc.rate, g = stats.gross;
   const all = d.sprint_curves.sprints, oggi = d.meta.oggi;
-  const AE = stAxisEnd(d, sel);
-  const w1 = stats.proj ? AE : (sel.matura < oggi ? sel.matura : oggi);
-  const W = stWindow(all, sel.inizio, w1, g);
+  const AE = stAxisEnd(d);
+  const S = stScope(d);
+  const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
+  const W = stWindow(all, S.w0, w1, g);
   const dc = stHasDc(all);
   const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
   const nd = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
@@ -322,8 +432,9 @@ function stWindow(all, w0, w1, g) {
 const stHasDc = all => (all || []).some(sp => (sp.points || []).some(p => p && ('dc' in p)));
 
 // ultimo giorno da disegnare: con proiezione, fino all'ultima maturazione con prove aperte
-const stAxisEnd = (d, sel) => {
-  let end = sel.matura;
+const stAxisEnd = d => {
+  const S = stScope(d);
+  let end = (S && S.w1) || d.meta.sprint.fine || d.meta.oggi;
   for (const sp of d.sprint_curves.sprints || []) {
     if ((sp.open_trials ?? 0) > 0 && sp.matura > end) end = sp.matura;
   }
@@ -352,9 +463,10 @@ function stRateWindow(pts, w0, w1) {
 function stBuildMoney(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, g = stats.gross;
   const all = d.sprint_curves.sprints, oggi = d.meta.oggi;
-  const AE = stAxisEnd(d, sel);
-  const w1 = stats.proj ? AE : (sel.matura < oggi ? sel.matura : oggi);
-  const W = stWindow(all, sel.inizio, w1, g);
+  const AE = stAxisEnd(d);
+  const S = stScope(d);
+  const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
+  const W = stWindow(all, S.w0, w1, g);
   const dc = stHasDc(all), rT = sc.rate;
   const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
   const nd = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
@@ -400,9 +512,10 @@ function stBuildMoney(w, h, d) {
 function stBuildTrials(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp;
   const all = d.sprint_curves.sprints, oggi = d.meta.oggi;
-  const AE = stAxisEnd(d, sel);
-  const w1 = stats.proj ? AE : (sel.matura < oggi ? sel.matura : oggi);
-  const W = stWindow(all, sel.inizio, w1, stats.gross);
+  const AE = stAxisEnd(d);
+  const S = stScope(d);
+  const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
+  const W = stWindow(all, S.w0, w1, stats.gross);
   const dc = stHasDc(all);
   const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), stats.gross));
   const nx = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
@@ -438,10 +551,11 @@ const ST_RATE_SOGLIA = 30;
 function stBuildRate(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp;
   const all = d.sprint_curves.sprints, oggi = d.meta.oggi, dc = stHasDc(all);
-  const AE = stAxisEnd(d, sel);
-  const w1 = stats.proj ? AE : (sel.matura < oggi ? sel.matura : oggi);
-  const R = stRateWindow(d.trial_rate.points, sel.inizio, w1);
-  const W = stWindow(all, sel.inizio, w1, stats.gross);
+  const AE = stAxisEnd(d);
+  const S = stScope(d);
+  const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
+  const R = stRateWindow(d.trial_rate.points, S.w0, w1);
+  const W = stWindow(all, S.w0, w1, stats.gross);
   const tot = W.trials.at(-1) ?? 0;
   const open = R.map((r, i) => Math.max(0, (W.trials[i] ?? 0) - r.ended));
   const rT = sc.rate;
@@ -521,14 +635,15 @@ const ST_BIG = ['money', 'trials', 'sprint'];
 
 function stCards(d) {
   const cs = stCurveSet(d), sel = cs.sel;
+  const S = stScope(d);
   const c = {};
   // Spesa e incassi per data di calendario sulla finestra: gli stessi giorni per tutti.
   {
     const g = stats.gross, all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, sel.inizio, sel.matura, g);
+    const W = stWindow(all, S.w0, S.w1, g);
     const spend = W.spend.at(-1) ?? 0, earn = W.paid.at(-1) ?? 0;
     const div = earn - spend, kind = g ? 'lordi' : 'netti';
-    const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
+    const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const rT = cs.rate, projEarn = earn + rT * (W.open.at(-1) ?? 0);
     const pdiv = (stats.proj ? projEarn : earn) - spend;
@@ -541,9 +656,9 @@ function stCards(d) {
   // Prove avviate per data di avvio dentro la finestra, con le offerte pagate in parallelo.
   {
     const all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, sel.inizio, sel.matura, stats.gross);
+    const W = stWindow(all, S.w0, S.w1, stats.gross);
     const tot = W.trials.at(-1) ?? 0, off = dc ? (W.offers.at(-1) ?? 0) : null;
-    const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
+    const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
     c.trials = { num: off == null ? String(tot) : `${tot} + ${off}`, color: ST.INK,
       cap: off == null ? `prove avviate nel ${per}` : `${tot} ${tot === 1 ? 'prova avviata' : 'prove avviate'} · ${off} ${off === 1 ? 'offerta pagata' : 'offerte pagate'} nel ${per}` };
     c.trials.legend = [stLgd(ST.BLU, 'Prove avviate'),
@@ -554,14 +669,14 @@ function stCards(d) {
   // Euro per euro sugli stessi giorni delle altre schede: stesso denominatore.
   {
     const all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, sel.inizio, sel.matura, stats.gross);
+    const W = stWindow(all, S.w0, S.w1, stats.gross);
     const hasOpen = (W.open.at(-1) ?? 0) > 0;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const ti = W.days.findIndex(x => x >= d.meta.oggi);
     const fval = k => { const s = W.spend[k], p = W.paid[k], o = W.open[k]; return s > 0 ? (p + cs.rate * o) / s : ((p + o === 0) ? 0 : null); };
     const finals = W.days.map((dt, k) => fval(k)).filter(v => v != null);
     const fv = finals.at(-1);
-    const per = `periodo ${stDM(sel.inizio)}–${stDM(sel.matura)}`;
+    const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
     c.sprint = fv == null ? { num: '–', cap: `nessuna spesa ancora · ${per}`, color: ST.INK }
       : { num: stEuro(fv) + ' €', color: hasOpen ? ST.BLU : ST.INK,
           cap: `${hasOpen ? 'stima a maturazione' : 'reale'}${cs.manual ? ` · tasso a mano ${stPct(cs.rate * 100)}` : ''} · ${stEuro(W.paid.at(-1) ?? 0)} € pagati${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} su ${stEuro(W.spend.at(-1) ?? 0)} € spesi · ${per}` };
@@ -573,9 +688,9 @@ function stCards(d) {
     ].join('');
   }
 
-  const Wall = stWindow(d.sprint_curves.sprints, sel.inizio, sel.matura, stats.gross);
+  const Wall = stWindow(d.sprint_curves.sprints, S.w0, S.w1, stats.gross);
   const Rtot = Wall.trials.at(-1) ?? 0;
-  const Rw = stRateWindow(d.trial_rate.points, sel.inizio, sel.matura).at(-1) ?? { paid: 0, ended: 0 };
+  const Rw = stRateWindow(d.trial_rate.points, S.w0, S.w1).at(-1) ?? { paid: 0, ended: 0 };
   const Rlost = Math.max(0, Rw.ended - Rw.paid), Ropen = Math.max(0, Rtot - Rw.ended);
   const rT = cs.rate;
   const Rproj = Rtot > 0 ? 100 * (Rw.paid + rT * Ropen) / Rtot : null;
@@ -629,12 +744,27 @@ function stSprintLabel(s, withDates) {
 }
 
 function stMenuHtml() {
-  const list = stats.sprints || (stats.data ? [stats.data.meta.sprint] : []);
-  const cur = stats.data ? stats.data.meta.sprint.id : null;
-  return `<div class="st-menu" role="listbox" aria-label="Scegli lo sprint" tabindex="-1">${list.map((s, i) => `
-      <button class="st-opt${i === stats.menuIdx ? ' st-act' : ''}${s.id === cur ? ' st-sel' : ''}" role="option" aria-selected="${s.id === cur}" data-st-opt="${s.id}" data-st-i="${i}">
-        <span class="st-optdot"></span><span class="st-optl">${stSprintLabel(s)}</span><span class="st-optd">${stDM(s.inizio)}–${stDM(s.fine)}</span>
-      </button>`).join('')}</div>`;
+  const items = stMenuItems();
+  const t = stats.data.meta.oggi;
+  const gLabel = gr => {
+    const w1 = gr.rows.map(s => { const x = stats.data.sprint_curves.sprints.find(y => y.id === s.id); return (x && x.matura) || s.fine; }).sort().at(-1);
+    const g = (t >= gr.w0 && t <= w1) ? `giorno ${stDayN(t) - stDayN(gr.w0) + 1} di ${stDayN(w1) - stDayN(gr.w0) + 1}` : 'chiuso';
+    const name = gr.numero != null ? `Sprint ${gr.numero}` : gr.rows[0].nome;
+    return `${name} · ${g}`;
+  };
+  return `<div class="st-menu" role="listbox" aria-label="Scegli lo sprint" tabindex="-1">${items.map((it, i) => {
+    const act = i === stats.menuIdx ? ' st-act' : '', sel = it.sel ? ' st-sel' : '';
+    if (it.type === 'group') {
+      const open = stats.grpOpen === it.key;
+      return `<div class="st-optrow"><button class="st-opt${act}${sel}" role="option" aria-selected="${!!it.sel}" data-st-grp="${it.key}" data-st-i="${i}">
+        <span class="st-optdot"></span><span class="st-optl">${gLabel(it.gr)} · ${it.gr.rows.length}</span><span class="st-optd">${stDM(it.gr.w0)}–${stDM(it.gr.fine)}</span>
+      </button><button class="st-exp" data-st-exp="${it.key}" aria-expanded="${open}" title="Dettaglio righe" aria-label="Dettaglio righe">${open ? '▾' : '▸'}</button></div>`;
+    }
+    const s = it.s;
+    return `<button class="st-opt${it.sub ? ' st-sub' : ''}${act}${sel}" role="option" aria-selected="${!!it.sel}" data-st-opt="${s.id}" data-st-i="${i}">
+      <span class="st-optdot"></span><span class="st-optl">${stSprintLabel(s)}</span><span class="st-optd">${stDM(s.inizio)}–${stDM(s.fine)}</span>
+    </button>`;
+  }).join('')}</div>`;
 }
 
 function stHeader() {
@@ -644,7 +774,7 @@ function stHeader() {
   const pill = sp
     ? `<div class="st-pillwrap">
          <button class="st-pill st-pill-sel" id="st-sprint-btn" aria-haspopup="listbox" aria-expanded="${stats.menuOpen}" title="Scegli lo sprint">
-           <span>${stSprintLabel(sp, true)}</span>
+           <span>${stScopeLabel()}</span>
            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
          </button>${stats.menuOpen ? stMenuHtml() : ''}
        </div>${sp.open_trials > 0 ? `<div class="st-pill st-pill-blue">${sp.open_trials} ${sp.open_trials === 1 ? 'prova aperta' : 'prove aperte'}</div>` : ''}`
@@ -734,7 +864,12 @@ function attachStatsEvents() {
   document.getElementById('st-sprint-btn')?.addEventListener('click', ev => {
     ev.stopPropagation();
     stats.menuOpen = !stats.menuOpen; stats.cmpOpen = false;
-    stats.menuIdx = Math.max(0, (stats.sprints || []).findIndex(s => stats.data && s.id === stats.data.meta.sprint.id));
+    if (stats.menuOpen) {
+      const items = stMenuItems();
+      const S = stScope(stats.data);
+      if (S && S.kind === 'group' && stGroups(stats.sprints || []).find(g => g.key === S.key && g.rows.length > 1)) stats.grpOpen = S.key;
+      stats.menuIdx = Math.max(0, items.findIndex(it => it.sel));
+    }
     render();
   });
   document.getElementById('st-sprint-btn')?.addEventListener('keydown', ev => {
@@ -744,6 +879,13 @@ function attachStatsEvents() {
     b.addEventListener('click', ev => { ev.stopPropagation(); statsSelectSprint(b.dataset.stOpt); });
     b.addEventListener('mouseenter', () => { stats.menuIdx = +b.dataset.stI; document.querySelectorAll('.st-opt').forEach(o => o.classList.toggle('st-act', o === b)); });
   });
+  document.querySelectorAll('[data-st-grp]').forEach(b => {
+    b.addEventListener('click', ev => { ev.stopPropagation(); statsSelectGroup(b.dataset.stGrp); });
+    b.addEventListener('mouseenter', () => { stats.menuIdx = +b.dataset.stI; document.querySelectorAll('.st-opt').forEach(o => o.classList.toggle('st-act', o === b)); });
+  });
+  document.querySelectorAll('[data-st-exp]').forEach(b => b.addEventListener('click', ev => {
+    ev.stopPropagation(); stats.grpOpen = stats.grpOpen === b.dataset.stExp ? null : b.dataset.stExp; render();
+  }));
   document.querySelectorAll('[data-st-gross]').forEach(b => b.addEventListener('click', () => {
     stats.gross = b.dataset.stGross === '1'; stLsSet(ST_LS.gross, stats.gross); render();
   }));
@@ -786,14 +928,15 @@ function attachStatsEvents() {
 document.addEventListener('keydown', ev => {
   if (stats.cmpOpen && state.page === 'stats' && ev.key === 'Escape') { ev.preventDefault(); stats.cmpOpen = false; render(); document.getElementById('st-cmp-btn')?.focus(); return; }
   if (!stats.menuOpen || state.page !== 'stats') return;
-  const list = stats.sprints || [];
+  const list = stMenuItems();
   if (ev.key === 'Escape') { ev.preventDefault(); stats.menuOpen = false; render(); document.getElementById('st-sprint-btn')?.focus(); }
   else if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
     ev.preventDefault();
     stats.menuIdx = (stats.menuIdx + (ev.key === 'ArrowDown' ? 1 : -1) + list.length) % Math.max(list.length, 1);
     document.querySelectorAll('.st-opt').forEach((o, i) => o.classList.toggle('st-act', i === stats.menuIdx));
   } else if (ev.key === 'Enter') {
-    const s = list[stats.menuIdx]; if (s) { ev.preventDefault(); statsSelectSprint(s.id); }
+    const it = list[stats.menuIdx]; if (!it) return; ev.preventDefault();
+    if (it.type === 'group') statsSelectGroup(it.key); else statsSelectSprint(it.s.id);
   }
 });
 document.addEventListener('click', ev => {
