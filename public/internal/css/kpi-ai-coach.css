@@ -11,40 +11,9 @@
 .aic-h2 { font-size: 22px; font-weight: 800; line-height: 28px; margin: 0; color: #fff; }
 .aic-ico { display: block; flex: none; }
 
-/* ── Benchmark ─────────────────────────────────────────────── */
-.aic-bench { height: 538px; margin-bottom: 32px; }
-.aic-bench > .aic-h2 { position: absolute; left: 24px; top: 20px; }
-.aic-soglia { position: absolute; right: 24px; top: 24px; display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: #fb8b04; line-height: 18px; }
+/* ── Benchmark: vedi kpi-ai-coach-lista.css ── */
+.aic-soglia { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; color: #fb8b04; line-height: 18px; }
 .aic-soglia svg { display: block; }
-.aic-bg { position: absolute; left: 72px; right: 24px; top: 0; bottom: 0; }
-.aic-bgrid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.aic-bc { position: relative; height: 100%; }
-.aic-nest { position: absolute; left: 6px; right: 6px; top: 106px; height: 300px; border-radius: 12px; background: #14171d; }
-.aic-nest.aic-off { background: #1a1d24; border: 1.5px dashed #2a2e37; }
-.aic-bsvg { position: absolute; inset: 0; }
-.aic-bc > .aic-bsvg { inset: auto; left: 6px; right: 6px; top: 106px; height: 300px; z-index: 2; }
-.aic-bsvg svg { display: block; overflow: visible; }
-.aic-num {
-  position: absolute; left: calc(50% - 13px); top: 63px; width: 26px; height: 26px; border-radius: 50%; background: #1a1d24; border: 1.5px solid #2a2e37;
-  font-size: 13px; font-weight: 800; line-height: 23px; text-align: center; color: #6f7683;
-}
-.aic-num.aic-on { background: #262d45; border-color: #4361ee; color: #fff; }
-.aic-numline { position: absolute; left: calc(100% / 14); right: calc(100% / 14); top: 75px; height: 1.5px; background: #6f7683; }
-.aic-gl, .aic-thr { z-index: 1; }
-.aic-gl { position: absolute; left: -8px; right: 0; height: 1px; background: #23272f; pointer-events: none; }
-.aic-gl.aic-gl0 { background: #2a2e37; }
-.aic-yl { position: absolute; right: calc(100% + 16px); font-size: 12px; font-weight: 700; line-height: 16px; color: #6f7683; text-align: right; white-space: nowrap; pointer-events: none; }
-.aic-yl.aic-yh { color: #9ca3af; }
-.aic-yax { position: absolute; left: -8px; width: 1.5px; background: #2a2e37; pointer-events: none; }
-.aic-ybreak { position: absolute; left: -14px; pointer-events: none; }
-.aic-thr { position: absolute; left: -8px; right: -4px; height: 0; border-top: 2px dashed #fb8b04; pointer-events: none; transform-origin: left center; }
-.aic-bt { position: absolute; left: 2px; right: 2px; text-align: center; }
-.aic-bt-n { top: 418px; height: 36px; font-size: 14px; font-weight: 800; line-height: 18px; color: #fff; overflow: hidden; }
-.aic-bt-m { top: 462px; height: 30px; font-size: 12px; font-weight: 700; line-height: 15px; color: #6f7683; overflow: hidden; }
-.aic-bt-v { top: 496px; height: 22px; font-size: 16px; font-weight: 800; line-height: 22px; color: #fff; white-space: nowrap; }
-.aic-bt-off { color: #6f7683; }
-.aic-bt-v.aic-bt-off { font-size: 13px; font-weight: 700; }
-
 /* disegno del grafico: righe che si tracciano, punti che compaiono */
 .aic-line { fill: none; stroke: #8da2ff; stroke-linejoin: round; stroke-linecap: round; }
 .aic-g { cursor: default; }
@@ -189,7 +158,6 @@
 .aic-e-m { font-size: 14px; font-weight: 600; color: #9ca3af; max-width: 520px; overflow-wrap: anywhere; }
 .aic-e-b { margin-top: 10px; height: 40px; padding: 0 24px; border: 0; border-radius: 50px; background: #4361ee; color: #fff; font-size: 14px; font-weight: 800; cursor: pointer; }
 .aic-e-b:hover { background: #5873f0; }
-.aic-bench .aic-e, .aic-cards .aic-e { height: 100%; }
 
 /* caricamento: sagome */
 .aic-sk { background: #2a2e37; border-radius: 8px; animation: st-pulse 1.2s ease-in-out infinite; }
@@ -216,23 +184,6 @@
   .aic .st-head .nav-toggle-desk { display: none; }
   .aic-wide-only { display: none; }
   .aic-narrow-only { display: block; }
-  .aic-bench { height: auto; margin-bottom: 28px; }
-  .aic-nb { position: relative; padding: 16px 12px 8px 10px; }
-  .aic-nb .aic-h2 { position: absolute; left: 20px; top: 16px; font-size: 20px; line-height: 26px; }
-  .aic-nb .aic-soglia { right: 20px; top: 20px; font-size: 14px; }
-  .aic-nbl { padding-top: 40px; display: flex; flex-direction: column; gap: 8px; }
-  .aic-brow { position: relative; height: 84px; border-radius: 12px; background: #14171d; border: 1.5px solid #2a2e37; }
-  .aic-brow.aic-boff { height: 52px; background: transparent; border: 1.5px dashed #2a2e37; }
-  .aic-brow .aic-num { left: 10px; top: 10px; width: 28px; height: 28px; line-height: 25px; font-size: 14px; }
-  .aic-brow .aic-bn { position: absolute; left: 48px; top: 8px; right: 164px; font-size: 15px; font-weight: 800; line-height: 20px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .aic-brow .aic-bm { position: absolute; left: 48px; top: 28px; right: 164px; font-size: 12px; font-weight: 700; line-height: 16px; color: #9ca3af; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .aic-brow .aic-bv { position: absolute; left: 48px; top: 44px; white-space: nowrap; font-size: 22px; font-weight: 800; line-height: 28px; color: #fff; }
-  .aic-brow .aic-bv small { font-size: 13px; font-weight: 700; color: #9ca3af; }
-  .aic-brow .aic-bsp { position: absolute; right: 8px; top: 14px; width: 148px; height: 56px; }
-  .aic-brow.aic-boff .aic-bn { color: #6f7683; top: 6px; font-size: 14px; }
-  .aic-brow.aic-boff .aic-bm { color: #6f7683; top: 26px; }
-  .aic-brow.aic-boff .aic-num { top: 11px; }
-  .aic-brow .aic-bnm { position: absolute; right: 14px; top: 16px; font-size: 13px; font-weight: 700; line-height: 18px; color: #6f7683; white-space: nowrap; }
   .aic-uh { margin-bottom: 16px; }
   .aic-uh { flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
   .aic-uh .aic-h2 { flex: 0 0 100%; }

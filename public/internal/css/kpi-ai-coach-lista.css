@@ -1,0 +1,143 @@
+/* Pagina «AI Coach»: Benchmark a righe, «Il ciclo intero» e scheda «Chat da correggere».
+   Misure e colori dalla tavola intera-1-pagina (_specs/design-flows/kpi-ai-coach-lista). Tutto sotto `.aic`. */
+
+.aicl-bench { padding: 20px 24px 24px; margin-bottom: 32px; }
+.aicl-bh { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; min-height: 28px; }
+.aicl-berr { min-height: 160px; }
+.aicl-row {
+  display: grid; grid-template-columns: 260px 190px minmax(0, 1fr); align-items: center; column-gap: 8px;
+  min-height: 72px; padding: 8px 14px; margin-bottom: 8px; border-radius: 12px; background: #14171d; border: 1.5px solid transparent;
+}
+.aicl-nn { font-size: 17px; font-weight: 800; line-height: 22px; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aicl-nm { font-size: 13px; font-weight: 700; line-height: 18px; color: #9ca3af; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aicl-n { min-width: 0; }
+.aicl-v { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.aicl-v b { font-size: 44px; font-weight: 800; line-height: 52px; letter-spacing: -.5px; color: #fff; }
+.aicl-v small { font-size: 15px; font-weight: 700; color: #9ca3af; }
+.aicl-v.aicl-ok b { color: #4ade80; }
+.aicl-cm { min-width: 0; }
+
+/* curva dei giri: il piano si disegna in percentuali, il cerchio resta tondo */
+.aicl-sp { position: relative; height: 62px; }
+.aicl-spp { position: absolute; left: 8px; right: 44px; top: 16px; bottom: 6px; }
+.aicl-spp svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.aicl-spp polyline { fill: none; stroke: #8da2ff; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.aicl-thr { position: absolute; left: -8px; right: -40px; height: 0; border-top: 1.5px solid #fb8b04; opacity: .85; }
+.aicl-thl { position: absolute; right: 2px; transform: translateY(-110%); font-size: 12px; font-weight: 800; color: #fb8b04; }
+.aicl-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: #8da2ff; border: 1.5px solid #14171d; box-sizing: border-box; }
+.aicl-dot.aicl-good { background: #4ade80; }
+.aicl-dot.aicl-last { width: 16px; height: 16px; margin: -8px 0 0 -8px; border: 2px solid #fff; background: #4361ee; }
+.aicl-dot.aicl-last.aicl-good { background: #4ade80; }
+.aicl-dot:hover { box-shadow: 0 0 0 3px rgba(141, 162, 255, .5); }
+
+.aicl-offs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 12px; }
+.aicl-off { padding: 10px 14px; border-radius: 10px; border: 1.5px dashed #2a2e37; }
+.aicl-offn { font-size: 14px; font-weight: 800; line-height: 18px; color: #6f7683; }
+.aicl-offm { font-size: 13px; font-weight: 700; line-height: 18px; color: #6f7683; }
+
+/* il ciclo intero */
+.aicl-cy { background: rgba(67, 97, 238, .08); border-color: #4361ee; grid-template-columns: 260px 250px minmax(0, 1fr) auto; min-height: 92px; margin: 0; padding: 10px 14px; }
+.aicl-cm { padding: 0 18px; }
+.aicl-cy .aicl-v b { font-size: 44px; }
+.aicl-bars { position: relative; height: 70px; max-width: 360px; }
+.aicl-bcs { position: absolute; left: 0; right: 0; top: 16px; bottom: 16px; display: flex; align-items: flex-end; gap: 3px; border-bottom: 1.5px solid #6f7683; }
+.aicl-bc { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.aicl-bb { display: block; width: 100%; max-width: 14px; border-radius: 2px 2px 0 0; background: #f87171; }
+.aicl-bb.aicl-today { background: rgba(248, 113, 113, .22); border: 1.5px dashed #f87171; border-bottom: 0; box-sizing: border-box; }
+.aicl-b0 { display: block; width: 100%; max-width: 14px; height: 3px; background: #6f7683; }
+.aicl-bc:hover .aicl-bb { filter: brightness(1.25); }
+.aicl-pk { position: absolute; transform: translateX(-50%); font-size: 12px; font-weight: 800; line-height: 14px; color: #fff; pointer-events: none; }
+.aicl-bx { position: absolute; left: 0; right: 0; bottom: 0; height: 14px; font-size: 11px; font-weight: 700; line-height: 14px; color: #6f7683; }
+.aicl-bx span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.aicl-bx .aicl-xt { transform: none; color: #fff; font-weight: 800; }
+.aicl-cyerr { font-size: 14px; font-weight: 700; color: #f87171; overflow-wrap: anywhere; }
+.aicl-lnk { background: none; border: 0; padding: 0; color: #8da2ff; font: inherit; font-weight: 800; cursor: pointer; }
+.aicl-go {
+  display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px; border: 0; background: transparent; color: #8da2ff;
+  font-size: 15px; font-weight: 800; cursor: pointer; white-space: nowrap; border-radius: 50px;
+}
+.aicl-go:hover { color: #fff; }
+.aicl-go:focus-visible, .aicl-lr:focus-visible, .aicl-save:focus-visible, .aicl-ta:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ── Chat da correggere ───────────────────────────────────── */
+.aicl-lista { margin-bottom: 32px; padding-bottom: 6px; }
+.aicl-lh { padding: 22px 24px 8px; }
+.aicl-th, .aicl-lr { display: grid; grid-template-columns: minmax(0, 250px) minmax(0, 1.5fr) minmax(0, 1fr) 150px; column-gap: 20px; }
+.aicl-th { margin: 0 24px; padding: 8px 16px 8px; border-bottom: 1.5px solid #2a2e37; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6f7683; }
+.aicl-body { padding: 0 8px; }
+.aicl-item { border-bottom: 1.5px solid #2a2e37; margin: 0 16px; }
+.aicl-item:last-child { border-bottom: 0; }
+.aicl-lr {
+  width: 100%; margin: 0 -16px; padding: 14px 16px; width: calc(100% + 32px); border: 0; border-radius: 12px; background: transparent; color: inherit;
+  font: inherit; text-align: left; cursor: pointer; align-items: start;
+}
+.aicl-lr:hover, .aicl-lr-on { background: #20242d; }
+.aicl-c1 { display: flex; flex-direction: column; min-width: 0; }
+.aicl-who { font-size: 17px; font-weight: 800; line-height: 22px; color: #fff; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.aicl-sub { font-size: 13px; font-weight: 700; line-height: 18px; color: #9ca3af; margin-top: 2px; overflow-wrap: anywhere; }
+.aicl-c2, .aicl-c3 { font-size: 14px; font-weight: 700; line-height: 20px; color: #9ca3af; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; min-width: 0; }
+.aicl-c3 { color: #fff; font-weight: 800; }
+.aicl-c2.aicl-none { color: #6f7683; }
+.aicl-c4 { padding-top: 1px; }
+.aicl-st { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; }
+.aicl-st i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.aicl-st-open i { background: #f87171; }
+.aicl-st-amb i { background: #fb8b04; }
+.aicl-st-done i { background: #8da2ff; }
+
+.aicl-panel { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; padding: 14px 8px 22px; }
+.aicl-chat { height: 300px; overflow: auto; padding: 8px 10px 8px 4px; border-right: 3px solid #2a2e37; border-radius: 4px; scrollbar-color: #3a3f4a transparent; position: relative; }
+.aicl-chat .aic-chat-msgs { gap: 14px; }
+.aicl-chat .aic-m-u { flex-direction: column; align-items: flex-end; gap: 2px; }
+.aicl-chat .aic-bub { max-width: 340px; font-size: 14px; line-height: 20px; }
+.aicl-flag .aic-bub { border-color: #f87171; }
+.aicl-tag { font-size: 12px; font-weight: 800; line-height: 16px; color: #f87171; padding-right: 4px; }
+.aicl-side { display: flex; flex-direction: column; min-width: 0; }
+.aicl-lab { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6f7683; margin: 4px 0 6px; display: block; }
+.aicl-why { font-size: 14px; font-weight: 800; line-height: 20px; color: #fff; margin-bottom: 14px; overflow-wrap: anywhere; }
+.aicl-ta {
+  width: 100%; min-height: 110px; resize: vertical; padding: 12px 14px; border-radius: 12px; background: #14171d; border: 1.5px solid #2a2e37;
+  color: #fff; font: inherit; font-size: 14px; font-weight: 700; line-height: 20px;
+}
+.aicl-ta:focus { border-color: #4361ee; outline: none; }
+.aicl-ta:disabled { opacity: .6; }
+.aicl-act { display: flex; align-items: center; gap: 14px; margin-top: 12px; min-height: 48px; flex-wrap: wrap; }
+/* stessa misura in ogni stato: cambiano solo colore e testo */
+.aicl-save {
+  box-sizing: border-box; flex: none; width: 168px; height: 48px; padding: 0; border: 0; border-radius: 50px; background: #4361ee; color: #fff;
+  font-size: 15px; font-weight: 800; cursor: pointer; box-shadow: 0 3px 0 #050608; white-space: nowrap;
+}
+.aicl-save[data-st="rest"]:hover:not(:disabled) { background: #5873f0; }
+.aicl-save:disabled { opacity: .45; cursor: default; }
+.aicl-save[data-st="saving"] { opacity: .75; cursor: progress; }
+.aicl-save[data-st="saved"] { background: #16a34a; opacity: 1; }
+.aicl-save[data-st="error"] { background: #f87171; color: #0f1115; opacity: 1; }
+.aicl-msg { font-size: 13px; font-weight: 700; line-height: 18px; color: #9ca3af; min-width: 0; flex: 1 1 160px; overflow-wrap: anywhere; }
+.aicl-save[data-st="error"] + .aicl-msg { color: #f87171; }
+
+@media (max-width: 900px) {
+  .aicl-bench { padding: 16px 12px 12px; margin-bottom: 28px; }
+  .aicl-bh { padding: 0 6px; }
+  .aicl-row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; padding: 10px 12px; }
+  .aicl-cm { grid-column: 1 / -1; padding: 0; }
+  .aicl-sp { margin-top: 10px; }
+  .aicl-v b { font-size: 34px; line-height: 40px; }
+  .aicl-offs { grid-template-columns: 1fr; gap: 8px; }
+  .aicl-cy { grid-template-columns: minmax(0, 1fr) auto; }
+  .aicl-cy .aicl-cm { order: 3; }
+  .aicl-cy .aicl-go { grid-column: 1 / -1; order: 4; justify-content: center; border: 1.5px solid #4361ee; width: 100%; }
+  .aicl-bars { max-width: none; }
+  .aicl-cy .aicl-nm { white-space: normal; }
+  .aicl-lh { padding: 18px 16px 8px; }
+  .aicl-th { display: none; }
+  .aicl-body { padding: 0 4px; }
+  .aicl-item { margin: 0 8px; }
+  .aicl-lr { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; margin: 0 -8px; width: calc(100% + 16px); padding: 12px 8px; }
+  .aicl-c1 { grid-column: 1 / -1; }
+  .aicl-c2 { grid-column: 1 / -1; -webkit-line-clamp: 2; }
+  .aicl-c3 { -webkit-line-clamp: 2; font-size: 13px; }
+  .aicl-panel { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 8px 0 18px; }
+  .aicl-chat { height: 280px; }
+  .aicl-chat .aic-bub { max-width: 250px; }
+  .aicl-save { width: 100%; }
+}

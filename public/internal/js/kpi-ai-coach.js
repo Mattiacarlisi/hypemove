@@ -3,6 +3,7 @@
 // Misure, testi e tempi copiano le tavole red-1 … red-7 del redesign (_specs/design-flows/kpi-ai-coach).
 // Ogni blocco (benchmark, uso, conversazioni) carica e mostra il proprio errore per conto suo e si
 // ridisegna da solo dentro il suo contenitore: il resto della pagina non si muove.
+// Benchmark a righe e «Chat da correggere»: kpi-ai-coach-lista.js.
 // RPC: kpi_coach_benchmark, kpi_ai_usage, kpi_ai_users, kpi_events_by_name, kpi_ai_conversations, kpi_ai_conversation.
 
 const AIC = {
@@ -183,6 +184,7 @@ async function aicLoadChat(id) {
 // Ingresso nella pagina: ricarica in sordina ciò che c'è già, così si vedono i giri nuovi senza sagome.
 function aicEnter() {
   aicLoadBench();
+  aiclLoad();
   aicLoadUsage();
   aicLoadConv(aic.tab);
   if (aic.tab === 'feedback') aicLoadFeed();
@@ -192,6 +194,7 @@ function aicEnter() {
 // Carica ciò che manca la prima volta che la pagina si disegna.
 function aicEnsure() {
   if (!aic.bench.data && !aic.bench.loading && !aic.bench.error) aicLoadBench();
+  aiclEnsure();
   const key = aicRangeKey(aicRange());
   if (aic.usage.key !== key && !aic.usage.loading && !aic.usage.error) aicLoadUsage();
   const c = aic.conv[aic.tab];
@@ -205,152 +208,6 @@ function aicError(msg, retry) {
     <div class="aic-e-m">${esc(msg)}</div><button class="aic-e-b" data-aic-retry="${retry}">Riprova</button></div>`;
 }
 const aicSk = (w, h, st) => `<i class="aic-sk" style="display:block;width:${w};height:${h};${st || ''}"></i>`;
-
-// ── BENCHMARK ─────────────────────────────────────────────────────────
-// Geometria della tavola (scheda 996 px): colonne in fila, scala 60–100% con taglio dichiarato.
-const AIC_PT = 128, AIC_PB = 384, AIC_NEST = 106, AIC_NH = 300;
-const aicYb = v => AIC_PT + (AIC_PB - AIC_PT) * (100 - v) / 40;           // y nella scheda
-const aicYc = v => aicYb(v) - AIC_NEST;                                   // y dentro la colonna
-const aicPct = g => 100 * g.giusti / g.casi;
-const aicPctY = g => Math.max(60, aicPct(g));                             // sotto il 60% il punto resta sul fondo della scala
-const aicOk = (g, soglia) => g.giusti * 100 >= soglia * g.casi;
-
-// Una colonna: linea dei giri + punti + etichetta dell'ultimo valore. w = larghezza della colonna.
-function aicBenchCol(p, w, soglia, k, anim) {
-  const g = p.giri || [], n = g.length;
-  if (!n) return '';
-  const OFF = 14, STEP = 5;
-  const step = Math.min(STEP, (w - OFF - 56) / Math.max(1, n - 1));
-  const pts = g.map((c, i) => [OFF + i * step, aicYc(aicPctY(c))]);
-  let s = '';
-  for (let i = 1; i < n; i++) {
-    if (g[i].casi !== g[i - 1].casi) {
-      const xm = OFF + (i - .5) * step;
-      s += `<line x1="${xm.toFixed(1)}" y1="14" x2="${xm.toFixed(1)}" y2="${AIC_NH - 2}" stroke="${AIC.TER}" stroke-width="1.5" stroke-dasharray="3 4"/>
-        <text x="${(xm - 5).toFixed(1)}" y="${AIC_NH - 6}" font-size="11" font-weight="700" text-anchor="end" fill="${AIC.TER}">${g[i - 1].casi} casi</text>
-        <text x="${(xm + 5).toFixed(1)}" y="${AIC_NH - 6}" font-size="11" font-weight="700" fill="${AIC.TER}">${g[i].casi}</text>`;
-    }
-  }
-  const d = (0.15 * k).toFixed(2) + 's';
-  if (n > 1) s += `<polyline class="aic-line" pathLength="1" stroke-width="2" points="${pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ')}"/>`;
-  const r = step >= 5 ? 3 : 2.5;
-  let dots = '';
-  pts.forEach((q, i) => {
-    const last = i === n - 1, ok = aicOk(g[i], soglia), c = g[i];
-    const tip = `Giro ${i + 1} · ${String(c.quando || '').slice(-5)}|${c.giusti} su ${c.casi}`;
-    dots += `<g class="aic-g" data-tip="${esc(tip)}" data-tipk="b">
-      <rect x="${(q[0] - step / 2).toFixed(1)}" y="0" width="${Math.max(step, 4).toFixed(1)}" height="${AIC_NH}" fill="transparent"/>
-      <circle class="aic-ring" cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${last ? 12 : 9}" fill="none" stroke="${AIC.LB}" stroke-width="2"/>
-      <circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${last ? 7 : r}" fill="${ok ? AIC.GRN : AIC.BLU}" stroke="${last ? AIC.INK : AIC.NEST}" stroke-width="${last ? 2 : 1.5}"/></g>`;
-  });
-  const [lx, ly] = pts[n - 1], L = g[n - 1], ok = aicOk(L, soglia);
-  const near = Math.abs(aicYb(aicPctY(L)) - aicYb(soglia)) < 14;
-  dots += `<text x="${(lx + (near ? 11 : 13)).toFixed(1)}" y="${(ly + (near ? 22 : 6)).toFixed(1)}" font-size="17" font-weight="800" fill="${ok ? AIC.GRN : AIC.INK}" pointer-events="none">${Math.round(aicPct(L))}%</text>`;
-  return `<svg width="${w}" height="${AIC_NH}" style="--d:${d}" aria-hidden="false">${s}<g class="aic-dots">${dots}</g></svg>`;
-}
-
-// Piccola linea dei giri della finestra stretta (148 × 56).
-function aicSpark(p, soglia, k) {
-  const g = p.giri, n = g.length, W = 148, H = 56, gut = 26, pw = W - gut - 22;
-  const y = v => 6 + (H - 12) * (100 - v) / 40, step = pw / 13;
-  let s = `<line x1="${gut}" x2="${W}" y1="${y(60).toFixed(1)}" y2="${y(60).toFixed(1)}" stroke="${AIC.BRD}"/>
-    <line x1="${gut}" x2="${W}" y1="${y(soglia).toFixed(1)}" y2="${y(soglia).toFixed(1)}" stroke="${AIC.ORG}" stroke-width="1.5" stroke-dasharray="4 3"/>
-    <text x="0" y="${(y(100) + 8).toFixed(1)}" font-size="11" font-weight="700" fill="${AIC.TER}">100</text>
-    <text x="0" y="${(y(60) + 4).toFixed(1)}" font-size="11" font-weight="700" fill="${AIC.TER}">60</text>
-    <path d="M${gut - 1} ${(y(60) - 1).toFixed(1)} l3 -3 l-6 -4 l6 -4" fill="none" stroke="${AIC.SEC}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-  const pts = g.map((c, i) => [gut + 6 + i * step, y(aicPctY(c))]);
-  if (n > 1) s += `<polyline class="aic-line" pathLength="1" stroke-width="1.5" style="--d:${(0.3 * k).toFixed(1)}s" points="${pts.map(q => q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ')}"/>`;
-  let dots = '';
-  pts.forEach((q, i) => {
-    const last = i === n - 1, c = g[i], ok = aicOk(c, soglia);
-    const tip = `Giro ${i + 1} · ${String(c.quando || '').slice(-5)}|${c.giusti} su ${c.casi}`;
-    dots += `<g class="aic-g" data-tip="${esc(tip)}" data-tipk="b"><rect x="${(q[0] - step / 2).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${H}" fill="transparent"/>
-      <circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${last ? 5.5 : 2.5}" fill="${last ? (ok ? AIC.GRN : AIC.BLU) : AIC.LB}" ${last ? `stroke="#fff" stroke-width="1.5"` : ''}/></g>`;
-  });
-  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="display:block;overflow:visible;--d:${(0.3 * k).toFixed(1)}s">${s}<g class="aic-dots">${dots}</g></svg>`;
-}
-
-const AIC_SK_H = [.40, .55, .30, .62, .48, .36, .58];
-
-function aicBenchHtml() {
-  const b = aic.bench, d = b.data;
-  const head = soglia => `<h2 class="aic-h2">Benchmark</h2><div class="aic-soglia"><svg width="30" height="12" aria-hidden="true"><line x1="2" y1="6" x2="28" y2="6" stroke="${AIC.ORG}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 5"/></svg>Soglia ${soglia}%</div>`;
-  if (b.error) return `<div class="aic-card aic-bench">${head(99)}<div style="position:absolute;inset:60px 0 0">${aicError(b.error, 'bench')}</div></div>`;
-  const narrow = aicNarrow();
-  if (!d) {   // sagome alla misura dei blocchi veri (red-2)
-    if (narrow) {
-      return `<div class="aic-card aic-bench aic-nb">${head(99)}<div class="aic-nbl">${[0, 1, 2, 3, 4, 5, 6].map(k => `<div class="aic-brow"><i class="aic-sk aic-sk-abs" style="left:10px;top:10px;width:28px;height:28px;border-radius:50%"></i>
-        <i class="aic-sk aic-sk-abs" style="left:48px;top:12px;width:110px;height:14px"></i><i class="aic-sk aic-sk-abs" style="left:48px;top:34px;width:70px;height:12px"></i>
-        <i class="aic-sk aic-sk-abs" style="right:12px;top:18px;width:136px;height:44px;border-radius:10px"></i></div>`).join('')}</div></div>`;
-    }
-    const cols = [0, 1, 2, 3, 4, 5, 6].map(k => `<div class="aic-bc"><i class="aic-nest"></i>
-      <i class="aic-sk aic-sk-abs" style="left:20px;right:20px;top:${AIC_PB - 12 - (AIC_PB - AIC_PT - 24) * AIC_SK_H[k] - 0}px;height:${((AIC_PB - AIC_PT - 24) * AIC_SK_H[k]).toFixed(0)}px;border-radius:10px"></i>
-      <i class="aic-sk aic-sk-abs" style="left:calc(50% - 32px);top:422px;width:64px;height:12px;border-radius:6px"></i>
-      <i class="aic-sk aic-sk-abs" style="left:calc(50% - 22px);top:442px;width:44px;height:12px;border-radius:6px"></i>
-      <i class="aic-sk aic-sk-abs" style="left:calc(50% - 36px);top:468px;width:72px;height:10px;border-radius:5px"></i>
-      <i class="aic-sk aic-sk-abs" style="left:calc(50% - 30px);top:500px;width:60px;height:14px;border-radius:7px"></i></div>`).join('');
-    return `<div class="aic-card aic-bench">${head(99)}<div class="aic-bg"><div class="aic-numline"></div>${aicBenchAxes(99)}<div class="aic-bgrid">${cols}</div></div></div>`;
-  }
-  const soglia = d.soglia || 99, ps = d.passaggi;
-  if (narrow) {
-    const rows = ps.map((p, i) => {
-      const g = p.giri || [];
-      if (!g.length) {
-        return `<div class="aic-brow aic-boff"><span class="aic-num">${i + 1}</span><div class="aic-bn">${esc(p.nome)}</div><div class="aic-bm">${esc(p.modello || '')}</div><div class="aic-bnm">non misurato</div></div>`;
-      }
-      const L = g[g.length - 1], ok = aicOk(L, soglia);
-      return `<div class="aic-brow"><span class="aic-num aic-on">${i + 1}</span><div class="aic-bn">${esc(p.nome)}</div><div class="aic-bm">${esc(p.modello || '')}</div>
-        <div class="aic-bv" style="${ok ? `color:${AIC.GRN}` : ''}">${L.giusti}<small> su ${L.casi}</small></div><div class="aic-bsp">${aicSpark(p, soglia, i)}</div></div>`;
-    }).join('');
-    const anim = !b.animated ? ' aic-a' : '';
-    b.animated = true;
-    return `<div class="aic-card aic-bench aic-nb${anim}">${head(soglia)}<div class="aic-nbl">${rows}</div></div>`;
-  }
-  const anim = !b.animated ? '1' : '0';
-  b.animated = true;
-  const cols = ps.map((p, k) => {
-    const g = p.giri || [], has = g.length > 0, L = g[g.length - 1];
-    return `<div class="aic-bc"><div class="aic-nest${has ? '' : ' aic-off'}"></div><div class="aic-bsvg" data-aic-bsvg="${k}"></div>
-      <span class="aic-num${has ? ' aic-on' : ''}" style="top:63px">${k + 1}</span>
-      <div class="aic-bt aic-bt-n${has ? '' : ' aic-bt-off'}">${esc(p.nome)}</div>
-      <div class="aic-bt aic-bt-m aic-bt-off">${esc(p.modello || '')}</div>
-      <div class="aic-bt aic-bt-v${has ? '' : ' aic-bt-off'}">${has ? `${L.giusti} su ${L.casi}` : 'non misurato'}</div></div>`;
-  }).join('');
-  return `<div class="aic-card aic-bench" data-aic-anim="${anim}">${head(soglia)}
-    <div class="aic-bg"><div class="aic-numline"></div>${aicBenchAxes(soglia)}<div class="aic-bgrid">${cols}</div></div></div>`;
-}
-
-// Assi e linee della scala: 60–100%, il taglio in basso è dichiarato dall'ondina.
-function aicBenchAxes(soglia) {
-  let s = '';
-  [60, 70, 80, 90].forEach(v => { s += `<div class="aic-gl${v === 60 ? ' aic-gl0' : ''}" style="top:${aicYb(v).toFixed(1)}px"></div>`; });
-  [60, 70, 80, 90, 100].forEach(v => {
-    s += `<div class="aic-yl${v === 60 || v === 100 ? ' aic-yh' : ''}" style="top:${(aicYb(v) - 8).toFixed(1)}px">${v}%</div>`;
-  });
-  s += `<div class="aic-yax" style="top:${aicYb(100).toFixed(1)}px;height:${(AIC_PB - 15 - aicYb(100)).toFixed(1)}px"></div>
-    <svg class="aic-ybreak" style="top:${AIC_PB - 16}px" width="12" height="18" viewBox="0 0 12 18" aria-hidden="true"><path d="M6 0v3l-4 3 8 4-8 4 4 3" fill="none" stroke="${AIC.SEC}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 0)"/></svg>
-    <div class="aic-thr" style="top:${aicYb(soglia).toFixed(1)}px"></div>`;
-  return s;
-}
-
-// Dopo l'inserimento: le linee hanno bisogno della larghezza vera della colonna.
-function aicDrawBench() {
-  const card = document.querySelector('.aic-bench[data-aic-anim]');
-  const d = aic.bench.data;
-  if (!card || !d) return;
-  const anim = card.dataset.aicAnim === '1';
-  card.dataset.aicAnim = '0';
-  const soglia = d.soglia || 99;
-  card.querySelectorAll('[data-aic-bsvg]').forEach(el => {
-    const k = +el.dataset.aicBsvg, p = d.passaggi[k];
-    const w = Math.max(40, Math.round(el.clientWidth));
-    el.innerHTML = aicBenchCol(p, w, soglia, k, anim);
-  });
-  if (anim) {
-    card.classList.add('aic-a');
-    setTimeout(() => card.classList.remove('aic-a'), 3200);
-  }
-}
 
 // ── USO ───────────────────────────────────────────────────────────────
 const AIC_METRICS = {
@@ -566,18 +423,18 @@ function pageAICoach() {
   return `<div class="st-page aic" id="aic-page">
     <div class="st-head"><button class="nav-toggle nav-toggle-desk" data-nav-toggle title="Mostra il menu" aria-label="Mostra il menu">${NAV_PANEL_ICON}</button><h1 class="st-h1">AI Coach</h1></div>
     <div id="aic-bench">${aicBenchHtml()}</div>
+    <div id="aic-lista">${aicListaHtml()}</div>
     <div id="aic-uso">${aicUsoHtml()}</div>
     <div id="aic-conv">${aicConvHtml()}</div>
     <div class="aic-tip" id="aic-tip"></div>
   </div>`;
 }
 
-const AIC_BLOCKS = { bench: aicBenchHtml, uso: aicUsoHtml, conv: aicConvHtml };
+const AIC_BLOCKS = { bench: () => aicBenchHtml(), lista: () => aicListaHtml(), uso: () => aicUsoHtml(), conv: () => aicConvHtml() };
 function aicRefresh(name) {
   const host = document.getElementById('aic-' + name);
   if (!host || state.page !== 'ai-coach') return;
   host.innerHTML = AIC_BLOCKS[name]();
-  if (name === 'bench') aicDrawBench();
 }
 
 function aicTip(el, ev) {
@@ -598,6 +455,7 @@ function aicTip(el, ev) {
 }
 
 function aicOnClick(ev) {
+  if (aiclOnClick(ev)) return;
   const t = ev.target;
   const q = sel => t.closest && t.closest(sel);
   const retry = q('[data-aic-retry]');
@@ -660,6 +518,7 @@ function aicAttach() {
   if (!page) return;
   page.addEventListener('click', aicOnClick);
   page.addEventListener('input', ev => {
+    if (aiclOnInput(ev)) return;
     if (ev.target && ev.target.id === 'aic-search') { aic.query = ev.target.value; aicUpdateList(); }
   });
   page.addEventListener('mousemove', ev => {
@@ -667,7 +526,6 @@ function aicAttach() {
     aicTip(el, ev);
   });
   page.addEventListener('mouseleave', () => aicTip(null));
-  aicDrawBench();
   if (!aic.wired) {
     aic.wired = true;
     let tm = 0;
@@ -676,8 +534,7 @@ function aicAttach() {
       tm = setTimeout(() => {
         if (state.page !== 'ai-coach' || !document.getElementById('aic-page')) return;
         const nw = aicNarrow();
-        if (nw !== aic.narrow) { aic.narrow = nw; aicRefresh('bench'); aicRefresh('uso'); aicRefresh('conv'); }
-        else if (!nw) { const d = aic.bench.data; if (d) { const c = document.querySelector('.aic-bench'); if (c) { c.dataset.aicAnim = '0'; aicDrawBench(); } } }
+        if (nw !== aic.narrow) { aic.narrow = nw; aicRefresh('uso'); aicRefresh('conv'); }
       }, 120);
     });
   }
