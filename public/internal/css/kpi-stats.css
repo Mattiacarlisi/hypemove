@@ -75,6 +75,11 @@
 .st-lg { display: flex; align-items: center; gap: 6px; }
 /* barra globale sopra i grafici: stessi controlli del vecchio grafico 1, una riga sua */
 .st-bar { position: relative; z-index: 4; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.st-bar.st-noted { margin-bottom: 38px; }
+.st-bar.st-noted2 { margin-bottom: 56px; }
+.st-segcol { position: relative; }
+.st-taxnote { position: absolute; top: calc(100% + 6px); left: 14px; font-size: 12px; font-weight: 500; line-height: 1.5; color: #9ca3af; white-space: nowrap; }
+.st-taxnote b { font-weight: 700; color: #d1d5db; }
 /* grafico 1: comandi in alto a destra, legenda sotto */
 .st-seg { display: flex; padding: 3px; border-radius: 50px; background: #0f1115; border: 1.5px solid #2a2e37; }
 .st-segb {
@@ -168,4 +173,8 @@
   .st-card.st-big .st-chart, .st-card.st-big.st-has-leg .st-chart { top: 402px; }
   .st-cap { white-space: normal; right: 24px; }
   .st-readout { top: 20px !important; right: 24px; }
+}
+@media (max-width: 900px) {
+  .st-bar.st-noted, .st-bar.st-noted2 { margin-bottom: 20px; }
+  .st-taxnote { position: static; display: block; margin: 5px 0 0 14px; white-space: normal; }
 }

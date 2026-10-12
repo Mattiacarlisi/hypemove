@@ -24,15 +24,21 @@ const stats = {
   scopeKey: null,   // gruppo (g:15) o dettaglio di riga (r:uuid); null = default dal server
   seq: 0,
   gross: false,         // globale «Con tasse / Senza tasse» dalla barra sopra i grafici: false = resa netta (20,90 €), true = prezzo pieno (29,99 €). Vale per i grafici in euro
+  tax: false,           // «IRES + IRAP» dalla barra, solo con «Con tasse»: toglie il 27,9% del guadagno dove gli incassi netti superano la spesa
   cmp: null,            // globale «Confronta» dalla barra: id degli sprint di confronto scelti; null = i due precedenti. Vale per i grafici per sprint
   cmpOpen: false,
   rate: null,           // globale «Tasso» dalla barra: tasso di fine prova impostato a mano (0..1); null = quello dei dati. Vale per il ROI e le proiezioni. Non si ricorda fra le visite
   proj: true,           // globale «Con proiezione»: assi estesi all'ultima scadenza, stime col tasso
 };
-const ST_LS = { gross: 'kpi.stats.gross', cmp: 'kpi.stats.compare', proj: 'kpi.stats.proj', scope: 'kpi.stats.scope' };
+const ST_LS = { gross: 'kpi.stats.gross', tax: 'kpi.stats.tax', cmp: 'kpi.stats.compare', proj: 'kpi.stats.proj', scope: 'kpi.stats.scope' };
 const stLsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
 const stLsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* senza memoria la scelta vale per la visita */ } };
 stats.gross = stLsGet(ST_LS.gross) === true;
+stats.tax = stLsGet(ST_LS.tax) === true;
+// IRES 24% + IRAP 3,9%: si pagano sull'utile, quindi solo sulla parte di incassi netti che supera la spesa
+const ST_PROFIT_TAX = 0.279;
+const stProfitTax = (earn, spend) => (stats.tax && !stats.gross && earn > spend ? ST_PROFIT_TAX * (earn - spend) : 0);
+const stAfterTax = (earn, spend) => earn - stProfitTax(earn, spend);
 stats.proj = stLsGet(ST_LS.proj) !== false;
 { const c = stLsGet(ST_LS.cmp); if (Array.isArray(c)) stats.cmp = c; }
 stLoadScope();
@@ -337,7 +343,7 @@ function stCurveSet(d) {
   const all = d.sprint_curves.sprints, sel = all.find(s => s.selected) || all.at(-1), ids = stCmpIds(d);
   const dataRate = d.sprint_curves.rate ?? 0, rate = stats.rate ?? dataRate, g = stats.gross;
   // valore di un punto: (pagato + tasso × prove aperte) / spesa
-  const val = p => (p.cs > 0 ? ((g ? p.pg : p.pn) + rate * (g ? p.og : p.on)) / p.cs : null);
+  const val = p => (p.cs > 0 ? stAfterTax((g ? p.pg : p.pn) + rate * (g ? p.og : p.on), p.cs) / p.cs : null);
   return { all, sel, cmp: all.filter(s => ids.includes(s.id)), val, rate, dataRate, manual: stats.rate != null };
 }
 function stToggleCmp(id) {
@@ -365,7 +371,7 @@ function stBuildSprintDay(w, h, d) {
   const val = (S, k, r) => {
     const s = S.spend[k], p = S.paid[k], o = S.open[k];
     if (s == null || p == null || o == null) return null;
-    if (s > 0) return (p + r * o) / s;
+    if (s > 0) return stAfterTax(p + r * o, s) / s;
     return (p + o === 0 ? 0 : null);
   };
   const top = Math.max(0, ...W.days.map((dt, k) => val(W, k, rate) ?? 0),
@@ -480,8 +486,10 @@ function stBuildMoney(w, h, d) {
   const dc = stHasDc(all), rT = sc.rate;
   const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
   const nd = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
-  const projEnd = (W.paid.at(-1) ?? 0) + rT * (W.open.at(-1) ?? 0);
-  const top = Math.max(10, W.spend.at(-1) ?? 0, W.paid.at(-1) ?? 0, stats.proj ? projEnd : 0);
+  const paidT = (X, i) => stAfterTax(X.paid[i], X.spend[i]), projT = i => stAfterTax(W.paid[i] + rT * W.open[i], W.spend[i]);
+  const iEnd = W.days.length - 1;
+  const projEnd = iEnd >= 0 ? projT(iEnd) : 0;
+  const top = Math.max(10, W.spend.at(-1) ?? 0, iEnd >= 0 ? paidT(W, iEnd) : 0, stats.proj ? projEnd : 0);
   const pow = Math.pow(10, Math.floor(Math.log10(top))), norm = top / pow;
   const ymax = (norm <= 1 ? 1 : norm <= 1.25 ? 1.25 : norm <= 1.5 ? 1.5 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * pow;
   const ticks = [0, ymax / 4, ymax / 2, 3 * ymax / 4, ymax].map(v => [v, stEuroTick(v)]);
@@ -489,29 +497,27 @@ function stBuildMoney(w, h, d) {
   let s = c.s;
   cmp.forEach((sp, k) => {
     const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length], C = wins[k];
-    const runs = stRuns(C.paid.map((v, i) => ({ i, v, est: C.days[i] > oggi })), ymax, true);
+    const runs = stRuns(C.paid.map((v, i) => ({ i, v: paidT(C, i), est: C.days[i] > oggi })), ymax, true);
     s += stCurve(c, runs, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
   });
   const estD = i => W.days[i] > oggi;
   s += stCurve(c, stRuns(W.spend.map((v, i) => ({ i, v, est: estD(i) })), ymax, true),
     { color: ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3, dot: () => 'dot' });
-  s += stCurve(c, stRuns(W.paid.map((v, i) => ({ i, v, est: estD(i) })), ymax, true),
+  if (!stats.proj) s += stCurve(c, stRuns(W.paid.map((v, i) => ({ i, v: paidT(W, i), est: estD(i) })), ymax, true),
     { color: ST.VER, estColor: ST.VER, estDash: '7 6', sw: 3, dot: () => 'dot' });
   if (stats.proj) {
-    const fi = W.days.findIndex(x => x >= oggi), from = fi < 0 ? W.days.length : Math.max(0, fi - 1);
-    if (from < W.days.length - 1) {
-      const runsP = stRuns(W.days.slice(from).map((dt, j) => ({ i: from + j, v: W.paid[from + j] + rT * W.open[from + j], est: true })), ymax, true);
-      s += stCurve(c, runsP, { color: ST.INK, estColor: ST.INK, estDash: '7 6', sw: 2.5,
-        dot: (p, r, e) => e.last && r === runsP.at(-1) ? 'ring' : null });
-    }
+    // la bianca è la proiezione degli incassi cumulati: coincide col reale nel passato
+    const runsP = stRuns(W.days.map((dt, i) => ({ i, v: projT(i), est: W.open[i] > 0 || dt > oggi })), ymax, true);
+    s += stCurve(c, runsP, { color: ST.INK, estColor: ST.INK, estDash: '7 6', sw: 2.5,
+      dot: (p, r, e) => e.last && r === runsP.at(-1) ? 'ring' : null });
   }
   return {
     svg: stSvg(w, h, s), c, nx: nd,
     hov: i => {
       if (i < 0 || i >= W.days.length) return null;
       const ab = dc ? ` · ${W.offers[i]} ${(W.offers[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
-      const pj = stats.proj ? ` · proiezione ${stEuro(W.paid[i] + rT * W.open[i])} €` : '';
-      return { txt: `${stDM(W.days[i])} · spesi ${stEuro(W.spend[i])} € · incassati ${stEuro(W.paid[i])} €${ab}${pj}`, v: W.spend[i] };
+      const pj = stats.proj ? ` · proiezione ${stEuro(projT(i))} €` : '';
+      return { txt: `${stDM(W.days[i])} · spesi ${stEuro(W.spend[i])} € · incassati ${stEuro(paidT(W, i))} €${ab}${pj}`, v: W.spend[i] };
     },
   };
 }
@@ -685,11 +691,13 @@ function stCards(d) {
     const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const rT = cs.rate, projEarn = earn + rT * (W.open.at(-1) ?? 0);
-    const pdiv = (stats.proj ? projEarn : earn) - spend;
+    const base = stats.proj ? projEarn : earn, tax = stProfitTax(base, spend);
+    const pdiv = base - tax - spend;
+    const taxTxt = !stats.tax || g ? '' : (tax > 0 ? ` · IRES e IRAP stimate ${stEuro(tax)} € su ${stEuro(base - spend)} € di utile` : (base > spend ? '' : ' · IRES e IRAP zero: il periodo è in perdita'));
     c.money = { num: stEuro(pdiv) + ' €', color: ST.INK,
-      cap: `il divario fra investimento e ricavi · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind}${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} · ${per}${stats.proj ? ` · proiezione +${stEuro(rT * (W.open.at(-1) ?? 0))} €` : ''}` };
-    c.money.legend = [stLgd(ST.BLU, 'Spesa ads cumulata'), stLgd(ST.VER, `Incassi ${kind} cumulati`),
-      ...(stats.proj ? [stLgd(ST.INK, 'proiezione', '7 6')] : []),
+      cap: `il divario fra investimento e ricavi · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind}${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} · ${per}${stats.proj ? ` · proiezione +${stEuro(rT * (W.open.at(-1) ?? 0))} €` : ''}${taxTxt}` };
+    c.money.legend = [stLgd(ST.BLU, 'Spesa ads cumulata'),
+      ...(stats.proj ? [stLgd(ST.INK, 'proiezione')] : [stLgd(ST.VER, `Incassi ${kind} cumulati`)]),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x) + ' · incassi'))].join('');
   }
   // Prove avviate per data di avvio dentro la finestra, con le offerte pagate in parallelo.
@@ -712,7 +720,7 @@ function stCards(d) {
     const hasOpen = (W.open.at(-1) ?? 0) > 0;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const ti = W.days.findIndex(x => x >= d.meta.oggi);
-    const fval = k => { const s = W.spend[k], p = W.paid[k], o = W.open[k]; return s > 0 ? (p + cs.rate * o) / s : ((p + o === 0) ? 0 : null); };
+    const fval = k => { const s = W.spend[k], p = W.paid[k], o = W.open[k]; return s > 0 ? stAfterTax(p + cs.rate * o, s) / s : ((p + o === 0) ? 0 : null); };
     const finals = W.days.map((dt, k) => fval(k)).filter(v => v != null);
     const fv = finals.at(-1);
     const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
@@ -754,11 +762,17 @@ function stToolbarHtml(d, cs) {
       <button class="st-opt${ids.includes(s.id) ? ' st-sel' : ''}" role="option" aria-selected="${ids.includes(s.id)}" data-st-cmp="${s.id}">
         <span class="st-optdot"></span><span class="st-optl">Sprint ${s.numero}</span><span class="st-optd">${stDM(s.inizio)}–${stDM(s.fine)}</span>
       </button>`).join('');
-  return `<div class="st-bar">
+  const note = stats.gross ? '' : `<span class="st-taxnote"><b>IVA 22% + Google 15%</b> sul prezzo di ogni abbonamento${stats.tax ? '<br><b>IRES 24% + IRAP 3,9%</b> sull’utile: incassi netti meno spesa ads' : ''}</span>`;
+  return `<div class="st-bar${note ? (stats.tax ? ' st-noted st-noted2' : ' st-noted') : ''}">
+      <div class="st-segcol">
       <div class="st-seg" role="group" aria-label="Valore di un abbonamento">
         ${seg(!stats.gross, 'gross', 0, 'Con tasse', `Tolte IVA e commissione di Google: un annuale ci lascia ${stEuro(val.net_year)} €`)}
         ${seg(stats.gross, 'gross', 1, 'Senza tasse', `Senza togliere niente: un annuale vale il prezzo pieno, ${stEuro(val.gross_year)} €`)}
+      </div>${note}
       </div>
+      ${stats.gross ? '' : `<div class="st-seg" role="group" aria-label="Imposte sull’utile">
+        ${seg(stats.tax, 'tax', stats.tax ? 0 : 1, 'IRES + IRAP', 'Stima delle imposte di una società: il 27,9% del guadagno, solo dove gli incassi netti superano la spesa')}
+      </div>`}
       <div class="st-seg" role="group" aria-label="Proiezione col tasso">
         ${seg(stats.proj, 'proj', 1, 'Con proiezione', 'Assi estesi all\u2019ultima scadenza: le prove attive si proiettano col tasso')}
         ${seg(!stats.proj, 'proj', 0, 'Senza proiezione', 'Solo dati veri fino a oggi')}
@@ -926,6 +940,9 @@ function attachStatsEvents() {
   });
   document.querySelectorAll('[data-st-exp]').forEach(b => b.addEventListener('click', ev => {
     ev.stopPropagation(); stats.grpOpen = stats.grpOpen === b.dataset.stExp ? null : b.dataset.stExp; render();
+  }));
+  document.querySelectorAll('[data-st-tax]').forEach(b => b.addEventListener('click', () => {
+    stats.tax = b.dataset.stTax === '1'; stLsSet(ST_LS.tax, stats.tax); render();
   }));
   document.querySelectorAll('[data-st-gross]').forEach(b => b.addEventListener('click', () => {
     stats.gross = b.dataset.stGross === '1'; stLsSet(ST_LS.gross, stats.gross); render();
