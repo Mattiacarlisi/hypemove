@@ -217,6 +217,21 @@ const AICL_ACTIONS = {
   propose_bug_report: 'Ha aperto una segnalazione', send_bug_report: 'Ha aperto una segnalazione',
   propose_operator_contact: 'Ha proposto il contatto con un operatore', confirm_operator_contact: 'Ha proposto il contatto con un operatore',
 };
+// Card in chat: [etichetta, posto]. Il posto replica l'ordine fisso con cui l'app le disegna sotto la risposta
+// (app/src/components/AIChatSheet/AIChatContent.tsx, blocco `cards`, righe ~1893-2060: piano, allenamento, peso, attività, memoria,
+// obiettivo, livello, segnalazione, operatore); a pari posto vale l'ordine delle chiamate.
+const AICL_CARDS = {
+  plan_change: ['Piano cambiato', 1], riscrivi_piano: ['Piano cambiato', 1], modify_plan_workout: ['Piano cambiato', 1],
+  propose_workout: ['Allenamento proposto', 2], create_workout: ['Allenamento creato', 2], crea_allenamento: ['Allenamento creato', 2],
+  save_weight: ['Peso registrato', 3], log_activity: ['Attività registrata', 4],
+  save_coach_note: ['Nota salvata', 8], ricorda: ['Nota salvata', 8],
+  apply_goal_change: ['Obiettivo cambiato', 9], save_training_level: ['Livello salvato', 10],
+  propose_bug_report: ['Segnalazione aperta', 13], send_bug_report: ['Segnalazione aperta', 13],
+  propose_operator_contact: ['Contatto con operatore proposto', 14], confirm_operator_contact: ['Contatto con operatore proposto', 14],
+  riscrivi_allenamento: ['Allenamento cambiato', 20], cambia_esercizi: ['Allenamento cambiato', 20], set_exercise_preference: ['Esercizio segnato', 20],
+  update_daily_state: ['Stato di oggi aggiornato', 20], save_equipment: ['Attrezzatura salvata', 20], registra_pasto: ['Pasto registrato', 20],
+  propose_medical_update: ['Dato di salute proposto', 20],
+};
 const aiclObj = v => {
   if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { return {}; } }
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
@@ -237,7 +252,8 @@ function aiclActions(calls) {
       seen.add(key);
       if (AICL_READS[name]) { if (!reads.includes(AICL_READS[name])) reads.push(AICL_READS[name]); return; }
       const dati = aiclObj(res.dati);
-      const a = { name, label: AICL_ACTIONS[name] || name, extra: '', detail: '', fail: false, why: '' };
+      const cd = AICL_CARDS[name] || [name, 20];
+      const a = { name, card: cd[0], rank: cd[1], label: AICL_ACTIONS[name] || name, extra: '', detail: '', fail: false, why: '' };
       if (name === 'save_coach_note' || name === 'ricorda') {
         a.detail = aiclTxt(args.note || dati.testo);
         if (args.affects_training === true || res.affects_training === true || dati.affects_training === true) a.extra = 'incide sugli allenamenti';
@@ -252,6 +268,20 @@ function aiclActions(calls) {
     });
   });
   return { acts, reads };
+}
+
+// Le card del turno segnalato, nell'ordine in cui l'app le mostra: dopo il testo della risposta, per posto fisso e poi per chiamata.
+function aiclCardsHtml(id) {
+  const d = aicl.detail[id];
+  if (!d || !d.data || !Array.isArray(d.data.calls)) return '';
+  const calls = d.data.calls.map((c, i) => [c, i]).sort((x, y) => String(x[0].created_at || '').localeCompare(String(y[0].created_at || '')) || x[1] - y[1]).map(x => x[0]);
+  const acts = aiclActions(calls).acts.map((a, i) => [a, i]).sort((x, y) => x[0].rank - y[0].rank || x[1] - y[1]).map(x => x[0]);
+  return acts.map(a => {
+    const sub = a.fail ? (a.why || 'Non riuscita') : a.detail;
+    const note = a.fail ? 'non riuscita, l\'utente non ha visto niente' : (a.extra || '');
+    return `<div class="aicl-card${a.fail ? ' aicl-card-bad' : ''}" title="${esc([a.card, sub, note].filter(Boolean).join(': '))}">
+      <span class="aicl-card-lb">${esc(a.card)}</span>${sub ? `<span class="aicl-card-dt">${esc(sub)}</span>` : ''}${note ? `<span class="aicl-card-nt">${esc(note)}</span>` : ''}</div>`;
+  }).join('');
 }
 
 function aiclActionsInner(id) {
@@ -320,12 +350,18 @@ function aiclChatInner(id) {
   const ms = d.data.messages;
   if (!ms.length) return `<div class="aic-chat-msg">Nessun messaggio</div>`;
   const av = `<span class="aic-av">${aicIc('<path d="M11 3l1.9 5.1L18 10l-5.1 1.9L11 17l-1.9-5.1L4 10l5.1-1.9z"/><path d="M19 15v5M16.5 17.5h5"/>', 17, AIC.LB)}</span>`;
-  return `<div class="aic-chat-msgs">${ms.map(m => {
+  // le card del turno segnalato vanno sotto la prima risposta del coach che segue il messaggio segnalato
+  const fi = ms.findIndex(m => m.flagged);
+  let ci = -1;
+  if (fi >= 0) { ci = ms.findIndex((m, i) => i > fi && m.role === 'assistant'); if (ci < 0) ci = fi; }
+  const cards = aiclCardsHtml(id);
+  return `<div class="aic-chat-msgs">${ms.map((m, i) => {
     const flag = m.flagged ? ' aicl-flag' : '';
     const body = esc(m.content);
-    return m.role === 'assistant'
+    const tail = i === ci && cards ? `<div class="aicl-cards">${cards}</div>` : '';
+    return (m.role === 'assistant'
       ? `<div class="aic-m aic-m-c">${av}<div class="aic-bub">${body}</div></div>`
-      : `<div class="aic-m aic-m-u${flag}" ${m.flagged ? 'data-aicl-flagged' : ''}>${m.flagged ? '<span class="aicl-tag">Segnalato</span>' : ''}<div class="aic-bub">${body}</div></div>`;
+      : `<div class="aic-m aic-m-u${flag}" ${m.flagged ? 'data-aicl-flagged' : ''}>${m.flagged ? '<span class="aicl-tag">Segnalato</span>' : ''}<div class="aic-bub">${body}</div></div>`) + tail;
   }).join('')}</div>`;
 }
 

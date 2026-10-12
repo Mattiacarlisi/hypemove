@@ -95,6 +95,14 @@
 .aicl-side { display: flex; flex-direction: column; min-width: 0; }
 .aicl-lab { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6f7683; margin: 4px 0 6px; display: block; }
 .aicl-why { font-size: 14px; font-weight: 800; line-height: 20px; color: #fff; margin-bottom: 14px; overflow-wrap: anywhere; }
+.aicl-cards { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-left: 38px; }
+.aicl-card { display: flex; flex-direction: column; gap: 2px; max-width: 300px; min-width: 0; padding: 10px 14px; border-radius: 12px; background: #14171d; border: 1.5px solid #2a2e37; border-left: 4px solid #4361ee; }
+.aicl-card-lb { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #8da2ff; }
+.aicl-card-dt { font-size: 14px; font-weight: 800; line-height: 20px; color: #fff; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.aicl-card-nt { font-size: 13px; font-weight: 700; line-height: 18px; color: #9ca3af; overflow-wrap: anywhere; }
+.aicl-card-bad { border-color: #f87171; background: rgba(248, 113, 113, .08); }
+.aicl-card-bad .aicl-card-lb, .aicl-card-bad .aicl-card-nt { color: #f87171; }
+.aicl-card-bad .aicl-card-dt { -webkit-line-clamp: 1; }
 .aicl-acts { margin-bottom: 14px; min-width: 0; }
 .aicl-do { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .aicl-do-r { display: flex; gap: 10px; align-items: flex-start; padding: 6px 10px; border-radius: 10px; min-width: 0; }
@@ -151,5 +159,7 @@
   .aicl-panel { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 8px 0 18px; }
   .aicl-chat { height: 280px; }
   .aicl-chat .aic-bub { max-width: 250px; }
+  .aicl-cards { margin-left: 34px; }
+  .aicl-card { max-width: 240px; }
   .aicl-save { width: 100%; }
 }
