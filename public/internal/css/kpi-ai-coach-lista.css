@@ -95,6 +95,21 @@
 .aicl-side { display: flex; flex-direction: column; min-width: 0; }
 .aicl-lab { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6f7683; margin: 4px 0 6px; display: block; }
 .aicl-why { font-size: 14px; font-weight: 800; line-height: 20px; color: #fff; margin-bottom: 14px; overflow-wrap: anywhere; }
+.aicl-rp { margin: -8px 0 0 38px; min-width: 0; }
+.aicl-rp:empty { display: none; }
+.aicl-rp-act { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 28px; }
+.aicl-rp-lnk { min-width: 64px; height: 28px; padding: 0; border: 0; background: none; color: #6f7683; font: inherit; font-size: 13px; font-weight: 800; text-align: left; cursor: pointer; }
+.aicl-rp-lnk:hover { color: #8da2ff; }
+.aicl-rp-lnk.aicl-rp-bad { color: #f87171; }
+.aicl-rp-c { margin: 6px 0 2px; padding: 8px 12px; max-width: 360px; border-left: 3px solid #4361ee; border-radius: 4px 12px 12px 4px; background: #14171d; font-size: 14px; font-weight: 700; line-height: 20px; color: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
+.aicl-rp-ta { display: block; width: 100%; max-width: 360px; min-height: 64px; margin-top: 6px; resize: vertical; padding: 10px 12px; border-radius: 12px; background: #14171d; border: 1.5px solid #2a2e37; color: #fff; font: inherit; font-size: 14px; font-weight: 700; line-height: 20px; box-sizing: border-box; }
+.aicl-rp-ta:focus { border-color: #4361ee; outline: none; }
+.aicl-rp-b { box-sizing: border-box; flex: none; width: 88px; height: 36px; padding: 0; border: 1.5px solid #2a2e37; border-radius: 50px; background: transparent; color: #fff; font-size: 14px; font-weight: 800; cursor: pointer; }
+.aicl-rp-b.aicl-rp-go { background: #4361ee; border-color: #4361ee; }
+.aicl-rp-b:disabled { opacity: .6; cursor: default; }
+.aicl-rp-ms { font-size: 13px; font-weight: 700; line-height: 18px; color: #4ade80; min-width: 0; overflow-wrap: anywhere; }
+.aicl-rp-ms.aicl-rp-err { color: #f87171; }
+.aicl-rp-lnk:focus-visible, .aicl-rp-b:focus-visible, .aicl-rp-ta:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .aicl-cards { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-left: 38px; }
 .aicl-card { display: flex; flex-direction: column; gap: 2px; max-width: 300px; min-width: 0; padding: 10px 14px; border-radius: 12px; background: #14171d; border: 1.5px solid #2a2e37; border-left: 4px solid #4361ee; }
 .aicl-card-lb { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #8da2ff; }
@@ -160,6 +175,8 @@
   .aicl-chat { height: 280px; }
   .aicl-chat .aic-bub { max-width: 250px; }
   .aicl-cards { margin-left: 34px; }
+  .aicl-rp { margin-left: 34px; }
+  .aicl-rp-ta, .aicl-rp-c { max-width: 100%; }
   .aicl-card { max-width: 240px; }
   .aicl-save { width: 100%; }
 }

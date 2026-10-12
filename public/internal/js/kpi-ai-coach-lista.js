@@ -40,6 +40,9 @@ const aicl = {
   detail: {},                                  // id → { data, error, loading }
   draft: {},                                   // id → testo del commento, anche non salvato
   save: {},                                    // id → { st: 'saving'|'saved'|'error', msg }
+  rep: {},                                     // id → { items: {indice messaggio: commento}, general } (dopo il caricamento del dettaglio)
+  ui: {},                                      // id → { indice: { mode, draft, st, msg, confirm } }
+  busy: {},
   seq: 0,
 };
 
@@ -89,6 +92,7 @@ async function aiclLoadDetail(id) {
     const data = await aicRpc('kpi_coach_broken_chat_detail', { p_id: Number(id) });
     if (!data || !Array.isArray(data.messages)) throw new Error('chat non trovata');
     d.data = data;
+    aiclRepInit(id);
   } catch (e) {
     console.error('aiclLoadDetail', e); d.error = aicErrMsg(e);
   }
@@ -305,7 +309,7 @@ function aiclPanelHtml(r) {
   const id = r.id;
   const locked = AICL_LOCKED.includes(r.status);
   const why = r.agent_note || aiclReasons(r.reasons).join('. ') || '—';
-  const text = aicl.draft[id] != null ? aicl.draft[id] : (r.expected || '');
+  const text = aiclGeneral(id);
   return `<div class="aicl-panel"><div class="aicl-chat" id="aicl-chat-${esc(id)}">${aiclChatInner(id)}</div>
     <div class="aicl-side"><div class="aicl-lab">Perché è segnalata</div><div class="aicl-why">${esc(why)}</div>
       <div class="aicl-lab">Cosa ha fatto il coach</div><div class="aicl-acts" id="aicl-acts-${esc(id)}">${aiclActionsInner(id)}</div>
@@ -319,7 +323,7 @@ function aiclSaveState(id) { return (aicl.save[id] && aicl.save[id].st) || 'rest
 function aiclSaveLabel(id) { return { rest: 'Salva commento', saving: 'Salvo…', saved: 'Salvato', error: 'Non salvato' }[aiclSaveState(id)]; }
 function aiclSaveAttrs(id, locked) {
   const st = aiclSaveState(id), r = aiclRow(id);
-  const text = aicl.draft[id] != null ? aicl.draft[id] : (r && r.expected) || '';
+  const text = aiclFullText(id);
   const dis = locked || st === 'saving' || !String(text).trim();
   return `data-st="${st}"${dis ? ' disabled' : ''}`;
 }
@@ -338,6 +342,160 @@ function aiclPaintSave(id) {
   b.dataset.st = aiclSaveState(id);
   b.disabled = aiclSaveAttrs(id, locked).includes('disabled');
   if (m) m.innerHTML = aiclSaveMsg(id, locked, r);
+}
+
+// ── RISPOSTE AI SINGOLI MESSAGGI ──────────────────────────────────────
+// Tutto sta in `expected` (testo semplice): per ogni risposta «<messaggio del coach>» a capo «→ <commento>»,
+// le righe del commento dopo la prima rientrano di due spazi, blocchi separati da una riga vuota, in fondo il commento generale.
+// `coach` = [{ i: indice del messaggio nella chat, c: testo }].
+function aiclComposeExpected(items, general, coach) {
+  const blocks = coach.filter(m => items[m.i] != null && String(items[m.i]).trim())
+    .map(m => `«${m.c}»\n→ ${String(items[m.i]).replace(/\r\n/g, '\n').trim().split('\n').join('\n  ')}`);
+  const g = String(general || '').replace(/\r\n/g, '\n').trim();
+  if (g) blocks.push(g);
+  return blocks.join('\n\n');
+}
+
+// Rilegge `expected`: ciò che non si attacca a un messaggio resta per intero nel commento generale.
+// Accetta anche la forma scritta a mano: "frammento" o «frammento», poi ->, → o virgola e il commento; «…» nel frammento
+// separa pezzi che devono comparire in ordine nel messaggio.
+function aiclParseExpected(text, coach) {
+  text = String(text == null ? '' : text).replace(/\r\n/g, '\n');
+  const items = {}, rest = [], used = new Set();
+  const byLen = [...coach].sort((a, b) => b.c.length - a.c.length);
+  let buf = [], pos = 0;
+  const flush = () => { if (buf.length) { rest.push(buf.join('\n')); buf = []; } };
+  const fuzzy = frag => {
+    const parts = String(frag).split(/…|\.\.\./).map(x => x.trim()).filter(Boolean);
+    if (!parts.length) return null;
+    const lc = c => c.c.toLowerCase();
+    const ok = c => { let at = 0; return parts.every(x => { const k = lc(c).indexOf(x.toLowerCase(), at); if (k < 0) return false; at = k + x.length; return true; }); };
+    return coach.find(c => !used.has(c.i) && ok(c)) || coach.find(ok) || null;
+  };
+  while (pos < text.length) {
+    const tail = text.slice(pos);
+    let hit = null;
+    if (tail[0] === '«') {
+      for (const c of byLen) {
+        const head = `«${c.c}»\n→ `;
+        if (!used.has(c.i) && tail.startsWith(head)) { hit = { c, len: head.length, canon: true }; break; }
+      }
+    }
+    if (!hit) {
+      const m = tail.match(/^(?:"([^"]*)"|«([^»]*)»)\s*(?:->|→|,)[ \t]*/);
+      if (m) { const c = fuzzy(m[1] != null ? m[1] : m[2]); if (c) hit = { c, len: m[0].length, canon: false }; }
+    }
+    let lines = null, end = pos;
+    if (hit) {
+      const body = text.slice(pos + hit.len).split('\n');
+      lines = [body[0]]; let k = 1;
+      while (k < body.length && (hit.canon ? body[k].startsWith('  ') : (body[k].trim() !== '' && body[k][0] !== '«'))) { lines.push(hit.canon ? body[k].slice(2) : body[k]); k++; }
+      if (k < body.length && body[k].trim() === '') k++;
+      end = pos + hit.len + body.slice(0, k).join('\n').length + (k < body.length ? 1 : 0);
+      if (!lines.join('\n').trim()) { hit = null; lines = null; }
+    }
+    if (hit) {
+      const t = lines.join('\n').trim();
+      items[hit.c.i] = items[hit.c.i] != null ? items[hit.c.i] + '\n' + t : t;
+      used.add(hit.c.i); flush(); pos = end;
+    } else {
+      const e = text.indexOf('\n', pos);
+      buf.push(text.slice(pos, e < 0 ? text.length : e));
+      pos = e < 0 ? text.length : e + 1;
+    }
+  }
+  flush();
+  return { items, general: rest.join('\n\n').trim() };
+}
+
+const aiclCoachMsgs = id => {
+  const d = aicl.detail[id];
+  return d && d.data && Array.isArray(d.data.messages) ? d.data.messages.map((m, i) => ({ i, c: String(m.content == null ? '' : m.content), r: m.role })).filter(m => m.r === 'assistant').map(({ i, c }) => ({ i, c })) : [];
+};
+const aiclGeneral = id => {
+  if (aicl.draft[id] != null) return aicl.draft[id];
+  if (aicl.rep[id]) return aicl.rep[id].general;
+  const r = aiclRow(id); return (r && r.expected) || '';
+};
+const aiclFullText = (id, items) => {
+  const rp = aicl.rep[id];
+  return rp ? aiclComposeExpected(items || rp.items, aiclGeneral(id), aiclCoachMsgs(id)) : String(aiclGeneral(id));
+};
+function aiclRepInit(id) {
+  const r = aiclRow(id);
+  const src = aicl.draft[id] != null ? aicl.draft[id] : (r && r.expected) || '';
+  const pr = aiclParseExpected(src, aiclCoachMsgs(id));
+  aicl.rep[id] = { items: pr.items, general: pr.general };
+  if (aicl.draft[id] != null) aicl.draft[id] = pr.general;
+}
+const aiclUi = (id, i) => ((aicl.ui[id] = aicl.ui[id] || {})[i] = aicl.ui[id][i] || {});
+const aiclRepKey = (id, i) => `${id}:${i}`;
+
+function aiclRepInner(id, i) {
+  const rp = aicl.rep[id], r = aiclRow(id);
+  if (!rp || !r || AICL_LOCKED.includes(r.status)) return '';
+  const ui = aiclUi(id, i), k = esc(aiclRepKey(id, i)), txt = rp.items[i];
+  const flash = ui.msg ? `<span class="aicl-rp-ms${ui.err ? ' aicl-rp-err' : ''}" role="status">${esc(ui.msg)}</span>` : '';
+  if (ui.mode === 'edit') {
+    return `<textarea class="aicl-rp-ta" data-aicl-rp-draft="${k}" rows="3" placeholder="Cosa doveva dire?">${esc(ui.draft || '')}</textarea>
+      <div class="aicl-rp-act"><button class="aicl-rp-b aicl-rp-go" data-aicl-rp-save="${k}"${ui.st === 'saving' ? ' disabled' : ''}>${ui.st === 'saving' ? 'Salvo…' : 'Salva'}</button>
+      <button class="aicl-rp-b" data-aicl-rp-cancel="${k}"${ui.st === 'saving' ? ' disabled' : ''}>Annulla</button>${flash}</div>`;
+  }
+  if (txt != null && String(txt).trim()) {
+    return `<div class="aicl-rp-c">${esc(txt)}</div><div class="aicl-rp-act"><button class="aicl-rp-lnk" data-aicl-rp-edit="${k}">Modifica</button>
+      <button class="aicl-rp-lnk${ui.confirm ? ' aicl-rp-bad' : ''}" data-aicl-rp-del="${k}">${ui.confirm ? 'Sicuro?' : 'Elimina'}</button>${flash}</div>`;
+  }
+  return `<div class="aicl-rp-act"><button class="aicl-rp-lnk" data-aicl-rp-open="${k}">Rispondi</button>${flash}</div>`;
+}
+function aiclPaintRep(id, i) {
+  const el = document.getElementById('aicl-rp-' + id + '-' + i);
+  if (el) el.innerHTML = aiclRepInner(id, i);
+}
+function aiclRepNote(id, i, msg, err) {
+  const ui = aiclUi(id, i);
+  ui.msg = msg; ui.err = !!err; clearTimeout(ui.tm);
+  if (!err) ui.tm = setTimeout(() => { ui.msg = ''; aiclPaintRep(id, i); }, 2200);
+  aiclPaintRep(id, i);
+}
+// Scrive `expected` e, solo se il database risponde, aggiorna la memoria. Ritorna true se salvato.
+async function aiclReplyPersist(id, i, items, ui) {
+  if (aicl.busy[id] || aiclSaveState(id) === 'saving') return false;
+  const text = aiclComposeExpected(items, aiclGeneral(id), aiclCoachMsgs(id));
+  if (!text.trim()) { aiclRepNote(id, i, 'Il commento non può restare vuoto', true); return false; }
+  aicl.busy[id] = true; ui.st = 'saving'; aiclPaintRep(id, i);
+  try {
+    await aiclCommit(id, text);
+    aicl.rep[id].items = items;
+    aicl.rep[id].general = aiclGeneral(id); delete aicl.draft[id];
+    ui.st = ''; ui.mode = ''; ui.confirm = false;
+    aicl.busy[id] = false;
+    aiclRepNote(id, i, 'Salvato', false);
+    aiclPaintSave(id);
+    return true;
+  } catch (e) {
+    console.error('aiclReplySave', e);
+    aicl.busy[id] = false; ui.st = '';
+    aiclRepNote(id, i, 'Non salvato: ' + aicErrMsg(e), true);
+    return false;
+  }
+}
+async function aiclRepAction(kind, key) {
+  const c = key.lastIndexOf(':'), id = key.slice(0, c), i = key.slice(c + 1);
+  const rp = aicl.rep[id]; if (!rp) return;
+  const ui = aiclUi(id, i);
+  if (kind === 'open' || kind === 'edit') { ui.mode = 'edit'; ui.draft = rp.items[i] || ''; ui.msg = ''; ui.confirm = false; aiclPaintRep(id, i); const t = document.querySelector(`[data-aicl-rp-draft="${CSS.escape(key)}"]`); if (t) t.focus(); }
+  else if (kind === 'cancel') { ui.mode = ''; ui.msg = ''; aiclPaintRep(id, i); }
+  else if (kind === 'save') {
+    const t = String(ui.draft || '').trim();
+    if (!t) { aiclRepNote(id, i, 'Scrivi un commento', true); return; }
+    await aiclReplyPersist(id, i, { ...rp.items, [i]: t }, ui);
+  } else if (kind === 'del') {
+    if (!ui.confirm) { ui.confirm = true; aiclPaintRep(id, i); clearTimeout(ui.ctm); ui.ctm = setTimeout(() => { ui.confirm = false; aiclPaintRep(id, i); }, 4000); return; }
+    clearTimeout(ui.ctm);
+    const next = { ...rp.items }; delete next[i];
+    ui.confirm = false;
+    await aiclReplyPersist(id, i, next, ui);
+  }
 }
 
 function aiclChatInner(id) {
@@ -360,7 +518,7 @@ function aiclChatInner(id) {
     const body = esc(m.content);
     const tail = i === ci && cards ? `<div class="aicl-cards">${cards}</div>` : '';
     return (m.role === 'assistant'
-      ? `<div class="aic-m aic-m-c">${av}<div class="aic-bub">${body}</div></div>`
+      ? `<div class="aic-m aic-m-c">${av}<div class="aic-bub">${body}</div></div><div class="aicl-rp" id="aicl-rp-${esc(id)}-${i}">${aiclRepInner(id, i)}</div>`
       : `<div class="aic-m aic-m-u${flag}" ${m.flagged ? 'data-aicl-flagged' : ''}>${m.flagged ? '<span class="aicl-tag">Segnalato</span>' : ''}<div class="aic-bub">${body}</div></div>`) + tail;
   }).join('')}</div>`;
 }
@@ -370,6 +528,8 @@ function aiclPaintChat(id) {
   const box = document.getElementById('aicl-chat-' + id);
   if (!box) return;
   box.innerHTML = aiclChatInner(id);
+  const gt = document.getElementById('aicl-ta-' + id);
+  if (gt && aicl.draft[id] == null && aicl.rep[id]) gt.value = aicl.rep[id].general;
   const ac = document.getElementById('aicl-acts-' + id);
   if (ac) ac.innerHTML = aiclActionsInner(id);
   const f = box.querySelector('[data-aicl-flagged]');
@@ -408,26 +568,32 @@ function aiclRepaintList() {
   if (f && box) box.scrollTop = Math.max(0, f.offsetTop - (box.clientHeight - f.offsetHeight) / 2);
 }
 
+// Scrive `expected` con la RPC di commento e aggiorna la riga solo con ciò che il database ha risposto.
+async function aiclCommit(id, text) {
+  const r = aiclRow(id);
+  const row = await aicRpc('kpi_coach_broken_chat_comment', { p_id: Number(id), p_expected: text });
+  if (row && typeof row === 'object') Object.assign(r, { status: row.status, expected: row.expected, commented_at: row.commented_at });
+  aiclRepaintRow(id);
+  aiclReloadQuiet();
+}
+
 async function aiclSaveNow(id) {
   const r = aiclRow(id);
-  if (!r || aiclSaveState(id) === 'saving') return;
-  const text = String(aicl.draft[id] != null ? aicl.draft[id] : r.expected || '').trim();
+  if (!r || aiclSaveState(id) === 'saving' || aicl.busy[id]) return;
+  const text = aiclFullText(id).trim();
   if (!text) return;
+  const general = aiclGeneral(id);
   aicl.save[id] = { st: 'saving' };
   aiclPaintSave(id);
   try {
-    const row = await aicRpc('kpi_coach_broken_chat_comment', { p_id: Number(id), p_expected: text });
-    // aggiorna la riga solo con ciò che il database ha risposto
-    if (row && typeof row === 'object') Object.assign(r, { status: row.status, expected: row.expected, commented_at: row.commented_at });
-    // chi ha commentato: il nome dell'operatore non torna dalla RPC; si ricarica l'elenco in sordina per averlo
+    await aiclCommit(id, text);
+    if (aicl.rep[id]) aicl.rep[id].general = String(general).trim();
     delete aicl.draft[id];
     aicl.save[id] = { st: 'saved' };
-    aiclRepaintRow(id);
     aiclPaintSave(id);
-    aiclReloadQuiet();
   } catch (e) {
     console.error('aiclSave', e);
-    aicl.draft[id] = text;   // il commento non si perde
+    aicl.draft[id] = general;   // il commento non si perde
     aicl.save[id] = { st: 'error', msg: aicErrMsg(e) };
     aiclPaintSave(id);
   }
@@ -473,6 +639,10 @@ function aiclOnClick(ev) {
     return true;
   }
   if (q('[data-aicl-more]')) { aicl.more = true; aiclRepaintList(); if (aicl.open != null) aiclPaintChat(aicl.open); return true; }
+  for (const k of ['open', 'edit', 'cancel', 'save', 'del']) {
+    const b = q(`[data-aicl-rp-${k}]`);
+    if (b) { aiclRepAction(k, b.dataset['aiclRp' + k[0].toUpperCase() + k.slice(1)]); return true; }
+  }
   const sv = q('[data-aicl-save]');
   if (sv) { aiclSaveNow(sv.dataset.aiclSave); return true; }
   const rt = q('[data-aic-retry]');
@@ -483,6 +653,11 @@ function aiclOnClick(ev) {
 
 function aiclOnInput(ev) {
   const ta = ev.target;
+  if (ta && ta.dataset && ta.dataset.aiclRpDraft != null) {
+    const key = ta.dataset.aiclRpDraft, c = key.lastIndexOf(':');
+    aiclUi(key.slice(0, c), key.slice(c + 1)).draft = ta.value;
+    return true;
+  }
   if (!ta || !ta.dataset || ta.dataset.aiclDraft == null) return false;
   const id = ta.dataset.aiclDraft;
   aicl.draft[id] = ta.value;
