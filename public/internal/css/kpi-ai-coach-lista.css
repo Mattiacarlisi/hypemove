@@ -62,6 +62,27 @@
 /* ── Chat da correggere ───────────────────────────────────── */
 .aicl-lista { margin-bottom: 32px; padding-bottom: 6px; }
 .aicl-lh { padding: 22px 24px 8px; }
+.aicl-sec { margin-bottom: 8px; }
+.aicl-sh { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 24px; min-height: 48px; }
+.aicl-sht { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; height: 40px; padding: 0; border: 0; background: none; color: #fff; font: inherit; cursor: pointer; text-align: left; }
+.aicl-sht .aic-ico { flex: none; color: #9ca3af; transform: rotate(-90deg); transition: transform .15s; }
+.aicl-sec-open .aicl-sht .aic-ico { transform: none; }
+.aicl-stt { font-size: 17px; font-weight: 800; line-height: 22px; }
+.aicl-cnt { min-width: 28px; padding: 0 8px; height: 22px; border-radius: 11px; background: #262d45; font-size: 13px; font-weight: 800; line-height: 22px; text-align: center; color: #8da2ff; box-sizing: border-box; }
+.aicl-big { flex: none; width: 40px; height: 40px; padding: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: #9ca3af; cursor: pointer; }
+.aicl-big:hover, .aicl-big[aria-pressed="true"] { color: #fff; background: #20242d; }
+.aicl-send { box-sizing: border-box; flex: none; width: 96px; height: 40px; padding: 0; border: 0; border-radius: 50px; background: #4361ee; color: #fff; font-size: 15px; font-weight: 800; cursor: pointer; box-shadow: 0 3px 0 #050608; }
+.aicl-send:disabled { opacity: .45; cursor: default; }
+.aicl-sendn { font-size: 12px; font-weight: 700; color: #9ca3af; white-space: nowrap; }
+.aicl-sendm { font-size: 13px; font-weight: 800; color: #4ade80; overflow-wrap: anywhere; min-width: 0; }
+.aicl-sendm-err { color: #f87171; }
+.aicl-sht:focus-visible, .aicl-big:focus-visible, .aicl-send:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.aicl-sec:not(.aicl-sec-open) .aicl-sb, .aicl-sec:not(.aicl-sec-open) .aicl-th { display: none; }
+.aicl-sb { max-height: 60vh; overflow-y: auto; overflow-x: hidden; padding: 0 8px; scrollbar-color: #3a3f4a transparent; }
+.aicl-sec-big .aicl-sb { max-height: calc(100vh - 150px); }
+.aicl-sec-empty { padding: 4px 16px 14px; font-size: 14px; font-weight: 700; color: #6f7683; }
+.aicl-jn { display: block; margin-top: 4px; font-size: 13px; font-weight: 700; line-height: 18px; color: #fb8b04; overflow-wrap: anywhere; }
+.aicl-fx { display: block; margin-top: 4px; font-size: 12px; font-weight: 700; line-height: 16px; color: #6f7683; overflow-wrap: anywhere; }
 .aicl-th, .aicl-lr { display: grid; grid-template-columns: minmax(0, 250px) minmax(0, 1.5fr) minmax(0, 1fr) 150px; column-gap: 20px; }
 .aicl-th { margin: 0 24px; padding: 8px 16px 8px; border-bottom: 1.5px solid #2a2e37; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #6f7683; }
 .aicl-body { padding: 0 8px; }
@@ -79,11 +100,14 @@
 .aicl-c3 { color: #fff; font-weight: 800; }
 .aicl-c2.aicl-none { color: #6f7683; }
 .aicl-c4 { padding-top: 1px; }
-.aicl-st { display: inline-flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; }
-.aicl-st i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.aicl-st { display: inline-flex; align-items: flex-start; gap: 10px; font-size: 14px; font-weight: 800; line-height: 18px; color: #fff; }
+.aicl-st i { width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; flex: none; }
 .aicl-st-open i { background: #f87171; }
 .aicl-st-amb i { background: #fb8b04; }
 .aicl-st-done i { background: #8da2ff; }
+.aicl-st-q i { background: #fb8b04; }
+.aicl-st-fix i { background: #4361ee; }
+.aicl-st-ok i { background: #4ade80; }
 
 .aicl-panel { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px; padding: 14px 8px 22px; }
 .aicl-chat { height: 300px; overflow: auto; padding: 8px 10px 8px 4px; border-right: 3px solid #2a2e37; border-radius: 4px; scrollbar-color: #3a3f4a transparent; position: relative; }
@@ -165,6 +189,9 @@
   .aicl-cy .aicl-nm { white-space: normal; }
   .aicl-lh { padding: 18px 16px 8px; }
   .aicl-th { display: none; }
+  .aicl-sh { padding: 4px 12px; gap: 8px; }
+  .aicl-sb { max-height: 60vh; }
+  .aicl-c4 { max-width: 150px; }
   .aicl-body { padding: 0 4px; }
   .aicl-item { margin: 0 8px; }
   .aicl-lr { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; margin: 0 -8px; width: calc(100% + 16px); padding: 12px 8px; }

@@ -10,13 +10,32 @@
 // non sta nella lista.
 const AICL_STATUS = {
   open:      ['open', 'da commentare'],
-  ambiguous: ['amb',  'ambigua'],
-  failed:    ['amb',  'ambigua'],
+  ambiguous: ['amb',  'ambigua: riscrivi il commento'],
+  failed:    ['amb',  'non riuscita'],
   commented: ['done', 'commentata'],
-  fixing:    ['done', 'commentata'],
+  queued:    ['q',    'in coda'],
+  fixing:    ['fix',  'in lavorazione'],
+  closed:    ['ok',   'corretta'],
 };
+// Le quattro sezioni, nell'ordine in cui si mostrano. `queued` si può ricommentare (esce dalla coda), `fixing` e `closed` no.
+const AICL_SECS = [
+  { k: 'todo',   title: 'Da commentare', states: ['open', 'ambiguous', 'failed'], empty: 'Nessuna chat da commentare.', open: true },
+  { k: 'done',   title: 'Commentato',    states: ['commented'],                   empty: 'Nessuna chat commentata.',    open: true },
+  { k: 'queue',  title: 'Da correggere', states: ['queued', 'fixing'],            empty: 'Nessuna chat da correggere.', open: false },
+  { k: 'closed', title: 'Corretto',      states: ['closed'],                      empty: 'Nessuna chat corretta.',      open: false },
+];
+const AICL_LS = 'aicl-sezioni';
+function aiclSecLoad() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(AICL_LS) || '{}') || {}; } catch (e) { saved = {}; }
+  const o = {};
+  AICL_SECS.forEach(x => { o[x.k] = { open: typeof saved[x.k] === 'boolean' ? saved[x.k] : x.open, big: false }; });
+  return o;
+}
+function aiclSecSave() {
+  try { localStorage.setItem(AICL_LS, JSON.stringify(Object.fromEntries(AICL_SECS.map(x => [x.k, !!aicl.sec[x.k].open])))); } catch (e) { /* senza memoria resta com'è */ }
+}
 const AICL_TO_COMMENT = ['open', 'ambiguous', 'failed'];   // gli stati che pesano nel conteggio «da commentare»
-const AICL_HIDDEN = ['closed'];
 const AICL_LOCKED = ['fixing', 'closed'];                   // gli stati che la RPC di commento rifiuta
 
 // Codici di `reasons` → frase breve. Se manca la frase si mostra il codice.
@@ -31,7 +50,6 @@ const AICL_REASONS = {
 };
 const aiclReasons = r => (Array.isArray(r) ? r : []).map(c => AICL_REASONS[c] || String(c));
 
-const AICL_ROWS = 4;      // righe mostrate prima di «Altre N»
 const AICL_DAYS = 14;
 
 const aicl = {
@@ -40,6 +58,8 @@ const aicl = {
   detail: {},                                  // id → { data, error, loading }
   draft: {},                                   // id → testo del commento, anche non salvato
   save: {},                                    // id → { st: 'saving'|'saved'|'error', msg }
+  sec: null,                                   // k → { open, big }
+  send: { st: '', msg: '', err: false },
   rep: {},                                     // id → { items: {indice messaggio: commento}, general } (dopo il caricamento del dettaglio)
   ui: {},                                      // id → { indice: { mode, draft, st, msg, confirm } }
   busy: {},
@@ -56,7 +76,7 @@ function aiclWhen(ts) {
   return `${p.day}/${p.month} ${p.hour === '24' ? '00' : p.hour}:${p.minute}`;
 }
 const aiclDay = ts => { const d = new Date(ts); return isNaN(d) ? null : romeDay(d); };
-const aiclRows = () => (aicl.data || []).filter(r => !AICL_HIDDEN.includes(r.status));
+const aiclRows = () => aicl.data || [];
 const aiclToComment = () => aiclRows().filter(r => AICL_TO_COMMENT.includes(r.status)).length;
 const aiclRow = id => (aicl.data || []).find(r => String(r.id) === String(id));
 
@@ -194,8 +214,8 @@ function aiclRowHtml(r) {
   const head = `<button class="aicl-lr${open ? ' aicl-lr-on' : ''}" data-aicl-open="${esc(r.id)}" aria-expanded="${open}">
     <span class="aicl-c1"><span class="aicl-who">${msg}</span><span class="aicl-sub">Utente ${esc(aiclShort(r.user_id))} · ${esc(scr)} · ${esc(aiclWhen(r.message_at || r.found_at))}</span></span>
     <span class="aicl-c2${r.coach_reply ? '' : ' aicl-none'}">${esc(r.coach_reply || 'Nessuna risposta')}</span>
-    <span class="aicl-c3">${esc(why)}</span>
-    <span class="aicl-c4">${aiclStatus(r.status)}</span></button>`;
+    <span class="aicl-c3">${esc(why)}${(r.status === 'ambiguous' || r.status === 'failed') && r.judge_note ? `<span class="aicl-jn" title="${esc(r.judge_note)}">${esc(r.judge_note)}</span>` : ''}</span>
+    <span class="aicl-c4">${aiclStatus(r.status)}${r.status === 'closed' && (r.fix_commit || r.closed_at) ? `<span class="aicl-fx">${esc([r.fix_commit ? 'commit ' + String(r.fix_commit).slice(0, 8) : '', r.closed_at ? aiclWhen(r.closed_at) : ''].filter(Boolean).join(' · '))}</span>` : ''}</span></button>`;
   return `<div class="aicl-item">${head}${open ? aiclPanelHtml(r) : ''}</div>`;
 }
 
@@ -331,6 +351,7 @@ function aiclSaveMsg(id, locked, r) {
   const s = aicl.save[id];
   if (s && s.st === 'error') return esc(s.msg || 'Errore');
   if (locked) return 'In correzione o chiusa: non si commenta.';
+  if (r && r.status === 'queued') return 'In coda: se commenti di nuovo, esce dalla coda e torna a «Commentato».';
   if (s && s.st === 'saved') return r && r.commented_by ? `Commento di ${esc(r.commented_by)}` : '';
   return r && r.commented_at && r.commented_by ? `Commentata da ${esc(r.commented_by)} il ${esc(aiclWhen(r.commented_at))}` : '';
 }
@@ -536,36 +557,76 @@ function aiclPaintChat(id) {
   if (f) box.scrollTop = Math.max(0, f.offsetTop - (box.clientHeight - f.offsetHeight) / 2);
 }
 
+const aiclSecRows = sec => {
+  const rows = aiclRows().filter(r => sec.states.includes(r.status));
+  return sec.k === 'todo' ? [...rows.filter(r => r.status !== 'open'), ...rows.filter(r => r.status === 'open')] : rows;
+};
+
+function aiclSendCount() { return aiclRows().filter(r => r.status === 'commented').length; }
+
+function aiclHeadHtml(sec) {
+  const st = aicl.sec[sec.k], n = aiclSecRows(sec).length;
+  let extra = '';
+  if (sec.k === 'done') {
+    const c = aiclSendCount(), sd = aicl.send;
+    extra = `${sd.msg ? `<span class="aicl-sendm${sd.err ? ' aicl-sendm-err' : ''}" role="status">${esc(sd.msg)}</span>` : ''}
+      <span class="aicl-sendn">${c} chat</span><button class="aicl-send" data-aicl-send${!c || sd.st === 'saving' ? ' disabled' : ''}>${sd.st === 'saving' ? 'Invio…' : 'Invia'}</button>`;
+  }
+  const bigIc = st.big
+    ? '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'
+    : '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>';
+  return `<button class="aicl-sht" data-aicl-sec="${sec.k}" aria-expanded="${!!st.open}">${aicIc(AIC_CHD, 18, 'currentColor')}<span class="aicl-stt">${esc(sec.title)}</span><span class="aicl-cnt">${n}</span></button>
+    ${extra}<button class="aicl-big" data-aicl-big="${sec.k}" aria-pressed="${!!st.big}" title="${st.big ? 'Riduci' : 'Ingrandisci'}" aria-label="${st.big ? 'Riduci' : 'Ingrandisci'} la sezione ${esc(sec.title)}">${aicIc(bigIc, 18, 'currentColor')}</button>`;
+}
+
+function aiclSecHtml(sec) {
+  const st = aicl.sec[sec.k], rows = aiclSecRows(sec);
+  return `<section class="aicl-sec${st.open ? ' aicl-sec-open' : ''}${st.big ? ' aicl-sec-big' : ''}" data-sec="${sec.k}">
+    <div class="aicl-sh" id="aicl-sh-${sec.k}">${aiclHeadHtml(sec)}</div>
+    ${rows.length ? `<div class="aicl-th" aria-hidden="true"><span>Chat</span><span>Il coach ha fatto</span><span>Perché</span><span>Stato</span></div>` : ''}
+    <div class="aicl-sb" data-sec="${sec.k}">${rows.length ? rows.map(aiclRowHtml).join('') : `<div class="aicl-sec-empty">${esc(sec.empty)}</div>`}</div></section>`;
+}
+
 function aiclListInner() {
   if (aicl.error) return aicError(aicl.error, 'aicl');
   if (!aicl.data) {
-    return [0, 1, 2, 3].map(() => `<div class="aicl-item"><div class="aicl-lr" style="cursor:default"><span class="aicl-c1"><i class="aic-sk" style="display:block;width:90px;height:16px"></i><i class="aic-sk" style="display:block;width:150px;height:12px;margin-top:8px"></i></span>
-      <span class="aicl-c2"><i class="aic-sk" style="display:block;width:80%;height:12px"></i></span><span class="aicl-c3"><i class="aic-sk" style="display:block;width:70%;height:12px"></i></span><span class="aicl-c4"><i class="aic-sk" style="display:block;width:90px;height:12px"></i></span></div></div>`).join('');
+    return `<div class="aicl-body">${[0, 1, 2, 3].map(() => `<div class="aicl-item"><div class="aicl-lr" style="cursor:default"><span class="aicl-c1"><i class="aic-sk" style="display:block;width:90px;height:16px"></i><i class="aic-sk" style="display:block;width:150px;height:12px;margin-top:8px"></i></span>
+      <span class="aicl-c2"><i class="aic-sk" style="display:block;width:80%;height:12px"></i></span><span class="aicl-c3"><i class="aic-sk" style="display:block;width:70%;height:12px"></i></span><span class="aicl-c4"><i class="aic-sk" style="display:block;width:90px;height:12px"></i></span></div></div>`).join('')}</div>`;
   }
-  const all = aiclRows();
-  if (!all.length) return `<div class="aic-empty">Nessuna chat da correggere</div>`;
-  // la riga aperta resta visibile anche se cade oltre le prime
-  let shown = aicl.more ? all : all.slice(0, AICL_ROWS);
-  const op = all.find(r => String(r.id) === String(aicl.open));
-  if (op && !shown.includes(op)) shown = [...shown, op];
-  const rest = all.length - shown.length;
-  return shown.map(aiclRowHtml).join('') + (rest > 0 ? `<button class="aic-more" data-aicl-more>Altre ${rest}${aicIc(AIC_CHD, 18, AIC.SEC)}</button>` : '');
+  if (!aicl.sec) aicl.sec = aiclSecLoad();
+  return AICL_SECS.map(aiclSecHtml).join('');
 }
 
 function aicListaHtml() {
   if (!aicl.show) return '';
+  if (!aicl.sec) aicl.sec = aiclSecLoad();
   return `<div class="aic-card aicl-lista" id="aicl-card"><div class="aicl-lh"><h2 class="aic-h2">Chat da correggere</h2></div>
-    <div class="aicl-th" aria-hidden="true"><span>Chat</span><span>Il coach ha fatto</span><span>Perché</span><span>Stato</span></div>
-    <div class="aicl-body">${aiclListInner()}</div></div>`;
+    <div class="aicl-secs">${aiclListInner()}</div></div>`;
 }
 
 // ── eventi ────────────────────────────────────────────────────────────
+// Ridisegna le sezioni senza perdere la posizione di scorrimento di ognuna né quella della chat aperta.
 function aiclRepaintList() {
-  const el = document.querySelector('#aic-lista .aicl-body');
-  if (el) el.innerHTML = aiclListInner();
-  const f = document.querySelector('#aic-lista [data-aicl-flagged]');
-  const box = f && f.closest('.aicl-chat');
-  if (f && box) box.scrollTop = Math.max(0, f.offsetTop - (box.clientHeight - f.offsetHeight) / 2);
+  const host = document.querySelector('#aic-lista .aicl-secs');
+  if (!host) return;
+  if (aicl.sec && aicl.open != null) {
+    const r = aiclRow(aicl.open), sec = r && AICL_SECS.find(x => x.states.includes(r.status));
+    if (sec && !aicl.sec[sec.k].open) { aicl.sec[sec.k].open = true; aiclSecSave(); }   // la chat aperta non sparisce in una sezione chiusa
+  }
+  const tops = {};
+  host.querySelectorAll('.aicl-sb').forEach(b => { tops[b.dataset.sec] = b.scrollTop; });
+  const old = aicl.open != null ? document.getElementById('aicl-chat-' + aicl.open) : null, ct = old ? old.scrollTop : null;
+  host.innerHTML = aiclListInner();
+  host.querySelectorAll('.aicl-sb').forEach(b => { if (tops[b.dataset.sec]) b.scrollTop = tops[b.dataset.sec]; });
+  if (aicl.open != null && aicl.detail[aicl.open]) {
+    aiclPaintChat(aicl.open);
+    const box = document.getElementById('aicl-chat-' + aicl.open);
+    if (box && ct != null) box.scrollTop = ct;
+  }
+}
+function aiclPaintHeads() {
+  if (!aicl.sec) return;
+  AICL_SECS.forEach(sec => { const el = document.getElementById('aicl-sh-' + sec.k); if (el) el.innerHTML = aiclHeadHtml(sec); });
 }
 
 // Scrive `expected` con la RPC di commento e aggiorna la riga solo con ciò che il database ha risposto.
@@ -599,29 +660,43 @@ async function aiclSaveNow(id) {
   }
 }
 
-// Ricarica l'elenco senza sagome e senza toccare la riga aperta (il campo di testo resta com'è).
+// Ricarica l'elenco senza sagome: le chat cambiano sezione, la riga aperta resta aperta.
 async function aiclReloadQuiet() {
   try {
     const data = await aicRpc('kpi_coach_broken_chats');
     if (Array.isArray(data)) {
       aicl.data = data;
       aicRefresh('bench');
-      const ids = aicl.open != null ? aicl.open : null;
-      document.querySelectorAll('#aic-lista .aicl-lr').forEach(b => {
-        const r = aiclRow(b.dataset.aiclOpen); if (!r) return;
-        const st = b.querySelector('.aicl-c4'); if (st) st.innerHTML = aiclStatus(r.status);
-      });
-      if (ids != null) aiclPaintSave(ids);
+      aiclRepaintList();
+      if (aicl.open != null) aiclPaintSave(aicl.open);
     }
   } catch (e) { console.error('aiclReloadQuiet', e); }
 }
 
-// Aggiorna la sola colonna Stato della riga e il conteggio nella riga del ciclo.
+// Dopo un salvataggio la chat può cambiare sezione: si ridisegna e si aggiorna il conteggio nella riga del ciclo.
 function aiclRepaintRow(id) {
-  const r = aiclRow(id); if (!r) return;
-  const b = document.querySelector(`#aic-lista [data-aicl-open="${CSS.escape(String(id))}"]`);
-  const st = b && b.querySelector('.aicl-c4'); if (st) st.innerHTML = aiclStatus(r.status);
+  if (!aiclRow(id)) return;
   aicRefresh('bench');
+  aiclRepaintList();
+}
+
+// «Invia»: porta tutte le chat commentate in coda per Hermes.
+async function aiclSend() {
+  if (aicl.send.st === 'saving' || !aiclSendCount()) return;
+  aicl.send = { st: 'saving', msg: '', err: false };
+  aiclPaintHeads();
+  try {
+    const n = Number(await aicRpc('kpi_coach_broken_chats_send'));
+    await aiclReloadQuiet();
+    aicl.send = { st: 'done', msg: `Inviate ${Number.isFinite(n) ? n : ''}`.trim(), err: false };
+    aiclPaintHeads();
+    clearTimeout(aicl.sendTm);
+    aicl.sendTm = setTimeout(() => { aicl.send = { st: '', msg: '', err: false }; aiclPaintHeads(); }, 3500);
+  } catch (e) {
+    console.error('aiclSend', e);
+    aicl.send = { st: 'err', msg: 'Non inviate: ' + aicErrMsg(e), err: true };
+    aiclPaintHeads();
+  }
 }
 
 // Ritorna true se il clic è suo.
@@ -638,7 +713,23 @@ function aiclOnClick(ev) {
     if (aicl.open != null) aiclPaintChat(aicl.open);
     return true;
   }
-  if (q('[data-aicl-more]')) { aicl.more = true; aiclRepaintList(); if (aicl.open != null) aiclPaintChat(aicl.open); return true; }
+  const sh = q('[data-aicl-sec]');
+  if (sh) {
+    const k = sh.dataset.aiclSec; aicl.sec[k].open = !aicl.sec[k].open; aiclSecSave();
+    const el = document.querySelector(`#aic-lista .aicl-sec[data-sec="${k}"]`);
+    if (el) el.classList.toggle('aicl-sec-open', aicl.sec[k].open);
+    aiclPaintHeads(); return true;
+  }
+  const bg = q('[data-aicl-big]');
+  if (bg) {
+    const k = bg.dataset.aiclBig, st = aicl.sec[k];
+    st.big = !st.big;
+    if (st.big && !st.open) { st.open = true; aiclSecSave(); }
+    const el = document.querySelector(`#aic-lista .aicl-sec[data-sec="${k}"]`);
+    if (el) { el.classList.toggle('aicl-sec-big', st.big); el.classList.toggle('aicl-sec-open', st.open); if (st.big && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' }); }
+    aiclPaintHeads(); return true;
+  }
+  if (q('[data-aicl-send]')) { aiclSend(); return true; }
   for (const k of ['open', 'edit', 'cancel', 'save', 'del']) {
     const b = q(`[data-aicl-rp-${k}]`);
     if (b) { aiclRepAction(k, b.dataset['aiclRp' + k[0].toUpperCase() + k.slice(1)]); return true; }
