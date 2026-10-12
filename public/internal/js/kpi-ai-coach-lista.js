@@ -195,6 +195,82 @@ function aiclRowHtml(r) {
   return `<div class="aicl-item">${head}${open ? aiclPanelHtml(r) : ''}</div>`;
 }
 
+// ── COSA HA FATTO IL COACH ────────────────────────────────────────────
+// Dalle `calls` della RPC di dettaglio: azioni vere (con esito), letture (attenuate), passaggi interni (ignorati).
+const AICL_INTERNAL = ['router_call', 'routing_contract', 'coach_flow', 'honesty_judge_call', 'honesty_guard', 'workout_validator_rejects', 'plan_adapt', 'module_plan', 'qa', 'commit_premium_nodes_batch'];
+const AICL_READS = {
+  get_exercises: 'esercizi', get_workout_details: 'dettaglio allenamento', get_roadmap_progress: 'avanzamento del percorso', get_user_pt_context: 'contesto del coach',
+  get_user_profile: 'profilo', get_nutrition_log: 'diario alimentare', get_user_workouts: 'allenamenti', web_search: 'ricerca web',
+};
+const AICL_ACTIONS = {
+  save_coach_note: 'Ha salvato una nota', ricorda: 'Ha salvato una nota',
+  create_workout: 'Ha creato un allenamento', crea_allenamento: 'Ha creato un allenamento',
+  propose_workout: 'Ha proposto un allenamento',
+  plan_change: 'Ha cambiato il piano', riscrivi_piano: 'Ha cambiato il piano', modify_plan_workout: 'Ha cambiato il piano',
+  riscrivi_allenamento: 'Ha cambiato l\'allenamento', cambia_esercizi: 'Ha cambiato l\'allenamento',
+  set_exercise_preference: 'Ha segnato un esercizio',
+  update_daily_state: 'Ha aggiornato lo stato di oggi',
+  apply_goal_change: 'Ha cambiato l\'obiettivo',
+  save_equipment: 'Ha salvato l\'attrezzatura', save_training_level: 'Ha salvato il livello', save_weight: 'Ha registrato il peso',
+  log_activity: 'Ha registrato un\'attività', registra_pasto: 'Ha registrato un pasto',
+  propose_medical_update: 'Ha proposto un dato di salute',
+  propose_bug_report: 'Ha aperto una segnalazione', send_bug_report: 'Ha aperto una segnalazione',
+  propose_operator_contact: 'Ha proposto il contatto con un operatore', confirm_operator_contact: 'Ha proposto il contatto con un operatore',
+};
+const aiclObj = v => {
+  if (typeof v === 'string') { try { v = JSON.parse(v); } catch (e) { return {}; } }
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+};
+const aiclTxt = v => (v == null || v === '' ? '' : typeof v === 'string' ? v : JSON.stringify(v));
+
+// Una voce per azione vera: { label, extra, detail, fail, why, name }.
+function aiclActions(calls) {
+  const acts = [], reads = [], seen = new Set();
+  (Array.isArray(calls) ? calls : []).forEach(c => {
+    const list = Array.isArray(c && c.tool_calls) ? c.tool_calls : [];
+    list.forEach(t => {
+      const name = String((t && t.name) || '');
+      if (!name || AICL_INTERNAL.includes(name)) return;
+      const args = aiclObj(t.args), res = aiclObj(t.result);
+      const key = name + '|' + JSON.stringify(t.args == null ? null : t.args);
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (AICL_READS[name]) { if (!reads.includes(AICL_READS[name])) reads.push(AICL_READS[name]); return; }
+      const dati = aiclObj(res.dati);
+      const a = { name, label: AICL_ACTIONS[name] || name, extra: '', detail: '', fail: false, why: '' };
+      if (name === 'save_coach_note' || name === 'ricorda') {
+        a.detail = aiclTxt(args.note || dati.testo);
+        if (args.affects_training === true || res.affects_training === true || dati.affects_training === true) a.extra = 'incide sugli allenamenti';
+      } else if (name === 'create_workout' || name === 'crea_allenamento') a.detail = aiclTxt(res.name || dati.nome);
+      else if (name === 'propose_workout') a.detail = aiclTxt(aiclObj(res.card_payload).name);
+      else if (name === 'set_exercise_preference') a.detail = aiclTxt(res.exercise_name);
+      const callErr = c && c.error != null && c.error !== '' ? aiclTxt(c.error) : '';
+      if (res.error != null && res.error !== '' && res.error !== false) { a.fail = true; a.why = aiclTxt(res.error); }
+      else if (res.fatto === false) { a.fail = true; a.why = aiclTxt(res.motivo || res.dettaglio); }
+      else if (callErr) { a.fail = true; a.why = callErr; }
+      acts.push(a);
+    });
+  });
+  return { acts, reads };
+}
+
+function aiclActionsInner(id) {
+  const d = aicl.detail[id];
+  if (!d || d.loading) return `<i class="aic-sk" style="display:block;width:70%;height:14px"></i>`;
+  if (d.error) return `<div class="aicl-do-none">Non disponibile.</div>`;
+  const calls = d.data && d.data.calls;
+  if (!Array.isArray(calls) || !calls.length) return `<div class="aicl-do-none">Nessuna chiamata registrata per questo turno.</div>`;
+  const { acts, reads } = aiclActions(calls);
+  const rows = acts.length ? `<ul class="aicl-do">${acts.map(a => {
+    const sub = a.fail ? (a.why || 'Non riuscita') : a.detail;
+    const lab = a.label + (a.extra ? ' · ' + a.extra : '') + (a.fail ? ' · non riuscita' : '');
+    const full = [lab, sub].filter(Boolean).join(': ');
+    return `<li class="aicl-do-r${a.fail ? ' aicl-do-bad' : ''}" title="${esc(full)}"><span class="aicl-do-mk" aria-hidden="true">${a.fail ? '✕' : '✓'}</span>
+      <span class="aicl-do-bd"><span class="aicl-do-lb">${esc(lab)}</span>${sub ? `<span class="aicl-do-dt">${esc(sub)}</span>` : ''}</span></li>`;
+  }).join('')}</ul>` : `<div class="aicl-do-none">Nessuna azione: ha solo risposto.</div>`;
+  return rows + (reads.length ? `<div class="aicl-do-rd">Ha guardato: ${esc(reads.join(', '))}</div>` : '');
+}
+
 function aiclPanelHtml(r) {
   const id = r.id;
   const locked = AICL_LOCKED.includes(r.status);
@@ -202,6 +278,7 @@ function aiclPanelHtml(r) {
   const text = aicl.draft[id] != null ? aicl.draft[id] : (r.expected || '');
   return `<div class="aicl-panel"><div class="aicl-chat" id="aicl-chat-${esc(id)}">${aiclChatInner(id)}</div>
     <div class="aicl-side"><div class="aicl-lab">Perché è segnalata</div><div class="aicl-why">${esc(why)}</div>
+      <div class="aicl-lab">Cosa ha fatto il coach</div><div class="aicl-acts" id="aicl-acts-${esc(id)}">${aiclActionsInner(id)}</div>
       <label class="aicl-lab" for="aicl-ta-${esc(id)}">Doveva fare così</label>
       <textarea class="aicl-ta" id="aicl-ta-${esc(id)}" data-aicl-draft="${esc(id)}" rows="4" placeholder="Cosa doveva fare il coach?" ${locked ? 'disabled' : ''}>${esc(text)}</textarea>
       <div class="aicl-act"><button class="aicl-save" id="aicl-sv-${esc(id)}" data-aicl-save="${esc(id)}" ${aiclSaveAttrs(id, locked)}>${aiclSaveLabel(id)}</button>
@@ -257,6 +334,8 @@ function aiclPaintChat(id) {
   const box = document.getElementById('aicl-chat-' + id);
   if (!box) return;
   box.innerHTML = aiclChatInner(id);
+  const ac = document.getElementById('aicl-acts-' + id);
+  if (ac) ac.innerHTML = aiclActionsInner(id);
   const f = box.querySelector('[data-aicl-flagged]');
   if (f) box.scrollTop = Math.max(0, f.offsetTop - (box.clientHeight - f.offsetHeight) / 2);
 }
