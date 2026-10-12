@@ -2214,7 +2214,7 @@ function autoRefreshTick() {
   fetchSprints();
   if (state.page === 'overview') fetchData();
   else { state.overviewStale = true; startCountdown(); }
-  if (state.page === 'stats') fetchStats({ silent: true });
+  if (state.page === 'stats') fetchStats({ silent: true, fresh: true });
 }
 
 function startAutoRefresh() {

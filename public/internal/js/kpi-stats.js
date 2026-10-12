@@ -75,7 +75,10 @@ async function fetchStats(opts = {}) {
     if (ser.error) throw ser.error;
     if (!lst.error && Array.isArray(lst.data)) stats.sprints = lst.data;
     let d = ser.data;
-    let need = !!opts.force || !!(d && d.stale);
+    // giro automatico o ritorno sulla pagina: un valore più vecchio di 5 minuti si ricalcola, come fa l'Overview
+    const aged = !!opts.fresh && !!(d && d.computed_at) && Date.now() - new Date(d.computed_at).getTime() > ST_REFRESH_STALE_MS;
+    const force = !!opts.force || aged;
+    let need = force || !!(d && d.stale);
     if (!d || !d.data) { d = null; need = true; }   // niente di salvato: la pagina resta in caricamento finché il ricalcolo non torna
     if (d) {
       apply(d);
@@ -86,7 +89,7 @@ async function fetchStats(opts = {}) {
     }
     // 2. scaduto, mancante o «Aggiorna»: UNA chiamata di ricalcolo, poi si ridisegna
     if (need) {
-      const r = await kpiRecompute('stats_series', scope, !!opts.force || !d);
+      const r = await kpiRecompute('stats_series', scope, force || !d);
       if (seq !== stats.seq) return;
       if (r.data) {
         if (!r.data.sprint_curves) throw new Error('Il database non restituisce ancora i dati del primo grafico: manca la migrazione kpi_stats_sprint_curves.');
@@ -114,7 +117,7 @@ async function fetchStats(opts = {}) {
 
 function statsOnNav() {
   const old = !stats.lastUpdated || Date.now() - stats.lastUpdated.getTime() > ST_REFRESH_STALE_MS;
-  if (!stats.loading && (!stats.data || old)) fetchStats({ silent: !!stats.data });
+  if (!stats.loading && (!stats.data || old)) fetchStats({ silent: !!stats.data, fresh: true });
 }
 
 function statsSelectSprint(id) {  // dettaglio di riga
@@ -411,6 +414,13 @@ const stRowCum = (sp, date, key) => {
   if (i < 1 || !pts.length) return 0;
   return pts[Math.min(i, pts.length) - 1][key] ?? 0;
 };
+// i pagamenti arrivati dopo l'ultimo giorno della curva stanno sommati sull'ultimo punto: se la data vera
+// cade nella finestra si contano da quel giorno, altrimenti restano dove sono (cosi' non spariscono)
+const stRowCumW = (sp, date, key, w1) => {
+  let v = stRowCum(sp, date, key);
+  if (sp.late && sp.late.length && date >= sp.matura) for (const l of sp.late) if (l.date > date && l.date <= w1) v -= l[key] ?? 0;
+  return v;
+};
 // flussi cumulati di calendario su una finestra, sommati su tutte le righe
 function stWindow(all, w0, w1, g) {
   const days = stWindowDays(w0, w1), okey = g ? 'og' : 'on', pkey = g ? 'pg' : 'pn';
@@ -418,7 +428,7 @@ function stWindow(all, w0, w1, g) {
     const inc = days.map((dt, k) => {
       const pd = k === 0 ? stAddDays(w0, -1) : days[k - 1];
       let v = 0;
-      for (const sp of all) v += Math.max(0, stRowCum(sp, dt, key) - stRowCum(sp, pd, key));
+      for (const sp of all) v += Math.max(0, stRowCumW(sp, dt, key, w1) - stRowCumW(sp, pd, key, w1));
       return v;
     });
     let t = 0;
