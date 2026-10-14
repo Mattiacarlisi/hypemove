@@ -364,9 +364,9 @@ function stBuildSprintDay(w, h, d) {
   const AE = stAxisEnd(d);
   const S = stScope(d);
   const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
-  const W = stWindow(all, S.w0, w1, g);
+  const W = stWindow(stRowsOf(d, S), S.w0, w1, g);
   const dc = stHasDc(all);
-  const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
+  const wins = cmp.map(sp => stWindow([sp], sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
   const nd = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
   const val = (S, k, r) => {
     const s = S.spend[k], p = S.paid[k], o = S.open[k];
@@ -406,9 +406,9 @@ function stBuildSprintDay(w, h, d) {
 const stEuroTick = v => v === 0 ? '€0' : '€' + String(Math.round(v * 100) / 100).replace('.', ',');
 
 // ── PERIODO: aggregati di calendario sulla finestra [inizio, matura] ──
-// Gli sprint sovrapposti si spartiscono spesa e incassi (ogni giorno sta in una sola riga,
-// ogni utente in una sola): qui si risommano per data di calendario, così spesa e ricavi
-// sono contati sugli STESSI giorni. Il confronto allinea le finestre per anzianità, come il ROI.
+// Coorte: ogni utente sta nella riga del suo primo avvio, e i suoi pagamenti restano lì anche se
+// arrivano dopo la fine dello sprint. Si sommano solo le righe dello scope; la spesa è quella dei
+// giorni di pubblicità di quelle righe. Il confronto allinea le finestre per anzianità, come il ROI.
 function stWindowDays(w0, w1) {
   const out = [];
   for (let k = 0; k <= stDayN(w1) - stDayN(w0); k++) out.push(stAddDays(w0, k));
@@ -427,14 +427,20 @@ const stRowCumW = (sp, date, key, w1) => {
   if (sp.late && sp.late.length && date >= sp.matura) for (const l of sp.late) if (l.date > date && l.date <= w1) v -= l[key] ?? 0;
   return v;
 };
-// flussi cumulati di calendario su una finestra, sommati su tutte le righe
+// righe della coorte in esame: un utente sta nello sprint del suo primo avvio, quindi si sommano solo
+// le righe dello scope (gruppo o dettaglio), mai quelle degli sprint vicini che cadono negli stessi giorni
+const stRowsOf = (d, S) => {
+  const ids = new Set((S && S.rows || []).map(r => r.id));
+  return (d.sprint_curves.sprints || []).filter(sp => ids.has(sp.id));
+};
+// flussi cumulati di calendario su una finestra, sommati sulle righe date
 function stWindow(all, w0, w1, g) {
   const days = stWindowDays(w0, w1), okey = g ? 'og' : 'on', pkey = g ? 'pg' : 'pn';
   const flow = key => {
     const inc = days.map((dt, k) => {
       const pd = k === 0 ? stAddDays(w0, -1) : days[k - 1];
       let v = 0;
-      for (const sp of all) v += Math.max(0, stRowCumW(sp, dt, key, w1) - stRowCumW(sp, pd, key, w1));
+      for (const sp of all) v += stRowCumW(sp, dt, key, w1) - stRowCumW(sp, pd, key, w1);   // i rimborsi scendono
       return v;
     });
     let t = 0;
@@ -451,7 +457,7 @@ const stHasDc = all => (all || []).some(sp => (sp.points || []).some(p => p && (
 const stAxisEnd = d => {
   const S = stScope(d);
   let end = (S && S.w1) || d.meta.sprint.fine || d.meta.oggi;
-  for (const sp of d.sprint_curves.sprints || []) {
+  for (const sp of stRowsOf(d, S)) {
     if ((sp.open_trials ?? 0) > 0 && sp.matura > end) end = sp.matura;
   }
   const cap = stAddDays(d.meta.oggi, 30);
@@ -473,8 +479,8 @@ function stRateWindow(pts, w0, w1) {
 
 
 // ── GRAFICO «Spesa cumulata e incassi»: spesa e ricavi sugli stessi giorni ──
-// Spesa Meta e incassi per data di calendario sulla finestra [inizio, matura], sommati su
-// tutte le righe: con gli sprint sovrapposti i 116 € si vedono tutti. Solo dati veri.
+// Spesa Meta dei giorni di pubblicità e incassi della coorte, sulla finestra [inizio, matura]
+// delle righe dello scope. Solo dati veri.
 
 function stBuildMoney(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp, g = stats.gross;
@@ -482,9 +488,9 @@ function stBuildMoney(w, h, d) {
   const AE = stAxisEnd(d);
   const S = stScope(d);
   const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
-  const W = stWindow(all, S.w0, w1, g);
+  const W = stWindow(stRowsOf(d, S), S.w0, w1, g);
   const dc = stHasDc(all), rT = sc.rate;
-  const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
+  const wins = cmp.map(sp => stWindow([sp], sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), g));
   const nd = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
   const paidT = (X, i) => stAfterTax(X.paid[i], X.spend[i]), projT = i => stAfterTax(W.paid[i] + rT * W.open[i], W.spend[i]);
   const iEnd = W.days.length - 1;
@@ -523,7 +529,7 @@ function stBuildMoney(w, h, d) {
 }
 
 // ── GRAFICO «Prove avviate — totale cumulato»: partenze per data di avvio ──
-// Conteggi per data di calendario dentro la finestra, sommati su tutte le righe.
+// Prove della coorte per data di avvio, sommate sulle righe dello scope.
 
 function stBuildTrials(w, h, d) {
   const sc = stCurveSet(d), sel = sc.sel, cmp = sc.cmp;
@@ -531,9 +537,9 @@ function stBuildTrials(w, h, d) {
   const AE = stAxisEnd(d);
   const S = stScope(d);
   const w1 = stats.proj ? AE : (S.w1 < oggi ? S.w1 : oggi);
-  const W = stWindow(all, S.w0, w1, stats.gross);
+  const W = stWindow(stRowsOf(d, S), S.w0, w1, stats.gross);
   const dc = stHasDc(all);
-  const wins = cmp.map(sp => stWindow(all, sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), stats.gross));
+  const wins = cmp.map(sp => stWindow([sp], sp.inizio, stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi), stats.gross));
   const nx = Math.max(W.days.length, ...wins.map(C => C.days.length), 2);
   const top = Math.max(2, W.trials.at(-1) ?? 0, ...wins.flatMap(C => C.trials));
   const stepY = top <= 8 ? 2 : top <= 20 ? 4 : top <= 40 ? 8 : 20;
@@ -569,7 +575,19 @@ const ST_RATE_SOGLIA = 30;
 // le concluse e il confronto resta per riga. Con le chiavi il confronto non si applica
 // (segue una sola coorte: quella dello sprint scelto).
 function stCohort(d, S, w1) {
-  const C = d.cohort, CP = d.cohort_points;
+  let C = d.cohort, CP = d.cohort_points;
+  if (Array.isArray(d.cohort_rows) && d.cohort_rows.length) {
+    // somma per giorno delle sole righe dello scope; l'ultimo punto ha già i fati arrivati dopo la maturazione
+    const ids = new Set((S && S.rows || []).map(r => r.id)), by = new Map();
+    for (const r of d.cohort_rows) if (ids.has(r.id)) for (const p of r.points || []) {
+      const q = by.get(p.date) || { date: p.date, started: 0, paid: 0, cancelled: 0, lost: 0 };
+      for (const k of ['started', 'paid', 'cancelled', 'lost']) q[k] += p[k] ?? 0;
+      by.set(p.date, q);
+    }
+    CP = [...by.values()].sort((a, b) => (a.date < b.date ? -1 : 1));
+    const L = CP.at(-1) || { started: 0, paid: 0, cancelled: 0, lost: 0 };
+    C = { started: L.started, paid: L.paid, cancelled: L.cancelled, lost: L.lost };
+  }
   if (C && Array.isArray(CP) && CP.length) {
     const idx = CP.map((p, k) => k).filter(k => CP[k].date <= w1);
     const gg = arr => idx.map(k => arr[k]);
@@ -579,7 +597,7 @@ function stCohort(d, S, w1) {
       openEnd: Math.max(0, (C.started ?? 0) - (C.paid ?? 0) - (C.cancelled ?? 0) - (C.lost ?? 0)) };
   }
   const R = stRateWindow(d.trial_rate.points, S.w0, w1);
-  const Wall = stWindow(d.sprint_curves.sprints, S.w0, w1, stats.gross);
+  const Wall = stWindow(stRowsOf(d, S), S.w0, w1, stats.gross);
   const tot = Wall.trials.at(-1) ?? 0;
   const paidEnd = R.length ? R[R.length - 1].paid : 0;
   const lostEnd = R.length ? Math.max(0, R[R.length - 1].ended - R[R.length - 1].paid) : 0;
@@ -615,7 +633,7 @@ function stBuildRate(w, h, d) {
       const col = ST_CMP_COLORS[k % ST_CMP_COLORS.length];
       const w1c = stats.proj ? AE : (sp.matura < oggi ? sp.matura : oggi);
       const C = stRateWindow(d.trial_rate.points, sp.inizio, w1c);
-      const Cw = stWindow(all, sp.inizio, w1c, stats.gross);
+      const Cw = stWindow([sp], sp.inizio, w1c, stats.gross);
       const t2 = Cw.trials.at(-1) ?? 0;
       const cr = stRuns(C.map((r, i) => ({ i, v: pp(r.paid, t2), est: C[i].date > oggi })), 100, true);
       s += stCurve(c, cr, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && r === cr.at(-1) ? 'dot' : null });
@@ -631,7 +649,7 @@ function stBuildRate(w, h, d) {
         dot: (p, r, e) => e.last && r === rp.at(-1) ? 'ring' : null });
     }
   }
-  const off = dc ? stWindow(all, S.w0, w1, stats.gross).offers : null;
+  const off = dc ? stWindow(stRowsOf(d, S), S.w0, w1, stats.gross).offers : null;
   return { svg: stSvg(w, h, s), c, nx: nd,
     hov: i => { if (i < 0 || i >= K.days.length || K.tot <= 0) return null;
       const ab = dc ? ` · ${off[i]} ${(off[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
@@ -685,7 +703,7 @@ function stCards(d) {
   // Spesa e incassi per data di calendario sulla finestra: gli stessi giorni per tutti.
   {
     const g = stats.gross, all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, S.w0, w1, g);
+    const W = stWindow(stRowsOf(d, S), S.w0, w1, g);
     const spend = W.spend.at(-1) ?? 0, earn = W.paid.at(-1) ?? 0;
     const div = earn - spend, kind = g ? 'lordi' : 'netti';
     const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
@@ -703,7 +721,7 @@ function stCards(d) {
   // Prove avviate per data di avvio dentro la finestra, con le offerte pagate in parallelo.
   {
     const all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, S.w0, w1, stats.gross);
+    const W = stWindow(stRowsOf(d, S), S.w0, w1, stats.gross);
     const tot = W.trials.at(-1) ?? 0, off = dc ? (W.offers.at(-1) ?? 0) : null;
     const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
     c.trials = { num: off == null ? String(tot) : `${tot} + ${off}`, color: ST.INK,
@@ -716,7 +734,7 @@ function stCards(d) {
   // Euro per euro sugli stessi giorni delle altre schede: stesso denominatore.
   {
     const all = d.sprint_curves.sprints, dc = stHasDc(all);
-    const W = stWindow(all, S.w0, w1, stats.gross);
+    const W = stWindow(stRowsOf(d, S), S.w0, w1, stats.gross);
     const hasOpen = (W.open.at(-1) ?? 0) > 0;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const ti = W.days.findIndex(x => x >= d.meta.oggi);
