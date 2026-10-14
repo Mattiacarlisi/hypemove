@@ -730,7 +730,7 @@ async function fetchRetentionDaily() {
     const jobs = sel.length
       ? sel.map(id => {
           const s = (state.retDSprints || []).find(x => x.sprint_id === id);
-          return { key: id, inizio: s && s.inizio, fine: s && s.fine };
+          return { key: id, inizio: s && s.inizio, fine: s && s.fine, t0: s && s.t0, t1: s && s.t1 };
         }).filter(j => j.inizio && j.fine)
       : [{ key: 'free', inizio: state.retDFrom, fine: state.retDTo }];
 
@@ -739,7 +739,9 @@ async function fetchRetentionDaily() {
       const res = await sb.rpc('kpi_retention_daily', {
         p_start:  j.inizio,
         p_end:    j.fine,
-        p_anchor: 'signup',
+        p_anchor: 'first_open',
+        p_t0:     j.t0 || null,
+        p_t1:     j.t1 || null,
       });
       if (res.error) throw res.error;
       out[j.key] = res.data;
@@ -6673,8 +6675,8 @@ function funnelViz() {
 // ── RETENTION ────────────────────────────────────────────────────────
 
 // La pagina Retention ospita DUE viste che rispondono a due domande diverse:
-//  · Per settimana → "chi continua ad allenarsi" (coorte = primo workout, invariata)
-//  · Per giorno    → "quando far scadere la prova" (coorte = signup, curva di sopravvivenza)
+//  · Per settimana → "chi continua ad allenarsi" (coorte = primo avvio)
+//  · Per giorno    → "quando far scadere la prova" (coorte = primo avvio, curva di sopravvivenza)
 // Il toggle cambia solo state.retView: non tocca mai i filtri dell'altra vista.
 function pageRetention() {
   const tab = (id, label, on) =>
@@ -7048,7 +7050,7 @@ function retDailyTable(data) {
     const color = pct === null ? 'var(--muted)'
       : pct >= 40 ? 'var(--mattia)' : pct >= 20 ? 'var(--amber)' : 'var(--red)';
     return `<tr${isTrial ? ' style="background:rgba(251,191,36,.06)"' : ''}>
-      <td style="color:var(--muted);font-size:12px">D${r.day}${Number(r.day) === 0 ? ' · signup' : ''}</td>
+      <td style="color:var(--muted);font-size:12px">D${r.day}${Number(r.day) === 0 ? ' · primo avvio' : ''}</td>
       <td class="metric-val" style="font-size:13px">${retDCell(r.alive)}</td>
       <td style="font-weight:700;color:${color}">${retDCell(pct, '%')}</td>
       <td style="font-size:12px;color:var(--red)">${retDCell(r.lost)}</td>
@@ -7084,8 +7086,9 @@ function retDailyCompare() {
     // Qualifica priva di senso quando i primi avvii sono meno degli iscritti: per gli
     // sprint vecchi anonymous_sessions non copre gli utenti pre-sistema-sessioni, e un
     // rapporto sopra il 100% è un dato rotto, non un risultato.
-    const qual = fo > 0 && fo >= data.cohort_size
-      ? (data.cohort_size / fo * 100).toFixed(1) + '%'
+    const reg  = Number(meta.cohort_size || 0);
+    const qual = fo > 0 && fo >= reg
+      ? (reg / fo * 100).toFixed(1) + '%'
       : '<span style="color:var(--border2)">—</span>';
     const cell = d => {
       const r = retDDay(data, d);
@@ -7095,7 +7098,7 @@ function retDailyCompare() {
       <td style="color:var(--text);font-size:12px">${meta.nome || '—'}</td>
       <td style="font-size:12px;color:var(--muted)">${data.from} → ${data.to}</td>
       <td class="metric-val" style="font-size:13px">${fo || '—'}</td>
-      <td class="metric-val" style="font-size:13px">${data.cohort_size}</td>
+      <td class="metric-val" style="font-size:13px">${reg}</td>
       <td style="font-size:12px;color:var(--muted)">${qual}</td>
       <td>${cell(1)}</td><td>${cell(3)}</td><td>${cell(7)}</td><td>${cell(14)}</td>
       <td style="font-size:12px;color:var(--muted)">${
