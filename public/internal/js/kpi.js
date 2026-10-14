@@ -2634,10 +2634,16 @@ function ptSprints() {
     return { id: key, rows: rs, name, from: rs[0].from, t0: rs[0].t0, fine,
       label: `${name} · ${ddmm(rs[0].from)}${ptHM(rs[0].ora)}–${ddmm(fine)}` };
   }).sort((a, b) => a.t0.localeCompare(b.t0));
+  // Uno sprint finisce a fine giornata del suo ultimo giorno (o prima, se il successivo parte prima):
+  // ciò che parte dopo appartiene al successivo, che quindi comincia dove finisce questo.
   groups.forEach((g, i) => {
     const next = groups[i + 1];
-    g.t1 = next ? next.t0 : null;
-    g.to = next ? (next.t0.endsWith('00:00:00') ? addDays(next.from, -1) : next.from) : null;
+    if (next) {
+      const endFine = ptStamp(addDays(g.fine, 1));
+      g.t1 = next.t0 < endFine ? next.t0 : endFine;
+      g.to = g.t1.endsWith('00:00:00') ? addDays(g.t1.slice(0, 10), -1) : g.t1.slice(0, 10);
+      next.t0 = g.t1; next.from = g.t1.slice(0, 10);
+    } else { g.t1 = null; g.to = null; }
     g.details = g.rows.length > 1 ? g.rows.map(r => ({ id: 'r:' + r.id, from: r.from, t0: r.t0, t1: g.t1, to: g.to, fine: r.fine,
       label: `${g.name} · dettaglio · ${r.nome} · ${ddmm(r.from)}${ptHM(r.ora)}–${ddmm(r.fine)}` })) : [];
   });
