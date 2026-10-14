@@ -2614,8 +2614,8 @@ function ptlTrialOutcome(t, now) {
 }
 
 // Sprint della sezione, con la regola di «Stats»: le righe con lo stesso numero sono un esperimento solo.
-// Il gruppo parte dalla riga che inizia prima (con l'ora, se c'è) e arriva fino all'inizio del gruppo
-// successivo; ogni riga resta scegliibile come dettaglio, dal suo inizio allo stesso confine.
+// Una prova sta nello sprint della coorte dell'utente: il suo primo avvio cade fra inizio (con l'ora) e
+// fine dello sprint. Il gruppo è l'unione delle sue righe; ogni riga resta scegliibile come dettaglio.
 const ptStamp = (day, ora) => `${day} ${ora ? String(ora).slice(0, 8).padEnd(8, ':00') : '00:00:00'}`;
 const romeStamp = ts => new Date(ts).toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
 const ptHM = ora => ora ? ' ' + String(ora).slice(0, 5) : '';
@@ -2623,7 +2623,8 @@ function ptSprints() {
   const rows = (state.sprints || []).filter(s => !/test/i.test(s.nome || '')).map(s => {
     const from = String(s.inizio).slice(0, 10);
     return { id: s.id, nome: s.nome, num: (String(s.nome || '').match(/\d+/) || [])[0] || null, from,
-      ora: s.inizio_ora, fine: String(s.fine || s.inizio).slice(0, 10), t0: ptStamp(from, s.inizio_ora) };
+      ora: s.inizio_ora, fine: String(s.fine || s.inizio).slice(0, 10), t0: ptStamp(from, s.inizio_ora),
+      t1: s.fine_ora ? ptStamp(String(s.fine).slice(0, 10), s.fine_ora) : ptStamp(addDays(String(s.fine || s.inizio).slice(0, 10), 1)) };
   });
   const map = new Map();
   rows.forEach(r => { const k = r.num != null ? 'g:' + r.num : 'r:' + r.id; if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
@@ -2634,17 +2635,10 @@ function ptSprints() {
     return { id: key, rows: rs, name, from: rs[0].from, t0: rs[0].t0, fine,
       label: `${name} · ${ddmm(rs[0].from)}${ptHM(rs[0].ora)}–${ddmm(fine)}` };
   }).sort((a, b) => a.t0.localeCompare(b.t0));
-  // Uno sprint finisce a fine giornata del suo ultimo giorno (o prima, se il successivo parte prima):
-  // ciò che parte dopo appartiene al successivo, che quindi comincia dove finisce questo.
-  groups.forEach((g, i) => {
-    const next = groups[i + 1];
-    if (next) {
-      const endFine = ptStamp(addDays(g.fine, 1));
-      g.t1 = next.t0 < endFine ? next.t0 : endFine;
-      g.to = g.t1.endsWith('00:00:00') ? addDays(g.t1.slice(0, 10), -1) : g.t1.slice(0, 10);
-      next.t0 = g.t1; next.from = g.t1.slice(0, 10);
-    } else { g.t1 = null; g.to = null; }
-    g.details = g.rows.length > 1 ? g.rows.map(r => ({ id: 'r:' + r.id, from: r.from, t0: r.t0, t1: g.t1, to: g.to, fine: r.fine,
+  groups.forEach(g => {
+    g.t1 = g.rows.map(r => r.t1).sort().at(-1);
+    g.to = g.fine;
+    g.details = g.rows.length > 1 ? g.rows.map(r => ({ id: 'r:' + r.id, from: r.from, t0: r.t0, t1: r.t1, to: r.fine, fine: r.fine,
       label: `${g.name} · dettaglio · ${r.nome} · ${ddmm(r.from)}${ptHM(r.ora)}–${ddmm(r.fine)}` })) : [];
   });
   return groups;
@@ -2667,10 +2661,10 @@ function ptPeriod(today) {
 function ptModel(per) {
   const now = new Date(), today = romeDay(now);
   const inPer = ts => {
-    if (per.t0) { const st = romeStamp(ts); return st >= per.t0 && (!per.t1 || st < per.t1); }
     const day = romeDay(ts); return day >= per.from && (!per.to || day <= per.to);
   };
-  const trials = (state.premTimeline || []).filter(t => t.trial_at && inPer(t.trial_at)).map(t => {
+  const inCohort = t => { const st = romeStamp(t.first_open_at || t.trial_at); return st >= per.t0 && st < per.t1; };
+  const trials = (state.premTimeline || []).filter(t => t.trial_at && (per.t0 ? inCohort(t) : inPer(t.trial_at))).map(t => {
     const o = ptlTrialOutcome(t, now);
     const start = romeDay(t.trial_at);
     const kind = o === 'converted' ? 'paid' : (o === 'open' || o === 'pending') ? 'soon' : 'quit';
@@ -2693,12 +2687,13 @@ function ptModel(per) {
   const count = { paid: 0, soon: 0, quit: 0 };
   trials.forEach(t => count[t.kind]++);
   const toToday = !per.to || per.to >= today;
-  let last = per.from;
+  const from = trials.reduce((m, t) => t.start < m ? t.start : m, per.from);
+  let last = from;
   trials.forEach(t => { if (t.end && t.end > last) last = t.end; if (t.est && t.est > last) last = t.est; if (t.start > last) last = t.start; });
   let axisEnd = addDays(last, 1);
   // Una prova aperta arriva a oggi: l'asse la contiene anche se il periodo è già chiuso.
   if ((toToday || trials.some(t => !t.end)) && axisEnd < addDays(today, 1)) axisEnd = addDays(today, 1);
-  return { today, trials, count, from: per.from, axisEnd };
+  return { today, trials, count, from, axisEnd };
 }
 
 // Grafico: X = giorni di calendario, Y = numero della prova (1 in basso).
