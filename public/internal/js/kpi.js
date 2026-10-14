@@ -2662,11 +2662,9 @@ function ptPeriod(today) {
 
 function ptModel(per) {
   const now = new Date(), today = romeDay(now);
-  const inPer = ts => {
-    const day = romeDay(ts); return day >= per.from && (!per.to || day <= per.to);
-  };
-  const inCohort = t => { const st = romeStamp(t.first_open_at || t.trial_at); return st >= per.t0 && st < per.t1; };
-  const trials = (state.premTimeline || []).filter(t => t.trial_at && (per.t0 ? inCohort(t) : inPer(t.trial_at))).map(t => {
+  const t0 = per.t0 || ptStamp(per.from), t1 = per.t1 || ptStamp(addDays(per.to || today, 1));
+  const inCohort = t => { const st = romeStamp(t.first_open_at || t.trial_at); return st >= t0 && st < t1; };
+  const trials = (state.premTimeline || []).filter(t => t.trial_at && inCohort(t)).map(t => {
     const o = ptlTrialOutcome(t, now);
     const start = romeDay(t.trial_at);
     const kind = o === 'converted' ? 'paid' : (o === 'open' || o === 'pending') ? 'soon' : 'quit';
