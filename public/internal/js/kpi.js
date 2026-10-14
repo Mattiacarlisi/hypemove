@@ -2592,7 +2592,7 @@ const GOAL_BAR_COLORS = ['#a78bfa', '#22d3ee', '#4ade80', '#f59e0b', '#f43f5e', 
 // Numeri a sinistra (ha pagato / pagherà / disdette), a destra una linea per prova dal giorno
 // di avvio a quello di chiusura.
 const PT_COL = { paid: '#4ade80', soon: '#4361ee', quit: '#f87171' };
-const PT_LABEL = { paid: 'Ha pagato', soon: 'Pagherà', quit: 'Disdette' };
+const PT_LABEL = { paid: 'Ha pagato', soon: 'In prova', quit: 'Disdette' };
 const PT_ORDER = ['paid', 'soon', 'quit'];
 const PT_PERIODS = [['oggi', 'Oggi'], ['settimana', 'Settimana'], ['mese', 'Mese'], ['sprint', 'Sprint']];
 const romeDay = ts => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
