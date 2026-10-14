@@ -2605,6 +2605,7 @@ const ddmm = day => day.slice(8, 10) + '/' + day.slice(5, 7);
 // comunicato se ha fatto pagare o ha chiuso: non è persa finché non lo dice.
 function ptlTrialOutcome(t, now) {
   if (t.paid_at) return 'converted';
+  if (t.status === 'active' && t.payment_state === 1 && !t.is_trial) return 'converted';
   const trialing = t.status !== 'revoked' && (t.payment_state === 2 || t.is_trial);
   const expired  = !t.expires_at || new Date(t.expires_at) <= now;
   if (!trialing) return 'lost';
@@ -2612,21 +2613,38 @@ function ptlTrialOutcome(t, now) {
   return t.status === 'cancelled' ? 'canceling' : 'open';
 }
 
-// Sprint della sezione: niente sprint di test, in ordine di inizio. Ognuno arriva fino al giorno
-// prima dell'inizio del successivo (l'ultimo è aperto).
+// Sprint della sezione, con la regola di «Stats»: le righe con lo stesso numero sono un esperimento solo.
+// Il gruppo parte dalla riga che inizia prima (con l'ora, se c'è) e arriva fino all'inizio del gruppo
+// successivo; ogni riga resta scegliibile come dettaglio, dal suo inizio allo stesso confine.
+const ptStamp = (day, ora) => `${day} ${ora ? String(ora).slice(0, 8).padEnd(8, ':00') : '00:00:00'}`;
+const romeStamp = ts => new Date(ts).toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
+const ptHM = ora => ora ? ' ' + String(ora).slice(0, 5) : '';
 function ptSprints() {
-  const list = (state.sprints || []).filter(s => !/test/i.test(s.nome || ''))
-    .map(s => ({ id: s.id, nome: s.nome, from: String(s.inizio).slice(0, 10), fine: String(s.fine || s.inizio).slice(0, 10) }))
-    .sort((a, b) => a.from.localeCompare(b.from) || String(a.id).localeCompare(String(b.id)));
-  list.forEach(s => {
-    const next = list.find(n => n.from > s.from);
-    s.to = next ? addDays(next.from, -1) : null;
-    s.label = `${s.nome} · ${ddmm(s.from)}–${ddmm(s.fine)}`;
+  const rows = (state.sprints || []).filter(s => !/test/i.test(s.nome || '')).map(s => {
+    const from = String(s.inizio).slice(0, 10);
+    return { id: s.id, nome: s.nome, num: (String(s.nome || '').match(/\d+/) || [])[0] || null, from,
+      ora: s.inizio_ora, fine: String(s.fine || s.inizio).slice(0, 10), t0: ptStamp(from, s.inizio_ora) };
   });
-  return list;
+  const map = new Map();
+  rows.forEach(r => { const k = r.num != null ? 'g:' + r.num : 'r:' + r.id; if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
+  const groups = [...map.entries()].map(([key, rs]) => {
+    rs.sort((a, b) => a.t0.localeCompare(b.t0));
+    const name = rs[0].num != null ? 'Sprint ' + rs[0].num : rs[0].nome;
+    const fine = rs.map(r => r.fine).sort().at(-1);
+    return { id: key, rows: rs, name, from: rs[0].from, t0: rs[0].t0, fine,
+      label: `${name} · ${ddmm(rs[0].from)}${ptHM(rs[0].ora)}–${ddmm(fine)}` };
+  }).sort((a, b) => a.t0.localeCompare(b.t0));
+  groups.forEach((g, i) => {
+    const next = groups[i + 1];
+    g.t1 = next ? next.t0 : null;
+    g.to = next ? (next.t0.endsWith('00:00:00') ? addDays(next.from, -1) : next.from) : null;
+    g.details = g.rows.length > 1 ? g.rows.map(r => ({ id: 'r:' + r.id, from: r.from, t0: r.t0, t1: g.t1, to: g.to, fine: r.fine,
+      label: `${g.name} · dettaglio · ${r.nome} · ${ddmm(r.from)}${ptHM(r.ora)}–${ddmm(r.fine)}` })) : [];
+  });
+  return groups;
 }
 
-// Periodo scelto: { from, to (null = fino a oggi), sprints, sprint }. null se gli sprint non ci sono ancora.
+// Periodo scelto: { from, to (null = fino a oggi), t0/t1 (confini con l'ora), sprints, sprint }.
 function ptPeriod(today) {
   const kind = state.ptlPeriod;
   if (kind === 'oggi') return { from: today, to: today };
@@ -2634,20 +2652,24 @@ function ptPeriod(today) {
   if (kind === 'mese') return { from: addDays(today, -29), to: today };
   const sprints = ptSprints();
   if (!sprints.length) return null;
-  const cur = sprints.find(s => s.id === state.ptlSprintId)
+  const all = sprints.flatMap(g => [g, ...g.details]);
+  const cur = all.find(s => s.id === state.ptlSprintId)
     || [...sprints].reverse().find(s => s.from <= today) || sprints[sprints.length - 1];
-  return { from: cur.from, to: cur.to, sprints, sprint: cur };
+  return { from: cur.from, to: cur.to, t0: cur.t0, t1: cur.t1, sprints, sprint: cur };
 }
 
 function ptModel(per) {
   const now = new Date(), today = romeDay(now);
-  const inPer = day => day >= per.from && (!per.to || day <= per.to);
-  const trials = (state.premTimeline || []).filter(t => t.trial_at && inPer(romeDay(t.trial_at))).map(t => {
+  const inPer = ts => {
+    if (per.t0) { const st = romeStamp(ts); return st >= per.t0 && (!per.t1 || st < per.t1); }
+    const day = romeDay(ts); return day >= per.from && (!per.to || day <= per.to);
+  };
+  const trials = (state.premTimeline || []).filter(t => t.trial_at && inPer(t.trial_at)).map(t => {
     const o = ptlTrialOutcome(t, now);
     const start = romeDay(t.trial_at);
     const kind = o === 'converted' ? 'paid' : (o === 'open' || o === 'pending') ? 'soon' : 'quit';
     let end = null;
-    if (kind === 'paid') end = romeDay(t.paid_at);
+    if (kind === 'paid') end = t.paid_at ? romeDay(t.paid_at) : addDays(start, 7) < today ? addDays(start, 7) : today;
     else if (kind === 'quit') {
       const exp = t.expires_at ? romeDay(t.expires_at) : start;
       end = t.cancelled_at ? romeDay(t.cancelled_at) : exp;
@@ -2759,7 +2781,7 @@ function ptHead(per, withSeg) {
   if (state.ptlPeriod === 'sprint') {
     mid = per && per.sprint
       ? `<div class="pt-pillwrap"><button class="pt-pill" data-pt-menu aria-haspopup="listbox" aria-expanded="${state.ptlMenu}"><span>${esc(per.sprint.label)}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`
-        + (state.ptlMenu ? `<div class="pt-menu" role="listbox">${[...per.sprints].reverse().map(s => `<button class="pt-opt${s.id === per.sprint.id ? ' pt-sel' : ''}" role="option" data-pt-sprint="${s.id}"><span class="pt-optdot"></span>${esc(s.label)}</button>`).join('')}</div>` : '') + '</div>'
+        + (state.ptlMenu ? `<div class="pt-menu" role="listbox">${[...per.sprints].reverse().flatMap(g => [g, ...g.details]).map(s => `<button class="pt-opt${s.id === per.sprint.id ? ' pt-sel' : ''}" role="option" data-pt-sprint="${esc(s.id)}"${s.id[0] === 'r' ? ' style="padding-left:28px;font-weight:500"' : ''}><span class="pt-optdot"></span>${esc(s.label)}</button>`).join('')}</div>` : '') + '</div>'
       : '<span class="pt-pill pt-pill-sk"></span>';
   } else if (per) {
     mid = `<span class="pt-range">${state.ptlPeriod === 'oggi' ? ddmm(per.from) : ddmm(per.from) + ' – ' + ddmm(per.to)}</span>`;
@@ -2802,7 +2824,7 @@ function attachPremiumTimeline() {
     ev.stopPropagation(); state.ptlMenu = !state.ptlMenu; render();
   });
   document.querySelectorAll('[data-pt-sprint]').forEach(el => el.addEventListener('click', () => {
-    state.ptlSprintId = (state.sprints.find(s => String(s.id) === el.dataset.ptSprint) || {}).id; state.ptlMenu = false; render();
+    state.ptlSprintId = el.dataset.ptSprint; state.ptlMenu = false; render();
   }));
   document.querySelector('[data-pt-retry]')?.addEventListener('click', () => {
     state.premTimelineError = null; state.premTimeline = null; render(); fetchData();
