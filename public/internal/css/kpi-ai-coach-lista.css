@@ -28,7 +28,11 @@
 .aicl-dot.aicl-good { background: #4ade80; }
 .aicl-dot.aicl-last { width: 16px; height: 16px; margin: -8px 0 0 -8px; border: 2px solid #fff; background: #4361ee; }
 .aicl-dot.aicl-last.aicl-good { background: #4ade80; }
-.aicl-dot:hover { box-shadow: 0 0 0 3px rgba(141, 162, 255, .5); }
+.aicl-dot:hover { box-shadow: 0 0 0 3px rgba(141, 162, 255, .5); z-index: 2; }
+.aicl-dl { display: none; position: absolute; left: 50%; bottom: calc(100% + 4px); transform: translateX(-50%); font-size: 12px; font-weight: 800; color: #fff; white-space: nowrap; pointer-events: none; }
+.aicl-last .aicl-dl { display: block; }
+.aicl-spp:has(.aicl-dot:hover) .aicl-last:not(:hover) .aicl-dl { display: none; }
+.aicl-dot:hover .aicl-dl { display: block; }
 
 .aicl-offs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 12px; }
 .aicl-off { padding: 10px 14px; border-radius: 10px; border: 1.5px dashed #2a2e37; }

@@ -137,13 +137,11 @@ function aiclSpark(p, soglia) {
   const L = g[n - 1], ok = aiclOk(L, soglia);
   const dots = g.map((c, i) => {
     const last = i === n - 1, good = aiclOk(c, soglia);
-    const tip = `Giro ${i + 1} · ${String(c.quando || '').slice(-5)}|${c.giusti} su ${c.casi}`;
-    return `<i class="aicl-dot${last ? ' aicl-last' : ''}${good ? ' aicl-good' : ''}" style="left:${xs(i).toFixed(2)}%;top:${aiclY(aiclPct(c)).toFixed(2)}%" data-tip="${esc(tip)}" data-tipk="b"></i>`;
+    return `<i class="aicl-dot${last ? ' aicl-last' : ''}${good ? ' aicl-good' : ''}" style="left:${xs(i).toFixed(2)}%;top:${aiclY(aiclPct(c)).toFixed(2)}%"><span class="aicl-dl">${c.giusti}</span></i>`;
   }).join('');
   return `<div class="aicl-sp" role="img" aria-label="${esc(`${g.length} giri, l'ultimo ${L.giusti} su ${L.casi}`)}">
-    <div class="aicl-spp"><i class="aicl-thr" style="top:${aiclY(soglia).toFixed(2)}%"></i>
-      ${n > 1 ? `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" vector-effect="non-scaling-stroke"/></svg>` : ''}${dots}</div>
-    <span class="aicl-thl" style="top:${aiclY(soglia).toFixed(2)}%">${soglia}%</span></div>`;
+    <div class="aicl-spp">
+      ${n > 1 ? `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" vector-effect="non-scaling-stroke"/></svg>` : ''}${dots}</div></div>`;
 }
 
 function aiclCycleRow() {
@@ -181,7 +179,7 @@ function aiclCycleRow() {
 
 function aicBenchHtml() {
   const b = aic.bench, d = b.data;
-  const head = soglia => `<div class="aicl-bh"><h2 class="aic-h2">Benchmark</h2><div class="aic-soglia"><svg width="30" height="12" aria-hidden="true"><line x1="2" y1="6" x2="28" y2="6" stroke="${AIC.ORG}" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="6 5"/></svg>Soglia ${soglia}%</div></div>`;
+  const head = soglia => `<div class="aicl-bh"><h2 class="aic-h2">Benchmark</h2></div>`;
   if (b.error) return `<div class="aic-card aicl-bench">${head(99)}<div class="aicl-berr">${aicError(b.error, 'bench')}</div>${aiclCycleRow()}</div>`;
   if (!d) {
     const sk = [0, 1, 2].map(() => `<div class="aicl-row"><div class="aicl-n"><i class="aic-sk" style="display:block;width:120px;height:16px"></i><i class="aic-sk" style="display:block;width:60px;height:12px;margin-top:8px"></i></div>
@@ -194,7 +192,7 @@ function aicBenchHtml() {
   const rows = on.map(p => {
     const g = p.giri, L = g[g.length - 1], ok = aiclOk(L, soglia);
     return `<div class="aicl-row"><div class="aicl-n"><div class="aicl-nn">${esc(p.nome)}</div><div class="aicl-nm">${esc(p.modello || '')}</div></div>
-      <div class="aicl-v${ok ? ' aicl-ok' : ''}"><b>${L.giusti}</b><small>su ${L.casi}</small></div><div class="aicl-cm">${aiclSpark(p, soglia)}</div></div>`;
+      <div class="aicl-v${ok ? ' aicl-ok' : ''}"><b>${Math.floor(aiclPct(L))}%</b></div><div class="aicl-cm">${aiclSpark(p, soglia)}</div></div>`;
   }).join('');
   const offHtml = offs.length ? `<div class="aicl-offs">${offs.map(p => `<div class="aicl-off"><div class="aicl-offn">${esc(p.nome)}</div><div class="aicl-offm">Nessun giro</div></div>`).join('')}</div>` : '';
   return `<div class="aic-card aicl-bench">${head(soglia)}${rows}${offHtml}${aiclCycleRow()}</div>`;
