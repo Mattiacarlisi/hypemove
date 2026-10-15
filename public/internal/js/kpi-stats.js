@@ -305,7 +305,7 @@ function stBase(w, h, o) {
   if (o.fz != null && o.fz < nx - 1) s += stRect(X(o.fz), mt, x1 - X(o.fz), PH, ST.FZ);
   if (o.fz2 != null && o.fz2 < nx - 1) s += stRect(X(o.fz2), mt, x1 - X(o.fz2), PH, ST.FZ2);
   for (const [v] of o.ticks) if (v) s += stLine(ML, Y(v), x1, Y(v), ST.GRID);
-  s += stLine(ML, Y(0), x1, Y(0), ST.INK, 1.5);
+  s += stLine(ML, Y(0), x1, Y(0), ST.MUT, 1.5);
   for (const [v, l] of o.ticks) s += stText(ML - 8, Y(v) + 4, l, ST.MUT, 600, 'end');
   for (let i = 0; i < nx; i++) s += stLine(X(i), mt + PH, X(i), mt + PH + (lab.has(i) ? 6 : 3), ST.TER);
   for (const [i, t] of labs) {
@@ -507,7 +507,7 @@ function stBuildMoney(w, h, d) {
     s += stCurve(c, runs, { color: col, estColor: col, estDash: '7 6', sw: 2.5, dot: (p, r, e) => e.last && r === runs.at(-1) ? 'dot' : null });
   });
   const estD = i => W.days[i] > oggi;
-  s += stCurve(c, stRuns(W.spend.map((v, i) => ({ i, v, est: estD(i) })), ymax, true),
+  s += stCurve(c, stRuns(W.spend.map((v, i) => ({ i, v, est: false })), ymax, true),
     { color: ST.BLU, estColor: ST.BLU, estDash: '7 6', sw: 3, dot: () => 'dot' });
   if (!stats.proj) s += stCurve(c, stRuns(W.paid.map((v, i) => ({ i, v: paidT(W, i), est: estD(i) })), ymax, true),
     { color: ST.VER, estColor: ST.VER, estDash: '7 6', sw: 3, dot: () => 'dot' });
@@ -522,7 +522,7 @@ function stBuildMoney(w, h, d) {
     hov: i => {
       if (i < 0 || i >= W.days.length) return null;
       const ab = dc ? ` · ${W.offers[i]} ${(W.offers[i] ?? 0) === 1 ? 'offerta' : 'offerte'}` : '';
-      const pj = stats.proj ? ` · proiezione ${stEuro(projT(i))} €` : '';
+      const pj = stats.proj && (W.open[i] > 0 || W.days[i] > oggi) ? ` · proiezione ${stEuro(projT(i))} €` : '';
       return { txt: `${stDM(W.days[i])} · spesi ${stEuro(W.spend[i])} € · incassati ${stEuro(paidT(W, i))} €${ab}${pj}`, v: W.spend[i] };
     },
   };
@@ -706,16 +706,16 @@ function stCards(d) {
     const W = stWindow(stRowsOf(d, S), S.w0, w1, g);
     const spend = W.spend.at(-1) ?? 0, earn = W.paid.at(-1) ?? 0;
     const div = earn - spend, kind = g ? 'lordi' : 'netti';
-    const per = `periodo ${stDM(S.w0)}–${stDM(S.w1)}`;
+    const per = stats.proj && w1 > d.meta.oggi ? `dati veri ${stDM(S.w0)}–${stDM(d.meta.oggi)}, proiezione fino al ${stDM(w1)}` : `periodo ${stDM(S.w0)}–${stDM(w1 < d.meta.oggi ? w1 : d.meta.oggi)}`;
     const off = dc ? (W.offers.at(-1) ?? 0) : null;
     const rT = cs.rate, projEarn = earn + rT * (W.open.at(-1) ?? 0);
     const base = stats.proj ? projEarn : earn, tax = stProfitTax(base, spend);
     const pdiv = base - tax - spend;
     const taxTxt = !stats.tax || g ? '' : (tax > 0 ? ` · IRES e IRAP stimate ${stEuro(tax)} € su ${stEuro(base - spend)} € di utile` : (base > spend ? '' : ' · IRES e IRAP zero: il periodo è in perdita'));
     c.money = { num: stEuro(pdiv) + ' €', color: ST.INK,
-      cap: `il divario fra investimento e ricavi · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind}${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} · ${per}${stats.proj ? ` · proiezione +${stEuro(rT * (W.open.at(-1) ?? 0))} €` : ''}${taxTxt}` };
+      cap: `${stats.proj ? `il divario proiettato${stats.tax && !g ? ' e dopo le imposte' : ''}, a prove concluse` : 'il divario fra investimento e ricavi'} · ${stEuro(spend)} € spesi, ${stEuro(earn)} € incassati ${kind}${off == null ? '' : ` (di cui ${off} ${off === 1 ? 'offerta' : 'offerte'})`} · ${per}${stats.proj ? ` · proiezione +${stEuro(rT * (W.open.at(-1) ?? 0))} € al tasso ${stPct(rT * 100)}${cs.manual ? ` (a mano, dai dati ${stPct(cs.dataRate * 100)})` : ''}` : ''}${taxTxt}` };
     c.money.legend = [stLgd(ST.BLU, 'Spesa ads cumulata'),
-      ...(stats.proj ? [stLgd(ST.INK, 'proiezione')] : [stLgd(ST.VER, `Incassi ${kind} cumulati`)]),
+      ...(stats.proj ? [stLgd(ST.INK, `Incassi ${kind}`), stLgd(ST.INK, 'proiezione', '7 6')] : [stLgd(ST.VER, `Incassi ${kind} cumulati`)]),
       ...cs.cmp.map((x, k) => stLgd(ST_CMP_COLORS[k % ST_CMP_COLORS.length], stCurveName(x) + ' · incassi'))].join('');
   }
   // Prove avviate per data di avvio dentro la finestra, con le offerte pagate in parallelo.
