@@ -16,13 +16,15 @@ const AICL_STATUS = {
   queued:    ['q',    'in coda'],
   fixing:    ['fix',  'in lavorazione'],
   closed:    ['ok',   'corretta'],
+  merged:    ['ok',   'unita'],
 };
-// Le quattro sezioni, nell'ordine in cui si mostrano. `queued` si può ricommentare (esce dalla coda), `fixing` e `closed` no.
+// Le cinque sezioni (Finito = unite in bender negli ultimi 7 giorni), nell'ordine in cui si mostrano. `queued` si può ricommentare (esce dalla coda), `fixing` e `closed` no.
 const AICL_SECS = [
   { k: 'todo',   title: 'Da commentare', states: ['open', 'ambiguous', 'failed'], empty: 'Nessuna chat da commentare.', open: true },
   { k: 'done',   title: 'Commentato',    states: ['commented'],                   empty: 'Nessuna chat commentata.',    open: true },
   { k: 'queue',  title: 'Da correggere', states: ['queued', 'fixing'],            empty: 'Nessuna chat da correggere.', open: false },
   { k: 'closed', title: 'Corretto',      states: ['closed'],                      empty: 'Nessuna chat corretta.',      open: false },
+  { k: 'merged', title: 'Finito',        states: ['merged'],                      empty: 'Nessuna chat finita negli ultimi 7 giorni.', open: false },
 ];
 const AICL_LS = 'aicl-sezioni';
 function aiclSecLoad() {
@@ -36,7 +38,7 @@ function aiclSecSave() {
   try { localStorage.setItem(AICL_LS, JSON.stringify(Object.fromEntries(AICL_SECS.map(x => [x.k, !!aicl.sec[x.k].open])))); } catch (e) { /* senza memoria resta com'è */ }
 }
 const AICL_TO_COMMENT = ['open', 'ambiguous', 'failed'];   // gli stati che pesano nel conteggio «da commentare»
-const AICL_LOCKED = ['fixing', 'closed'];                   // gli stati che la RPC di commento rifiuta
+const AICL_LOCKED = ['fixing', 'closed', 'merged'];                   // gli stati che la RPC di commento rifiuta
 
 // Codici di `reasons` → frase breve. Se manca la frase si mostra il codice.
 const AICL_REASONS = {
@@ -60,6 +62,8 @@ const aicl = {
   save: {},                                    // id → { st: 'saving'|'saved'|'error', msg }
   sec: null,                                   // k → { open, big }
   send: { st: '', msg: '', err: false },
+  merge: { st: '', msg: '', err: false },      // il bottone «Unisci»
+  mergeReq: null,                              // l'ultima richiesta di unione (kpi_coach_merge_status)
   rep: {},                                     // id → { items: {indice messaggio: commento}, general } (dopo il caricamento del dettaglio)
   ui: {},                                      // id → { indice: { mode, draft, st, msg, confirm } }
   busy: {},
@@ -97,6 +101,7 @@ async function aiclLoad() {
     if (!Array.isArray(data)) throw new Error('risposta inattesa');
     if (seq !== aicl.seq) return;
     aicl.data = data;
+    aiclMergeStatus();
   } catch (e) {
     if (seq !== aicl.seq) return;
     console.error('aiclLoad', e); aicl.error = aicErrMsg(e);
@@ -215,7 +220,7 @@ function aiclRowHtml(r) {
     <span class="aicl-c1"><span class="aicl-who">${msg}</span><span class="aicl-sub">Utente ${esc(aiclShort(r.user_id))} · ${esc(scr)} · ${esc(aiclWhen(r.message_at || r.found_at))}</span></span>
     <span class="aicl-c2${r.coach_reply ? '' : ' aicl-none'}">${esc(r.coach_reply || 'Nessuna risposta')}</span>
     <span class="aicl-c3">${esc(why)}${(r.status === 'ambiguous' || r.status === 'failed') && r.judge_note ? `<span class="aicl-jn" title="${esc(r.judge_note)}">${esc(r.judge_note)}</span>` : ''}</span>
-    <span class="aicl-c4">${aiclStatus(r.status)}${r.status === 'closed' && (r.fix_commit || r.closed_at) ? `<span class="aicl-fx">${esc([r.fix_commit ? 'commit ' + String(r.fix_commit).slice(0, 8) : '', r.closed_at ? aiclWhen(r.closed_at) : ''].filter(Boolean).join(' · '))}</span>` : ''}</span></button>`;
+    <span class="aicl-c4">${aiclStatus(r.status)}${['closed', 'merged'].includes(r.status) && (r.fix_commit || r.closed_at) ? `<span class="aicl-fx">${esc([r.fix_commit ? 'commit ' + String(r.fix_commit).slice(0, 8) : '', r.merged_at ? 'unita ' + aiclWhen(r.merged_at) : r.closed_at ? aiclWhen(r.closed_at) : ''].filter(Boolean).join(' · '))}</span>` : ''}</span></button>`;
   return `<div class="aicl-item">${head}${open ? aiclPanelHtml(r) : ''}</div>`;
 }
 
@@ -572,6 +577,11 @@ function aiclHeadHtml(sec) {
     extra = `${sd.msg ? `<span class="aicl-sendm${sd.err ? ' aicl-sendm-err' : ''}" role="status">${esc(sd.msg)}</span>` : ''}
       <span class="aicl-sendn">${c} chat</span><button class="aicl-send" data-aicl-send${!c || sd.st === 'saving' ? ' disabled' : ''}>${sd.st === 'saving' ? 'Invio…' : 'Invia'}</button>`;
   }
+  if (sec.k === 'closed') {
+    const busy = aiclMergeBusy(), m = aiclMergeMsg();
+    extra = `${m.msg ? `<span class="aicl-sendm${m.err ? ' aicl-sendm-err' : ''}" role="status">${esc(m.msg)}</span>` : ''}
+      <button class="aicl-send" data-aicl-merge${!n || busy ? ' disabled' : ''}>${busy ? 'Unione…' : 'Unisci'}</button>`;
+  }
   const bigIc = st.big
     ? '<path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/>'
     : '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>';
@@ -699,6 +709,41 @@ async function aiclSend() {
   }
 }
 
+// «Unisci»: chiede al PC di portare il ramo del giro dentro bender. Il PC la prende entro cinque minuti.
+const aiclMergeBusy = () => aicl.merge.st === 'saving' || ['pending', 'running'].includes(aicl.mergeReq && aicl.mergeReq.status);
+function aiclMergeMsg() {
+  if (aicl.merge.msg) return aicl.merge;
+  const r = aicl.mergeReq;
+  if (!r) return { msg: '', err: false };
+  if (r.status === 'pending') return { msg: 'In attesa del PC', err: false };
+  if (r.status === 'running') return { msg: 'Unione in corso', err: false };
+  if (r.status === 'failed') return { msg: 'Unione fallita: ' + (r.note || ''), err: true };
+  const fresh = Date.now() - new Date(r.finished_at) < 24 * 3600 * 1000;
+  return { msg: fresh ? 'Unito: ' + (r.note || '') : '', err: false };
+}
+async function aiclMergeStatus() {
+  try { aicl.mergeReq = await aicRpc('kpi_coach_merge_status'); } catch (e) { console.error('aiclMergeStatus', e); return; }
+  aiclPaintHeads();
+  clearTimeout(aicl.mergeTm);
+  if (['pending', 'running'].includes(aicl.mergeReq && aicl.mergeReq.status)) {
+    aicl.mergeTm = setTimeout(async () => { await aiclReloadQuiet(); aiclMergeStatus(); }, 30000);
+  }
+}
+async function aiclMerge() {
+  if (aiclMergeBusy()) return;
+  aicl.merge = { st: 'saving', msg: '', err: false };
+  aiclPaintHeads();
+  try {
+    aicl.mergeReq = await aicRpc('kpi_coach_merge_request');
+    aicl.merge = { st: '', msg: '', err: false };
+    aiclMergeStatus();
+  } catch (e) {
+    console.error('aiclMerge', e);
+    aicl.merge = { st: 'err', msg: 'Non partita: ' + aicErrMsg(e), err: true };
+    aiclPaintHeads();
+  }
+}
+
 // Ritorna true se il clic è suo.
 function aiclOnClick(ev) {
   const t = ev.target, q = s => t.closest && t.closest(s);
@@ -730,6 +775,7 @@ function aiclOnClick(ev) {
     aiclPaintHeads(); return true;
   }
   if (q('[data-aicl-send]')) { aiclSend(); return true; }
+  if (q('[data-aicl-merge]')) { aiclMerge(); return true; }
   for (const k of ['open', 'edit', 'cancel', 'save', 'del']) {
     const b = q(`[data-aicl-rp-${k}]`);
     if (b) { aiclRepAction(k, b.dataset['aiclRp' + k[0].toUpperCase() + k.slice(1)]); return true; }
