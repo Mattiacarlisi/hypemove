@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-14T09:58:12.603Z",
+  "generatedAt": "2026-10-16T12:53:50.749Z",
   "promptVersion": "3.18.0",
   "promptsHash": "65532b777838508f100d00de9722caa0f97a6c4188307f3eceb38518f06f34c0",
   "separator": "\n\n",
@@ -302,9 +302,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -325,11 +326,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -610,10 +615,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",
@@ -1524,9 +1531,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -1547,11 +1555,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -1832,10 +1844,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",
@@ -2746,9 +2760,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -2769,11 +2784,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -3054,10 +3073,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",
@@ -3968,9 +3989,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -3991,11 +4013,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -4276,10 +4302,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",
@@ -5190,9 +5218,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -5213,11 +5242,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -5498,10 +5531,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",
@@ -6412,9 +6447,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -6435,11 +6471,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -6720,10 +6760,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",
@@ -7634,9 +7676,10 @@
                   "strength",
                   "cardio",
                   "back",
+                  "cooldown",
                   "none"
                 ],
-                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
+                "description": "Tipo chiesto per oggi: mobility (mobilità, stretching, allungamento), cooldown (defaticamento, cool-down: solo stretching e mobilità dolce), strength (tonificare), cardio (bruciare), back (schiena), goal (resta sull'obiettivo), none."
               },
               "only_equipment": {
                 "type": "boolean",
@@ -7657,11 +7700,15 @@
                   "high_impact",
                   "floor",
                   "kneeling",
+                  "lying",
+                  "floor_sitting",
+                  "chair",
+                  "kneeling_spread",
                   "exercise",
                   "time",
                   "none"
                 ],
-                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), exercise (non gli piace quell'esercizio), none."
+                "description": "Il limite che ha detto: knee, low_back, shoulder, wrist, neck (dolore), high_impact (niente salti), floor (niente a terra), kneeling (niente in ginocchio), lying (niente sdraiato), floor_sitting (niente seduta a terra), chair (senza sedia), kneeling_spread (ginocchia mai uno dopo l'altro), exercise (non gli piace quell'esercizio), none."
               },
               "avoid_family": {
                 "type": "string",
@@ -7942,10 +7989,12 @@
                     "kneeling",
                     "quadruped",
                     "wrists",
-                    "squat"
+                    "squat",
+                    "floor_sitting",
+                    "chair"
                   ]
                 },
-                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
+                "description": "Token di movimento che l'utente vuole EVITARE come preferenza (non clinica). Valorizzalo SOLO quando la preference riguarda l'evitare una CLASSE di movimento: 'non posso/voglio saltare'→['jumping']; 'niente da sdraiata/a terra'→['floor_lying']; 'niente in ginocchio'→['kneeling','quadruped']; 'niente seduta a terra' (sdraiata sì)→['floor_sitting']; 'senza sedia'→['chair']; 'mi fanno male i polsi in appoggio'→['wrists']; 'niente accosciate profonde'→['squat']. Vengono scritti in user_profile.disliked_modalities e applicati automaticamente dal filtro del catalogo. Per l'avversione a un ESERCIZIO NOMINATO (push-up, burpees…) non esiste token: lascia questa lista vuota — la nota resta in memoria. Ometti per preferenze non-motorie (orari, obiettivi)."
               },
               "affects_training": {
                 "type": "boolean",

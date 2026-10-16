@@ -730,7 +730,7 @@ async function fetchRetentionDaily() {
     const jobs = sel.length
       ? sel.map(id => {
           const s = (state.retDSprints || []).find(x => x.sprint_id === id);
-          return { key: id, inizio: s && s.inizio, fine: s && s.fine };
+          return { key: id, inizio: s && s.inizio, fine: s && s.fine, t0: s && s.t0, t1: s && s.t1 };
         }).filter(j => j.inizio && j.fine)
       : [{ key: 'free', inizio: state.retDFrom, fine: state.retDTo }];
 
@@ -739,7 +739,9 @@ async function fetchRetentionDaily() {
       const res = await sb.rpc('kpi_retention_daily', {
         p_start:  j.inizio,
         p_end:    j.fine,
-        p_anchor: 'signup',
+        p_anchor: 'first_open',
+        p_t0:     j.t0 || null,
+        p_t1:     j.t1 || null,
       });
       if (res.error) throw res.error;
       out[j.key] = res.data;
@@ -1293,12 +1295,18 @@ async function fetchStepUsers(variant, step, label, idx) {
 // Stato di salute di tutte le creatività nel periodo: alimenta il catalogo e le sue schede.
 // Chi è in prova (o pagante) grazie a una certa proposta. I dati sono già quelli della
 // tabella degli acquisti: una sola fonte, quindi la riga e la lista non possono divergere.
+// «prova iniziata» non è uno stato ma una storia: si filtra sul flag, e accanto a ognuno si
+// scrive com'è finita oggi (ancora in prova, pagante, finito).
 function showCreativeConvUsers(variant, stato, label) {
+  const storia = stato === 'prova iniziata';
   const righe = ((state.purchases && state.purchases.acquisti) || [])
-    .filter(r => (r.variant || 'senza_attribuzione') === variant && r.stato === stato);
+    .filter(r => (r.variant || 'senza_attribuzione') === variant
+      && (storia ? r.prova_iniziata === true : r.stato === stato));
   state.stepUsersModal = {
     variant, step: stato, label,
-    desc: 'attribuito all\'ultimo paywall toccato prima del pagamento',
+    desc: storia
+      ? 'prove partite da questa proposta, con lo stato di oggi di ciascuna · attribuito all\'ultimo paywall toccato prima del pagamento'
+      : 'attribuito all\'ultimo paywall toccato prima del pagamento',
   };
   state.stepUsersError = null; state.stepUsersLoading = false;
   state.stepUsersData = {
@@ -1312,8 +1320,8 @@ function showCreativeConvUsers(variant, stato, label) {
         : Math.abs(min) + ' min dopo';
       const parti = String(r.quando || "").split(" ");
       return {
-        nome: r.nome, email: r.email, views: 1,
-        dettaglio: `${r.piano} · ${r.prezzo != null ? '€ ' + r.prezzo : '—'} · attribuzione ${r.forza} (${quando})`,
+        nome: r.nome, email: r.email, views: 1, sotto: compratoDaText(r),
+        dettaglio: `${storia ? 'oggi ' + (r.stato || '—') + ' · ' : ''}${r.piano} · ${r.prezzo != null ? '€ ' + r.prezzo : '—'} · attribuzione ${r.forza} (${quando})`,
         giorno: parti[0] || '—', ora: parti[1] || '—', ts: r.quando,
       };
     }),
@@ -2660,11 +2668,9 @@ function ptPeriod(today) {
 
 function ptModel(per) {
   const now = new Date(), today = romeDay(now);
-  const inPer = ts => {
-    const day = romeDay(ts); return day >= per.from && (!per.to || day <= per.to);
-  };
-  const inCohort = t => { const st = romeStamp(t.first_open_at || t.trial_at); return st >= per.t0 && st < per.t1; };
-  const trials = (state.premTimeline || []).filter(t => t.trial_at && (per.t0 ? inCohort(t) : inPer(t.trial_at))).map(t => {
+  const t0 = per.t0 || ptStamp(per.from), t1 = per.t1 || ptStamp(addDays(per.to || today, 1));
+  const inCohort = t => { const st = romeStamp(t.first_open_at || t.trial_at); return st >= t0 && st < t1; };
+  const trials = (state.premTimeline || []).filter(t => t.trial_at && inCohort(t)).map(t => {
     const o = ptlTrialOutcome(t, now);
     const start = romeDay(t.trial_at);
     const kind = o === 'converted' ? 'paid' : (o === 'open' || o === 'pending') ? 'soon' : 'quit';
@@ -6673,8 +6679,8 @@ function funnelViz() {
 // ── RETENTION ────────────────────────────────────────────────────────
 
 // La pagina Retention ospita DUE viste che rispondono a due domande diverse:
-//  · Per settimana → "chi continua ad allenarsi" (coorte = primo workout, invariata)
-//  · Per giorno    → "quando far scadere la prova" (coorte = signup, curva di sopravvivenza)
+//  · Per settimana → "chi continua ad allenarsi" (coorte = primo avvio)
+//  · Per giorno    → "quando far scadere la prova" (coorte = primo avvio, curva di sopravvivenza)
 // Il toggle cambia solo state.retView: non tocca mai i filtri dell'altra vista.
 function pageRetention() {
   const tab = (id, label, on) =>
@@ -7048,7 +7054,7 @@ function retDailyTable(data) {
     const color = pct === null ? 'var(--muted)'
       : pct >= 40 ? 'var(--mattia)' : pct >= 20 ? 'var(--amber)' : 'var(--red)';
     return `<tr${isTrial ? ' style="background:rgba(251,191,36,.06)"' : ''}>
-      <td style="color:var(--muted);font-size:12px">D${r.day}${Number(r.day) === 0 ? ' · signup' : ''}</td>
+      <td style="color:var(--muted);font-size:12px">D${r.day}${Number(r.day) === 0 ? ' · primo avvio' : ''}</td>
       <td class="metric-val" style="font-size:13px">${retDCell(r.alive)}</td>
       <td style="font-weight:700;color:${color}">${retDCell(pct, '%')}</td>
       <td style="font-size:12px;color:var(--red)">${retDCell(r.lost)}</td>
@@ -7084,8 +7090,9 @@ function retDailyCompare() {
     // Qualifica priva di senso quando i primi avvii sono meno degli iscritti: per gli
     // sprint vecchi anonymous_sessions non copre gli utenti pre-sistema-sessioni, e un
     // rapporto sopra il 100% è un dato rotto, non un risultato.
-    const qual = fo > 0 && fo >= data.cohort_size
-      ? (data.cohort_size / fo * 100).toFixed(1) + '%'
+    const reg  = Number(meta.cohort_size || 0);
+    const qual = fo > 0 && fo >= reg
+      ? (reg / fo * 100).toFixed(1) + '%'
       : '<span style="color:var(--border2)">—</span>';
     const cell = d => {
       const r = retDDay(data, d);
@@ -7095,7 +7102,7 @@ function retDailyCompare() {
       <td style="color:var(--text);font-size:12px">${meta.nome || '—'}</td>
       <td style="font-size:12px;color:var(--muted)">${data.from} → ${data.to}</td>
       <td class="metric-val" style="font-size:13px">${fo || '—'}</td>
-      <td class="metric-val" style="font-size:13px">${data.cohort_size}</td>
+      <td class="metric-val" style="font-size:13px">${reg}</td>
       <td style="font-size:12px;color:var(--muted)">${qual}</td>
       <td>${cell(1)}</td><td>${cell(3)}</td><td>${cell(7)}</td><td>${cell(14)}</td>
       <td style="font-size:12px;color:var(--muted)">${
@@ -8123,11 +8130,21 @@ const CREATIVE_ACT_COLS = [
 // I gesti che si possono mettere in percentuale. Sono quelli delle colonne di destra più prova e
 // incasso, che vengono dai soldi e non dagli eventi: tutti si leggono contro la stessa base, cioè
 // quante persone quella creatività l'hanno vista davvero.
+// Le tre colonne dei soldi non dicono la stessa cosa: «Prova iniziata» è un conteggio che resta
+// (una prova partita è partita, comunque sia finita), «In prova» e «Pagante» sono lo stato di
+// OGGI di quegli abbonamenti. Per confrontare le creatività si guarda la prima.
+// `stato` = cosa filtra la lista che si apre cliccando il numero.
 const CREATIVE_RATE_COLS = [
   ...CREATIVE_ACT_COLS.map(c => ({ k: c.k, l: c.l, c: c.c, from: 'marks' })),
-  { k: 'in_prova', l: 'In prova', c: '#22d3ee', from: 'conv' },
-  { k: 'paganti',  l: 'Pagante',  c: '#4ade80', from: 'conv' },
+  { k: 'prove_iniziate', l: 'Prova iniziata', c: '#5b9bff', from: 'conv', stato: 'prova iniziata',
+    t: 'Prove partite da questa proposta nel periodo, anche se poi sono finite o diventate paganti · ultimo tocco prima del pagamento' },
+  { k: 'in_prova', l: 'In prova', c: '#22d3ee', from: 'conv', stato: 'in prova',
+    t: 'Stato di oggi: prove ancora in corso. Le prove scadute o disdette non ci sono più, quelle diventate paganti passano a Pagante · ultimo tocco prima del pagamento' },
+  { k: 'paganti',  l: 'Pagante',  c: '#4ade80', from: 'conv', stato: 'pagante',
+    t: 'Stato di oggi: chi paga adesso un abbonamento partito da questa proposta. Chi ha disdetto ed è scaduto non c\'è più · ultimo tocco prima del pagamento' },
 ];
+// Le stesse, in colonna nella tabella: intestazione e celle escono da qui, così non si sfasano.
+const CREATIVE_CONV_COLS = CREATIVE_RATE_COLS.filter(c => c.from === 'conv');
 
 // La base delle percentuali: chi ha visto la PRIMA schermata, cioè il numero grande della prima
 // casella del percorso. Non `users`, che conta anche chi la proposta l'ha aperta senza che una
@@ -8215,17 +8232,15 @@ function creativeAuditRow(reg, live, win) {
     .map(s => `${esc(s.source)} <span style="color:#5a5a7a">${s.users}</span>`).join(' · ');
 
   // Prova e incasso non vengono dagli eventi ma dai soldi, attribuiti per ultimo tocco: per
-  // questo stanno in due colonne a parte e non si cliccano — il dettaglio, nome per nome, è
-  // nella tabella degli acquisti qui sotto.
+  // questo stanno in colonne a parte. Il numero apre la lista, presa dalla tabella degli
+  // acquisti qui sotto. Un backend vecchio senza `prove_iniziate` dà «—», come ogni vuoto.
   const conv = ((state.purchases && state.purchases.per_variant) || {})[reg.variant] || null;
-  const convCols = [
-    { v: conv ? conv.in_prova : 0, stato: 'in prova', l: 'In prova', c: '#22d3ee', t: 'Prove in corso attribuite a questa proposta (ultimo tocco prima del pagamento)' },
-    { v: conv ? conv.paganti : 0,  stato: 'pagante',  l: 'Pagante',  c: '#4ade80', t: 'Paganti veri attribuiti a questa proposta (ultimo tocco prima del pagamento)' },
-  ].map(x => {
-    const open = x.v > 0
+  const convCols = CREATIVE_CONV_COLS.map(x => {
+    const v = conv ? Number(conv[x.k] || 0) : 0;
+    const open = v > 0
       ? ` class="creative-conv" data-variant="${esc(reg.variant)}" data-stato="${esc(x.stato)}" data-label="${esc(reg.name + ' · ' + x.l)}" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"`
       : '';
-    return `<td title="${esc(x.t + (x.v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${x.v > 0 ? x.c : 'var(--muted)'}"><span${open}>${x.v || '—'}</span></td>`;
+    return `<td title="${esc(x.t + (v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${v > 0 ? x.c : 'var(--muted)'}"><span${open}>${v || '—'}</span></td>`;
   }).join('');
 
   const cols = CREATIVE_ACT_COLS.map(c => {
@@ -8379,7 +8394,7 @@ function premiumCreativesAuditCard() {
     <div class="card" style="margin-bottom:16px">
       ${head}
       <div style="overflow-x:auto">
-        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:${state.creativePathOpen ? 1040 : 800}px">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:${state.creativePathOpen ? 1120 : 880}px">
           <thead>
             <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
               <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
@@ -8391,8 +8406,8 @@ function premiumCreativesAuditCard() {
                   : `Percorso <span style="color:#60a5fa;font-weight:600;margin-left:6px">▸ apri</span>`}
               </th>
               ${headerCols}
-              <th title="Prove in corso attribuite a questa proposta, per ultimo tocco prima del pagamento" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:#22d3ee">In prova</th>
-              <th title="Paganti veri attribuiti a questa proposta, per ultimo tocco prima del pagamento" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:#4ade80">Pagante</th>
+              ${CREATIVE_CONV_COLS.map(c =>
+                `<th title="${esc(c.t)}" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:${c.c}">${esc(c.l)}</th>`).join('')}
             </tr>
           </thead>
           <tbody>${rows.map(r => creativeAuditRow(r, byVariant[r.variant], win)).join('')}</tbody>
@@ -8411,7 +8426,7 @@ function premiumCreativesAuditCard() {
             ricorda il paywall), e abbonamenti vecchi rivalidati dopo una reinstallazione, contati come acquisti nuovi.
             Corretto in app il 27/09/2026, vale dal rilascio successivo: il paywall di partenza si salva sul telefono prima del pagamento, e
             una rivalidazione non è più un «Comprato». Gli eventi già scritti restano così: per chi ha pagato davvero fanno fede
-            le colonne <strong>In prova</strong> e <strong>Pagante</strong>, che partono dai pagamenti.
+            le colonne <strong>Prova iniziata</strong>, <strong>In prova</strong> e <strong>Pagante</strong>, che partono dai pagamenti.
           </div>
           <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:9px">
             ${CREATIVE_ACT_COLS.map(c => {
@@ -8641,6 +8656,18 @@ async function fetchPaywallPurchases() {
   render();
 }
 
+/**
+ * Su quale account è stato fatto il gesto, quando non è quello collegato da Google all'acquisto:
+ * «comprato da <account> · <aggancio>», o «comprato da utente non loggato». Stringa vuota se è lo
+ * stesso account, o se il backend non manda ancora `aggancio`/`comprato_da`.
+ */
+function compratoDaText(r) {
+  if (!r) return '';
+  if (r.aggancio === 'sessione senza utente') return 'comprato da utente non loggato';
+  if (!r.comprato_da) return '';
+  return 'comprato da ' + r.comprato_da + (r.aggancio ? ' · ' + r.aggancio : '');
+}
+
 /** Nome umano di una creatività, dal catalogo; la chiave tecnica se non è in elenco. */
 function creativeName(variant) {
   if (!variant) return '—';
@@ -8659,6 +8686,9 @@ function premiumPaywallPurchasesCard() {
         <strong style="color:var(--fg)">forte</strong> = il gesto che apre il pagamento (tentativo, CTA, scelta del piano) ·
         <strong style="color:var(--fg)">debole</strong> = solo l'ultima schermata che aveva davanti, quindi un indizio ·
         oltre le 24 ore non si attribuisce niente.
+        Il gesto si cerca anche sugli altri account dello stesso telefono e dello stesso abbonamento
+        (chi ha il token dell'acquisto nei propri eventi); se non c'è da nessuna parte, nella sessione senza login
+        che ha chiuso lo stesso acquisto. Quando il gesto non è dell'account collegato, sotto il nome c'è «comprato da …».
       </div>
     </div>`;
 
@@ -8689,13 +8719,18 @@ function premiumPaywallPurchasesCard() {
       : min >= 0  ? `${min} min prima`
       : `${Math.abs(min)} min dopo`;
     const forzaCol = r.forza === 'forte' ? '#4ade80' : r.forza === 'debole' ? '#f59e0b' : '#ef4444';
+    const compratoDa = compratoDaText(r);
     return `
       <tr style="border-bottom:1px solid #15151f">
-        <td style="padding:9px 12px;color:${r.orfano ? '#f59e0b' : 'var(--fg)'};white-space:nowrap">${esc(r.nome)}</td>
+        <td style="padding:9px 12px;color:${r.orfano ? '#f59e0b' : 'var(--fg)'};white-space:nowrap">${esc(r.nome)}${compratoDa
+          ? `<div title="Il gesto sul paywall è stato fatto su un account diverso da quello a cui Google ha collegato l'acquisto" style="font-size:9.5px;color:#5a5a7a;margin-top:2px">${esc(compratoDa)}</div>`
+          : ''}</td>
         <td style="padding:9px 12px">${r.email
           ? `<a href="mailto:${esc(r.email)}" style="color:#a78bfa;text-decoration:none">${esc(r.email)}</a>`
           : `<span style="color:#f59e0b;font-size:11px" title="La riga di play_purchases non porta user_id: Google ha confermato l'abbonamento ma il collegamento all'account non è mai arrivato. L'acquisto è vero, l'utente non si può ancora nominare.">acquisto senza account collegato</span>`}</td>
-        <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.piano)}</td>
+        <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.piano)}${r.prova_iniziata === true
+          ? ` <span title="L'abbonamento è partito con la settimana di prova gratuita" style="font-size:9.5px;color:#5b9bff;border:1px solid #5b9bff55;border-radius:4px;padding:0 5px;margin-left:4px">prova</span>`
+          : ''}</td>
         <td style="padding:9px 12px;font-family:var(--mono);color:var(--fg);white-space:nowrap">${r.prezzo != null ? '€ ' + r.prezzo : '—'}</td>
         <td style="padding:9px 12px;font-weight:700;color:${col};white-space:nowrap">${esc(r.stato)}</td>
         <td style="padding:9px 12px;color:var(--muted);white-space:nowrap;font-size:11px">${esc(r.quando)}</td>
@@ -8718,7 +8753,8 @@ function premiumPaywallPurchasesCard() {
       <strong style="color:#f59e0b">${orfani} acquist${orfani === 1 ? 'o' : 'i'} senza account collegato.</strong>
       Google ha confermato l'abbonamento ma la riga di <code style="font-family:var(--mono)">play_purchases</code>
       non porta <code style="font-family:var(--mono)">user_id</code>: l'incasso è vero, la persona no.
-      Senza utente non ci sono eventi da attribuire — l'attribuzione resta «nessuna» per forza, non per mancanza di dati —
+      Senza utente l'attribuzione resta di solito «nessuna» (si trova solo se il gesto sta su un account che porta lo stesso
+      abbonamento, o in una sessione senza login) —
       e va controllato a mano se in app ha davvero il premium.
     </div>` : '';
 
@@ -8971,7 +9007,9 @@ function stepUsersModal() {
             <tr style="border-bottom:1px solid #15151f">
               <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(u.giorno || '—')}</td>
               <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(u.ora || '—')}</td>
-              <td style="padding:9px 14px;color:var(--fg)">${esc(u.nome || '—')}</td>
+              <td style="padding:9px 14px;color:var(--fg)">${esc(u.nome || '—')}${u.sotto
+                ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${esc(u.sotto)}</div>`
+                : ''}</td>
               <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(u.email)}" style="color:#a78bfa;text-decoration:none">${esc(u.email || '—')}</a></td>
               ${hasDet ? `<td style="padding:9px 14px;color:var(--fg);font-family:var(--mono);font-size:11px">${esc(u.dettaglio || '—')}</td>` : ''}
               <td style="padding:9px 14px;text-align:center;color:${u.views > 1 ? 'var(--fg)' : 'var(--muted)'}">${u.views || 1}</td>
