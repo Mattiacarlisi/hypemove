@@ -275,6 +275,8 @@ const ONBOARDING_FUNNEL_STEPS = [
 ];
 
 const LS_OV             = 'hm_overview_keys';
+const LS_SA_SEL         = 'hm_sa_sprints_v1';   // sprint scelti nella card «Attivazione per sprint» (null = ultimi 6)
+const LS_SA_PHASES      = 'hm_sa_phases_v1';    // fasce delle fasi sopra il grafico: 'on' | 'off'
 const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
@@ -570,6 +572,7 @@ let state = {
   // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
   // scoreMenu = menu aperto ('sel' | 'ref' | null).
   scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
+  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saMenu: false, saW: 800,
   // Pagina «Goal» (kpi_goal_board, letta dalla cache). goals = kpi_settings.goals, uguale per tutti gli operatori;
   // goalEdit = { k, text, saving, fresh } mentre un obiettivo è in modifica.
   goalBoard: null, goalBoardError: null, goalCache: null, goalLoading: false, goalForce: false,
@@ -651,6 +654,7 @@ async function fetchData() {
     // I due riquadri «ultimi feedback» e «ultime chat» arrivano dopo, ognuno col suo render:
     // prima la pagina intera aspettava kpi_ai_sessions, la RPC più lenta del gruppo.
     fetchScoreboard();
+    fetchSprintActivation();
     Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]).then(render);
   } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
   state.loading = false;
@@ -787,7 +791,7 @@ function kcMark(c) {
 }
 // Dopo ogni render: la scheda che si sta ricalcolando prende la linea blu, quella appena aggiornata la dissolvenza breve.
 function kcSync() {
-  const host = el => el.closest('.card, .sbr-card') || el.closest('.main') || el.parentElement;
+  const host = el => el.closest('.card, .sbr-card, .sa-card') || el.closest('.main') || el.parentElement;
   document.querySelectorAll('.kc-busy').forEach(el => el.classList.remove('kc-busy'));
   document.querySelectorAll('.kc-mark[data-busy="1"]').forEach(m => host(m).classList.add('kc-busy'));
   document.querySelectorAll('.kc-mark[data-fresh="1"]').forEach(m => {
@@ -2012,6 +2016,39 @@ async function fetchScoreboard(force) {
   if (state.scoreboardCache) state.scoreboardCache.fresh = false;
 }
 
+// Card «Attivazione per sprint»: stesso schema di fetchScoreboard sulla voce di cache 'sprint_activation'/'all'.
+async function fetchSprintActivation(force) {
+  force = force || state.saForce; state.saForce = false;
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'sprint_activation', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      state.sa = data.data; state.saError = null;
+      state.saCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      render();
+      if (!state.saCache.pending) return;
+    } else {
+      state.saCache = null;   // niente di salvato: la card resta in caricamento finché il ricalcolo non torna
+    }
+  } catch (e) {
+    console.error('fetchSprintActivation', e);
+    state.saError = e.message || 'Errore caricamento attivazione per sprint';
+    render();
+    return;
+  }
+  const r = await kpiRecompute('sprint_activation', 'all', force || !state.sa);
+  if (r.data && Array.isArray(r.data)) {
+    state.sa = r.data; state.saError = null;
+    state.saCache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (state.sa) {
+    state.saCache = { ...state.saCache, pending: false, failed: true, fresh: false };
+  } else {
+    state.saError = 'Attivazione per sprint non disponibile';
+  }
+  render();
+  if (state.saCache) state.saCache.fresh = false;
+}
+
 // Pagina «Goal»: stesso schema di fetchScoreboard sulla voce di cache 'goal_board'/'all' (kpi_goal_board).
 async function fetchGoalBoard(force) {
   if (state.goalLoading) return;
@@ -2313,6 +2350,7 @@ function manualRefresh() {
   // gli sprint del grafico tentativi finiti in errore si riprovano: senza, restavano in errore fino al ricarico
   state.attemptsChartErrors = {};
   state.scoreForce = true;   // «Aggiorna» fa ricalcolare anche le curve di «Sprint vs record» (altrimenti restano quelle in cache)
+  state.saForce = true;      // … e la card «Attivazione per sprint»
   fetchData();
   // ripesca dal DB tutto ciò che è condiviso (impostazioni, funnel salvati, sprint) → vedi le modifiche
   // dell'altro utente senza ricaricare la pagina
@@ -3395,6 +3433,224 @@ function attachGoal() {
   }
 }
 
+// ── CARD «ATTIVAZIONE PER SPRINT» ───────────────────────────────────────
+// Per ogni sprint scelto, tre linee in % sulla stessa base: chi finisce l'onboarding ed entra in app (la prima
+// schermata dell'app, dopo l'eventuale paywall o registrazione). Attivati = allenamento finito O pasto salvato, una
+// persona conta una volta; premono Inizia; finiscono l'allenamento. Tutto entro 14 giorni dal primo avvio.
+// Numeri da kpi_sprint_activation (cache 'sprint_activation'/'all'), mai in diretta. Sopra il grafico due fasce
+// calcolate dai dati: se c'era il paywall a fine onboarding e su quale schermata si atterra per prima.
+const SA_MIN_BASE = 30;          // sotto: punto vuoto e niente etichette (regola dei grafici: niente curve su pochi dati)
+const SA_PAYWALL_SHARE = 0.5;    // dalla metà della base in su che ha visto il paywall → «Paywall»
+const SA_LANDING_SHARE = 0.7;    // una schermata d'arrivo vale per lo sprint se ci atterra almeno il 70%
+const SA_DEFAULT_N = 6;          // sprint accesi di default: gli ultimi sei principali
+const SA_COL = { att: '#ffffff', ini: '#9ca3af', fin: '#4361ee' };
+
+// Sprint 1 e 2 non hanno first_open: non si possono scegliere.
+function saSelectable(rows) { return rows.filter(r => r.coorte > 0); }
+function saDefaultSel(rows) { return rows.filter(r => r.principale && r.coorte > 0).slice(-SA_DEFAULT_N).map(r => r.id); }
+function saPct(n, base) { return base > 0 ? Math.round(n * 100 / base) : null; }
+// «S12», e per i sotto-sprint la prima parola dopo il numero: «S12 test», «S15 post», «S16 uomini».
+function saShort(row, narrow) {
+  if (row.numero == null) return String(row.nome).slice(0, 8);
+  if (row.principale || narrow) return 'S' + row.numero;
+  const word = String(row.nome).replace(/^\D*\d+\s*[-–·:]?\s*/, '').trim().split(/\s+/)[0] || '';
+  return ('S' + row.numero + ' ' + word.toLowerCase()).trim();
+}
+function saPhase(row) {
+  if (!row || row.base < SA_MIN_BASE) return null;
+  const paywall = row.paywall / row.base >= SA_PAYWALL_SHARE ? 'Paywall' : 'Senza paywall';
+  const l = row.landing || {}, tot = (l.home || 0) + (l.detail || 0) + (l.cibo || 0);
+  let landing = 'Misto';
+  if (tot > 0) {
+    const [name, n] = [['Home', l.home || 0], ['Dettaglio', l.detail || 0], ['Cibo', l.cibo || 0]].sort((a, b) => b[1] - a[1])[0];
+    if (n / tot >= SA_LANDING_SHARE) landing = name;
+  }
+  return { paywall, landing };
+}
+// Sprint vicini con la stessa etichetta condividono la fascia; uno sprint senza fase la spezza.
+function saBands(phases, key) {
+  const out = [];
+  phases.forEach((ph, i) => {
+    const label = ph ? ph[key] : null, last = out[out.length - 1];
+    if (!label) return;
+    if (last && last.label === label && last.to === i - 1) last.to = i;
+    else out.push({ from: i, to: i, label });
+  });
+  return out;
+}
+// Dove va l'etichetta di ogni valore: Inizia sopra, finiti sotto, attivati sopra o di lato se è vicino a Inizia.
+function saLabelSides(v) {
+  const s = { ini: 'up', fin: 'down', att: 'up' };
+  if (v.fin > v.ini) { s.fin = 'up'; s.ini = 'down'; }
+  if (Math.abs(v.att - v.ini) < 6) s.att = 'right';
+  return s;
+}
+function saSelected(rows) {
+  const ids = Array.isArray(state.saSel) ? state.saSel : saDefaultSel(rows);
+  return ids.filter(id => rows.some(r => r.id === id && r.coorte > 0));
+}
+// Testo di una fascia: intero, accorciato o niente se non ci sta (12 px, circa 7 px per lettera).
+function saBandText(label, w) {
+  const SHORT = { 'Senza paywall': 'No paywall', Dettaglio: 'Dett.', Paywall: 'Pw', Home: 'Home', Cibo: 'Cibo', Misto: 'Misto' };
+  if (label.length * 7 + 10 <= w) return label;
+  const s = SHORT[label] || '';
+  return s && s.length * 7 + 10 <= w ? s : '';
+}
+
+function saChart(rows, W, phasesOn) {
+  const narrow = W < 600;
+  const bandH = phasesOn && rows ? 22 : 0;
+  const top = bandH ? bandH * 2 + 26 : 14, plotH = narrow ? 200 : 260, xLab = narrow ? 28 : 44;
+  const H = top + plotH + xLab;
+  const x0 = narrow ? 38 : 46, x1 = W - 12;
+  const n = rows ? rows.length : SA_DEFAULT_N, step = (x1 - x0) / n;
+  const X = i => x0 + step * (i + 0.5);
+  const Y = v => top + plotH - v / 100 * plotH;
+  let s = `<svg class="sa-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Attivazione per sprint">`;
+  [0, 20, 40, 60, 80, 100].forEach(v => {
+    s += `<line class="pt-gh" x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}"/><text class="sa-tk" x="${x0 - 8}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
+  });
+  if (!rows) return s + '</svg>';
+  for (let i = 1; i < n; i++) s += `<line class="sa-sep" x1="${x0 + step * i}" x2="${x0 + step * i}" y1="${bandH ? 8 : top}" y2="${top + plotH}"/>`;
+  if (bandH) {
+    const ph = rows.map(saPhase);
+    [['paywall', 8], ['landing', 8 + bandH + 6]].forEach(([key, y]) => saBands(ph, key).forEach(b => {
+      const bx = x0 + step * b.from + 3, bw = step * (b.to - b.from + 1) - 6;
+      const t = saBandText(b.label, bw);
+      s += `<rect class="sa-band${key === 'paywall' && b.label === 'Paywall' ? ' sa-band-pw' : ''}" x="${bx}" y="${y}" width="${bw}" height="${bandH}" rx="6"/>`
+        + (t ? `<text class="sa-band-t" x="${bx + bw / 2}" y="${y + bandH / 2 + 4}" text-anchor="middle">${esc(t)}</text>` : '');
+    }));
+  }
+  const pts = rows.map((r, i) => ({
+    r, i, x: X(i), ok: r.base > 0, few: r.base < SA_MIN_BASE,
+    v: { att: saPct(r.attivati, r.base), ini: saPct(r.inizia, r.base), fin: saPct(r.finisce, r.base) },
+  }));
+  const showLbl = step >= 40;
+  // Inizia e finiti prima, attivati per ultimi: se due valori coincidono si vede il bianco
+  ['ini', 'fin', 'att'].forEach(k => {
+    let seg = [];
+    const flush = () => { if (seg.length > 1) s += `<polyline class="sa-ln sa-ln-${k}" points="${seg.join(' ')}"/>`; seg = []; };
+    pts.forEach(p => { if (p.ok) seg.push(`${p.x.toFixed(1)},${Y(p.v[k]).toFixed(1)}`); else flush(); });
+    flush();
+    pts.filter(p => p.ok).forEach(p => {
+      const y = Y(p.v[k]);
+      s += `<circle class="sa-pt${p.few ? ' sa-hollow' : ''}" cx="${p.x.toFixed(1)}" cy="${y.toFixed(1)}" r="${k === 'att' ? 5.5 : 4.5}" style="--c:${SA_COL[k]}"/>`;
+      if (!showLbl || p.few) return;
+      const side = saLabelSides(p.v)[k];
+      const lx = side === 'right' ? p.x + 7 : p.x, ly = side === 'up' ? y - 11 : side === 'down' ? y + 20 : y + 4;
+      s += `<text class="sa-lbl${k === 'att' ? ' sa-lbl-att' : ''}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${side === 'right' ? 'start' : 'middle'}" fill="${SA_COL[k]}">${p.v[k]}%</text>`;
+    });
+  });
+  pts.forEach(p => {
+    const r = p.r, prov = r.age_days < 14;
+    s += `<text class="sa-tk sa-xl${prov ? ' sa-prov' : ''}" x="${p.x.toFixed(1)}" y="${top + plotH + 18}" text-anchor="middle">${esc(saShort(r, narrow || step < 70))}</text>`;
+    if (!narrow) s += `<text class="sa-tk sa-xd" x="${p.x.toFixed(1)}" y="${top + plotH + 34}" text-anchor="middle">${ddmm(String(r.inizio))}</text>`;
+    const tip = `${r.nome} · ${r.base.toLocaleString('it-IT')} ${r.base === 1 ? 'persona' : 'persone'}`
+      + (p.ok ? ` · attivati ${r.attivati} (${p.v.att}%) · Inizia ${r.inizia} (${p.v.ini}%) · finiscono ${r.finisce} (${p.v.fin}%)` : '')
+      + (p.few && p.ok ? ' · pochi dati' : '') + (prov ? ' · provvisorio' : '');
+    s += `<rect class="sa-hit" x="${(x0 + step * p.i).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${H}"><title>${esc(tip)}</title></rect>`;
+  });
+  return s + '</svg>';
+}
+
+function saLegend() {
+  const line = (c, w) => `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/><circle cx="15" cy="7" r="4" fill="${c}"/></svg>`;
+  return `<div class="pt-legend sa-legend"><span>${line(SA_COL.att, 3)}attivati: allenamento o pasto, una persona conta una volta</span>`
+    + `<span>${line(SA_COL.ini, 2.5)}premono Inizia</span><span>${line(SA_COL.fin, 2.5)}finiscono l'allenamento</span>`
+    + `<span><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>meno di ${SA_MIN_BASE} persone</span></div>`;
+}
+
+function saHead(rows) {
+  const title = '<h2 class="sa-title">Attivazione per sprint</h2>';
+  if (!rows) return `<div class="sa-head">${title}<span class="pt-pill pt-pill-sk"></span></div>`;
+  const chev = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const sel = saSelected(rows);
+  const items = [...rows].reverse().map(r => {
+    const on = sel.includes(r.id), off = !(r.coorte > 0);
+    return `<button class="pt-opt sa-opt${on ? ' pt-sel' : ''}${r.principale ? '' : ' sa-sub'}" role="option" aria-selected="${on}"`
+      + (off ? ' disabled aria-disabled="true"' : ` data-sa-toggle="${esc(r.id)}"`)
+      + `><span class="sa-chk"></span>${esc(r.nome)}${off ? '<span class="sa-miss">dati mancanti</span>' : ''}</button>`;
+  }).join('');
+  const menu = state.saMenu
+    ? `<div class="pt-menu sa-menu" role="listbox" aria-multiselectable="true"><div class="sa-quick"><button class="sa-qb" data-sa-quick="def">Ultimi ${SA_DEFAULT_N}</button><button class="sa-qb" data-sa-quick="all">Tutti</button></div>${items}</div>`
+    : '';
+  return `<div class="sa-head">${title}
+    <div class="sa-pills"><div class="pt-pillwrap sa-w"><button class="pt-pill" data-sa-menu aria-haspopup="listbox" aria-expanded="${!!state.saMenu}"><span>${sel.length ? sel.length + ' sprint' : 'Nessuno sprint'}</span>${chev}</button>${menu}</div>
+    <button class="sa-phases${state.saPhases ? ' pt-on' : ''}" data-sa-phases aria-pressed="${!!state.saPhases}">Fasi</button></div>
+    ${state.saCache ? `<span class="sbr-upd">${kcMark(state.saCache)}</span>` : ''}</div>`;
+}
+
+function sprintActivationCard() {
+  const rows = state.sa;
+  const shell = body => `<section class="sa-card">${body}</section>`;
+  if (state.saError && !rows) {
+    return shell(saHead(null) + `<div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-sa-retry>Riprova</button></div>`);
+  }
+  if (!rows) return shell(saHead(null) + `<div class="sa-chart sa-loading" aria-busy="true">${saChart(null, state.saW, false)}</div>`);
+  const sel = saSelected(rows), shown = rows.filter(r => sel.includes(r.id));
+  if (!shown.length) {
+    return shell(saHead(rows) + `<div class="pt-err sbr-none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <div class="pt-err-t">Nessuno sprint scelto</div><div class="sbr-sub">Sceglili dal menu.</div></div>`);
+  }
+  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases)}</div>${saLegend()}`);
+}
+
+// Il grafico si ridisegna alla larghezza vera della card (come ptFit).
+function saFit() {
+  const wrap = document.querySelector('.sa-chart');
+  if (!wrap) return;
+  const w = Math.round(wrap.clientWidth);
+  if (!w || Math.abs(w - state.saW) < 6) return;
+  state.saW = w;
+  const rows = state.sa;
+  if (!rows) { wrap.innerHTML = saChart(null, w, false); return; }
+  const sel = saSelected(rows);
+  wrap.innerHTML = saChart(rows.filter(r => sel.includes(r.id)), w, state.saPhases);
+}
+
+// Gestori della card: menu a scelta multipla, «Ultimi 6» / «Tutti», interruttore delle fasi, «Riprova».
+let saGlobals = false;
+function attachSprintActivation() {
+  const saveSel = ids => {
+    state.saSel = ids;
+    try { ids ? localStorage.setItem(LS_SA_SEL, JSON.stringify(ids)) : localStorage.removeItem(LS_SA_SEL); } catch (e) { /* storage pieno o bloccato: resta in memoria */ }
+  };
+  document.querySelector('[data-sa-menu]')?.addEventListener('click', ev => {
+    ev.stopPropagation(); state.saMenu = !state.saMenu; render();
+  });
+  document.querySelectorAll('[data-sa-toggle]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const cur = saSelected(state.sa || []), id = el.dataset.saToggle;
+    saveSel(cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
+    render();
+  }));
+  document.querySelectorAll('[data-sa-quick]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation();
+    saveSel(el.dataset.saQuick === 'all' ? saSelectable(state.sa || []).map(r => r.id) : null);
+    render();
+  }));
+  document.querySelector('[data-sa-phases]')?.addEventListener('click', () => {
+    state.saPhases = !state.saPhases;
+    try { localStorage.setItem(LS_SA_PHASES, JSON.stringify(state.saPhases ? 'on' : 'off')); } catch (e) { /* idem */ }
+    render();
+  });
+  document.querySelector('[data-sa-retry]')?.addEventListener('click', () => {
+    state.saError = null; state.sa = null; render(); fetchSprintActivation(true);
+  });
+  saFit();
+  if (!saGlobals) {
+    saGlobals = true;
+    document.addEventListener('click', ev => {
+      if (state.saMenu && !ev.target.closest('.sa-card .pt-pillwrap')) { state.saMenu = false; render(); }
+    });
+    let timer;
+    window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(saFit, 120); });
+  }
+}
+
 function pageOverview() {
   const keys = state.overviewKeys.filter(k => METRICS[k]);
   const colCount = Math.min(Math.max(keys.length, 1), 5);
@@ -3436,6 +3692,8 @@ function pageOverview() {
     ${sprintScoreboardCard()}
 
     ${premiumTimelineCard()}
+
+    ${sprintActivationCard()}
 
     <div class="grid-2" style="margin-bottom:16px;gap:16px">
     <div class="card" style="min-width:0">
@@ -11460,6 +11718,7 @@ function attachEvents() {
   // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
   attachPremiumTimeline();
   attachSprintRecord();
+  attachSprintActivation();
   attachGoal();
   document.querySelectorAll('[data-growth-range]').forEach(el =>
     el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));

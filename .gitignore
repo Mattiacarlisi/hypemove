@@ -3,6 +3,7 @@ dist/
 .vite/
 dist-server/
 scripts/.smoke-premium.png
+scripts/.smoke-sa-*.png
 
 # Master ritagliati degli screenshot Play: si rigenerano con `npm run images`
 assets-src/app/

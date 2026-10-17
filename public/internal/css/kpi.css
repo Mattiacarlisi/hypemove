@@ -1161,6 +1161,70 @@
 @keyframes kc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
 .kc-fade { animation: kc-in 250ms ease-out; }
 @keyframes kc-in { from { opacity: .55; } to { opacity: 1; } }
+/* ── Card «Attivazione per sprint» (overview): tema Notte, riusa pt-* (pillola, menu, errore, legenda) ── */
+.sa-card {
+  container: sa / inline-size; box-sizing: border-box; margin-bottom: 16px; padding: 24px 32px 20px;
+  background: #1a1d24; border: 1.5px solid #2a2e37; border-radius: 14px; box-shadow: 0 3px 0 #050608;
+  font-family: Nunito, system-ui, sans-serif; color: #ffffff; line-height: 1.3;
+}
+.sa-card .pt-pill:focus-visible, .sa-card .pt-retry:focus-visible, .sa-card .pt-opt:focus-visible,
+.sa-phases:focus-visible, .sa-qb:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.sa-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-height: 42px; margin-bottom: 18px; }
+.sa-title { font-size: 22px; font-weight: 800; line-height: 28px; margin: 0 10px 0 0; }
+.sa-pills { display: flex; align-items: center; gap: 10px; }
+.sa-w .pt-pill { width: 180px; }
+.sa-w .pt-menu { min-width: 300px; }
+.sa-phases {
+  font: inherit; font-size: 14px; font-weight: 800; color: #ffffff; height: 40px; padding: 0 18px; border-radius: 50px; cursor: pointer;
+  background: #14171d; border: 1.5px solid #2a2e37; box-sizing: border-box;
+}
+.sa-phases.pt-on { background: #262d45; border-color: #4361ee; }
+.sa-quick { display: flex; gap: 6px; padding: 4px 4px 8px; margin-bottom: 4px; border-bottom: 1.5px solid #2a2e37; }
+.sa-qb {
+  flex: 1; font: inherit; font-size: 13px; font-weight: 800; color: #ffffff; height: 32px; border-radius: 50px; cursor: pointer;
+  background: #14171d; border: 1.5px solid #2a2e37;
+}
+.sa-qb:hover { border-color: #4361ee; }
+.sa-opt.sa-sub { padding-left: 28px; font-weight: 500; }
+.sa-chk { width: 12px; height: 12px; border-radius: 3px; border: 1.5px solid #9ca3af; box-sizing: border-box; flex-shrink: 0; }
+.sa-opt.pt-sel .sa-chk { background: #4361ee; border-color: #4361ee; }
+.sa-opt[disabled] { opacity: .45; cursor: default; }
+.sa-opt[disabled]:hover { background: transparent; }
+.sa-miss { margin-left: auto; padding-left: 12px; font-size: 12px; font-weight: 600; color: #6b7280; }
+
+.sa-chart { width: 100%; min-height: 330px; }
+.sa-svg { display: block; overflow: visible; }
+.sa-tk { font-size: 13px; font-weight: 700; fill: #9ca3af; }
+.sa-xl { fill: #ffffff; }
+.sa-xl.sa-prov { fill: #9ca3af; }
+.sa-xd { font-size: 12px; fill: #6b7280; }
+.sa-sep { stroke: #23272f; stroke-width: 1; }
+.sa-band { fill: #14171d; stroke: #2a2e37; stroke-width: 1.5; }
+.sa-band-pw { fill: #262d45; stroke: #4361ee; }
+.sa-band-t { font-size: 12px; font-weight: 700; fill: #ffffff; }
+.sa-ln { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.sa-ln-att { stroke: #ffffff; stroke-width: 3; }
+.sa-ln-ini { stroke: #9ca3af; stroke-width: 2.5; }
+.sa-ln-fin { stroke: #4361ee; stroke-width: 2.5; }
+.sa-pt { fill: var(--c); stroke: #1a1d24; stroke-width: 2; }
+.sa-pt.sa-hollow { fill: #1a1d24; stroke: var(--c); stroke-width: 2; }
+.sa-lbl { font-size: 12px; font-weight: 800; paint-order: stroke; stroke: #1a1d24; stroke-width: 4px; stroke-linejoin: round; }
+.sa-lbl-att { font-size: 13px; stroke-width: 6px; }
+.sa-hit { fill: transparent; }
+.sa-loading .sa-svg { opacity: .5; }
+.sa-legend { gap: 8px 28px; }
+
+@container sa (max-width: 700px) {
+  .sa-head { gap: 12px; }
+  .sa-title { width: 100%; margin: 0; }
+  .sa-pills { width: 100%; }
+  .sa-w { flex: 1; }
+  .sa-w .pt-pill { width: 100%; }
+  .sa-w .pt-menu { min-width: 0; width: 100%; }
+  .sa-chart { min-height: 250px; }
+}
+@media (max-width: 700px) { .sa-card { padding: 16px; } }
+
 .sbr-upd { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) {
   .kc-busy::before { animation: none; width: 100%; opacity: .6; }

@@ -47,3 +47,12 @@ Il passaggio precedente (redesign «Funnel», 07/10) è nella storia git di ques
 - NON pubblicare finché `sprint_curves` non è calcolata: il codice nuovo non chiama più `kpi_sprint_scoreboard`, quindi senza cache la scheda resterebbe in caricamento.
 - Scostamenti dalla tavola: il menu elenca solo gli sprint dalla beta (11/06); il tooltip mostra il punto più vicino al cursore fra sprint e record.
 - Prossimo passo, alla lettera: quando il database è tornato normale, controllare `select query, computed_at, compute_ms, error from kpi_cache where query = 'sprint_curves'`; se è calcolata, aprire la dashboard, confrontare la scheda con la tavola `red-1`, poi committare `kpi.js`, `kpi.css`, `HANDOFF.md` e `_specs/design-flows/kpi-sprint-record/` e fare push su `main`.
+
+## 8. Card «Attivazione per sprint» nell'Overview (17/10/2026)
+
+Sotto «Prove gratuite». Tre linee per sprint, in % sulla stessa base: attivati (allenamento finito O pasto salvato, una persona conta una volta), premono Inizia, finiscono l'allenamento. Richiesta e regole decise da Mattia.
+- **Base**: chi finisce l'onboarding ed entra in app (prima schermata dopo onboarding_complete: chiusura del paywall di fine onboarding, onboarding_end_landing, view_Home, view_WorkoutDetail, view_Cibo). Vale anche per gli sprint con registrazione (la registrazione precede onboarding_complete). Coorte e finestre come kpi_sprint_curves, passi entro 14 giorni.
+- **Dati**: RPC kpi_sprint_activation() (migrazione app 20261017120000, applicata), letta SOLO dalla cache (kpi_cache_get / kpi_cache_recompute, voce sprint_activation/all, tier hourly). 1,3 s a calcolo.
+- **Sprint**: scelta multipla dal menu (Sprint 1 e 2 spenti: niente first_open), default gli ultimi 6 principali, salvata in localStorage (hm_sa_sprints_v1). Interruttore «Fasi» (hm_sa_phases_v1): fasce calcolate dai dati, paywall se lo vede almeno metà della base, atterraggio se una schermata prende almeno il 70% (altrimenti «Misto»). Costanti SA_* in kpi.js.
+- **Regole dei grafici**: asse X = sprint in ordine cronologico ma equispaziati (come la tavola approvata da Mattia), asse Y 0-100 con righe, legenda fuori, punto vuoto e niente etichette sotto 30 persone.
+- **Prove**: node scripts/test-sprint-activation.mjs (13 casi); collaudo visivo senza login con finto supabase-js: scripts/smoke-sprint-activation.mjs (Playwright: se www non ha node_modules, copiarlo temporaneamente in app/ e lanciarlo con cwd www).
