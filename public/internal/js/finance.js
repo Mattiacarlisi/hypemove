@@ -609,6 +609,7 @@ function renderSidebar() {
       ${nav("ricorrenti","🔁","Ricorrenti")}
       ${nav("fatture","🧾","Fatture" + ftBadgeSidebar())}
       <div class="nav-section" style="margin-top:10px">Analisi</div>
+      ${nav("conto","📒","Conto mensile")}
       ${nav("riepilogo","📅","Riepilogo")}
       ${nav("categorie","🏷️","Categorie")}
       <div class="nav-section" style="margin-top:10px">Config</div>
@@ -625,6 +626,7 @@ function renderPage() {
   if (state.page === "registro")     return renderRegistro();
   if (state.page === "ricorrenti")   return renderRicorrenti();
   if (state.page === "fatture")      return renderFatture();
+  if (state.page === "conto")        return renderConto();
   if (state.page === "riepilogo")    return renderRiepilogo();
   if (state.page === "categorie")    return renderCategorieView();
   if (state.page === "impostazioni") return renderImpostazioni();
@@ -1421,6 +1423,7 @@ function renderModal() {
 // ── EVENTS ────────────────────────────────────────────────────────────────────
 function attachEvents() {
   attachFattureEvents();
+  attachContoEvents();
   document.querySelectorAll("[data-nav]").forEach(el =>
     el.addEventListener("click", () => setState({ page: el.dataset.nav })));
 
