@@ -1206,6 +1206,7 @@
 .sa-ln-att { stroke: #ffffff; stroke-width: 3; }
 .sa-ln-ini { stroke: #9ca3af; stroke-width: 2.5; }
 .sa-ln-fin { stroke: #4361ee; stroke-width: 2.5; }
+.sa-ln-coo { stroke: #fb8b04; stroke-width: 2.5; stroke-dasharray: 6 5; }
 .sa-pt { fill: var(--c); stroke: #1a1d24; stroke-width: 2; }
 .sa-pt.sa-hollow { fill: #1a1d24; stroke: var(--c); stroke-width: 2; }
 .sa-lbl { font-size: 12px; font-weight: 800; paint-order: stroke; stroke: #1a1d24; stroke-width: 4px; stroke-linejoin: round; }

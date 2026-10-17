@@ -102,6 +102,14 @@ check('posizione dei valori: Inizia sopra, finiti sotto, attivati di lato se vic
   assert.deepEqual(lib.saLabelSides({ ini: 30, fin: 17, att: 30 }), { ini: 'up', fin: 'down', att: 'right' });
   assert.deepEqual(lib.saLabelSides({ ini: 32, fin: 23, att: 28 }), { ini: 'up', fin: 'down', att: 'right' });
 });
+check('linea dal primo avvio: sotto, sopra se supera i finiti, a sinistra se troppo vicina', () => {
+  assert.equal(lib.saLabelSides({ ini: 64, fin: 40, att: 40, coo: 26 }).coo, 'down');
+  assert.equal(lib.saLabelSides({ ini: 64, fin: 40, att: 40, coo: 37 }).coo, 'left');
+  assert.equal(lib.saLabelSides({ ini: 29, fin: 16, att: 31, coo: 22 }).coo, 'left');
+  assert.equal(lib.saLabelSides({ ini: 60, fin: 10, att: 45, coo: 25 }).coo, 'up');
+  assert.equal(lib.saLabelSides({ ini: 26, fin: 17, att: 17, coo: 13 }).coo, 'left');
+  assert.equal(lib.saLabelSides({ ini: 30, fin: 17, att: 30 }).coo, undefined);
+});
 
 console.log(ko ? `\n✗ ${ko} test falliti` : '\n✓ tutti i test passano');
 process.exit(ko ? 1 : 0);

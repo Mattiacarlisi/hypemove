@@ -43,7 +43,7 @@ async function shoot(name, width, setup) {
   await page.evaluate(({ rows, setup }) => {
     // eslint-disable-next-line no-undef
     Object.assign(state, { sa: rows, saError: null, saCache: { computedAt: new Date().toISOString(), pending: false, failed: false, fresh: false },
-      saSel: null, saPhases: true, saMenu: false, saW: 800 }, setup || {});
+      saSel: null, saPhases: true, saCoorte: false, saMenu: false, saW: 800 }, setup || {});
     document.body.innerHTML = '<div id="probe" style="max-width:1180px;margin:0 auto;padding:24px;background:#0a0a0f;min-height:100vh"></div>';
     document.body.style.background = '#0a0a0f';
     // eslint-disable-next-line no-undef
@@ -63,6 +63,7 @@ out.default = await shoot('default', 1280);
 out.menu    = await shoot('menu', 1280, { saMenu: true });
 out.tutti   = await shoot('tutti', 1280, { saSel: FIXTURE.filter(r => r.coorte > 0).map(r => r.id) });
 out.nofasi  = await shoot('nofasi', 1280, { saPhases: false });
+out.coorte  = await shoot('coorte', 1280, { saCoorte: true });
 out.stretta = await shoot('stretta', 480);
 out.vuota   = await shoot('vuota', 1280, { saSel: [] });
 out.errore  = await shoot('errore', 1280, { sa: null, saError: 'x' });
@@ -74,6 +75,7 @@ const checks = {
   'menu con «dati mancanti» sugli sprint 1-2': (out.menu.match(/dati mancanti/g) || []).length === 2,
   'vuota dice nessuno sprint': out.vuota.includes('Nessuno sprint scelto'),
   'errore con Riprova': out.errore.includes('Riprova'),
+  'linea dal primo avvio in legenda': out.coorte.includes('attivati su chi ha aperto') && !out.default.includes('attivati su chi ha aperto'),
   'nessun trattino lungo nei testi': !Object.values(out).some(t => t.includes('—')),
 };
 console.log(JSON.stringify(checks, null, 2));

@@ -277,6 +277,7 @@ const ONBOARDING_FUNNEL_STEPS = [
 const LS_OV             = 'hm_overview_keys';
 const LS_SA_SEL         = 'hm_sa_sprints_v1';   // sprint scelti nella card «Attivazione per sprint» (null = ultimi 6)
 const LS_SA_PHASES      = 'hm_sa_phases_v1';    // fasce delle fasi sopra il grafico: 'on' | 'off'
+const LS_SA_COORTE      = 'hm_sa_coorte_v1';    // linea «dal primo avvio» (attivati su chi ha aperto l'app): 'on' | 'off'
 const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
@@ -572,7 +573,7 @@ let state = {
   // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
   // scoreMenu = menu aperto ('sel' | 'ref' | null).
   scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
-  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saMenu: false, saW: 800,
+  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saCoorte: loadLS(LS_SA_COORTE, 'off') === 'on', saMenu: false, saW: 800,
   // Pagina «Goal» (kpi_goal_board, letta dalla cache). goals = kpi_settings.goals, uguale per tutti gli operatori;
   // goalEdit = { k, text, saving, fresh } mentre un obiettivo è in modifica.
   goalBoard: null, goalBoardError: null, goalCache: null, goalLoading: false, goalForce: false,
@@ -3443,7 +3444,8 @@ const SA_MIN_BASE = 30;          // sotto: punto vuoto e niente etichette (regol
 const SA_PAYWALL_SHARE = 0.5;    // dalla metà della base in su che ha visto il paywall → «Paywall»
 const SA_LANDING_SHARE = 0.7;    // una schermata d'arrivo vale per lo sprint se ci atterra almeno il 70%
 const SA_DEFAULT_N = 6;          // sprint accesi di default: gli ultimi sei principali
-const SA_COL = { att: '#ffffff', ini: '#9ca3af', fin: '#4361ee' };
+// coo = attivati su chi ha aperto l'app (tasto «Dal primo avvio», spento di default)
+const SA_COL = { att: '#ffffff', ini: '#9ca3af', fin: '#4361ee', coo: '#fb8b04' };
 
 // Sprint 1 e 2 non hanno first_open: non si possono scegliere.
 function saSelectable(rows) { return rows.filter(r => r.coorte > 0); }
@@ -3483,6 +3485,11 @@ function saLabelSides(v) {
   const s = { ini: 'up', fin: 'down', att: 'up' };
   if (v.fin > v.ini) { s.fin = 'up'; s.ini = 'down'; }
   if (Math.abs(v.att - v.ini) < 6) s.att = 'right';
+  // dal primo avvio: sotto i finiti se c'è spazio, sopra se li supera, a sinistra quando è troppo vicina
+  if (v.coo != null) {
+    if (v.coo >= v.fin) s.coo = Math.abs(v.att - v.coo) < 12 || v.coo - v.fin < 6 ? 'left' : 'up';
+    else s.coo = v.fin - v.coo >= 6 ? 'down' : 'left';
+  }
   return s;
 }
 function saSelected(rows) {
@@ -3497,7 +3504,7 @@ function saBandText(label, w) {
   return s && s.length * 7 + 10 <= w ? s : '';
 }
 
-function saChart(rows, W, phasesOn) {
+function saChart(rows, W, phasesOn, coorteOn) {
   const narrow = W < 600;
   const bandH = phasesOn && rows ? 22 : 0;
   const top = bandH ? bandH * 2 + 26 : 14, plotH = narrow ? 200 : 260, xLab = narrow ? 28 : 44;
@@ -3523,11 +3530,12 @@ function saChart(rows, W, phasesOn) {
   }
   const pts = rows.map((r, i) => ({
     r, i, x: X(i), ok: r.base > 0, few: r.base < SA_MIN_BASE,
-    v: { att: saPct(r.attivati, r.base), ini: saPct(r.inizia, r.base), fin: saPct(r.finisce, r.base) },
+    v: { att: saPct(r.attivati, r.base), ini: saPct(r.inizia, r.base), fin: saPct(r.finisce, r.base),
+         ...(coorteOn ? { coo: saPct(r.attivati_coorte || 0, r.coorte) } : {}) },
   }));
   const showLbl = step >= 40;
   // Inizia e finiti prima, attivati per ultimi: se due valori coincidono si vede il bianco
-  ['ini', 'fin', 'att'].forEach(k => {
+  (coorteOn ? ['coo', 'ini', 'fin', 'att'] : ['ini', 'fin', 'att']).forEach(k => {
     let seg = [];
     const flush = () => { if (seg.length > 1) s += `<polyline class="sa-ln sa-ln-${k}" points="${seg.join(' ')}"/>`; seg = []; };
     pts.forEach(p => { if (p.ok) seg.push(`${p.x.toFixed(1)},${Y(p.v[k]).toFixed(1)}`); else flush(); });
@@ -3537,8 +3545,8 @@ function saChart(rows, W, phasesOn) {
       s += `<circle class="sa-pt${p.few ? ' sa-hollow' : ''}" cx="${p.x.toFixed(1)}" cy="${y.toFixed(1)}" r="${k === 'att' ? 5.5 : 4.5}" style="--c:${SA_COL[k]}"/>`;
       if (!showLbl || p.few) return;
       const side = saLabelSides(p.v)[k];
-      const lx = side === 'right' ? p.x + 7 : p.x, ly = side === 'up' ? y - 11 : side === 'down' ? y + 20 : y + 4;
-      s += `<text class="sa-lbl${k === 'att' ? ' sa-lbl-att' : ''}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${side === 'right' ? 'start' : 'middle'}" fill="${SA_COL[k]}">${p.v[k]}%</text>`;
+      const lx = side === 'right' ? p.x + 7 : side === 'left' ? p.x - 7 : p.x, ly = side === 'up' ? y - 11 : side === 'down' ? y + 20 : y + 4;
+      s += `<text class="sa-lbl${k === 'att' ? ' sa-lbl-att' : ''}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${side === 'right' ? 'start' : side === 'left' ? 'end' : 'middle'}" fill="${SA_COL[k]}">${p.v[k]}%</text>`;
     });
   });
   pts.forEach(p => {
@@ -3547,16 +3555,18 @@ function saChart(rows, W, phasesOn) {
     if (!narrow) s += `<text class="sa-tk sa-xd" x="${p.x.toFixed(1)}" y="${top + plotH + 34}" text-anchor="middle">${ddmm(String(r.inizio))}</text>`;
     const tip = `${r.nome} · ${r.base.toLocaleString('it-IT')} ${r.base === 1 ? 'persona' : 'persone'}`
       + (p.ok ? ` · attivati ${r.attivati} (${p.v.att}%) · Inizia ${r.inizia} (${p.v.ini}%) · finiscono ${r.finisce} (${p.v.fin}%)` : '')
+      + (coorteOn && p.ok ? ` · dal primo avvio ${r.attivati_coorte || 0} su ${r.coorte} (${p.v.coo}%)` : '')
       + (p.few && p.ok ? ' · pochi dati' : '') + (prov ? ' · provvisorio' : '');
     s += `<rect class="sa-hit" x="${(x0 + step * p.i).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${H}"><title>${esc(tip)}</title></rect>`;
   });
   return s + '</svg>';
 }
 
-function saLegend() {
+function saLegend(coorteOn) {
   const line = (c, w) => `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/><circle cx="15" cy="7" r="4" fill="${c}"/></svg>`;
   return `<div class="pt-legend sa-legend"><span>${line(SA_COL.att, 3)}attivati: allenamento o pasto, una persona conta una volta</span>`
     + `<span>${line(SA_COL.ini, 2.5)}premono Inizia</span><span>${line(SA_COL.fin, 2.5)}finiscono l'allenamento</span>`
+    + (coorteOn ? `<span><svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${SA_COL.coo}" stroke-width="2.5" stroke-dasharray="6 4"/><circle cx="15" cy="7" r="4" fill="${SA_COL.coo}"/></svg>attivati su chi ha aperto l'app</span>` : '')
     + `<span><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>meno di ${SA_MIN_BASE} persone</span></div>`;
 }
 
@@ -3576,7 +3586,8 @@ function saHead(rows) {
     : '';
   return `<div class="sa-head">${title}
     <div class="sa-pills"><div class="pt-pillwrap sa-w"><button class="pt-pill" data-sa-menu aria-haspopup="listbox" aria-expanded="${!!state.saMenu}"><span>${sel.length ? sel.length + ' sprint' : 'Nessuno sprint'}</span>${chev}</button>${menu}</div>
-    <button class="sa-phases${state.saPhases ? ' pt-on' : ''}" data-sa-phases aria-pressed="${!!state.saPhases}">Fasi</button></div>
+    <button class="sa-phases${state.saPhases ? ' pt-on' : ''}" data-sa-phases aria-pressed="${!!state.saPhases}">Fasi</button>
+    <button class="sa-phases${state.saCoorte ? ' pt-on' : ''}" data-sa-coorte aria-pressed="${!!state.saCoorte}">Dal primo avvio</button></div>
     ${state.saCache ? `<span class="sbr-upd">${kcMark(state.saCache)}</span>` : ''}</div>`;
 }
 
@@ -3595,7 +3606,7 @@ function sprintActivationCard() {
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
       <div class="pt-err-t">Nessuno sprint scelto</div><div class="sbr-sub">Sceglili dal menu.</div></div>`);
   }
-  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases)}</div>${saLegend()}`);
+  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases, state.saCoorte)}</div>${saLegend(state.saCoorte)}`);
 }
 
 // Il grafico si ridisegna alla larghezza vera della card (come ptFit).
@@ -3608,7 +3619,7 @@ function saFit() {
   const rows = state.sa;
   if (!rows) { wrap.innerHTML = saChart(null, w, false); return; }
   const sel = saSelected(rows);
-  wrap.innerHTML = saChart(rows.filter(r => sel.includes(r.id)), w, state.saPhases);
+  wrap.innerHTML = saChart(rows.filter(r => sel.includes(r.id)), w, state.saPhases, state.saCoorte);
 }
 
 // Gestori della card: menu a scelta multipla, «Ultimi 6» / «Tutti», interruttore delle fasi, «Riprova».
@@ -3635,6 +3646,11 @@ function attachSprintActivation() {
   document.querySelector('[data-sa-phases]')?.addEventListener('click', () => {
     state.saPhases = !state.saPhases;
     try { localStorage.setItem(LS_SA_PHASES, JSON.stringify(state.saPhases ? 'on' : 'off')); } catch (e) { /* idem */ }
+    render();
+  });
+  document.querySelector('[data-sa-coorte]')?.addEventListener('click', () => {
+    state.saCoorte = !state.saCoorte;
+    try { localStorage.setItem(LS_SA_COORTE, JSON.stringify(state.saCoorte ? 'on' : 'off')); } catch (e) { /* idem */ }
     render();
   });
   document.querySelector('[data-sa-retry]')?.addEventListener('click', () => {
