@@ -54,6 +54,8 @@ function ctPiano(x) {
   return 'annuale';
 }
 const CT_PIANO_LABEL = { annuale: 'annuale', mensile: 'mensile', rate: 'annuale a rate' };
+const CT_PLURALI = { 'annuale': 'annuali', 'mensile': 'mensili', 'annuale a rate': 'annuali a rate', 'a rate': 'a rate', 'annuale scontato': 'annuali scontati' };
+function ctPl(n, label) { return `${n} ${n === 1 ? label : (CT_PLURALI[label] || label)}`; }
 
 // ── CARICAMENTO ──────────────────────────────────────────────────────────────────
 function ctState() {
@@ -113,7 +115,7 @@ async function ctLoad({ forzaSync = false } = {}) {
 // ── MODELLO ──────────────────────────────────────────────────────────────────────
 // Un "bucket" è una colonna: un mese chiuso, le tre colonne del mese in corso, un trimestre, il totale.
 function ctBucket() {
-  return { lordo: 0, iva: 0, comm: 0, netto: 0, entrateReg: 0, meta: 0, altri: 0, stime: 0,
+  return { lordo: 0, iva: 0, comm: 0, netto: 0, entrateReg: 0, meta: 0, altri: 0, stime: 0, servizio: 0,
     altriCat: {}, stimeVoci: {}, ordini: [], rimborsi: [], movimenti: [], metaGiorni: null, metaFonte: null, voci: [] };
 }
 function ctAddOrdine(b, o, segno = 1) {
@@ -123,7 +125,7 @@ function ctRisultato(b) { return b.netto + b.entrateReg - b.meta - b.altri - b.s
 function ctSomma(bs) {
   const t = ctBucket();
   for (const b of bs) {
-    for (const k of ['lordo', 'iva', 'comm', 'netto', 'entrateReg', 'meta', 'altri', 'stime']) t[k] += b[k];
+    for (const k of ['lordo', 'iva', 'comm', 'netto', 'entrateReg', 'meta', 'altri', 'stime', 'servizio']) t[k] += b[k];
     for (const [k, v] of Object.entries(b.altriCat)) t.altriCat[k] = (t.altriCat[k] || 0) + v;
     for (const [k, v] of Object.entries(b.stimeVoci)) t.stimeVoci[k] = (t.stimeVoci[k] || 0) + v;
     t.ordini.push(...b.ordini); t.rimborsi.push(...b.rimborsi); t.movimenti.push(...b.movimenti);
@@ -177,6 +179,7 @@ function ctModel() {
       const v = Math.abs(x.importo);
       if (x.categoria === META_AUTO_CAT) { if (!isCur || !ct.metaDays) { t.meta += v; t.movimenti.push(x); t.metaFonte = 'registro'; } continue; }
       t.altri += v; t.altriCat[x.categoria] = (t.altriCat[x.categoria] || 0) + v; t.movimenti.push(x);
+      if (ctServizio(x)) t.servizio += v;
     }
     const st = stimaVoci(m, movM);
     if (isCur && ct.metaDays) {
@@ -185,9 +188,9 @@ function ctModel() {
     }
     if (isCur && st[CT_STIME.ai.voce] && giornoN > 0) {     // AI: finora quello consumato, il resto in proporzione
       const ai = st[CT_STIME.ai.voce];
-      p.stime += ctR2(ai / giornoN * restano); p.stimeVoci[CT_STIME.ai.voce] = ctR2(ai / giornoN * restano);
+      p.stime += ctR2(ai / giornoN * restano); p.servizio += ctR2(ai / giornoN * restano); p.stimeVoci[CT_STIME.ai.voce] = ctR2(ai / giornoN * restano);
     }
-    for (const [k, v] of Object.entries(st)) { b.stime += v; b.stimeVoci[k] = v; }
+    for (const [k, v] of Object.entries(st)) { b.stime += v; b.servizio += v; b.stimeVoci[k] = v; }
     cols[m] = b; if (isCur) cols[cur + ':P'] = p;
   }
 
@@ -209,7 +212,8 @@ function ctModel() {
     const t = fineMs(m); const att = attiviAl(t);
     const nuovi = abb.filter(a => a.pagato != null && ctDay(a.pagato).slice(0, 7) === m);
     const decise = prove.map(a => ({ a, e: esitoProva(a) })).filter(x => x.e && ctDay(x.e.t).slice(0, 7) === m);
-    ind[m] = { paganti: att.length, nuovi: nuovi.length, nuoviDiretti: nuovi.filter(a => a.prova == null).length,
+    const persi = abb.filter(a => a.pagato != null && a.scade != null && a.scade <= Math.min(t, now) && ctDay(a.scade).slice(0, 7) === m);
+    ind[m] = { paganti: att.length, persi: persi.length, persiRimborsi: persi.filter(a => a.rimborsato).length, nuovi: nuovi.length, nuoviDiretti: nuovi.filter(a => a.prova == null).length,
       mrr: att.reduce((s, a) => s + nettoMese(a), 0), proveOk: decise.filter(x => x.e.ok).length, proveTot: decise.length,
       perPiano: att.reduce((o, a) => (o[a.piano] = (o[a.piano] || 0) + 1, o), {}) };
   }
@@ -272,7 +276,7 @@ function ctModel() {
   for (const m of mesi) { acc += ctRisultato(cols[m]); cumulato[m] = acc; }
   cumulato[cur + ':E'] = acc - finoraRis + ctRisultato(E);
 
-  return { oggi, cur, mesi, chiusi, cols, ind, tot, cumulato, scen, blocchi, tasso, inProva,
+  return { oggi, cur, mesi, chiusi, cols, ind, tot, cumulato, scen, blocchi, tasso, inProva, abb,
     proveDecise: tutteDecise, metaBasso, metaAlto, giorniAttivi, giornoN, restano, giorniCur,
     attiviOra: attiviAl(now), nettoMese };
 }
@@ -314,28 +318,215 @@ function ctIndCol(M, c) {
     nuovi, proveOk: c.kind === 'E' ? null : sum('proveOk'), proveTot: c.kind === 'E' ? null : sum('proveTot'),
     mrr: c.kind === 'E' ? null : i.mrr,
     cac: c.kind !== 'E' && nuovi ? meta / nuovi : null, cacBase: nuovi,
-    roi: c.kind !== 'E' && meta > 0 ? netto / meta : null,
+    roas: c.kind !== 'E' && meta > 0 ? netto / meta : null,
+    persi: c.kind === 'E' ? null : sum('persi'),
+    arppu: c.kind !== 'E' && i.paganti ? i.mrr / i.paganti : null,
+    crescita: (() => { if (c.kind === 'E' || c.kind === 'T') return null; const prev = addMese(c.mesi[0], -1); const p = M.ind[prev]; return p && p.mrr > 0 ? i.mrr / p.mrr - 1 : null; })(),
+    margine: c.kind !== 'E' ? ctMargine(c.b) : null,
+    payback: c.kind !== 'E' && nuovi && i.paganti && i.mrr > 0 ? (meta / nuovi) / (i.mrr / i.paganti) : null,
+    roi: c.kind !== 'E' ? ctRoi(c.b) : null,
   };
 }
 
+// Costi di servizio: quelli che crescono con gli utenti (server, infrastruttura, AI), per il margine lordo.
+const CT_SERVIZIO_RE = /supabase|google cloud|openrouter|hosting|server/i;
+function ctServizio(x) { return x.categoria === 'Hosting & Infrastruttura' || CT_SERVIZIO_RE.test(String(x.descrizione || '')); }
+function ctMargine(b) { return b.netto > 0 ? (b.netto - b.servizio) / b.netto : null; }
+
+// ROI su tutti i costi: (entrate − costi) ÷ costi
+function ctCosti(b) { return b.meta + b.altri + b.stime; }
+function ctRoi(b) { const k = ctCosti(b); return k > 0 ? (b.netto + b.entrateReg - k) / k : null; }
+function ctPct(v, dec = 1) { return v == null || !isFinite(v) ? '—' : ctN(v * 100, dec) + '%'; }
+
+// ── VALORE DI UN CLIENTE NEL TEMPO (LTV) ─────────────────────────────────────────────
+// Nessun vostro abbonamento ha ancora rinnovato: finché i casi sono meno di CT_LTV_MIN si usano
+// i tassi di primo rinnovo del settore (RevenueCat 2026, Health & Fitness su Google Play).
+const CT_RINNOVO_SETTORE = { mensile: 0.573, annuale: 0.246 };
+const CT_LTV_MIN = 30;
+const CT_DAY = 86400000;
+function ctLtv(M) {
+  const now = Date.now();
+  const propri = (piano, periodo, soglia) => {
+    const arrivati = M.abb.filter(a => a.pagato != null && (piano === 'annuale' ? a.piano !== 'mensile' : a.piano === 'mensile') && a.pagato + periodo * CT_DAY < now);
+    return { n: arrivati.length, ok: arrivati.filter(a => a.scade != null && a.scade > a.pagato + soglia * CT_DAY).length };
+  };
+  const own = { mensile: propri('mensile', 31, 40), annuale: propri('annuale', 366, 400) };
+  const r = {}, fonte = {};
+  for (const p of ['mensile', 'annuale']) {
+    const usaPropri = own[p].n >= CT_LTV_MIN;
+    r[p] = usaPropri ? own[p].ok / own[p].n : CT_RINNOVO_SETTORE[p];
+    fonte[p] = usaPropri ? 'vostro' : 'settore';
+  }
+  const annNet = ctNet(CT_LISTINO.annuale);
+  const valore = a => {
+    const n1 = a.ultimo_netto != null ? Number(a.ultimo_netto) : ctNet(Number(a.prezzo) || CT_LISTINO[a.piano]);
+    if (a.piano === 'mensile') return { v: n1 / (1 - r.mensile), conto: `${ctN(n1)} ÷ (1 − ${ctPct(r.mensile)})`, label: 'mensile' };
+    if (a.piano === 'rate') { const y = ctR2(n1 * 12); return { v: y / (1 - r.annuale), conto: `12 × ${ctN(n1)} = ${ctN(y)} ÷ (1 − ${ctPct(r.annuale)})`, label: 'a rate' }; }
+    const n2 = ctNet(Number(a.prezzo) || CT_LISTINO.annuale);
+    if (Math.abs(n1 - n2) < 0.01) return { v: n2 / (1 - r.annuale), conto: `${ctN(n2)} ÷ (1 − ${ctPct(r.annuale)})`, label: 'annuale' };
+    return { v: n1 + r.annuale * n2 / (1 - r.annuale), conto: `${ctN(n1)} il 1° anno + ${ctPct(r.annuale)} × ${ctN(n2)} ÷ (1 − ${ctPct(r.annuale)})`, label: 'annuale scontato' };
+  };
+  const gruppi = {};
+  for (const a of M.attiviOra) { const x = valore(a); const k = x.label + '|' + x.v.toFixed(2); (gruppi[k] ||= { ...x, n: 0 }).n++; }
+  const G = Object.values(gruppi);
+  const n = M.attiviOra.length;
+  const ltv = n ? G.reduce((s, g) => s + g.v * g.n, 0) / n : null;
+  const pagantiSempre = M.abb.filter(a => a.pagato != null).length;
+  const storico = pagantiSempre ? M.tot.netto / pagantiSempre : null;
+  return { ltv, G, n, r, fonte, own, storico, pagantiSempre, annNet };
+}
+
 // ── RENDER ───────────────────────────────────────────────────────────────────────
+// Ogni spiegazione dice cos'è, la formula, e il conto rifatto coi numeri della pagina:
+// così un errore si vede subito. Le funzioni ricevono il modello del render corrente.
+function ctBox(titolo, def, formula, calcolo, nota) {
+  return `<b>${titolo}</b>${def ? `<p>${def}</p>` : ''}`
+    + (formula ? `<div class="ct-f"><span>Formula</span>${formula}</div>` : '')
+    + (calcolo ? `<div class="ct-f ct-calc"><span>Il conto</span>${calcolo}</div>` : '')
+    + (nota ? `<p class="ct-nota">${nota}</p>` : '');
+}
+function ctMeseCur(M) { return CT_MESI[Number(M.cur.slice(5)) - 1]; }
+function ctDaFeb() { return 'da ' + CT_MESI[Number(CT_DAL.slice(5)) - 1]; }
+function ctNuoviTot(M) { return M.mesi.reduce((s, m) => s + M.ind[m].nuovi, 0); }
+
 const CT_INFO = {
-  netto: `<b>Netto che arriva da Google</b>Dal prezzo Google toglie l'IVA al 22% (la versa lui allo Stato), poi il 15% di commissione su quello che resta. Arriva il 69,7% di quello che paga l'utente: 9,90 € → 6,89 €, 29,99 € → 20,89 €. È il netto vero di ogni ordine (Orders API).<br><br>Google lo versa verso il 15 del mese dopo: questo è il netto <i>maturato</i> nel mese, non il bonifico.`,
-  meta: `<b>Meta Ads</b>Mesi chiusi: la voce del Registro. Mese in corso: l'API Meta giorno per giorno, oggi compreso (parziale).`,
-  altri: `<b>Altri costi nel Registro</b>Tutte le spese del Registro tranne Meta, nel mese della loro data. Nel mese in corso una voce con data futura (es. un ricorrente del 20) sta in «previsto».`,
-  stime: `<b>Costi stimati</b>Costi veri che nel Registro non ci sono ancora: ${CT_STIME.voci.map(v => `${v.voce} (${ctN(v.importo)} €, ultimo importo registrato)`).join(', ')} e l'AI, stimata dall'app in dollari (cambio ${ctN(CT_STIME.cambioUsdEur)}). La stima di un mese sparisce da sola quando nel Registro c'è la voce vera con quel nome.`,
-  risultato: `<b>Risultato del mese, prima delle imposte</b>Netto da Google meno tutti i costi.<br><br><b>Imposte.</b> Oggi gli incassi vanno sulla P.IVA di Mattia: se è forfettario si paga sul 67% dei ricavi anche quando si è in perdita; se è ordinario solo sull'utile. In una SRL: IRES 24% sull'utile e IRAP 4,73% (Marche) sul valore della produzione, che non è l'utile. Da confermare col commercialista.`,
-  cumulato: `<b>Cumulato</b>La somma dei risultati da ${ctMeseLabel(CT_DAL)} a oggi: quanto avete messo di tasca vostra finora (se negativo).`,
-  paganti: `<b>Paganti</b>Abbonamenti pagati e non ancora scaduti a fine mese (nel mese in corso: oggi). Esclusi test e account interni. Chi ha disdetto ma ha ancora giorni pagati conta fino alla scadenza.`,
-  nuovi: `<b>Nuovi paganti</b>Abbonamenti con il primo pagamento nel mese, da prova o diretti. Un rimborso non lo toglie da qui: lo toglie dai paganti.`,
-  prove: `<b>Prove che pagano</b>Prove gratuite con l'esito deciso nel mese: pagate, oppure scadute o disdette senza pagare. Il conteggio prima della percentuale: sotto le 30 prove la percentuale balla molto.<br><br>Settore (RevenueCat 2026, Health & Fitness su Google Play): 35,7% delle prove diventa pagante.`,
-  mrr: `<b>Ricavo ricorrente mensile (MRR)</b>Quanto netto entra al mese dagli abbonamenti attivi, con gli annuali divisi per 12: un annuale vale 1,74 € al mese, un mensile 6,89 €. È il numero che un investitore guarda per primo. ARR = MRR × 12.`,
-  cac: `<b>Costo per nuovo pagante (CAC)</b>Spesa Meta del periodo ÷ nuovi paganti del periodo. Conta tutti i nuovi paganti, anche quelli arrivati senza pubblicità, quindi è un po' ottimista.`,
-  roi: `<b>Ritorno su Meta (ROI)</b>Euro netti arrivati da Google per ogni euro speso in Meta, nello stesso periodo. Sotto 1 € la pubblicità non si è ancora ripagata. Gli annuali pagano tutto subito, quindi il ritorno dei mensili arriva nei mesi dopo.`,
-  burn: `<b>Perdita media al mese (burn)</b>La media dei risultati degli ultimi 3 mesi chiusi, se negativi: quanto vi costa tenere aperta l'attività ogni mese. Non è il conto in banca: Google versa con un mese di ritardo.`,
-  previsto: `<b>Stima di fine mese</b>Somma di blocchi sempre visibili nel dettaglio (clicca una cifra della colonna): rinnovi già in calendario, prove che finiscono entro fine mese moltiplicate per la quota di prove che finora ha pagato, nuove vendite al ritmo del mese, Meta alla media giornaliera del mese. La forchetta va dallo scenario prudente all'ottimista.`,
-  scala: `<b>Quanto manca per reggervi da soli</b>Paganti necessari = euro al mese da coprire ÷ ricavo ricorrente mensile per pagante di oggi. Il mix conta: un annuale porta 1,74 € al mese, un mensile 6,89 €.<br><br>Costi fissi SRL ≈ ${ctN(CT_SRL_MESE, 0)} €/mese (camera di commercio, libri sociali, bilancio, commercialista). Due compensi minimi = 18.808 €/anno a testa con INPS e IRAP ≈ ${ctN(CT_COMPENSI_MESE, 0)} €/mese. Stime da confermare col commercialista.`,
+  netto: M => {
+    const F = M.cols[M.cur];
+    return ctBox('Netto che arriva da Google',
+      `Dal prezzo Google toglie l'IVA al 22% (la versa lui allo Stato), poi il 15% di commissione su quello che resta. È il netto vero di ogni ordine, letto da Google.`,
+      `prezzo ÷ 1,22 × 0,85 &nbsp;(9,90 → 6,89 · 29,99 → 20,89)`,
+      `${ctMeseCur(M)} finora: ${ctN(F.lordo)} pagati − ${ctN(F.iva)} IVA − ${ctN(F.comm)} commissione = <b>${ctN(F.netto)} €</b>`,
+      `Google lo versa verso il 15 del mese dopo: è il netto maturato nel mese, non il bonifico.`);
+  },
+  meta: M => {
+    const F = M.cols[M.cur];
+    return ctBox('Meta Ads', `Mesi chiusi: la voce del Registro. Mese in corso: l'API Meta giorno per giorno, oggi compreso (parziale).`, null,
+      F.metaGiorni ? `${ctMeseCur(M)}: ${Object.keys(F.metaGiorni).length} giorni letti dall'API = <b>${ctN(F.meta)} €</b>` : `${ctMeseCur(M)}: ${ctN(F.meta)} € dal Registro`);
+  },
+  altri: () => ctBox('Altri costi nel Registro', `Tutte le spese del Registro tranne Meta, nel mese della loro data. Nel mese in corso una voce con data futura (un ricorrente del 20) sta in «previsto». Apri la riga per vederle per categoria, clicca una cifra per l'elenco.`),
+  stime: M => {
+    const v = M.cols[M.cur].stimeVoci;
+    return ctBox('Costi stimati',
+      `Costi veri che nel Registro non ci sono ancora. La stima di un mese sparisce da sola quando nel Registro c'è la voce vera con quel nome.`,
+      `${CT_STIME.voci.map(x => `${x.voce} = ${ctN(x.importo)} € (ultimo importo registrato)`).join(' · ')} · AI = dollari stimati dall'app × ${ctN(CT_STIME.cambioUsdEur)}`,
+      Object.keys(v).length ? `${ctMeseCur(M)} finora: ${Object.entries(v).map(([k, x]) => `${k} ${ctN(x)}`).join(' + ')} = <b>${ctN(M.cols[M.cur].stime)} €</b>` : null);
+  },
+  risultato: M => {
+    const F = M.cols[M.cur];
+    return ctBox('Risultato, prima delle imposte', null,
+      `netto da Google − Meta − altri costi − costi stimati`,
+      `${ctMeseCur(M)} finora: ${ctN(F.netto)} − ${ctN(F.meta)} − ${ctN(F.altri)} − ${ctN(F.stime)} = <b>${ctN(ctRisultato(F))} €</b>`,
+      `È anche il margine operativo (EBITDA): non ci sono ammortamenti né interessi.<br><br><b>Imposte.</b> Oggi gli incassi vanno sulla P.IVA di Mattia: se è forfettario si paga sul 67% dei ricavi anche quando si è in perdita; se è ordinario solo sull'utile. In una SRL: IRES 24% sull'utile e IRAP 4,73% (Marche) sul valore della produzione, che non è l'utile. Da confermare col commercialista.`);
+  },
+  cumulato: M => ctBox('Cumulato', `Quanto avete messo di tasca vostra finora (se negativo).`,
+    `somma dei risultati ${ctDaFeb()} a oggi`,
+    `${M.mesi.map(m => ctN(ctRisultato(M.cols[m]))).join(' + ')} = <b>${ctN(M.cumulato[M.cur])} €</b>`),
+  paganti: M => {
+    const p = M.attiviOra.reduce((o, a) => (o[a.piano] = (o[a.piano] || 0) + 1, o), {});
+    return ctBox('Paganti', `Abbonamenti pagati e non ancora scaduti (a fine mese, o oggi). Chi ha disdetto ma ha ancora giorni pagati conta fino alla scadenza. Esclusi test e account interni; le prove non contano.`,
+      `abbonamenti con un pagamento e scadenza dopo oggi`,
+      `${Object.entries(p).map(([k, n]) => ctPl(n, CT_PIANO_LABEL[k])).join(' + ')} = <b>${M.attiviOra.length}</b>${M.inProva.length ? ` · più ${M.inProva.length} in prova` : ''}`);
+  },
+  nuovi: M => ctBox('Nuovi paganti', `Abbonamenti con il primo pagamento nel mese, da prova o diretti. Un rimborso non lo toglie da qui: lo toglie dai paganti.`, null,
+    `${ctMeseCur(M)}: ${M.ind[M.cur].nuovi - M.ind[M.cur].nuoviDiretti} da prova + ${M.ind[M.cur].nuoviDiretti} diretti = <b>${M.ind[M.cur].nuovi}</b>`),
+  prove: M => {
+    const ok = M.proveDecise.filter(e => e.ok).length, n = M.proveDecise.length;
+    return ctBox('Prove che pagano', `Prove gratuite con l'esito già deciso: pagate, oppure scadute o disdette senza pagare. Le prove ancora aperte non contano.`,
+      `prove pagate ÷ prove con l'esito deciso`,
+      `${ok} pagate ÷ (${ok} pagate + ${n - ok} non pagate) = <b>${ctPct(n ? ok / n : null, 0)}</b>`,
+      `Settore (RevenueCat 2026, Health & Fitness su Google Play): 35,7%. Sotto le 30 prove la percentuale balla molto: guardate i conteggi.`);
+  },
+  mrr: M => {
+    const g = {};
+    for (const a of M.attiviOra) { const v = M.nettoMese(a); const k = CT_PIANO_LABEL[a.piano] + '|' + v.toFixed(2); (g[k] ||= { l: CT_PIANO_LABEL[a.piano], v, n: 0 }).n++; }
+    const mrr = M.attiviOra.reduce((s, a) => s + M.nettoMese(a), 0);
+    return ctBox('Ricavo ricorrente mensile (MRR)', `Quanto netto vi lasciano al mese gli abbonamenti attivi oggi. È il primo numero che guarda un investitore.`,
+      `somma del netto mensile di ogni abbonamento attivo (annuale: netto ÷ 12) · ARR = MRR × 12`,
+      `${Object.values(g).map(x => `${ctPl(x.n, x.l)} × ${ctN(x.v)}`).join(' + ')} = <b>${ctN(mrr)} €</b><br>ARR: ${ctN(mrr)} × 12 = <b>${ctN(mrr * 12)} €</b>`);
+  },
+  cac: M => {
+    const F = M.cols[M.cur], n = M.ind[M.cur].nuovi, nt = ctNuoviTot(M);
+    return ctBox('Costo per nuovo pagante (CAC)', `Quanto vi costa in pubblicità ogni nuovo pagante. Conta tutti i nuovi paganti, anche quelli arrivati senza pubblicità, quindi è un po' ottimista.`,
+      `spesa Meta ÷ nuovi paganti, nello stesso periodo`,
+      `${ctMeseCur(M)}: ${ctN(F.meta)} ÷ ${n} = <b>${n ? ctN(F.meta / n) + ' €' : '—'}</b><br>${ctDaFeb()}: ${ctN(M.tot.meta)} ÷ ${nt} = <b>${nt ? ctN(M.tot.meta / nt) + ' €' : '—'}</b>`);
+  },
+  roi: M => {
+    const F = M.cols[M.cur], T = M.tot;
+    const riga = (b, l) => { const k = ctCosti(b), r = ctRoi(b); return `${l}: (${ctN(b.netto + b.entrateReg)} entrate − ${ctN(k)} costi) ÷ ${ctN(k)} costi = <b>${ctPct(r)}</b>`; };
+    return ctBox('Ritorno sull\'investimento (ROI)', `Quanto rende tutto quello che avete speso: Meta, strumenti, server, AI. 0% è il pareggio; −60% vuol dire che di ogni 100 € spesi ne sono tornati 40.`,
+      `(netto da Google − tutti i costi) ÷ tutti i costi`,
+      `${riga(F, ctMeseCur(M) + ' finora')}<br>${riga(T, ctDaFeb())}`);
+  },
+  roas: M => {
+    const F = M.cols[M.cur], T = M.tot;
+    return ctBox('Ritorno su Meta (ROAS)', `Guarda solo la pubblicità: quanti euro netti sono tornati per ogni euro speso in Meta. Sotto 1 € la pubblicità non si è ancora ripagata. Gli annuali pagano subito, i mensili un po' ogni mese: il ritorno dei mensili arriva dopo.`,
+      `netto da Google ÷ spesa Meta, nello stesso periodo`,
+      `${ctMeseCur(M)}: ${ctN(F.netto)} ÷ ${ctN(F.meta)} = <b>${F.meta ? ctN(F.netto / F.meta) + ' €' : '—'}</b><br>${ctDaFeb()}: ${ctN(T.netto)} ÷ ${ctN(T.meta)} = <b>${T.meta ? ctN(T.netto / T.meta) + ' €' : '—'}</b>`);
+  },
+  ltv: M => {
+    const L = ctLtv(M); const F = M.cols[M.cur]; const n = M.ind[M.cur].nuovi;
+    const cac = n ? F.meta / n : null;
+    const tassi = ['mensile', 'annuale'].map(p => `${p}: ${ctPct(L.r[p])} (${L.fonte[p] === 'settore' ? 'settore' : 'vostro'}; i vostri: ${L.own[p].n ? `${L.own[p].ok} su ${L.own[p].n}` : 'nessuno ancora arrivato al rinnovo'})`).join(' · ');
+    return ctBox('Valore di un cliente nel tempo (LTV)',
+      `Quanto netto vi lascia un pagante in tutta la sua vita. Si suppone che a ogni rinnovo resti la stessa quota di abbonati. Non toglie il costo dell'AI per utente.`,
+      `netto per periodo ÷ (1 − quota che rinnova) · poi media sui paganti di oggi`,
+      `${L.G.map(g => `${ctPl(g.n, g.label)}: ${g.conto} = ${ctN(g.v)}`).join('<br>')}<br>media: (${L.G.map(g => `${g.n} × ${ctN(g.v)}`).join(' + ')}) ÷ ${L.n} = <b>${ctN(L.ltv)} €</b>`
+        + (cac ? `<br>LTV ÷ CAC di ${ctMeseCur(M)}: ${ctN(L.ltv)} ÷ ${ctN(cac)} = <b>${ctN(L.ltv / cac)}</b> (riferimento: sopra 3)` : '')
+        + (L.storico != null ? `<br>Incassato finora per pagante: ${ctN(M.tot.netto)} ÷ ${L.pagantiSempre} paganti di sempre = <b>${ctN(L.storico)} €</b>` : ''),
+      `Quote di rinnovo — ${tassi}. Si passa ai vostri dati da soli quando i casi sono almeno ${CT_LTV_MIN}. Settore: RevenueCat 2026, primo rinnovo, Health & Fitness su Google Play.`);
+  },
+  burn: M => {
+    const u = M.chiusi.slice(-3);
+    const v = u.map(m => ctRisultato(M.cols[m]));
+    return ctBox('Perdita media al mese (burn)', `Quanto vi costa ogni mese tenere aperta l'attività. Non è il conto in banca: Google versa con un mese di ritardo. Con il saldo in banca diventa l'autonomia (runway): saldo ÷ perdita al mese = mesi che restano.`,
+      `media dei risultati degli ultimi 3 mesi chiusi`,
+      u.length ? `(${u.map((m, i) => `${CT_MESI[Number(m.slice(5)) - 1]} ${ctN(v[i])}`).join(' + ')}) ÷ ${u.length} = <b>${ctN(v.reduce((s, x) => s + x, 0) / u.length)} €</b>` : null);
+  },
+  persi: M => {
+    const I = M.ind[M.cur];
+    return ctBox('Paganti persi', `Abbonamenti pagati che sono scaduti senza rinnovarsi, rimborsi compresi. Da qui nasce il tasso di abbandono (churn), che si misura bene solo quando i primi abbonamenti arrivano al rinnovo.`,
+      `abbonamenti pagati con scadenza nel mese e non rinnovati`,
+      `${ctMeseCur(M)}: <b>${I.persi}</b>${I.persiRimborsi ? ` (di cui ${I.persiRimborsi} ${I.persiRimborsi === 1 ? 'rimborsato' : 'rimborsati'})` : ''} su ${M.ind[addMese(M.cur, -1)] ? M.ind[addMese(M.cur, -1)].paganti : 0} paganti a inizio mese`,
+      `Abbandono mensile = persi ÷ paganti a inizio mese. Con pochi paganti un solo abbandono sposta la percentuale di molti punti: guardate i conteggi.`);
+  },
+  crescita: M => {
+    const a = M.ind[addMese(M.cur, -1)], b = M.ind[M.cur];
+    return ctBox('Crescita del MRR', `Di quanto è cresciuto il ricavo ricorrente mensile rispetto al mese prima. È la misura di crescita che chiede un investitore.`,
+      `MRR di fine mese ÷ MRR di fine mese precedente − 1`,
+      a ? `${ctMeseCur(M)}: ${ctN(b.mrr)} ÷ ${ctN(a.mrr)} − 1 = <b>${a.mrr > 0 ? ctPct(b.mrr / a.mrr - 1, 0) : '—'}</b>` : null,
+      `Nel mese in corso il MRR è quello di oggi.`);
+  },
+  arppu: M => {
+    const I = M.ind[M.cur];
+    return ctBox('Ricavo medio per pagante (ARPPU)', `Quanto netto vi lascia al mese, in media, un pagante. Con tanti annuali è basso: un annuale vale 1,74 € al mese, un mensile 6,89 €.`,
+      `MRR ÷ paganti`, `oggi: ${ctN(I.mrr)} ÷ ${I.paganti} = <b>${I.paganti ? ctN(I.mrr / I.paganti) + ' €' : '—'}</b>`);
+  },
+  margine: M => {
+    const F = M.cols[M.cur], T = M.tot;
+    return ctBox('Margine lordo', `Quanto resta del netto dopo i costi che servono a far funzionare l'app per gli utenti: server, infrastruttura, AI. Le app in abbonamento mature stanno sopra il 70-80%; oggi è negativo perché i server e l'AI servono anche a tanti utenti gratuiti.`,
+      `(netto da Google − costi di servizio) ÷ netto da Google · costi di servizio = categoria Hosting & Infrastruttura, Supabase, Google Cloud, OpenRouter e le stime`,
+      `${ctMeseCur(M)} finora: (${ctN(F.netto)} − ${ctN(F.servizio)}) ÷ ${ctN(F.netto)} = <b>${ctPct(ctMargine(F), 0)}</b><br>${ctDaFeb()}: (${ctN(T.netto)} − ${ctN(T.servizio)}) ÷ ${ctN(T.netto)} = <b>${ctPct(ctMargine(T), 0)}</b>`);
+  },
+  payback: M => {
+    const F = M.cols[M.cur], I = M.ind[M.cur];
+    const cac = I.nuovi ? F.meta / I.nuovi : null, arppu = I.paganti ? I.mrr / I.paganti : null;
+    return ctBox('Rientro del CAC', `In quanti mesi il netto di un pagante ripaga quello che è costato in pubblicità. Sotto i 12 mesi è considerato sano.`,
+      `CAC ÷ ricavo medio per pagante al mese (ARPPU)`,
+      cac && arppu ? `${ctMeseCur(M)}: ${ctN(cac)} ÷ ${ctN(arppu)} = <b>${ctN(cac / arppu, 1)} mesi</b>` : null,
+      `Vale solo se il pagante resta abbastanza a lungo: un annuale che non rinnova lascia 20,89 € in tutto.`);
+  },
+  previsto: M => ctBox('Stima di fine mese', `Somma di blocchi che vedi cliccando una cifra della colonna «fine mese».`,
+    `rinnovi in calendario + prove che finiscono entro fine mese × quota di prove che paga + nuove vendite al ritmo del mese; Meta alla media giornaliera`,
+    `netto: ${ctN(M.cols[M.cur].netto)} finora + ${ctN(M.blocchi.rinnovi.netto)} rinnovi + ${ctN(M.blocchi.prove.netto)} prove + ${ctN(M.blocchi.nuove.netto)} nuove = <b>${ctN(M.scen.centrale.netto)} €</b><br>risultato: <b>${ctN(M.scen.centrale.ris)} €</b>, tra ${ctN(M.scen.prudente.ris)} e ${ctN(M.scen.ottimista.ris)}`),
+  scala: M => {
+    const n = M.attiviOra.length, mrr = M.attiviOra.reduce((s, a) => s + M.nettoMese(a), 0);
+    return ctBox('Quanto manca per reggervi da soli', `Quanti paganti servono, con il mix di piani di oggi, per coprire ogni gradino. Un annuale porta 1,74 € al mese, un mensile 6,89 €: il mix conta molto.`,
+      `paganti necessari = euro al mese da coprire ÷ MRR per pagante`,
+      `MRR per pagante: ${ctN(mrr)} ÷ ${n} = <b>${n ? ctN(mrr / n) : '—'} €</b>`,
+      `Costi fissi SRL ≈ ${ctN(CT_SRL_MESE, 0)} €/mese (camera di commercio, libri sociali, bilancio, commercialista). Due compensi minimi = 18.808 €/anno a testa con INPS e IRAP ≈ ${ctN(CT_COMPENSI_MESE, 0)} €/mese. Stime da confermare col commercialista.`);
+  },
 };
+let ctLastM = null;
 
 function ctI(key) { return `<button type="button" class="ct-i" data-ct-info="${key}" aria-label="Spiegazione">i</button>`; }
 
@@ -370,10 +561,16 @@ function ctRighe(M) {
   R.push({ sec: 'Indicatori' });
   R.push({ k: 'paganti', l: ct.view === 'trimestri' ? 'Paganti a fine periodo' : 'Paganti a fine mese', info: 'paganti', ind: 'paganti', int: true });
   R.push({ k: 'nuovi', l: 'Nuovi paganti', info: 'nuovi', ind: 'nuovi', int: true });
+  R.push({ k: 'persi', l: 'Paganti persi', info: 'persi', ind: 'persi', int: true });
   R.push({ k: 'prove', l: 'Prove che pagano', info: 'prove', ind: 'prove' });
   R.push({ k: 'mrr', l: 'Ricavo ricorrente mensile (MRR)', info: 'mrr', ind: 'mrr' });
+  R.push({ k: 'crescita', l: 'Crescita del MRR', info: 'crescita', ind: 'crescita' });
+  R.push({ k: 'arppu', l: 'Ricavo per pagante (ARPPU)', info: 'arppu', ind: 'arppu' });
+  R.push({ k: 'margine', l: 'Margine lordo', info: 'margine', ind: 'margine' });
   R.push({ k: 'cac', l: 'Costo per nuovo pagante (CAC)', info: 'cac', ind: 'cac' });
-  R.push({ k: 'roi', l: 'Ritorno su Meta (ROI)', info: 'roi', ind: 'roi' });
+  R.push({ k: 'payback', l: 'Rientro del CAC (mesi)', info: 'payback', ind: 'payback' });
+  R.push({ k: 'roi', l: 'Ritorno sull’investimento (ROI)', info: 'roi', ind: 'roi' });
+  R.push({ k: 'roas', l: 'Ritorno su Meta (ROAS)', info: 'roas', ind: 'roas' });
   return R;
 }
 
@@ -395,7 +592,14 @@ function ctIndHTML(M, r, c) {
   if (r.ind === 'prove') return !I.proveTot ? `<span class="ct-dash">—</span>` : `<span class="ct-n">${I.proveOk} su ${I.proveTot}</span>`;
   if (r.ind === 'mrr') return I.mrr == null ? `<span class="ct-dash">—</span>` : `<span class="ct-n">${ctN(I.mrr)}</span>`;
   if (r.ind === 'cac') return I.cac == null ? `<span class="ct-dash">—</span>` : `<span class="ct-n">${ctN(I.cac)}</span><small class="ct-base">÷ ${I.cacBase}</small>`;
-  if (r.ind === 'roi') return I.roi == null ? `<span class="ct-dash">—</span>` : `<span class="ct-n ${I.roi >= 1 ? 'ct-pos' : ''}">${ctN(I.roi)} €</span>`;
+  const dash = `<span class="ct-dash">—</span>`;
+  if (r.ind === 'persi') return I.persi == null ? dash : `<span class="ct-n">${I.persi}</span>`;
+  if (r.ind === 'arppu') return I.arppu == null ? dash : `<span class="ct-n">${ctN(I.arppu)}</span>`;
+  if (r.ind === 'crescita') return I.crescita == null ? dash : `<span class="ct-n ${I.crescita >= 0 ? 'ct-pos' : 'ct-neg'}">${I.crescita >= 0 ? '+' : ''}${ctPct(I.crescita, 0)}</span>`;
+  if (r.ind === 'margine') return I.margine == null ? dash : `<span class="ct-n ${I.margine >= 0 ? '' : 'ct-neg'}">${ctPct(I.margine, 0)}</span>`;
+  if (r.ind === 'payback') return I.payback == null ? dash : `<span class="ct-n">${ctN(I.payback, 1)}</span>`;
+  if (r.ind === 'roas') return I.roas == null ? `<span class="ct-dash">—</span>` : `<span class="ct-n ${I.roas >= 1 ? 'ct-pos' : ''}">${ctN(I.roas)} €</span>`;
+  if (r.ind === 'roi') return I.roi == null ? `<span class="ct-dash">—</span>` : `<span class="ct-n ${I.roi >= 0 ? 'ct-pos' : 'ct-neg'}">${ctPct(I.roi)}</span>`;
   return '';
 }
 
@@ -485,7 +689,13 @@ function ctDettaglio(M) {
       prove: `${I.proveOk ?? 0} prove pagate su ${I.proveTot ?? 0} con l'esito deciso nel periodo`,
       mrr: `${ctN(I.mrr ?? 0)} € al mese = somma del netto mensile di ogni abbonamento attivo (annuali ÷ 12)`,
       cac: `${ctN(b.meta)} € di Meta ÷ ${I.cacBase ?? 0} nuovi paganti`,
-      roi: `${ctN(b.netto)} € netti ÷ ${ctN(b.meta)} € di Meta`,
+      persi: `${I.persi ?? 0} abbonamenti pagati scaduti nel periodo senza rinnovo (rimborsi compresi)`,
+      arppu: `MRR ${ctN(I.mrr ?? 0)} ÷ ${I.paganti ?? 0} paganti = ${I.arppu != null ? ctN(I.arppu) + ' €' : '—'}`,
+      crescita: `MRR di fine periodo ÷ MRR di fine periodo precedente − 1 = ${I.crescita != null ? ctPct(I.crescita) : '—'}`,
+      margine: `(${ctN(b.netto)} netto − ${ctN(b.servizio)} costi di servizio) ÷ ${ctN(b.netto)} = ${ctPct(ctMargine(b))}`,
+      payback: `CAC ${I.cac != null ? ctN(I.cac) : '—'} ÷ ARPPU ${I.arppu != null ? ctN(I.arppu) : '—'} = ${I.payback != null ? ctN(I.payback, 1) + ' mesi' : '—'}`,
+      roas: `${ctN(b.netto)} € netti ÷ ${ctN(b.meta)} € di Meta = ${b.meta ? ctN(b.netto / b.meta) + ' €' : '—'}`,
+      roi: `(${ctN(b.netto + b.entrateReg)} entrate − ${ctN(ctCosti(b))} costi) ÷ ${ctN(ctCosti(b))} costi = ${ctPct(ctRoi(b))}`,
     };
     corpo = `<p>${forms[r.ind]}</p>`;
   }
@@ -496,24 +706,30 @@ function ctDettaglio(M) {
 function ctKpi(M) {
   const ora = M.attiviOra;
   const mrr = ora.reduce((s, a) => s + M.nettoMese(a), 0);
-  const F = M.cols[M.cur]; const I = M.ind[M.cur];
+  const F = M.cols[M.cur]; const I = M.ind[M.cur]; const prev = M.ind[addMese(M.cur, -1)];
+  const crescita = prev && prev.mrr > 0 ? mrr / prev.mrr - 1 : null;
   const cacMese = I.nuovi ? F.meta / I.nuovi : null;
   const totNuovi = M.mesi.reduce((s, m) => s + M.ind[m].nuovi, 0);
   const cacTot = totNuovi ? M.tot.meta / totNuovi : null;
-  const roiMese = F.meta > 0 ? F.netto / F.meta : null;
-  const roiTot = M.tot.meta > 0 ? M.tot.netto / M.tot.meta : null;
+  const arppu = ora.length ? mrr / ora.length : null;
+  const roasMese = F.meta > 0 ? F.netto / F.meta : null, roasTot = M.tot.meta > 0 ? M.tot.netto / M.tot.meta : null;
+  const roiMese = ctRoi(F), roiTot = ctRoi(M.tot);
+  const L = ctLtv(M);
   const ult3 = M.chiusi.slice(-3);
   const burn = ult3.length ? ult3.reduce((s, m) => s + ctRisultato(M.cols[m]), 0) / ult3.length : null;
   const ok = M.proveDecise.filter(e => e.ok).length, n = M.proveDecise.length;
   const piani = ora.reduce((o, a) => (o[a.piano] = (o[a.piano] || 0) + 1, o), {});
+  const daFeb = 'da ' + CT_MESI_BREVI[Number(CT_DAL.slice(5)) - 1].toLowerCase();
   const tile = (label, info, val, sub, cls = '') => `<div class="ct-kpi"><div class="ct-kl">${label}${ctI(info)}</div><div class="ct-kv ${cls}">${val}</div><div class="ct-ks">${sub}</div></div>`;
   return `<div class="ct-kpis">
-    ${tile('Ricavo ricorrente (MRR)', 'mrr', ctE(mrr), `ARR ${ctN(mrr * 12)} € all'anno`)}
-    ${tile('Paganti', 'paganti', ora.length, `${Object.entries(piani).map(([p, k]) => `${k} ${p === 'rate' ? 'a rate' : p === 'annuale' ? 'annuali' : 'mensili'}`).join(' · ')}${M.inProva.length ? ` · ${M.inProva.length} in prova` : ''}`)}
-    ${tile(`Costo per pagante (CAC)`, 'cac', cacMese == null ? '—' : ctE(cacMese), `${CT_MESI[Number(M.cur.slice(5)) - 1]} · da ${CT_MESI_BREVI[Number(CT_DAL.slice(5)) - 1].toLowerCase()}: ${ctE(cacTot)}`)}
-    ${tile('Ritorno su Meta (ROI)', 'roi', roiMese == null ? '—' : ctN(roiMese) + ' €', `per 1 € speso · da ${CT_MESI_BREVI[Number(CT_DAL.slice(5)) - 1].toLowerCase()}: ${roiTot == null ? '—' : ctN(roiTot) + ' €'}`, roiMese != null && roiMese >= 1 ? 'ct-pos' : '')}
+    ${tile('Ricavo ricorrente (MRR)', 'mrr', ctE(mrr), `ARR ${ctN(mrr * 12)} €${crescita != null ? ` · ${crescita >= 0 ? '+' : ''}${ctPct(crescita, 0)} sul mese prima` : ''}`)}
+    ${tile('Paganti', 'paganti', ora.length, `${Object.entries(piani).map(([p, k]) => `${k} ${p === 'rate' ? 'a rate' : p === 'annuale' ? 'annuali' : 'mensili'}`).join(' · ')}${M.inProva.length ? ` · ${M.inProva.length} in prova` : ''}${I.persi ? ` · ${I.persi} ${I.persi === 1 ? 'perso' : 'persi'} nel mese` : ''}`)}
     ${tile('Prove che pagano', 'prove', n ? `${ok} su ${n}` : '—', n ? `${Math.round(ok / n * 100)}% · settore 35,7%` : 'nessuna prova conclusa')}
     ${tile('Perdita al mese (burn)', 'burn', burn == null ? '—' : ctE(burn), `media ultimi 3 mesi · cumulato ${ctE(M.cumulato[M.cur])}`, burn != null && burn < 0 ? 'ct-neg' : '')}
+    ${tile('Costo per pagante (CAC)', 'cac', cacMese == null ? '—' : ctE(cacMese), `${CT_MESI[Number(M.cur.slice(5)) - 1]} · ${daFeb}: ${ctE(cacTot)}${cacMese && arppu ? ` · rientro ${ctN(cacMese / arppu, 1)} mesi` : ''}`)}
+    ${tile('Valore di un cliente (LTV)', 'ltv', L.ltv == null ? '—' : ctE(L.ltv), `${L.ltv != null && cacMese ? `LTV ÷ CAC ${ctN(L.ltv / cacMese)} · ` : ''}incassato finora ${ctE(L.storico)} a pagante`)}
+    ${tile('Ritorno sull’investimento (ROI)', 'roi', ctPct(roiMese), `tutti i costi · ${daFeb}: ${ctPct(roiTot)}`, roiMese != null ? (roiMese >= 0 ? 'ct-pos' : 'ct-neg') : '')}
+    ${tile('Ritorno su Meta (ROAS)', 'roas', roasMese == null ? '—' : ctN(roasMese) + ' €', `per 1 € di Meta · ${daFeb}: ${roasTot == null ? '—' : ctN(roasTot) + ' €'}`, roasMese != null && roasMese >= 1 ? 'ct-pos' : '')}
   </div>`;
 }
 
@@ -575,7 +791,11 @@ function ctReportTesto(M, key) {
   L.push(`Paganti ${parz ? 'oggi' : 'a fine periodo'}: ${I.paganti}  ·  nuovi nel periodo: ${nuovi}`);
   L.push(`Ricavo ricorrente mensile (MRR): ${ctE(I.mrr)}  ·  ARR: ${ctE(I.mrr * 12)}`);
   if (nuovi) L.push(`Costo per nuovo pagante (CAC): ${ctE(b.meta / nuovi)}`);
-  if (b.meta) L.push(`Ritorno su Meta: ${ctN(b.netto / b.meta)} € netti per 1 € speso`);
+  L.push(`Ritorno sull’investimento (ROI, tutti i costi): ${ctPct(ctRoi(b))}`);
+  if (b.meta) L.push(`Ritorno su Meta (ROAS): ${ctN(b.netto / b.meta)} € netti per 1 € speso`);
+  if (ctMargine(b) != null) L.push(`Margine lordo: ${ctPct(ctMargine(b), 0)} (netto meno server, infrastruttura e AI)`);
+  { const persi = ms.reduce((s, m) => s + M.ind[m].persi, 0); L.push(`Paganti persi nel periodo: ${persi}`); }
+  if (parz) { const LT = ctLtv(M); if (LT.ltv != null) L.push(`Valore di un cliente (LTV, stima con rinnovi di settore): ${ctE(LT.ltv)}`); }
   if (pTot) L.push(`Prove che pagano: ${pOk} su ${pTot}`);
   L.push('');
   L.push('Netto = quanto resta dopo IVA 22% e commissione Google 15%; Google lo versa verso il 15 del mese dopo.');
@@ -609,7 +829,7 @@ function renderConto() {
   if (ct.error) return `${head}<div class="card"><div class="empty"><div class="empty-text">${ctEsc(ct.error)}</div></div></div>`;
   if (!ct.data) return `${head}<div class="card"><div class="empty"><div class="empty-text">${ct.syncing ? 'Aggiorno gli ordini da Google…' : 'Carico il conto…'}</div></div></div>`;
   let M;
-  try { M = ctModel(); } catch (e) { console.error(e); return `${head}<div class="card"><div class="empty"><div class="empty-text">Errore nel calcolo: ${ctEsc(e.message)}</div></div></div>`; }
+  try { M = ctModel(); ctLastM = M; } catch (e) { console.error(e); return `${head}<div class="card"><div class="empty"><div class="empty-text">Errore nel calcolo: ${ctEsc(e.message)}</div></div></div>`; }
   return `${head}
     ${ctKpi(M)}
     <div class="card ct-card">
@@ -624,14 +844,16 @@ function renderConto() {
 
 // ── EVENTI ─────────────────────────────────────────────────────────────────────────
 let ctPop = null;
+let ctPopAt = 0;
 function ctChiudiInfo() { if (ctPop) { ctPop.remove(); ctPop = null; } }
 function ctApriInfo(btn) {
   const key = btn.dataset.ctInfo;
   if (ctPop && ctPop.dataset.key === key) { ctChiudiInfo(); return; }
   ctChiudiInfo();
+  ctPopAt = Date.now();
   ctPop = document.createElement('div');
   ctPop.className = 'ct-pop'; ctPop.dataset.key = key; ctPop.setAttribute('role', 'tooltip');
-  ctPop.innerHTML = CT_INFO[key] || '';
+  const v = CT_INFO[key]; ctPop.innerHTML = typeof v === 'function' ? (ctLastM ? v(ctLastM) : '') : (v || '');
   document.body.appendChild(ctPop);
   const r = btn.getBoundingClientRect(); const w = ctPop.offsetWidth, h = ctPop.offsetHeight;
   const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2));
@@ -644,7 +866,7 @@ document.addEventListener('click', e => {
   if (ctPop && !e.target.closest('.ct-pop')) ctChiudiInfo();
 }, true);
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { ctChiudiInfo(); const ct = state.ct; if (ct && ct.report) { ct.report = null; render(); } } });
-window.addEventListener('scroll', ctChiudiInfo, true);
+window.addEventListener('scroll', () => { if (Date.now() - ctPopAt > 400) ctChiudiInfo(); }, true);
 
 function attachContoEvents() {
   ctChiudiInfo();
