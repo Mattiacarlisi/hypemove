@@ -158,6 +158,7 @@ const rewrites = routes
 const redirects = `# Generato da scripts/prerender.mjs: non modificare a mano.
 /auth/callback                               /auth/callback.html   200
 ${rewrites.join("\n")}
+/invite/*                                   /invite/index.html    200
 
 # Tutto il resto: pagina 404 vera, con codice 404.
 /*                                           /404.html             404

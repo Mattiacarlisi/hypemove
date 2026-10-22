@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import ResetPassword from "./pages/ResetPassword.jsx";
 import Unsubscribe from "./pages/Unsubscribe.jsx";
 import Open from "./pages/Open.jsx";
+import Invite from "./pages/Invite.jsx";
 import "./index.css";
 
 // Questo bundle viene caricato SOLO dalle pagine che hanno bisogno di JavaScript
@@ -19,6 +20,8 @@ const app = (
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/unsubscribe" element={<Unsubscribe />} />
         <Route path="/open" element={<Open />} />
+        <Route path="/invite/*" element={<Invite />} />
+        <Route path="/invite" element={<Invite />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

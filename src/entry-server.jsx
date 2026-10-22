@@ -20,6 +20,7 @@ import Workout10MinutiCasa, { meta as dieciMeta } from "./pages/Workout10MinutiC
 import ResetPassword from "./pages/ResetPassword.jsx";
 import Unsubscribe from "./pages/Unsubscribe.jsx";
 import Open from "./pages/Open.jsx";
+import Invite from "./pages/Invite.jsx";
 import Link, { meta as linkMeta } from "./pages/Link.jsx";
 import { confronti } from "./data/confronti.js";
 
@@ -54,6 +55,7 @@ export const routes = [
   { path: "/reset-password", Component: ResetPassword, meta: { ...PRIVATE, title: "Reimposta password | Hypemove", description: "Reimposta la password del tuo account Hypemove." }, hydrate: true },
   { path: "/unsubscribe", Component: Unsubscribe, meta: { ...PRIVATE, title: "Disiscrizione email | Hypemove", description: "Gestisci la disiscrizione dalle email di Hypemove." }, hydrate: true },
   { path: "/open", Component: Open, meta: { ...PRIVATE, title: "Apri Hypemove", description: "Ti stiamo portando su Hypemove." }, hydrate: true },
+  { path: "/invite", Component: Invite, meta: { ...PRIVATE, title: "Invito su Hypemove", description: "Qualcuno ti ha invitato su Hypemove." }, hydrate: true },
 ];
 
 export function render(pathname = "/") {
