@@ -559,8 +559,6 @@ let state = {
   premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
   funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
   funnelStepUsersData: null, funnelStepUsersLoading: false, funnelStepUsersError: null,
-  behaviorData: null, behaviorLoading: false,
-  behaviorFrom: BETA_START, behaviorTo: TODAY, behaviorTypeFilter: 'all',
   userActivityOpen: false, userActivityUser: null, userActivityData: null, userActivityLoading: false,
   recentFeedback: null,
   feedbackModalOpen: false,
@@ -1634,7 +1632,8 @@ function invalidateExclusionCaches() {
   state.sprintPremiumFunnelData = {};
   state.funnel                 = null;
   state.retention              = null;
-  state.behaviorData           = null;
+  BEH.data                     = null;
+  BEH.events                   = {};
   fetchData(); // Overview: refetch immediato (nessun refetch automatico al cambio pagina)
 }
 
@@ -1676,20 +1675,6 @@ async function fetchRecentFeedback() {
   } catch (e) { console.error('fetchRecentFeedback', e); }
 }
 
-async function fetchBehavior() {
-  state.behaviorLoading = true;
-  render();
-  try {
-    const { data, error } = await sb.rpc('kpi_events_summary', {
-      p_from: state.behaviorFrom || null,
-      p_to:   state.behaviorTo   || null,
-    });
-    if (error) throw error;
-    state.behaviorData = data || [];
-  } catch (e) { console.error('fetchBehavior', e); }
-  state.behaviorLoading = false;
-  render();
-}
 
 // Sessione ops: verifica al boot se c'è già un JWT persistito da Supabase Auth JS.
 async function refreshOpsSession() {
@@ -3888,7 +3873,8 @@ const EVENT_LABELS = {
   feedback_opened: 'Feedback aperto',
   paywall_product_updated: 'Paywall — prodotto aggiornato',
   paywall_validator_step: 'Paywall — step validazione',
-  paywall_billing_error: 'Paywall — errore fatturazione',
+  paywall_billing_error: 'Paywall — acquisto annullato',
+  paywall_purchase_error: 'Acquisto annullato',
   paywall_plugin_event: 'Paywall — evento plugin',
   paywall_fallback_opened: 'Paywall — fallback aperto',
   paywall_purchase_attempt: 'Tentativo acquisto', trial_offer_shown: 'Offerta trial mostrata',
@@ -4065,163 +4051,6 @@ function userExplorerSection() {
     </div>`;
 }
 
-function pageBehavior() {
-  const QUICK = [
-    { label: '7g',    from: new Date(Date.now()-7*864e5).toISOString().slice(0,10),  to: TODAY },
-    { label: '30g',   from: new Date(Date.now()-30*864e5).toISOString().slice(0,10), to: TODAY },
-    { label: 'Beta',  from: BETA_START, to: TODAY },
-    { label: 'Tutto', from: '', to: '' },
-  ];
-
-  const isUserMode   = !!(state.ueSelectedUser && state.ueData !== null);
-  const isUserWaiting = !!(state.ueSelectedUser && !state.ueLoading && state.ueData === null);
-  const isUserLoading = !!(state.ueSelectedUser && state.ueLoading);
-
-  let allRows;
-  if (isUserMode) {
-    // Aggrega gli eventi raw dell'utente nello stesso formato di behaviorData.
-    // Conta i user_id univoci reali per rilevare anomalie nel tracking
-    // (se compare >1 utente su un evento mentre ne analizzi 1 solo, c'è un bug).
-    const evMap  = {};
-    const navMap = {};
-    const fallbackId = state.ueSelectedUser?.id || '_user_';
-    for (const e of state.ueData) {
-      const uid = e.user_id || fallbackId;
-      if (e.event_type === 'navigation') {
-        const key = e.event_name || e.screen;
-        if (!navMap[key]) navMap[key] = { event_name: key, event_type: 'navigation', total: 0, _users: new Set() };
-        navMap[key].total++;
-        navMap[key]._users.add(uid);
-      } else {
-        const key = e.event_name;
-        if (!evMap[key]) evMap[key] = { event_name: e.event_name, event_type: e.event_type, total: 0, _users: new Set() };
-        evMap[key].total++;
-        evMap[key]._users.add(uid);
-      }
-    }
-    const finalize = rows => rows.map(r => ({ ...r, unique_users: r._users.size }));
-    allRows = [
-      ...finalize(Object.values(evMap)).sort((a, b) => b.total - a.total),
-      ...finalize(Object.values(navMap)).sort((a, b) => b.total - a.total),
-    ];
-  } else {
-    allRows = state.behaviorData || [];
-  }
-
-  const totalEvents = allRows.reduce((s, r) => s + (+r.total || 0), 0);
-
-  const raw    = allRows.filter(r => !SYSTEM_EVENTS.has(r.event_name));
-  const tf     = state.behaviorTypeFilter;
-  const data   = tf === 'all' ? raw : raw.filter(r => r.event_type === tf);
-
-  const topEvents  = data.filter(r => r.event_type !== 'navigation');
-  const topScreens = raw.filter(r => r.event_type === 'navigation');
-  const maxE = Math.max(...topEvents.map(r => +r.total),  1);
-  const maxS = Math.max(...topScreens.map(r => +r.total), 1);
-
-  const eventRow = (r, max) => {
-    const pct   = Math.round((+r.total / max) * 100);
-    const color = TYPE_COLOR[r.event_type] || '#a78bfa';
-    const label = EVENT_LABELS[r.event_name] || r.event_name;
-    const hasDesc = !!EVENT_DESCRIPTIONS[r.event_name];
-    const infoBtn = hasDesc
-      ? `<button onclick="showEventTooltip(event,'${esc(r.event_name)}')" style="background:none;border:none;cursor:pointer;color:#4a4a6a;font-size:11px;padding:0 2px;line-height:1;flex-shrink:0" title="Cosa significa?">ℹ</button>`
-      : '';
-    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #1a1a2e">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:5px">${esc(label)}${infoBtn}</div>
-        <div style="display:flex;align-items:center;gap:6px;margin-top:4px">
-          <div style="flex:1;background:#1e1e30;height:3px;border-radius:2px">
-            <div style="width:${pct}%;background:${color};height:100%;border-radius:2px;transition:width .3s"></div>
-          </div>
-        </div>
-      </div>
-      <div style="text-align:right;flex-shrink:0">
-        <div style="font-size:12px;font-weight:600;color:var(--fg)">${(+r.total).toLocaleString('it-IT')}</div>
-        <div style="font-size:10px;color:var(--muted)">${r.unique_users} ${+r.unique_users === 1 ? 'utente' : 'utenti'}</div>
-      </div>
-      <span style="font-size:9px;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;flex-shrink:0;min-width:42px;text-align:center">${TYPE_LABEL[r.event_type] || r.event_type}</span>
-    </div>`;
-  };
-
-  const bodyLoading = state.behaviorLoading || isUserLoading;
-  const body = bodyLoading
-    ? `<div class="empty" style="padding:60px"><div class="empty-icon pulse">🖱️</div><div class="empty-text" style="color:var(--muted)">Caricamento…</div></div>`
-    : isUserWaiting
-    ? `<div class="empty" style="padding:60px"><div class="empty-icon">👆</div><div class="empty-text" style="color:var(--muted)">Premi "Carica attività" per vedere gli eventi di questo utente.</div></div>`
-    : !raw.length
-    ? `<div class="empty" style="padding:60px"><div class="empty-icon">🖱️</div><div class="empty-text" style="color:var(--muted)">Nessun dato nel periodo selezionato.</div></div>`
-    : `<div class="grid-2" style="gap:16px;align-items:start">
-        <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-            <div class="card-title" style="margin-bottom:0">Top azioni</div>
-            <div style="display:flex;gap:4px">
-              ${['all','action','click'].map(t => {
-                const lbl = { all:'Tutti', action:'Azioni', click:'Click' }[t];
-                return `<button class="filter-btn beh-type-btn ${tf===t?'active':''}" data-beh-type="${t}" style="font-size:10px;padding:3px 8px">${lbl}</button>`;
-              }).join('')}
-            </div>
-          </div>
-          <div>${topEvents.length ? topEvents.map(r => eventRow(r, maxE)).join('') : '<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun evento per questo filtro</div>'}</div>
-        </div>
-        <div class="card">
-          <div class="card-title" style="margin-bottom:14px">Schermate più visitate</div>
-          <div>${topScreens.length ? topScreens.map(r => eventRow(r, maxS)).join('') : '<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessuna schermata</div>'}</div>
-        </div>
-      </div>`;
-
-  const uName = state.ueSelectedUser ? esc(state.ueSelectedUser.name || state.ueSelectedUser.username || '') : '';
-  const totalBanner = (bodyLoading || isUserWaiting) ? '' : `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:10px 16px;background:#12121e;border:1px solid var(--border);border-radius:10px;width:fit-content">
-      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px">Totale eventi${isUserMode ? ' · ' + uName : ' nel periodo'}</span>
-      <span style="font-size:18px;font-weight:700;color:var(--fg);font-family:var(--mono)">${totalEvents.toLocaleString('it-IT')}</span>
-    </div>`;
-
-  const ueSel = state.ueSelectedUser;
-  const ueUserFilter = ueSel
-    ? `<div style="display:inline-flex;align-items:center;gap:8px;background:#12121e;border:1px solid #2a2a3d;border-radius:8px;padding:4px 4px 4px 12px">
-        <div style="line-height:1.3">
-          <span style="font-size:12px;font-weight:600;color:var(--fg)">${esc(ueSel.name || ueSel.username || '—')}</span>
-          <span style="font-size:11px;color:var(--muted);margin-left:5px">@${esc(ueSel.username || '')}</span>
-        </div>
-        <button id="ue-clear-user" style="background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;font-family:inherit" title="Rimuovi utente">✕</button>
-      </div>`
-    : `<div style="position:relative">
-        <input id="ue-search" type="text" placeholder="Cerca utente…"
-          value="${esc(state.ueSearchQuery)}"
-          class="form-input" style="width:190px;font-size:12px;padding:5px 10px">
-        <div id="ue-search-results" style="position:absolute;top:calc(100% + 4px);left:0;z-index:50;min-width:340px"></div>
-      </div>`;
-
-  return `
-    <div class="filter-bar" style="margin-bottom:8px;flex-wrap:wrap;gap:6px">
-      <span class="filter-label">Periodo rapido</span>
-      ${QUICK.map(q => {
-        const active = state.behaviorFrom === q.from && state.behaviorTo === q.to;
-        return `<button class="filter-btn beh-quick ${active?'active':''}" data-beh-from="${q.from}" data-beh-to="${q.to}">${q.label}</button>`;
-      }).join('')}
-      <div class="filter-sep"></div>
-      <span class="filter-label">Da</span>
-      <input type="date" id="beh-from" class="form-input" value="${state.behaviorFrom}"
-        style="width:145px;padding:5px 10px;font-size:12px">
-      <span style="color:var(--muted)">→</span>
-      <input type="date" id="beh-to" class="form-input" value="${state.behaviorTo}"
-        style="width:145px;padding:5px 10px;font-size:12px">
-      <button id="beh-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Applica</button>
-    </div>
-    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:6px;align-items:center">
-      <span class="filter-label">Utente</span>
-      ${ueUserFilter}
-      <div class="filter-sep"></div>
-      <span class="filter-label">Da ora</span>
-      <input type="datetime-local" id="ue-from-time" value="${esc(state.ueFromDateTime)}"
-        class="form-input" style="font-size:12px;padding:5px 10px">
-      ${ueSel ? `<button id="ue-load" class="btn btn-primary" style="font-size:12px;padding:6px 16px">Carica attività</button>` : ''}
-    </div>
-    ${totalBanner}
-    ${body}
-    ${userExplorerSection()}`;
-}
 
 function feedbackCard() {
   const rows = state.recentFeedback;
@@ -8397,7 +8226,7 @@ const CREATIVE_ACT_COLS = [
   { k: 'cta',       l: 'Bottone',       c: '#f59e0b', t: 'paywall_cta_tap · ha premuto il bottone che compra', ev: 'paywall_cta_tap' },
   { k: 'attempt',   l: 'Pagamento',     c: '#f59e0b', t: 'paywall_purchase_attempt · si è aperto il foglio di pagamento Google', ev: 'paywall_purchase_attempt' },
   { k: 'cancelled', l: 'Annullato',     c: '#8b8ba7', t: 'paywall_purchase_cancelled · ha aperto il pagamento e si è tirato indietro', ev: 'paywall_purchase_cancelled' },
-  { k: 'error',     l: 'Errore',        c: '#ef4444', t: 'paywall_purchase_error · lo store ha risposto con un errore', ev: 'paywall_purchase_error' },
+  { k: 'error',     l: 'Annullato',     c: '#ef4444', t: 'paywall_purchase_error · acquisto non concluso: chi tocca Acquista e non compra ha annullato', ev: 'paywall_purchase_error' },
   { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · perdeva il nome della creatività quando Android uccideva l\'app durante il pagamento, e contava come acquisto la rivalidazione di un abbonamento vecchio: corretto il 27/09/2026, vale dal rilascio successivo', ev: 'paywall_purchase_success' },
 ];
 
@@ -11701,7 +11530,7 @@ function attachEvents() {
         aicEnter();
         if (!state.opsSessionCheckedOnce) { state.opsSessionCheckedOnce = true; refreshOpsSession(); }
       }
-      if (state.page === 'behavior'   && !state.behaviorData  && !state.behaviorLoading)  fetchBehavior();
+      if (state.page === 'behavior'   && !BEH.data            && !BEH.loading)            fetchBehavior();
       if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
       render();
     }));
@@ -13017,34 +12846,6 @@ function attachEvents() {
     state.sprintRetMinW0 = +e.target.value;
   });
   document.getElementById('sprint-ret-calc')?.addEventListener('click', fetchSprintRetention);
-
-  // Behavior page — quick range buttons
-  document.querySelectorAll('.beh-quick').forEach(el =>
-    el.addEventListener('click', () => {
-      state.behaviorFrom = el.dataset.behFrom;
-      state.behaviorTo   = el.dataset.behTo;
-      const fi = document.getElementById('beh-from');
-      const ti = document.getElementById('beh-to');
-      if (fi) fi.value = state.behaviorFrom;
-      if (ti) ti.value = state.behaviorTo;
-      fetchBehavior();
-    }));
-
-  // Behavior page — custom date apply
-  document.getElementById('beh-apply')?.addEventListener('click', () => {
-    const f = document.getElementById('beh-from')?.value;
-    const t = document.getElementById('beh-to')?.value;
-    if (f) state.behaviorFrom = f;
-    if (t) state.behaviorTo   = t;
-    fetchBehavior();
-  });
-
-  // Behavior page — type filter
-  document.querySelectorAll('.beh-type-btn').forEach(el =>
-    el.addEventListener('click', () => {
-      state.behaviorTypeFilter = el.dataset.behType;
-      render();
-    }));
 
   // Behavior — User Explorer
   const ueSearchEl = document.getElementById('ue-search');
