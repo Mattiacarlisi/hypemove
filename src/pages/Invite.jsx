@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { handleAndroidDownloadClick } from "../lib/analytics.js";
-import { buildInviteStoreUrl, codeFromPathname, inviteCampaign, inviteTitle, inviteTodayLine } from "../lib/invite.js";
+import { buildInviteStoreUrl, codeFromPathname, inviteCampaign, inviteDare, inviteTitle, inviteTodayLine } from "../lib/invite.js";
 
 // Pagina d'invito /invite/<codice>. Chi ha l'app Android la apre direttamente (App Link):
 // qui arriva solo chi non ce l'ha. Android -> Play Store subito, con il codice nel referrer.
-// iPhone e computer -> anteprima di chi invita (RPC get_invite_preview) e tasto di download.
+// iPhone e computer -> anteprima di chi invita (RPC get_invite_preview) e tasto di download; se chi
+// invita ha fatto la sfida oggi, «Rosa ti sfida» col numero da battere e il tasto «Batti Rosa».
 
 const BUTTON = "Scarica HypeMove";
 
@@ -33,14 +34,14 @@ function Shell({ children }) {
   );
 }
 
-function DownloadButton({ href }) {
+function DownloadButton({ href, label = BUTTON }) {
   return (
     <a
       href={href}
-      onClick={(event) => handleAndroidDownloadClick(event, { buttonText: BUTTON, href, location: "invite" })}
+      onClick={(event) => handleAndroidDownloadClick(event, { buttonText: label, href, location: "invite" })}
       className="mt-7 inline-flex min-h-[54px] w-full items-center justify-center rounded-full bg-[#FB8B04] px-6 py-3 text-base font-bold text-black"
     >
-      {BUTTON}
+      {label}
     </a>
   );
 }
@@ -128,6 +129,21 @@ export default function Invite() {
       <Shell>
         <h1 className="text-2xl font-black leading-tight tracking-[-0.03em] sm:text-3xl">Questo invito non è più valido</h1>
         <DownloadButton href={buildInviteStoreUrl("")} />
+        {iphoneNote}
+      </Shell>
+    );
+  }
+
+  // Chi invita ha fatto la sfida oggi: il numero da battere, e il download diventa «Batti Rosa».
+  const dare = inviteDare(preview);
+  if (dare) {
+    return (
+      <Shell>
+        <Avatar picture={preview.inviter_picture} name={preview.inviter_username} />
+        <h1 className="text-2xl font-black leading-tight tracking-[-0.03em] sm:text-3xl">{dare.title}</h1>
+        <p className="mt-3 text-[72px] font-black leading-none tracking-[-0.04em] text-[#FB8B04]" data-testid="invite-dare-score">{dare.score}</p>
+        <p className="mt-2 text-lg font-bold text-black">{dare.unitLine}</p>
+        <DownloadButton href={buildInviteStoreUrl(code)} label={dare.button} />
         {iphoneNote}
       </Shell>
     );
