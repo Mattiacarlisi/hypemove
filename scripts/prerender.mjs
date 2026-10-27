@@ -113,7 +113,7 @@ Non è per atleti, bodybuilder o chi cerca schede avanzate.
 - [Chi siamo](${SITE_URL}/chi-siamo): chi la fa e perché
 - [iPhone](${SITE_URL}/iphone): come si installa la versione di prova su iPhone
 - [Google Play](${PLAY_STORE_URL ?? "https://play.google.com/store/apps/details?id=pt.app"}): scheda ufficiale dell'app, Android
-- [TestFlight](${TESTFLIGHT_URL ?? "https://testflight.apple.com/join/S6ZexeTD"}): versione di prova per iPhone, non è ancora sull'App Store
+- [TestFlight](${TESTFLIGHT_URL ?? "https://testflight.apple.com/join/EbeyAyTE"}): versione di prova per iPhone, non è ancora sull'App Store
 
 ## Confronti con altre app
 ${comparisons.map((route) => `- [${route.meta.title}](${SITE_URL}${route.path})`).join("\n")}

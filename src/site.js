@@ -8,7 +8,7 @@ export const PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=pt.
 export const PLAY_APP_ID = "pt.app";
 // iPhone: l'app non è ancora sull'App Store. Si installa dalla versione di prova con
 // TestFlight, il link pubblico si rigenera da App Store Connect se scade la build.
-export const TESTFLIGHT_URL = "https://testflight.apple.com/join/S6ZexeTD";
+export const TESTFLIGHT_URL = "https://testflight.apple.com/join/EbeyAyTE";
 export const SUPPORT_EMAIL = "ciao@hypemove.app";
 export const INSTAGRAM_URL = "https://www.instagram.com/hypemoveapp";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/hypemove";
