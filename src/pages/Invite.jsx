@@ -2,11 +2,13 @@ import React, { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { handleAndroidDownloadClick } from "../lib/analytics.js";
 import { buildInviteStoreUrl, codeFromPathname, inviteCampaign, inviteDare, inviteTitle, inviteTodayLine } from "../lib/invite.js";
+import { logInvitePage } from "../lib/invitePageEvents.js";
 
 // Pagina d'invito /invite/<codice>. Chi ha l'app Android la apre direttamente (App Link):
 // qui arriva solo chi non ce l'ha. Android -> Play Store subito, con il codice nel referrer.
 // iPhone e computer -> anteprima di chi invita (RPC get_invite_preview) e tasto di download; se chi
 // invita ha fatto la sfida oggi, «Rosa ti sfida» col numero da battere e il tasto «Batti Rosa».
+// Ogni apertura e ogni tocco su «Scarica» / «Scopri come» finiscono in link_page_events col codice.
 
 const BUTTON = "Scarica HypeMove";
 
@@ -34,11 +36,14 @@ function Shell({ children }) {
   );
 }
 
-function DownloadButton({ href, label = BUTTON }) {
+function DownloadButton({ href, code, label = BUTTON }) {
   return (
     <a
       href={href}
-      onClick={(event) => handleAndroidDownloadClick(event, { buttonText: label, href, location: "invite" })}
+      onClick={(event) => {
+        void logInvitePage("click", code, "store");
+        handleAndroidDownloadClick(event, { buttonText: label, href, location: "invite" });
+      }}
       className="mt-7 inline-flex min-h-[54px] w-full items-center justify-center rounded-full bg-[#FB8B04] px-6 py-3 text-base font-bold text-black"
     >
       {label}
@@ -82,10 +87,12 @@ export default function Invite() {
     const isIphone = /iPhone|iPad|iPod/i.test(ua);
 
     if (isAndroid) {
-      window.location.replace(buildInviteStoreUrl(code));
+      // Su Android aprire il link È arrivare sul Play Store: la visita si registra prima di partire.
       setState({ status: "redirect", code, isIphone: false, preview: null });
+      void logInvitePage("view", code).then(() => window.location.replace(buildInviteStoreUrl(code)));
       return undefined;
     }
+    void logInvitePage("view", code);
     if (!inviteCampaign(code)) {
       setState({ status: "invalid", code, isIphone, preview: null });
       return undefined;
@@ -120,7 +127,7 @@ export default function Invite() {
   const iphoneNote = isIphone ? (
     <p className="mt-5 text-sm text-black/65">
       Su iPhone stiamo arrivando.{" "}
-      <a href="/iphone" className="font-semibold text-black underline">Scopri come</a>
+      <a href="/iphone" onClick={() => void logInvitePage("click", code, "iphone")} className="font-semibold text-black underline">Scopri come</a>
     </p>
   ) : null;
 
@@ -128,7 +135,7 @@ export default function Invite() {
     return (
       <Shell>
         <h1 className="text-2xl font-black leading-tight tracking-[-0.03em] sm:text-3xl">Questo invito non è più valido</h1>
-        <DownloadButton href={buildInviteStoreUrl("")} />
+        <DownloadButton href={buildInviteStoreUrl("")} code={code} />
         {iphoneNote}
       </Shell>
     );
@@ -143,7 +150,7 @@ export default function Invite() {
         <h1 className="text-2xl font-black leading-tight tracking-[-0.03em] sm:text-3xl">{dare.title}</h1>
         <p className="mt-3 text-[72px] font-black leading-none tracking-[-0.04em] text-[#FB8B04]" data-testid="invite-dare-score">{dare.score}</p>
         <p className="mt-2 text-lg font-bold text-black">{dare.unitLine}</p>
-        <DownloadButton href={buildInviteStoreUrl(code)} label={dare.button} />
+        <DownloadButton href={buildInviteStoreUrl(code)} code={code} label={dare.button} />
         {iphoneNote}
       </Shell>
     );
@@ -156,7 +163,7 @@ export default function Invite() {
       <h1 className="text-2xl font-black leading-tight tracking-[-0.03em] sm:text-3xl">{inviteTitle(preview)}</h1>
       <p className="mt-4 text-base leading-7 text-black/65 sm:text-lg">Ogni giorno una sfida da 1 minuto.</p>
       {today ? <p className="mt-1 text-base leading-7 text-black/65 sm:text-lg">{today}</p> : null}
-      <DownloadButton href={buildInviteStoreUrl(code)} />
+      <DownloadButton href={buildInviteStoreUrl(code)} code={code} />
       {iphoneNote}
     </Shell>
   );
