@@ -7819,7 +7819,12 @@ const CREATIVE_REGISTRY = [
     note: 'Profondità di lettura: ogni sezione, la prima volta che è per metà sullo schermo, esce come paywall_step_view con step «features», index 1–5 e feature = inside · benefits · reviews · how · closing. Il numero della chiusura («+2000») è scelto a mano da Mattia e tenuto anche in produzione per sua scelta.',
     file: 'app/src/pages/OnboardingTrialPaywallN44/OnboardingTrialPaywallN44.tsx',
     screens: [
-      { idx: 0, t: 'La pagina', d: 'primo schermo: «Non solo allenamento» coi quattro bollini, poi i benefici; in basso la scheda crema «Inizia la prova per 0,00 €»' },
+      { idx: 0, t: 'La pagina', d: 'l\'apertura: «Sblocca il potenziale del tuo corpo» con le quattro icone, sotto i benefici; in basso il foglio crema «Inizia la prova per 0,00 €»' },
+      { idx: 1, t: 'Hypemove+', d: 'la sezione «Sblocca il potenziale del tuo corpo» con le quattro icone, per metà sullo schermo' },
+      { idx: 2, t: 'Benefici', d: '«Ecco cosa ottieni con N minuti al giorno» e i cinque benefici, per metà sullo schermo' },
+      { idx: 3, t: 'Recensioni', d: '«Cosa dicono di noi», il carosello dei messaggi, per metà sullo schermo' },
+      { idx: 4, t: 'Come funziona', d: '«Come funziona la prova gratuita», i tre passi (solo con la prova), per metà sullo schermo' },
+      { idx: 5, t: 'Chiusura', d: 'Movy, il «+2000» e «Il prossimo allenamento è il tuo», per metà sullo schermo' },
     ],
   },
   {
