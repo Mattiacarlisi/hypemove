@@ -571,7 +571,7 @@ let state = {
   // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
   // scoreMenu = menu aperto ('sel' | 'ref' | null).
   scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
-  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saCoorte: loadLS(LS_SA_COORTE, 'off') === 'on', saMenu: false, saW: 800,
+  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saCoorte: loadLS(LS_SA_COORTE, 'off') === 'on', saLegend: false, saMenu: false, saW: 800,
   // Pagina «Goal» (kpi_goal_board, letta dalla cache). goals = kpi_settings.goals, uguale per tutti gli operatori;
   // goalEdit = { k, text, saving, fresh } mentre un obiettivo è in modifica.
   goalBoard: null, goalBoardError: null, goalCache: null, goalLoading: false, goalForce: false,
@@ -3547,12 +3547,50 @@ function saChart(rows, W, phasesOn, coorteOn) {
   return s + '</svg>';
 }
 
-function saLegend(coorteOn) {
-  const line = (c, w) => `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/><circle cx="15" cy="7" r="4" fill="${c}"/></svg>`;
-  return `<div class="pt-legend sa-legend"><span>${line(SA_COL.att, 3)}attivati: allenamento o pasto, una persona conta una volta</span>`
-    + `<span>${line(SA_COL.ini, 2.5)}premono Inizia</span><span>${line(SA_COL.fin, 2.5)}finiscono l'allenamento</span>`
-    + (coorteOn ? `<span><svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${SA_COL.coo}" stroke-width="2.5" stroke-dasharray="6 4"/><circle cx="15" cy="7" r="4" fill="${SA_COL.coo}"/></svg>attivati su chi ha aperto l'app</span>` : '')
-    + `<span><svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>meno di ${SA_MIN_BASE} persone</span></div>`;
+// Segno di una serie nella legenda: linea col pallino (tratteggiata per «dal primo avvio») o punto vuoto.
+function saSwatch(k) {
+  if (k === 'few') return `<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>`;
+  const dash = k === 'coo' ? ' stroke-dasharray="6 4"' : ' stroke-linecap="round"';
+  return `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${SA_COL[k]}" stroke-width="${k === 'att' ? 3 : 2.5}"${dash}/><circle cx="15" cy="7" r="4" fill="${SA_COL[k]}"/></svg>`;
+}
+// Sprint d'esempio della legenda completa: l'ultimo dei mostrati coi numeri chiusi (14 giorni) e abbastanza persone.
+function saExample(rows) {
+  return [...rows].reverse().find(r => r.age_days >= 14 && r.base >= SA_MIN_BASE) || null;
+}
+
+// Legenda: la riga corta, con la freccia che apre sotto la legenda completa (cosa conta ogni linea e su chi).
+function saLegend(coorteOn, rows) {
+  const open = !!state.saLegend;
+  const chev = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const short = `<div class="pt-legend sa-legend" data-sa-legend><span>${saSwatch('att')}attivati: allenamento o pasto, una persona conta una volta</span>`
+    + `<span>${saSwatch('ini')}premono Inizia</span><span>${saSwatch('fin')}finiscono l'allenamento</span>`
+    + (coorteOn ? `<span>${saSwatch('coo')}attivati su chi ha aperto l'app</span>` : '')
+    + `<span>${saSwatch('few')}meno di ${SA_MIN_BASE} persone</span>`
+    + `<button class="sa-lg-btn${open ? ' pt-on' : ''}" aria-expanded="${open}" aria-controls="sa-lg-full" aria-label="${open ? 'Chiudi' : 'Apri'} la legenda completa" title="Legenda completa">${chev}</button></div>`;
+  if (!open) return short;
+  const ex = saExample(rows);
+  const eg = (n, d) => ex && d > 0
+    ? `<p class="sa-lg-eg">In ${esc(saShort(ex))}: ${n.toLocaleString('it-IT')} su ${d.toLocaleString('it-IT')}, cioè ${saPct(n, d)} su 100.</p>` : '';
+  const item = (sw, title, body, extra = '') => `<div class="sa-lg-it"><div class="sa-lg-h">${sw}<b>${title}</b></div><p>${body}</p>${extra}</div>`;
+  const last = rows[rows.length - 1];
+  return short + `<div class="sa-lg-full" id="sa-lg-full">`
+    + item(saSwatch('att'), 'Attivati',
+      'Su 100 persone che finiscono l\'onboarding ed entrano in app, quante entro 14 giorni dal primo avvio finiscono almeno un allenamento o salvano almeno un pasto analizzato. Chi fa tutte e due le cose conta una volta. Quello che sta sopra la linea blu sono le persone attivate solo dal cibo.',
+      ex ? eg(ex.attivati, ex.base) : '')
+    + item(saSwatch('ini'), 'Premono Inizia',
+      'Su 100 persone entrate in app, quante entro 14 giorni premono Inizia su un allenamento almeno una volta. Dice chi ci prova: la distanza dalla linea blu è chi inizia e non finisce.',
+      ex ? eg(ex.inizia, ex.base) : '')
+    + item(saSwatch('fin'), 'Finiscono l\'allenamento',
+      'Su 100 persone entrate in app, quante entro 14 giorni finiscono almeno un allenamento.',
+      ex ? eg(ex.finisce, ex.base) : '')
+    + item(saSwatch('coo'), 'Attivati su chi ha aperto l\'app',
+      'Conta la stessa cosa della bianca, allenamento finito o pasto salvato entro 14 giorni, ma su 100 persone che aprono l\'app per la prima volta, comprese quelle che lasciano durante l\'onboarding. Per questo sta quasi sempre sotto la bianca: più è lontana, più persone si fermano prima di entrare in app.',
+      coorteOn ? (ex ? eg(ex.attivati_coorte || 0, ex.coorte) : '') : '<p class="sa-lg-eg">Si accende con il tasto «Dal primo avvio».</p>')
+    + item(saSwatch('few'), `Meno di ${SA_MIN_BASE} persone`,
+      `Lo sprint ha meno di ${SA_MIN_BASE} persone entrate in app. Il punto resta, ma senza percentuale: con così poche persone, una in più sposta il valore di oltre 3 punti.`)
+    + item(`<span class="sa-lg-prov">${esc(saShort(last))}</span>`, 'Nome dello sprint in grigio',
+      'Lo sprint è finito da meno di 14 giorni: chi è arrivato negli ultimi giorni ha ancora tempo per attivarsi, quindi i numeri possono salire.')
+    + '</div>';
 }
 
 function saHead(rows) {
@@ -3591,7 +3629,7 @@ function sprintActivationCard() {
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
       <div class="pt-err-t">Nessuno sprint scelto</div><div class="sbr-sub">Sceglili dal menu.</div></div>`);
   }
-  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases, state.saCoorte)}</div>${saLegend(state.saCoorte)}`);
+  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases, state.saCoorte)}</div>${saLegend(state.saCoorte, shown)}`);
 }
 
 // Il grafico si ridisegna alla larghezza vera della card (come ptFit).
@@ -3637,6 +3675,10 @@ function attachSprintActivation() {
     state.saCoorte = !state.saCoorte;
     try { localStorage.setItem(LS_SA_COORTE, JSON.stringify(state.saCoorte ? 'on' : 'off')); } catch (e) { /* idem */ }
     render();
+  });
+  // tutta la riga della legenda apre e chiude; la freccia è il bottone per tastiera e lettori di schermo
+  document.querySelector('[data-sa-legend]')?.addEventListener('click', () => {
+    state.saLegend = !state.saLegend; render();
   });
   document.querySelector('[data-sa-retry]')?.addEventListener('click', () => {
     state.saError = null; state.sa = null; render(); fetchSprintActivation(true);

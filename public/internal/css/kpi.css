@@ -1213,7 +1213,26 @@
 .sa-lbl-att { font-size: 13px; stroke-width: 6px; }
 .sa-hit { fill: transparent; }
 .sa-loading .sa-svg { opacity: .5; }
-.sa-legend { gap: 8px 28px; }
+.sa-legend { gap: 8px 28px; align-items: center; cursor: pointer; }
+.sa-lg-btn {
+  display: inline-flex; align-items: center; justify-content: center; margin-left: auto; width: 32px; height: 32px; padding: 0;
+  border-radius: 50%; border: 1.5px solid #2a2e37; background: #14171d; color: #ffffff; cursor: pointer; flex-shrink: 0;
+}
+.sa-lg-btn svg { transition: transform 200ms ease; }
+.sa-lg-btn.pt-on { background: #262d45; border-color: #4361ee; }
+.sa-lg-btn.pt-on svg { transform: rotate(180deg); }
+.sa-lg-btn:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.sa-legend:hover .sa-lg-btn { border-color: #4361ee; }
+.sa-lg-full {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 18px 36px;
+  margin-top: 14px; padding-top: 18px; border-top: 1.5px solid #2a2e37; animation: kc-in 200ms ease-out;
+}
+.sa-lg-h { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.sa-lg-h b { font-weight: 800; color: #ffffff; }
+.sa-lg-it p { margin: 6px 0 0; font-size: 13px; font-weight: 500; line-height: 1.5; color: #9ca3af; }
+.sa-lg-it .sa-lg-eg { color: #ffffff; font-weight: 700; }
+.sa-lg-prov { display: inline-block; min-width: 30px; font-size: 13px; font-weight: 700; color: #9ca3af; text-align: center; }
+@media (prefers-reduced-motion: reduce) { .sa-lg-btn svg { transition: none; } .sa-lg-full { animation: none; } }
 
 @container sa (max-width: 700px) {
   .sa-head { gap: 12px; }

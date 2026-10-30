@@ -11,7 +11,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src  = readFileSync(join(here, '..', 'public', 'internal', 'js', 'kpi.js'), 'utf8').replace(/\r\n/g, '\n');
 
 const consts = src.match(/^const SA_[A-Z_]+ = .*$/gm) || [];
-const names = ['saSelectable', 'saDefaultSel', 'saPct', 'saShort', 'saPhase', 'saBands', 'saLabelSides', 'saSelected', 'saBandText'];
+const names = ['saSelectable', 'saDefaultSel', 'saPct', 'saShort', 'saPhase', 'saBands', 'saLabelSides', 'saSelected', 'saBandText', 'saExample'];
 const fns = names.map(n => {
   const m = src.match(new RegExp(`^function ${n}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, 'm'));
   if (!m) { console.error(`✗ ${n} non trovata in kpi.js — il test non ha nulla da verificare`); process.exit(1); }
@@ -109,6 +109,12 @@ check('linea dal primo avvio: sotto, sopra se supera i finiti, a sinistra se tro
   assert.equal(lib.saLabelSides({ ini: 60, fin: 10, att: 45, coo: 25 }).coo, 'up');
   assert.equal(lib.saLabelSides({ ini: 26, fin: 17, att: 17, coo: 13 }).coo, 'left');
   assert.equal(lib.saLabelSides({ ini: 30, fin: 17, att: 30 }).coo, undefined);
+});
+check('esempio della legenda completa: l\'ultimo sprint chiuso da 14 giorni con abbastanza persone', () => {
+  const r = (id, age_days, base) => ({ id, age_days, base });
+  assert.equal(lib.saExample([r('a', 40, 120), r('b', 20, 200), r('c', 13, 300)]).id, 'b');
+  assert.equal(lib.saExample([r('a', 40, 120), r('b', 20, lib.SA_MIN_BASE - 1)]).id, 'a');
+  assert.equal(lib.saExample([r('a', 3, 120)]), null);
 });
 
 console.log(ko ? `\n✗ ${ko} test falliti` : '\n✓ tutti i test passano');

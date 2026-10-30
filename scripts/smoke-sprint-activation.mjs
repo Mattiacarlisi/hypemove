@@ -1,7 +1,7 @@
 // Collaudo visivo della card «Attivazione per sprint» (Overview della dashboard interna), senza login e senza
 // database: serve `public/` in locale, sostituisce supabase-js con un finto client (nessuna sessione, nessuna
 // chiamata di rete) e disegna la card con il codice e il CSS veri, sui numeri di scripts/fixtures/sprint-activation.json.
-// Scatta: default (ultimi 6), menu aperto, «Tutti», fasi spente, finestra stretta. Errori JS = collaudo fallito.
+// Scatta: default (ultimi 6), menu aperto, «Tutti», fasi spente, finestra stretta, legenda completa aperta. Errori JS = collaudo fallito.
 //   node scripts/smoke-sprint-activation.mjs
 import http from 'node:http';
 import fs from 'node:fs';
@@ -68,6 +68,9 @@ out.stretta = await shoot('stretta', 480);
 out.vuota   = await shoot('vuota', 1280, { saSel: [] });
 out.errore  = await shoot('errore', 1280, { sa: null, saError: 'x' });
 out.carica  = await shoot('carica', 1280, { sa: null });
+out.legenda = await shoot('legenda', 1280, { saLegend: true });
+out.legcoo  = await shoot('legenda-coorte', 1280, { saLegend: true, saCoorte: true });
+out.legtel  = await shoot('legenda-390', 390, { saLegend: true });
 
 const checks = {
   'errori JS': errors.length ? errors : 'nessuno',
@@ -76,6 +79,9 @@ const checks = {
   'vuota dice nessuno sprint': out.vuota.includes('Nessuno sprint scelto'),
   'errore con Riprova': out.errore.includes('Riprova'),
   'linea dal primo avvio in legenda': out.coorte.includes('attivati su chi ha aperto') && !out.default.includes('attivati su chi ha aperto'),
+  'legenda completa chiusa di default': !out.default.includes('Nome dello sprint in grigio'),
+  'legenda completa con esempio e invito a «Dal primo avvio»': out.legenda.includes('su 100.') && out.legenda.includes('Si accende con'),
+  'legenda completa col primo avvio acceso: esempio, niente invito': !out.legcoo.includes('Si accende con'),
   'nessun trattino lungo nei testi': !Object.values(out).some(t => t.includes('—')),
 };
 console.log(JSON.stringify(checks, null, 2));
