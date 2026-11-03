@@ -436,7 +436,7 @@ let state = {
   // Stato SEPARATO da quello weekly (ret*) e da quello del funnel (funnel*): il toggle
   // fra le due viste non deve mai alterare i filtri dell'altra. Ogni campo qui inizia
   // per retD — se un handler nuovo scrive un campo che non inizia per retD, è un bug.
-  retView: 'week',             // 'week' | 'day'
+  retView: 'day',              // la pagina mostra solo la vista per giorno
   retDSprints: null,           // righe da kpi_retention_daily_cohort_sizes (menu degli sprint)
   rvEvent: 'app_open',         // evento della vista «Per giorno»
   rvSp: null, rvVs: [],        // sprint attivo e sprint di confronto
@@ -2370,13 +2370,13 @@ function layout() {
   return `
     ${sidebar()}
     <div class="nav-backdrop" data-nav-close></div>
-    <div class="main${state.page === 'stats' || state.page === 'funnel' || state.page === 'ai-coach' ? ' main-stats' : ''}">
+    <div class="main${state.page === 'stats' || state.page === 'funnel' || state.page === 'ai-coach' || state.page === 'retention' ? ' main-stats' : ''}">
       <div class="mtop">
         <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
         <span class="logo-mark">Hype<span>move</span></span>
         <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
       </div>
-      ${state.page === 'stats' ? pageStats() : state.page === 'ai-coach' ? pageAICoach() : state.page === 'funnel'
+      ${state.page === 'stats' ? pageStats() : state.page === 'ai-coach' ? pageAICoach() : state.page === 'retention' ? `<div class="st-page rv-page">${pageRetention()}</div>` : state.page === 'funnel'
         ? `<div class="st-page fn-page" id="fn-page">${pageFunnel()}${funnelParamsDrawer()}</div>`
         : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div class="page-head-l">
@@ -6782,14 +6782,8 @@ function funnelViz() {
 //  · Per giorno    → "quando far scadere la prova" (coorte = primo avvio, curva di sopravvivenza)
 // Il toggle cambia solo state.retView: non tocca mai i filtri dell'altra vista.
 function pageRetention() {
-  const tab = (id, label, on) =>
-    `<button id="${id}" class="filter-btn ${on ? 'active' : ''}" style="padding:6px 14px;font-size:12px">${label}</button>`;
-  return `
-    <div style="display:flex;gap:6px;margin-bottom:16px">
-      ${tab('ret-view-week', 'Per settimana', state.retView !== 'day')}
-      ${tab('ret-view-day',  'Per giorno',    state.retView === 'day')}
-    </div>
-    ${state.retView === 'day' ? pageRetentionDaily() : pageRetentionWeekly()}`;
+  return `<div class="st-head rv-head"><button class="nav-toggle nav-toggle-desk" data-nav-toggle
+    title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button></div>${pageRetentionDaily()}`;
 }
 
 function pageRetentionWeekly() {
@@ -11327,7 +11321,7 @@ function attachEvents() {
       if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
       if (state.page === 'funnel'     && state.funnelMode === 'activation' && !state.activation && !state.activationLoading) fetchActivation();
       if (state.page === 'goal'       && !state.goalBoard     && !state.goalLoading)      fetchGoalBoard();
-      if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
+      if (state.page === 'retention'  && !state.retDSprints   && !state.retDLoading)      fetchRetentionDaily();
       if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
       if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
