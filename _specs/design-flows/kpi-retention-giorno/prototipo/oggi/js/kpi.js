@@ -1,0 +1,13458 @@
+// KPI Dashboard — HypeMove
+const SUPABASE_URL = 'https://fiwskdxntgcredypplub.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpd3NrZHhudGdjcmVkeXBwbHViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMzIxNzAsImV4cCI6MjA2NDYwODE3MH0.W5b8A2zfm0Oeo746SXcANdeRhd2HsAMk5ND9Uc-q7Uo';
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── RPC CON RITENTATIVO SUI TIMEOUT ──────────────────────────────────
+// La dashboard chiama col JWT dell'operatore, quindi come ruolo `authenticated`, che
+// annulla ogni query oltre gli 8s (statement_timeout; `anon` ne ha 3). Dal
+// 03/08/2026 il traffico è passato da ~1 a ~90 nuovi utenti al giorno, e le RPC più
+// pesanti (kpi_funnel, kpi_premium, kpi_ai_sessions) sforano quel tetto SOLO a cache
+// fredda: la stessa identica query rilanciata subito dopo chiude in 1-2s, perché le
+// pagine lette restano in memoria anche quando lo statement viene annullato (misurato
+// 12/08/2026: funnel 3.77s KO → 2.55s OK, chat AI 4.04s KO → 1.07s OK).
+// Senza ritentativo la dashboard mostrava "canceling statement due to statement
+// timeout" a caso, su schede diverse a ogni caricamento.
+// ⚠️ Cerotto consapevole, non la cura. La cura (04/10/2026) è stata togliere il motivo per
+// cui la cache era sempre fredda: l'auto-refresh ricaricava l'Overview ogni 5 minuti da
+// ogni scheda aperta, e kpi_ai_sessions leggeva ~90 MB a giro svuotando la memoria del DB
+// (migration 20261004170000_kpi_dashboard_speed nel repo dell'app, più startAutoRefresh
+// qui sotto). Con la causa tolta basta UN ritentativo: prima erano quattro, e una query
+// davvero lenta teneva lo spinner ~45s martellando il DB cinque volte di fila.
+const RPC_TIMEOUT_CODE = '57014';
+const RPC_MAX_RETRY    = 1;
+// Attese fra un tentativo e l'altro. Il primo ritentativo parte quasi subito
+// apposta: le pagine appena lette restano in memoria solo finché il traffico
+// dell'app non le sfratta, quindi aspettare troppo butta via il vantaggio. Poi
+// si allarga, per il caso in cui il DB sia occupato davvero.
+const RPC_RETRY_WAIT_MS = [120, 400, 900, 1800];
+
+// Riconoscere il timeout dal solo `code` non basta: a seconda di dove viene
+// annullata la query PostgREST a volte restituisce il messaggio senza codice.
+const isRpcTimeout = (err) =>
+  !!err && (err.code === RPC_TIMEOUT_CODE || /statement timeout|ci ha messo troppo/i.test(err.message || ''));
+
+const rpcDirect = sb.rpc.bind(sb);
+sb.rpc = async (fn, params, opts) => {
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    res = await rpcDirect(fn, params, opts);
+    if (!isRpcTimeout(res.error) || attempt >= RPC_MAX_RETRY) break;
+    console.warn(`[rpc] ${fn}: timeout del DB, ritento (${attempt + 1}/${RPC_MAX_RETRY})`);
+    await new Promise(r => setTimeout(r, RPC_RETRY_WAIT_MS[attempt] || 2600));
+  }
+  // Il messaggio grezzo di Postgres finisce a schermo (i pannelli stampano e.message):
+  // sostituito con qualcosa che dica cosa è successo e cosa fare.
+  if (isRpcTimeout(res.error)) {
+    res = { ...res, error: { ...res.error, code: RPC_TIMEOUT_CODE, message:
+      'Il database ci ha messo troppo e ha annullato la query. ' +
+      'Capita a cache fredda: riprova fra qualche secondo.' } };
+  }
+  return res;
+};
+
+const REFRESH_MS  = 5 * 60 * 1000;
+const BETA_START  = '2026-06-11';
+const TODAY       = new Date().toISOString().slice(0, 10);
+const MONTH_START = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+
+// ── CATALOGO METRICHE ────────────────────────────────────────────────
+
+const METRICS = {
+  'users.total':       { label: 'Utenti Totali',   color: 'purple', get: d => d.users.total },
+  'users.new_7d':      { label: 'Nuovi (7g)',       color: 'green',  get: d => d.users.new_7d },
+  'users.new_30d':     { label: 'Nuovi (30g)',      color: 'green',  get: d => d.users.new_30d },
+  'users.premium':     { label: 'Premium Paganti',  color: 'amber',  get: d => d.users.premium },
+  'users.trial':       { label: 'Free Trial Attivi',color: 'amber',  get: d => d.users.trial },
+  'users.conv':        { label: 'Conv. Rate',       color: 'amber',  get: d => d.users.premium_pct + '%' },
+  'users.onboarded':   { label: 'Onboardati',       color: 'green',  get: d => d.users.onboarded },
+  'sessions.total':    { label: 'Workout Totali',   color: '',       get: d => d.sessions.total },
+  'sessions.s7d':      { label: 'Workout (7g)',     color: '',       get: d => d.sessions.sessions_7d },
+  'sessions.s30d':     { label: 'Workout (30g)',    color: '',       get: d => d.sessions.sessions_30d },
+  'sessions.duration': { label: 'Durata Media',     color: 'green',  get: d => d.sessions.avg_duration_min + ' min' },
+  'sessions.compl':    { label: 'Completamento',    color: 'green',  get: d => d.sessions.completion_pct + '%' },
+  'eng.dau':           { label: 'DAU',              color: 'amber',  get: d => d.engagement.dau },
+  'eng.wau':           { label: 'WAU',              color: 'amber',  get: d => d.engagement.wau },
+  'eng.mau':           { label: 'MAU',              color: 'amber',  get: d => d.engagement.mau },
+  'eng.streaks':       { label: 'Streak Attive',    color: 'purple', get: d => d.engagement.active_streaks },
+};
+
+const FUNNEL_LABELS = [
+  'Installazioni (Google Play)',
+  'First Open (primo avvio)',
+  'Onboarding iniziato',
+  'Onboarding completato',
+  'Almeno 1 workout',
+  'Primo workout entro 24h',
+  '≥2 workout prima settimana',
+  '≥3 workout prima settimana',
+  '≥5 workout prima settimana',
+  '3-day streak',
+  'Premium pagante',
+  // Step basati su eventi (user_events), coorte = nuovi iscritti del periodo. Gli indici 11-17
+  // devono restare allineati con gli ord della RPC kpi_funnel (aggiunti in coda per non rompere
+  // le config salvate in localStorage, che referenziano gli step per stepIdx).
+  'Vede il paywall (fine onboarding)',   // 11 · paywall_step_view · source=onboarding_end
+  'Chiude il paywall onboarding',        // 12 · paywall_close · source=onboarding_end
+  'Arriva in Home',                      // 13 · view_Home
+  'Apre workout detail',                 // 14 · view_WorkoutDetail
+  'Preme Start (inizia workout)',        // 15 · workout_start
+  'Fa ≥1 esercizio',                     // 16 · exercise_complete
+  'Completa workout (evento)',           // 17 · workout_complete
+  'Trial iniziato',                      // 18 · play_purchases is_trial=true (ha iniziato la prova)
+  // Step 19-21 (31/07/2026) — l'onboarding "auth in coda" misurato dal canale ANONIMO.
+  // Servono perché lo step 2 "Onboarding iniziato" è COUNT(auth.identities) = account creati:
+  // con la registrazione spostata in fondo, quel numero dice chi ha FINITO il questionario.
+  // ⚠️ L'inizio NON è view_Welcome (lo emette anche chi è già registrato a ogni riapertura:
+  // 56% di contaminazione misurata sullo Sprint 7) ma la PRIMA DOMANDA vera del questionario.
+  // Quale sia dipende dalla build: fino al riordino del 04/08/2026 era il Nome
+  // (view_OnboardingName), da lì in poi è l'Obiettivo (view_OnboardingGoal). La RPC ancora sul
+  // più vecchio dei due (LEAST) proprio per questo: le due build convivono in campo per settimane,
+  // e ancorare su uno solo azzererebbe una coorte o accorcerebbe la serie storica dell'altra.
+  // Esiste solo dall'11/07/2026 → gli sprint precedenti restano vuoti su queste tre righe.
+  'Inizio questionario (anonimo)',       // 19 · prima domanda vista dall'identità nel periodo
+  'Onboarding completato (registrato)',  // 20 · di quelli, chi ha onboarding_complete (= mail confermata)
+  'Regalo prova ricevuto',               // 21 · di quelli, chi ha visto la schermata dei 7 giorni
+  // 2026-09-13 — Il paywall di fine onboarding non esiste più (lo step 11, filtrato su
+  // source=onboarding_end, vale 0 su ogni sprint recente). Questo conta gli utenti UNICI che
+  // hanno visto un paywall, da qualsiasi punto: post-workout, fine trial, coach, shop. Chi lo
+  // rivede resta uno. Lo step 11 resta al suo posto per rileggere gli sprint chiusi.
+  'Vede il paywall (qualsiasi)',         // 22 · paywall_step_view · qualsiasi source · utenti unici
+  // 2026-09-21 — Step 23-29, la COORTE D'INGRESSO (migration kpi_funnel_coorte_ingresso_anonimi).
+  // Gli step 11-18 e 22 qui sopra contano sulla coorte che passa da `auth.identities` joinata su
+  // email: dall'ingresso anonimo (19/09/2026) chi entra senza registrarsi non la aggancia e quegli
+  // step leggono 0 — il 21/09, su 58 nuovi utenti, 50 erano in Home e 13 sul dettaglio, mostrati
+  // come 0. Questi sette contano sulle righe utente nate nel periodo, anonime comprese.
+  // ⚠️ Non sono una cascata: sono conteggi indipendenti di utenti unici, come gli step 13-17. Su
+  // sprint 12 "Apre workout detail" (281) supera "Arriva in Home" (256) — si arriva al dettaglio
+  // anche dal primo workout dell'onboarding, senza passare da una view della Home.
+  // Sono confrontabili all'indietro con i vecchi: su sprint 12 danno 256/281/184/147/117 contro
+  // 255/281/185/149/120. Gli step vecchi restano per rileggere gli sprint chiusi.
+  'Entra nell’app (anche anonimi)',     // 23 · righe public.users nate nel periodo = denominatore dei sei sotto
+  'Arriva in Home (anche anonimi)',      // 24 · view_Home
+  'Apre workout detail (anche anonimi)', // 25 · view_WorkoutDetail
+  'Preme Start (anche anonimi)',         // 26 · workout_start
+  'Fa ≥1 esercizio (anche anonimi)',     // 27 · exercise_complete
+  'Completa workout (anche anonimi)',    // 28 · workout_complete
+  'Vede il paywall (anche anonimi)',     // 29 · paywall_step_view · qualsiasi source
+];
+
+// Catalogo eventi per il BUILDER A EVENTI (kpi_funnel_v2, UNION user_events+anonymous_events).
+// Minimo e focalizzato sull'onboarding: le 9 schermate del wizard free (in ordine di flusso), più
+// first_open come testa/denominatore e onboarding_complete come endpoint. Nomi amichevoli già pronti;
+// l'event_name reale è mostrato tra parentesi nel menu. Le view_Onboarding* appaiono subito anche se
+// non ancora in prod (mostreranno 0 finché l'app non le emette). Aggiungere una voce qui = disponibile
+// nel menu.
+//
+// 2026-09-21 — La coda post-onboarding (Home → dettaglio → Start → esercizio → completa, più il
+// paywall) è entrata qui, dove prima si leggeva "NON è il posto per gli step del funnel standard".
+// Il motivo è cambiato sotto: con l'ingresso anonimo la coorte del funnel-utenti (`kpi_funnel`) è
+// rimasta `auth.identities` join su email, e chi entra senza registrarsi non la aggancia — quegli
+// step leggono 0 da quando l'anonimo è in campo (21/09: 50 in Home e 13 sul dettaglio, mostrati
+// come 0). Il builder a eventi gira su `kpi_funnel_v2`, che identifica per user_id o session_id e
+// gli anonimi li vede: finché la coorte non viene riparata è l'unico posto dove quel pezzo di
+// percorso si legge davvero, anche a confronto fra sprint.
+// Queste voci NON servono a rendere selezionabili gli eventi — il browser eventi li pesca già da
+// `event_registry` — ma a dargli il nome italiano nelle righe del funnel invece del nome grezzo.
+const EVENT_CATALOG = [
+  { event: 'first_open',                          label: 'Download / primo avvio' },
+  { event: 'view_Welcome',                        label: 'Onboarding · Benvenuto (coach)' },
+  // Schermata ritirata dal flusso col riordino del 04/08/2026: il nome non si chiede più, si
+  // genera dall'email. Resta qui perché le build in campo continuano a emetterla e perché serve a
+  // rileggere gli sprint chiusi. Nel funnel salvato "Onboarding" è scesa a variante fuori cascata.
+  { event: 'view_OnboardingName',                 label: 'Onboarding · Nome (ritirato)' },
+  { event: 'view_OnboardingAge',                  label: 'Onboarding · Età' },
+  { event: 'view_OnboardingGender',               label: 'Onboarding · Genere' },
+  { event: 'view_OnboardingWeight',               label: 'Onboarding · Peso' },
+  { event: 'view_OnboardingHeight',               label: 'Onboarding · Altezza' },
+  { event: 'view_OnboardingGoal',                 label: 'Onboarding · Obiettivo' },
+  // Interstitial "Non ti alleni mai da solo", eliminato dal wizard il 05/08/2026: non chiedeva
+  // niente e si auto-skippava dopo 3.5s. Come Nome, resta qui per rileggere gli sprint chiusi;
+  // nel funnel salvato "Onboarding" è sceso a variante fuori cascata.
+  { event: 'view_OnboardingGoalTrust',            label: 'Onboarding · Rinforzo obiettivo (ritirato)' },
+  { event: 'view_OnboardingLevel',                label: 'Onboarding · Livello' },
+  { event: 'view_OnboardingDuration',             label: 'Onboarding · Durata sessione' },
+  { event: 'view_OnboardingAvoid',                label: 'Onboarding · Movimenti da evitare' },
+  { event: 'view_OnboardingNotifications',        label: 'Onboarding · Notifiche' },
+  { event: 'view_OnboardingCoachChat',            label: 'Onboarding · Chat col coach' },
+  { event: 'coach_chat_onboarding_send',          label: 'Onboarding · Ha scritto al coach' },
+  { event: 'coach_chat_onboarding_skip',          label: 'Onboarding · Ha saltato la chat' },
+  { event: 'view_OnboardingPlanReveal',           label: 'Onboarding · Piano pronto' },
+  { event: 'view_OnboardingAccount',              label: 'Onboarding · Gate account' },
+  { event: 'view_SignUp',                         label: 'Onboarding · Form email' },
+  { event: 'sign_up',                             label: 'Onboarding · Registrato' },
+  { event: 'view_OnboardingConfirmation',         label: 'Onboarding · Conferma email' },
+  { event: 'onboarding_complete',                 label: 'Onboarding · Completato (fine)' },
+  { event: 'view_OnboardingTrialGift',            label: 'Onboarding · Schermata regalo (7 giorni)' },
+  { event: 'onboarding_age_gate_blocked',         label: 'Onboarding · Bloccato (minorenne)' },
+  { event: 'view_Home',                           label: 'Arrivo in Home' },
+  // Coda post-onboarding: dalla Home al primo workout completato. `workout_start` vive sulla
+  // WorkoutDetail (è il tasto Start), `exercise_complete` e `workout_complete` sulla pagina
+  // esercizio. Il paywall è l'unico non lineare dei cinque: si vede da più punti (post-workout,
+  // fine prova, coach, shop), quindi in cascata va messo sapendo che non è un passaggio obbligato.
+  { event: 'view_WorkoutDetail',                  label: 'Apre il dettaglio del workout' },
+  { event: 'workout_start',                       label: 'Preme Start (inizia il workout)' },
+  { event: 'exercise_complete',                   label: 'Completa almeno un esercizio' },
+  { event: 'workout_complete',                    label: 'Completa il workout' },
+  { event: 'paywall_step_view',                   label: 'Vede il paywall (da qualsiasi punto)' },
+  // Ritirato con il redesign coach-flow (l'intro questionario non esiste più): resta qui
+  // solo per rileggere gli sprint chiusi prima del rilascio del nuovo onboarding.
+  { event: 'view_OnboardingQuestionnaireWelcome', label: 'Onboarding · Intro questionario (ritirato)' },
+];
+
+// Etichetta leggibile di uno step evento: label salvata → catalogo → nome grezzo.
+function eventStepLabel(row) {
+  if (row && row.label) return row.label;
+  const c = EVENT_CATALOG.find(e => e.event === (row && row.event));
+  return c ? c.label : ((row && row.event) || '');
+}
+
+// Step canonici del funnel onboarding (built-in, come DEF_FUN_CFG è per il Default). Editabile
+// in sessione (drag&drop, aggiungi/togli step); per tenere una variante si usa "+ Salva".
+//
+// ⚠️ Allineato al flusso "auth in coda" (spec auth-at-end-of-onboarding + free-onboarding-coach-flow):
+// il questionario si compila in ANONIMO e la registrazione si chiede alla fine, dopo il reveal del
+// piano. Conseguenze sulla lettura:
+//  - la Conferma email NON è più in testa: è penultima e solo sul ramo email (chi entra con Google
+//    la salta). Sta come variante figlia del gate account, fuori dalla cascata, altrimenti azzererebbe
+//    tutto il ramo Google a valle.
+//  - Durata, Movimenti da evitare, Chat col coach, Piano pronto e Gate account sono schermate NUOVE:
+//    negli sprint chiusi prima del rilascio del nuovo onboarding risultano 0, e la cascata (che è
+//    sequenziale) muore lì. È atteso, non è un buco di tracking: quelle schermate non esistevano.
+//  - `view_OnboardingQuestionnaireWelcome` è ritirata dal codice ma resta come variante di Nome per
+//    rileggere gli sprint vecchi.
+//
+// ⚠️ Questa lista è rimasta all'ORDINE VECCHIO di proposito (04/08/2026). Il riordino del
+// questionario (spec onboarding-flow-reorder-weight-step) vive nel funnel SALVATO "Onboarding"
+// (`funnel_definitions`, riga `e14c4abd-…`), che è quello che si guarda davvero: lì l'Obiettivo apre
+// il questionario, il Peso è il 7° step e il Nome è sceso a variante fuori cascata. Questo built-in
+// resta la lettura degli sprint chiusi PRIMA del rilascio, dove l'ordine era questo. Se un giorno
+// diventa l'unica lettura utile, va riallineato al salvato — non il contrario.
+const ONBOARDING_FUNNEL_STEPS = [
+  { event: 'first_open',                   label: 'Download / primo avvio',           vsIdx: null },
+  { event: 'view_Welcome',                 label: 'Onboarding · Benvenuto (coach)',   vsIdx: 0 },
+  { event: 'view_OnboardingName',          label: '1 · Nome',                         vsIdx: 1,
+    children: [
+      { event: 'view_OnboardingQuestionnaireWelcome', label: '— Intro questionario (build vecchia)' },
+    ] },
+  { event: 'view_OnboardingAge',           label: '2 · Età',                          vsIdx: 2,
+    children: [
+      // Vicolo cieco, non una progressione: chi dichiara meno di 18 anni viene fermato dal gate.
+      // Fuori cascata apposta — in spina azzererebbe tutto il funnel a valle.
+      { event: 'onboarding_age_gate_blocked', label: '— bloccato (minorenne)' },
+    ] },
+  { event: 'view_OnboardingGender',        label: '3 · Genere',                       vsIdx: 3 },
+  { event: 'view_OnboardingGoal',          label: '4 · Obiettivo',                    vsIdx: 4 },
+  { event: 'view_OnboardingGoalTrust',     label: 'Rinforzo obiettivo',               vsIdx: 5 },
+  { event: 'view_OnboardingLevel',         label: '5 · Livello',                      vsIdx: 6 },
+  { event: 'view_OnboardingDuration',      label: '6 · Durata sessione',              vsIdx: 7 },
+  { event: 'view_OnboardingAvoid',         label: '7 · Movimenti da evitare',         vsIdx: 8 },
+  { event: 'view_OnboardingNotifications', label: '8 · Notifiche',                    vsIdx: 9 },
+  { event: 'view_OnboardingCoachChat',     label: '9 · Chat col coach',               vsIdx: 10,
+    children: [
+      { event: 'coach_chat_onboarding_send', label: '— ha scritto al coach' },
+      { event: 'coach_chat_onboarding_skip', label: '— ha saltato la chat' },
+    ] },
+  { event: 'view_OnboardingPlanReveal',    label: 'Piano pronto',                     vsIdx: 11 },
+  { event: 'view_OnboardingAccount',       label: 'Gate account',                     vsIdx: 12,
+    children: [
+      { event: 'view_SignUp',                 label: '— ramo email (form)' },
+      { event: 'view_OnboardingConfirmation', label: '— ramo email (conferma)' },
+    ] },
+  { event: 'sign_up',                      label: 'Registrato',                       vsIdx: 13 },
+  { event: 'onboarding_complete',          label: 'Onboarding · Completato (fine)',   vsIdx: 14,
+    children: [
+      // Il regalo dei 7 giorni si mostra SOLO se la prova è stata davvero concessa
+      // (flag trial_grant_enabled + esito della RPC): non è uno step obbligato e in spina
+      // azzererebbe il passo successivo ogni volta che il regalo non scatta.
+      { event: 'view_OnboardingTrialGift', label: '— schermata regalo (7 giorni)' },
+    ] },
+  // Dal 06/10/2026 la fine dell'onboarding apre il dettaglio del primo workout e la Home si vede
+  // dopo: con «Arrivo in Home» in mezzo la cascata, che è temporale, scartava chi apre il dettaglio
+  // prima della Home (48 contati su 110 nello sprint dal 06/10). `view_Home` resta nel catalogo.
+  { event: 'view_WorkoutDetail',           label: 'Apre il dettaglio del workout',    vsIdx: 15 },
+];
+
+const LS_OV             = 'hm_overview_keys';
+const LS_SA_SEL         = 'hm_sa_sprints_v1';   // sprint scelti nella card «Attivazione per sprint» (null = ultimi 6)
+const LS_SA_PHASES      = 'hm_sa_phases_v1';    // fasce delle fasi sopra il grafico: 'on' | 'off'
+const LS_SA_COORTE      = 'hm_sa_coorte_v1';    // linea «dal primo avvio» (attivati su chi ha aperto l'app): 'on' | 'off'
+const LS_FUN            = 'hm_funnel_cfg_v2';
+const LS_FUNNEL_DATES   = 'hm_funnel_dates';
+const LS_META_TOKEN     = 'hm_meta_token';
+const LS_SAVED_FUNNELS  = 'hm_saved_funnels_v1';
+// Ordine di visualizzazione delle chip in toolbar. Array di token: 'default' | 'onboarding' | <funnelId>.
+// Locale per-browser: i funnel salvati hanno anche order_index sul DB (condiviso), ma la posizione dei
+// due built-in (Default, onboarding) può stare solo qui. Il display segue questo ordine; token nuovi
+// (funnel appena creati) si accodano.
+const LS_FUNNEL_TOOLBAR_ORDER = 'hm_funnel_toolbar_order_v1';
+// Modalità di conteggio del funnel a eventi: 'cohort' (cascata, default) | 'absolute' (volumi).
+const LS_EVENT_FUNNEL_MODE = 'hm_event_funnel_mode';
+const LS_PREMIUM_FUN    = 'hm_premium_funnel_cfg_v3';
+const META_AD_ACCOUNT = 'act_1993609947865496';
+const META_API = 'https://graph.facebook.com/v20.0';
+
+const SPRINT_COLORS = ['#a78bfa', '#f97316', '#4ade80', '#22d3ee', '#f43f5e', '#fbbf24'];
+const SPRINT_DASHES = ['none', '8,4', '3,5', '10,3,3,3', '6,2'];
+
+const DEF_OV_KEYS = [
+  'users.total','users.new_7d','eng.dau','eng.wau','eng.mau',
+  'sessions.total','sessions.s7d','eng.streaks','users.premium','users.trial',
+];
+
+// vsIdx = indice nell'array funnelConfig (non il stepIdx). null = nessuna %
+// Allineato al funnel dello Sprint 7 (l'ultima versione rifinita): aggiunge paywall fine onboarding,
+// Home, workout detail e Trial iniziato rispetto alla vecchia default. vsIdx = posizione nell'array.
+const DEF_FUN_CFG = [
+  { stepIdx: 0,  vsIdx: null },  // 0 Installazioni (Google Play)
+  { stepIdx: 2,  vsIdx: 0 },     // 1 Onboarding iniziato vs Installazioni
+  { stepIdx: 3,  vsIdx: 1 },     // 2 Onboarding completato vs Onboarding iniziato
+  { stepIdx: 4,  vsIdx: 2 },     // 3 Almeno 1 workout vs Onboarding completato
+  { stepIdx: 5,  vsIdx: 3 },     // 4 Primo workout 24h vs Almeno 1 workout
+  { stepIdx: 11, vsIdx: 3 },     // 5 Vede il paywall (fine onboarding) vs Almeno 1 workout
+  { stepIdx: 13, vsIdx: 5 },     // 6 Arriva in Home vs Vede il paywall
+  { stepIdx: 14, vsIdx: 5 },     // 7 Apre workout detail vs Vede il paywall
+  { stepIdx: 6,  vsIdx: 3 },     // 8 ≥2 workout prima settimana vs Almeno 1 workout
+  { stepIdx: 7,  vsIdx: 3 },     // 9 ≥3 workout prima settimana vs Almeno 1 workout
+  { stepIdx: 9,  vsIdx: 3 },     // 10 3-day streak vs Almeno 1 workout
+  { stepIdx: 18, vsIdx: 2 },     // 11 Trial iniziato vs Onboarding completato
+  { stepIdx: 10, vsIdx: 11 },    // 12 Premium pagante vs Trial iniziato
+];
+
+// stepIdx = indice nel catalogo FUNNEL_ALL_STEPS (0=trial_shown, 1=paywall_views, 2=view_paywall,
+// 3=plan_select, 4=purchase_attempts, 5=premium_activated, 6=paywall_shown, 7=reached_plans,
+// 8=purchased). 6-8 aggiunti in coda così le config salvate vecchie restano valide.
+// Default = il vero funnel di conversione monotòno (eventi grande, utenti sotto; conversione = utenti):
+// Mostrato → Arrivato ai piani → Confronta piani → Tentato acquisto → Utenti in prova → Utenti paganti.
+// Gli ultimi due box sono separati apposta: "in prova" = ha inserito la carta ed è nel trial gratuito ora;
+// "paganti" = trial finito e pagamento reale in corso. Il calo In prova→Paganti = tasso di conversione del trial.
+// "Paywall aperto" (apertura volontaria) NON è qui: è una modalità d'ingresso parallela (auto vs
+// volontaria), sta come KPI card sopra. Metterlo nell'imbuto darebbe % senza senso.
+// NB: NON usiamo premium_activated (view_PremiumActivated) come fine: è un mount di schermata lato
+// client che si ripete e NON indica un pagamento. Le conversioni vere sono in play_purchases per token
+// (include CLIENT_VERIFIED, quindi anche conversioni senza RTDN Google), esclusi interni e licenze tester.
+// stepIdx 8 = "Conversione (trial/acq.)" resta nel catalogo per chi vuole il totale in un box solo.
+const DEF_PREMIUM_FUN_CFG = [
+  { stepIdx: 6, vsIdx: null }, // Paywall mostrato (tutte le varianti)
+  { stepIdx: 7, vsIdx: 0 },    // Arrivato ai piani vs mostrato
+  { stepIdx: 3, vsIdx: 1 },    // Confronta piani (plan select) vs ai piani
+  { stepIdx: 4, vsIdx: 2 },    // Tentato acquisto vs Confronta piani
+  { stepIdx: 9, vsIdx: 3 },    // Utenti in prova vs Tentato acquisto
+  { stepIdx: 10, vsIdx: 4 },   // Utenti paganti vs Utenti in prova (= tasso conversione trial→pagante)
+];
+// Config vecchia (fine = "Conversione" unico, stepIdx 8): la migriamo alla nuova a due box separati
+// così chi era sul default vede In prova → Paganti senza dover resettare a mano. Le config CUSTOM restano.
+const OLD_PREMIUM_FUN_CFG_V1 = [
+  { stepIdx: 6, vsIdx: null }, { stepIdx: 7, vsIdx: 0 }, { stepIdx: 3, vsIdx: 1 },
+  { stepIdx: 4, vsIdx: 2 }, { stepIdx: 8, vsIdx: 3 },
+];
+
+function loadLS(key, def) {
+  try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
+}
+
+function savePremiumFunnelConfig() {
+  localStorage.setItem(LS_PREMIUM_FUN, JSON.stringify(state.premiumFunnelConfig)); // cache locale
+  sb.from('kpi_settings')                                                          // condiviso (tutti lo vedono)
+    .upsert({ key: 'premium_funnel', value: state.premiumFunnelConfig, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .then(({ error }) => { if (error) console.warn('savePremiumFunnelConfig', error); });
+}
+
+// Carica la config del funnel Premium da localStorage, migrando il vecchio default (fine unico
+// "Conversione") al nuovo (In prova → Paganti). Non referenzia FUNNEL_ALL_STEPS: è un const definito
+// più in basso, chiamare qui a init darebbe TDZ.
+function loadPremiumFunnelConfig() {
+  const saved = loadLS(LS_PREMIUM_FUN, null);
+  if (!saved || !Array.isArray(saved) || !saved.length) return JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG));
+  if (JSON.stringify(saved) === JSON.stringify(OLD_PREMIUM_FUN_CFG_V1)) return JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG));
+  return saved;
+}
+
+async function loadSettings(retry = true) {
+  try {
+    const { data, error } = await sb.from('kpi_settings').select('key, value');
+    if (error) throw error;
+    for (const row of data || []) {
+      if (row.key === 'overview_keys' && Array.isArray(row.value))    state.overviewKeys = row.value;
+      if (row.key === 'meta_token'   && typeof row.value === 'string') {
+        state.metaToken = row.value;
+        localStorage.setItem(LS_META_TOKEN, row.value);
+      }
+      if (row.key === 'premium_funnel' && Array.isArray(row.value) && row.value.length) state.premiumFunnelConfig = row.value;
+      // obiettivi della pagina «Goal»: si scrivono solo con kpi_goal_set, mai con saveSetting (riga intera)
+      if (row.key === 'goals' && row.value && typeof row.value === 'object' && !Array.isArray(row.value)) state.goals = row.value;
+    }
+    state.settingsLoadError = false;
+  } catch (e) {
+    console.warn('loadSettings error', e);
+    if (retry) {
+      await new Promise(r => setTimeout(r, 2000));
+      return loadSettings(false);
+    }
+    state.settingsLoadError = true;
+  }
+}
+
+function saveSetting(key, value) {
+  if (key === 'overview_keys')   localStorage.setItem(LS_OV,           JSON.stringify(value));
+  else if (key === 'funnel_cfg')   localStorage.setItem(LS_FUN,          JSON.stringify(value));
+  else if (key === 'funnel_dates') localStorage.setItem(LS_FUNNEL_DATES, JSON.stringify(value));
+  else if (key === 'meta_token')   localStorage.setItem(LS_META_TOKEN,   value);
+  sb.from('kpi_settings')
+    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .then(({ error }) => {
+      if (error) {
+        console.warn('saveSetting', error);
+        if (key === 'meta_token') {
+          state.metaTokenSaveError = true;
+          render();
+        }
+      } else if (key === 'meta_token') {
+        state.metaTokenSaveError = false;
+        state.settingsLoadError = false;
+      }
+    });
+}
+
+// ── STATE ─────────────────────────────────────────────────────────────
+
+let state = {
+  page: 'stats',
+  data: null, chart: null, loading: true, lastUpdated: null, error: null,
+  funnel: null, funnelFrom: BETA_START, funnelTo: TODAY,
+  funnelSprintId: '',          // sprint scelto nel selettore periodo della pagina Funnel ('' = periodo libero)
+  funnelLoading: false, funnelError: null,
+  premiumCache: null,          // come funnelCache, per la pagina Premium
+  funnelCache: null,           // { scope, computedAt, pending } se i numeri a schermo vengono dalla cache, altrimenti null
+  eventFunnelCache: null,      // come funnelCache, per il funnel a eventi
+  activationCache: null,       // come funnelCache, per Attivazione
+  retention: null, retFrom: MONTH_START, retTo: TODAY, retMin: 1, retChart: 'bar',
+  retSprintId: '',             // sprint scelto nel selettore periodo della pagina Retention ('' = periodo libero)
+  retWeeks: 6, retMinW0: 1,
+  retLoading: false, retError: null,
+
+  // ── Retention · vista giornaliera (survival) ──────────────────────
+  // Stato SEPARATO da quello weekly (ret*) e da quello del funnel (funnel*): il toggle
+  // fra le due viste non deve mai alterare i filtri dell'altra. Ogni campo qui inizia
+  // per retD — se un handler nuovo scrive un campo che non inizia per retD, è un bug.
+  retView: 'week',             // 'week' | 'day'
+  retDFrom: MONTH_START, retDTo: TODAY,
+  retDSprintSel: [],           // id sprint selezionati nel menu (confronto multi-curva)
+  retDSprints: null,           // righe da kpi_retention_daily_cohort_sizes (coorte + primi avvii)
+  retDData: {},                // { [sprintId | 'free']: payload kpi_retention_daily }
+  retDDropdown: false,         // menu sprint aperto
+  retDLoading: false, retDError: null,
+  overviewKeys: loadLS(LS_OV, DEF_OV_KEYS),
+  funnelConfig: JSON.parse(JSON.stringify(DEF_FUN_CFG)),
+  editingOverview: false,
+  editingFunnel: false,
+  funnelMode: 'catalog',       // 'catalog' = step dal catalogo fisso (kpi_funnel) · 'event' = step evento liberi (kpi_funnel_v2) · 'activation' = linguetta Attivazione (kpi_activation)
+  activation: null,            // payload di kpi_activation: {funnel, by_workouts, weekly, sprint}
+  activationLoading: false, activationError: null,
+  funnelParamsOpen: false,     // pannello laterale «Chi è escluso» della pagina funnel (chiuso di default)
+  funnelMenu: null,            // menu aperto nella testata del funnel: null · 'funnel' (pillola col nome) · 'other' (Altro periodo)
+  funnelIncludeEmulators: false, // override v2: reinclude gli emulatori (p_include_emulators)
+  funnelIncludeTest: false,      // override v2: reinclude gli account test (p_include_test)
+  funnelIncludeBlocked: false,   // override v2: reinclude gli utenti bloccati (p_include_blocked)
+  funnelIncludeBots: false,      // override: reinclude i bot — Test Lab, browser automatici, UA falsificata (p_include_bots, anche su Attivazione)
+  funnelCohortBase: null,        // coorte dell'ultimo calcolo SENZA override — baseline per il delta
+  excludedUsers: null,           // lista nominale esclusi (RPC kpi_excluded_users_list)
+  excludedLoading: false, excludedError: null,
+  excludedFilter: null,          // filtro motivo nella lista: null | 'blocked' | 'test' | 'emulator' | 'bot'
+  eventFunnelConfig: [],       // [{event, source, label, vsIdx, children?:[{event,source,label}]}] — step del funnel a eventi. `children` = varianti annidate visibili espandendo il parent (es. sign_up → signup_google/signup_email); non partecipano al calcolo della % dello step successivo.
+  eventFunnel: null,           // risultato RPC kpi_funnel_v2: {steps:[{idx,event,source,numero}]}
+  eventFunnelFlatMap: null,    // { parent:[flatIdx|null,...], child:[[flatIdx|null,...],...] } — mappa posizione UI ↔ posizione in p_steps del flatten (parent+children serializzati in sequenza per la RPC)
+  eventFunnelExpanded: {},     // { [uiIdx]: true } — parent con children espansi in viz/editor (session-only)
+  eventFunnelProvider: null,   // filtro provider registrazione: null=tutti · 'google' · 'email'
+  eventFunnelSource: 'all',    // filtro sorgente install della coorte: 'all' · 'meta' · 'organic' (p_source kpi_funnel_v2; referrer disponibile dall'11/07/2026)
+  // Modalità conteggio: 'cohort' = cascata temporale (funnel vero) · 'absolute' = volumi indipendenti
+  // per step (p_mode kpi_funnel_v2). Persistita in localStorage, validata contro LS corrotto.
+  eventFunnelMode: ['cohort', 'absolute'].includes(localStorage.getItem(LS_EVENT_FUNNEL_MODE))
+    ? localStorage.getItem(LS_EVENT_FUNNEL_MODE) : 'cohort',
+  eventFunnelLoading: false, eventFunnelError: null,
+  editingEventFunnel: false,   // editor onboarding aperto/chiuso (come editingFunnel per il Default)
+  // Event browser — popup di selezione evento (sostituisce il dropdown hardcoded nel builder a eventi)
+  eventRegistry: [],           // catalogo eventi dal DB (event_registry): {event_name, screens, types, verdict, funnels_used, vol_7d, vol_30d}
+  eventBrowserOpen: false,     // visibilità del modale
+  eventBrowserTargetRow: null, // indice dello step di eventFunnelConfig da riempire (null = nessuno)
+  eventBrowserTargetChild: null, // se non-null, il target è la variante children[N] dello step targetRow (invece del parent stesso)
+  eventBrowserTargetOr: null,  // se non-null, si sta scegliendo un evento in OR del target: -1 = nuovo slot, >=0 = sostituisce orEvents[N]
+  ebSearch: '',                // query ricerca fuzzy
+  ebScreen: null,              // filtro schermata attiva (null = tutte)
+  ebType: null,                // filtro tipo (action/click/navigation) — null = tutti
+  ebVolAll: false,             // false = solo volume >100/30g, true = tutti
+  ebAliveOnly: true,           // nasconde dead/dark
+  ebSelected: null,            // event_name selezionato nel dettaglio
+  ebTab: 'details',            // 'details' | 'next'
+  ebNextLoading: false,        // query "cosa segue" in corso
+  ebNextRows: null,            // risultati "cosa segue": [{event, pct}] o null se non ancora caricato
+  // confronto tra sprint per il funnel onboarding (parallelo a sprintFunnel* del catalogo)
+  sprintEventOpen: false, sprintEventSel: [], sprintEventData: {}, sprintEventLoading: false, sprintEventError: null,
+  savedFunnels: [],           // funnel salvati/nominati — ora dal DB (funnel_definitions), non più localStorage
+  activeFunnelPreset: null,
+  funnelSaveOpen: false,
+  funnelSaveName: '',
+  chipEditorIdx: null,        // indice del funnel salvato in editing (icona/colore/nome/label) — null = editor chiuso
+  chipDraft: null,            // { name, icon, color, label } bozza durante l'editing
+  chipDragFrom: null,         // indice sorgente durante drag & drop delle chip
+  chipDragOver: null,         // indice target evidenziato durante drag
+  chipReorderSaving: false,   // flag per disabilitare drag mentre stiamo salvando l'ordine
+  extraCharts: null,
+  growthRange: 0, weeklyRange: 16, streakRange: 60, streakChartOpen: false,
+  // Card "Abbonamenti" (overview): dati da kpi_premium_timeline, periodo e confronto scelti qui.
+  premTimeline: null, premTimelineError: null, ptlPeriod: 'sprint', ptlSprintId: null, ptlMenu: false, ptlW: 800, ptlAnimated: '',
+  sprints: [], sprintsLoading: false,
+  sprintFormOpen: false, sprintEditingId: null,
+  sprintForm: { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' },
+  sprintFunnelEditId: null,   // id dello sprint di cui stiamo editando il funnel (pagina Sprint)
+  sprintFunnelEdit: null,     // working copy dell'array config in editing
+  sprintFunnelSaving: false,
+  funnelAssignOpen: false,    // pannello "assegna funnel corrente a sprint" (pagina Funnel)
+  funnelAssignSel: [],        // sprint id selezionati nel pannello assegna
+  funnelAssignSaving: false,
+  funnelOverwriteConfirm: null, // { kind:'assign'|'sprint', names:[…] } — modal "digita Modifica" quando si sovrascrive un funnel già custom
+  sprintFunnelOpen: false, sprintFunnelSel: [], sprintFunnelData: {}, sprintFunnelLoading: false, sprintFunnelError: null,
+  sprintFunnelDef: null,       // id di una funnel_definition da applicare UGUALE a tutti gli sprint nel confronto; null = Base (ogni sprint il suo funnel_config)
+  sprintFunnelHiddenSteps: [], // stepIdx nascosti SOLO in visualizzazione confronto (session-only, non persistito, non tocca i funnel)
+  sprintFunnelPctStart: true, // flag: sotto ogni cella del confronto mostra ANCHE la % sulla testa del funnel (oltre alla % vs step precedente) — default ON per coerenza con la colonna "vs #1" nei funnel singoli
+  funnelPhases: [], funnelPhasesId: null, // fasi (macro-aree) del funnel — condivise dal DB (funnel_phases)
+  sprintLeakMode: 'abs',       // pannello "Dove si perdono gli utenti": 'abs' = utenti persi | 'pct' = tasso di calo
+  sprintLeakEdit: null,        // working copy delle fasi durante l'editing; null = non stiamo editando
+  sprintLeakSaving: false,
+  sprintRetOpen: false, sprintRetSel: [], sprintRetData: {}, sprintRetLoading: false, sprintRetError: null,
+  sprintRetCustom: false, sprintRetMin: 1, sprintRetWeeks: 6, sprintRetMinW0: 1,
+  deleteConfirm: null, // { id, nome } when modal is open
+  // `…ErrorTimeout`: la query è stata ANNULLATA dal DB, non è un guasto. Serve
+  // separato dal messaggio perché il riquadro da mostrare è un altro (i dati ci
+  // sono, basta rileggere) e perché una sezione annullata non deve buttare giù
+  // le altre della stessa pagina.
+  premiumData: null, premiumLoading: false, premiumError: null, premiumErrorTimeout: false,
+  // Le sezioni della prova regalata (gate/regalo/vita) sono state RIMOSSE dalla
+  // pagina il 24/08/2026 (decisione Mattia): al loro posto c'è la card Coach Spot.
+  // Le RPC kpi_trial_* restano a DB, inutilizzate da qui.
+  premiumFrom: BETA_START, premiumTo: TODAY, premiumSprintId: '', // sprint scelto nel selettore della pagina Premium ('' = periodo libero)
+  premiumFunnelConfig: loadPremiumFunnelConfig(),
+  editingPremiumFunnel: false,
+  premiumSourceTab: 'paywall_sources', premiumPurchaserFilter: 'all', premiumGender: 'all',
+  premiumFunnelRangeFrom: BETA_START, premiumFunnelRangeTo: TODAY,
+  premiumFunnelRangeData: null, premiumFunnelRangeLoading: false, premiumFunnelRangeError: null,
+  sprintPremiumFunnelOpen: false, sprintPremiumFunnelSel: [], sprintPremiumFunnelData: {},
+  attemptsChartMode: 'people', attemptsChartSel: [], attemptsChartInit: false, attemptsChartData: {}, attemptsChartLoading: {}, attemptsChartErrors: {},
+  sprintPremiumFunnelLoading: false, sprintPremiumFunnelError: null,
+  // dettaglio utenti che hanno raggiunto uno step di una creatività (modal su click step box)
+  stepUsersModal: null, // { variant, step, label } quando aperto
+  // Catalogo creatività (kpi_paywall_creatives_audit): stato di salute per variant + la
+  // scheda aperta, se ce n'è una.
+  creativesAudit: null, creativesAuditLoading: false, creativesAuditError: null, creativesAuditErrorTimeout: false,
+  creativeModal: null,
+  // Il percorso a caselle è la colonna più larga della tabella: chiuderlo è l'unico modo di
+  // vedere i gesti d'acquisto senza scorrere di lato. Aperto di default, com'era prima.
+  creativePathOpen: true,
+  // Quale gesto mostrare in percentuale di fianco al nome ('' = nessuno, tabella com'era).
+  creativeRateKey: '',
+  // Foto caricate a mano, per creatività: { [variant]: [{id, path, url, position}] }.
+  shots: {}, shotsLoading: false, shotsError: null, shotsUploading: 0,
+  // Acquisti veri del periodo + attribuzione per ultimo tocco (kpi_paywall_purchases).
+  purchases: null, purchasesLoading: false, purchasesError: null, purchasesErrorTimeout: false,
+  stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
+  premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
+  funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
+  funnelStepUsersData: null, funnelStepUsersLoading: false, funnelStepUsersError: null,
+  userActivityOpen: false, userActivityUser: null, userActivityData: null, userActivityLoading: false,
+  recentFeedback: null,
+  feedbackModalOpen: false,
+  allFeedbacks: null,
+  allFeedbacksLoading: false,
+  selectedFeedback: null,
+  feedbackSearchQuery: '',
+  recentAISessions: null,
+  // Card «Sprint vs record» dell'Overview (kpi_sprint_curves, letta dalla cache). scoreSel = id dello sprint
+  // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
+  // scoreMenu = menu aperto ('sel' | 'ref' | null).
+  scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
+  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saCoorte: loadLS(LS_SA_COORTE, 'off') === 'on', saLegend: false, saMenu: false, saW: 800,
+  // Pagina «Goal» (kpi_goal_board, letta dalla cache). goals = kpi_settings.goals, uguale per tutti gli operatori;
+  // goalEdit = { k, text, saving, fresh } mentre un obiettivo è in modifica.
+  goalBoard: null, goalBoardError: null, goalCache: null, goalLoading: false, goalForce: false,
+  goalSel: null, goalRef: 'best', goals: {}, goalEdit: null, goalToast: null,
+  aiConvOpen: false,
+  aiSessions: null,
+  aiSessionsLoading: false,
+  aiSessionsFilter: null,   // filtro p_surface con cui è stata caricata aiSessions (null = tutte)
+  aiSelectedSession: null,
+  aiSessionMessages: null,
+  aiSessionMessagesLoading: false,
+  aiSearchQuery: '',
+  metaToken: localStorage.getItem(LS_META_TOKEN) || '',
+  settingsLoadError: false,
+  metaTokenSaveError: false,
+  metaAds: null,
+  metaAdsLoading: false,
+  metaAdsError: null,
+  metaDatePreset: 'last_30d',
+  metaCustomFrom: '',
+  metaCustomTo: '',
+  metaUseCustom: false,
+  metaCampaigns: null,
+  metaSprintSel: [],
+  metaSprintData: {},
+  metaSprintLoading: false,
+  metaFunnelData: null,
+  metaFunnelLoading: false,
+  metaFunnelError: null,
+  metaFunnelPeriod: null,
+  blockedUsers: [],
+  recentlyUnblocked: [],
+  blockSearchOpen: false,
+  blockSearchQuery: '',
+  blockSearchResults: [],
+  ueSearchQuery: '',
+  ueSearchResults: [],
+  ueSelectedUser: null,
+  ueFromDateTime: TODAY + 'T00:00',
+  ueData: null,
+  ueLoading: false,
+  likedExercises: null,
+  likedLoading: false,
+  likedFilterOpen: false,
+  likedShowAll: false,
+  likedGender: 'all',     // 'all' | 'male' | 'female'
+  likedAge: 'all',        // 'all' | '18-24' | '25-34' | '35-44' | '45-54' | '55-'
+  // Sessione operatore (email+password Supabase Auth): senza, ogni RPC della dashboard risponde 403.
+  opsSession: null, opsSessionCheckedOnce: false,
+  opsEmailInput: '', opsPasswordInput: '', opsAuthError: null,
+};
+
+let refreshTimer = null, countdownTimer = null, secondsLeft = 300;
+
+// ── DATA ──────────────────────────────────────────────────────────────
+
+async function fetchData() {
+  state.loading = true;
+  state.error = null;
+  updateHeaderActions();
+  try {
+    const [ov, ch, ec, lk, pt] = await Promise.all([
+      sb.rpc('kpi_overview'),
+      sb.rpc('kpi_chart_daily', { days_back: 14 }),
+      sb.rpc('kpi_extra_charts'),
+      sb.rpc('kpi_liked_exercises', likedExercisesParams()),
+      sb.rpc('kpi_premium_timeline'),
+    ]);
+    if (ov.error) throw ov.error;
+    if (ch.error) throw ch.error;
+    state.data  = ov.data;
+    state.chart = ch.data || [];
+    if (!ec.error) state.extraCharts = ec.data;
+    if (!lk.error) state.likedExercises = lk.data;
+    if (pt.error) state.premTimelineError = pt.error.message || 'Errore nel caricamento';
+    else { state.premTimeline = pt.data || []; state.premTimelineError = null; }
+    state.lastUpdated = new Date();
+    state.overviewStale = false;
+    // I due riquadri «ultimi feedback» e «ultime chat» arrivano dopo, ognuno col suo render:
+    // prima la pagina intera aspettava kpi_ai_sessions, la RPC più lenta del gruppo.
+    fetchScoreboard();
+    fetchSprintActivation();
+    Promise.all([fetchRecentFeedback(), fetchRecentAISessions()]).then(render);
+  } catch (e) { state.error = e.message || 'Errore sconosciuto'; }
+  state.loading = false;
+  render();
+  startCountdown();
+}
+
+// Mappa i filtri della card "Esercizi piu amati" nei parametri della RPC.
+const LIKED_AGE_RANGES = {
+  '18-24': [18, 24], '25-34': [25, 34], '35-44': [35, 44],
+  '45-54': [45, 54], '55-': [55, null],
+};
+function likedExercisesParams() {
+  const [min, max] = LIKED_AGE_RANGES[state.likedAge] || [null, null];
+  return {
+    p_gender:  state.likedGender === 'all' ? null : state.likedGender,
+    p_age_min: min,
+    p_age_max: max,
+  };
+}
+
+async function fetchLikedExercises() {
+  state.likedLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_liked_exercises', likedExercisesParams());
+    if (error) throw error;
+    state.likedExercises = data;
+  } catch (e) { /* lascia i dati precedenti, log silenzioso */ console.error('liked exercises', e); }
+  state.likedLoading = false;
+  render();
+}
+
+async function fetchRetention() {
+  state.retLoading = true;
+  state.retError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.retSprintId);
+    const res = await sb.rpc('kpi_retention', {
+      inizio:       state.retFrom,
+      fine:         state.retTo,
+      min_workouts: state.retMin,
+      max_weeks:    state.retWeeks,
+      min_w0:       state.retMinW0,
+      p_start:      selSprint ? sprintStartTs(selSprint) : null,
+      p_end:        selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (res.error) throw res.error;
+    state.retention = res.data;
+  } catch (e) { state.retError = e.message || 'Errore sconosciuto'; }
+  state.retLoading = false;
+  render();
+}
+
+// Righe del menu sprint della vista giornaliera: coorte, primi avvii e ultimo giorno
+// osservabile per ogni sprint, in UNA chiamata sola (con 100+ sprint, una per sprint
+// significherebbe 100 esecuzioni della RPC pesante alla sola apertura del menu).
+async function fetchRetentionDailySprints() {
+  if (state.retDSprints) return;
+  try {
+    const res = await sb.rpc('kpi_retention_daily_cohort_sizes', { p_sprint_ids: null });
+    if (res.error) throw res.error;
+    state.retDSprints = res.data || [];
+  } catch (e) { state.retDError = e.message || 'Errore sconosciuto'; }
+}
+
+// Una chiamata per sprint selezionato (le curve vanno sovrapposte), oppure una sola
+// sul periodo libero quando non c'è nessuno sprint selezionato.
+async function fetchRetentionDaily() {
+  state.retDLoading = true;
+  state.retDError = null;
+  render();
+  try {
+    await fetchRetentionDailySprints();
+    const sel = state.retDSprintSel;
+    const jobs = sel.length
+      ? sel.map(id => {
+          const s = (state.retDSprints || []).find(x => x.sprint_id === id);
+          return { key: id, inizio: s && s.inizio, fine: s && s.fine, t0: s && s.t0, t1: s && s.t1 };
+        }).filter(j => j.inizio && j.fine)
+      : [{ key: 'free', inizio: state.retDFrom, fine: state.retDTo }];
+
+    const out = {};
+    for (const j of jobs) {
+      const res = await sb.rpc('kpi_retention_daily', {
+        p_start:  j.inizio,
+        p_end:    j.fine,
+        p_anchor: 'first_open',
+        p_t0:     j.t0 || null,
+        p_t1:     j.t1 || null,
+      });
+      if (res.error) throw res.error;
+      out[j.key] = res.data;
+    }
+    state.retDData = out;
+  } catch (e) { state.retDError = e.message || 'Errore sconosciuto'; }
+  state.retDLoading = false;
+  render();
+}
+
+// ── CACHE DEL FUNNEL (kpi_cache_get) ─────────────────────────────────
+// In cache ci sono la vista di base (BETA_START → oggi, nessuno sprint) e ogni sprint con le sue date.
+// Ogni altro periodo si calcola dal vivo con kpi_funnel, come prima.
+function funnelCacheScope(from, to, sprint) {
+  if (sprint) return sprint.inizio === from && sprint.fine === to ? sprint.id : null;
+  return from === BETA_START && to === TODAY ? 'base' : null;
+}
+
+// ── Cache «calcola all'entrata» ─────────────────────────────────────────
+// kpi_cache_get restituisce sempre il valore salvato (anche scaduto) e non calcola niente. Se è scaduto, o l'utente
+// preme «Aggiorna», parte UNA chiamata kpi_cache_recompute (sincrona, con il limite di tempo del database) e la scheda
+// si ridisegna quando torna. Se il ricalcolo fallisce resta il valore vecchio, con l'ora in cui era stato calcolato.
+async function kpiRecompute(query, scope, force) {
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_recompute', { p_query: query, p_scope: scope, p_force: !!force });
+    if (error) return { failed: true, error: error.message };
+    return data ? { ...data, failed: kcFailed(data) } : { failed: true, error: 'risposta vuota' };
+  } catch (e) { return { failed: true, error: (e && e.message) || 'errore' }; }
+}
+// Ricalcolo non riuscito = l'ultimo errore è più recente dell'ultimo calcolo buono (chi non prende il lock non fallisce).
+function kcFailed(d) {
+  return !!(d && d.error_at && !d.busy && (!d.computed_at || new Date(d.error_at) > new Date(d.computed_at)));
+}
+// Dicitura «calcolato alle HH:MM» uguale per tutte le schede; la linea blu e la pulsazione si agganciano al marcatore.
+function kcWhen(iso) {
+  const at = new Date(iso);
+  return (at.toDateString() === new Date().toDateString() ? '' : 'il ' + at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) + ' ')
+    + 'alle ' + at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+}
+function kcMark(c) {
+  if (!c || !c.computedAt) return '';
+  return `<span class="kc-mark${c.pending ? ' kc-pulse' : ''}" data-busy="${c.pending ? 1 : 0}" data-fresh="${c.fresh ? 1 : 0}">calcolato ${kcWhen(c.computedAt)}${c.pending ? ' · aggiorno…' : c.failed ? ' · aggiornamento non riuscito' : ''}</span>`;
+}
+// Dopo ogni render: la scheda che si sta ricalcolando prende la linea blu, quella appena aggiornata la dissolvenza breve.
+function kcSync() {
+  const host = el => el.closest('.card, .sbr-card, .sa-card') || el.closest('.main') || el.parentElement;
+  document.querySelectorAll('.kc-busy').forEach(el => el.classList.remove('kc-busy'));
+  document.querySelectorAll('.kc-mark[data-busy="1"]').forEach(m => host(m).classList.add('kc-busy'));
+  document.querySelectorAll('.kc-mark[data-fresh="1"]').forEach(m => {
+    const h = host(m);
+    h.classList.add('kc-fade');
+    h.addEventListener('animationend', () => h.classList.remove('kc-fade'), { once: true });
+  });
+}
+
+// Risponde { data, computed_at, pending, failed } oppure null: se la riga non c'è nemmeno dopo un ricalcolo, la pagina
+// calcola dal vivo come prima. pending = il valore è scaduto (o c'è «Aggiorna»): chi chiama lancia il ricalcolo.
+async function funnelFromCache(scope, force, query = 'funnel') {
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: query, p_scope: scope, p_force: false });
+    if (error || !data) return null;
+    if (!data.data) {
+      // niente di salvato: un solo ricalcolo, e finché non torna la scheda resta in caricamento
+      const r = await kpiRecompute(query, scope, true);
+      return r && r.data ? { ...r, pending: false } : null;
+    }
+    return { ...data, pending: !!(force || data.stale), failed: kcFailed(data) };
+  } catch (e) { return null; }
+}
+
+// Il periodo rapido a schermo come lo chiama la cache: 'today' | 'yesterday' | 'base' | 'cur' | 'prev' | null (periodo libero
+// o altro sprint). Le date devono coincidere davvero con quelle del periodo: se la testata dice «Sprint 15» ma le
+// date sono state cambiate a mano, non è più quello sprint.
+function funnelQuickPeriod() {
+  if (state.funnelSprintId) {
+    const { cur, prev } = funnelQuickSprints();
+    const sp = cur && cur.id === state.funnelSprintId ? cur : prev && prev.id === state.funnelSprintId ? prev : null;
+    if (!sp || sp.inizio !== state.funnelFrom || sp.fine !== state.funnelTo) return null;
+    return sp === cur ? 'cur' : 'prev';
+  }
+  const same = r => state.funnelFrom === r.from && state.funnelTo === r.to;
+  if (same(eventFunnelPresetRange('today'))) return 'today';
+  if (same(eventFunnelPresetRange('yesterday'))) return 'yesterday';
+  // il periodo intero con cui la pagina si apre: in cache solo per i funnel a eventi
+  if (state.funnelFrom === BETA_START && state.funnelTo === TODAY) return 'base';
+  return null;
+}
+
+// Forma canonica (chiavi in ordine) per confrontare i passi che la pagina manderebbe con quelli della riga in cache.
+function canonJson(v) {
+  if (Array.isArray(v)) return '[' + v.map(canonJson).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canonJson(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
+const sameInstant = (a, b) => (a == null && b == null) || (a != null && b != null && new Date(a).getTime() === new Date(b).getTime());
+
+// Ricalcolo della scheda Funnel: una chiamata sola, poi si ridisegna (niente ripolling).
+async function funnelCachePoll(scope, force) {
+  const mine = () => state.funnelCache && state.funnelCache.scope === scope;
+  const r = await kpiRecompute('funnel', scope, force);
+  if (!mine()) return;
+  if (r.data) state.funnel = r.data;
+  state.funnelCache = { scope, computedAt: r.computed_at || state.funnelCache.computedAt, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  if (state.page === 'funnel' && state.funnelMode === 'catalog') render();
+  if (state.funnelCache) state.funnelCache.fresh = false;
+}
+
+// Risposte in ritardo: ogni richiesta porta il suo numero e, tornata dal database, conta solo se nel frattempo
+// non ne è partita un'altra (cambio di periodo o di funnel). Prima non c'era nessuna protezione: la risposta lenta
+// vecchia arrivava per ultima e scriveva i suoi numeri sotto le date nuove.
+let funnelReqSeq = 0, eventFunnelReqSeq = 0, premiumReqSeq = 0, activationReqSeq = 0;
+
+async function fetchFunnel(opts = {}) {
+  const req = ++funnelReqSeq;
+  // se il periodo coincide con uno sprint che ha un orario di partenza, lo rispetto anche qui
+  const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+  const scope = funnelCacheScope(state.funnelFrom, state.funnelTo, selSprint);
+  // «Aggiorna» sulla vista già a schermo: i numeri restano visibili mentre il database ricalcola
+  const keep = !!opts.force && !!state.funnel && !!state.funnelCache && state.funnelCache.scope === scope;
+  state.funnelLoading = !keep;
+  state.funnelError = null;
+  render();
+  try {
+    const cached = scope ? await funnelFromCache(scope, opts.force) : null;
+    if (req !== funnelReqSeq) return;
+    if (cached) {
+      state.funnel = cached.data;
+      state.funnelCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending, failed: cached.failed };
+    } else {
+      state.funnelCache = null;
+      const p_start = selSprint ? sprintStartTs(selSprint) : null;
+      const p_end = selSprint ? sprintEndTs(selSprint) : null;
+      const res = await sb.rpc('kpi_funnel', { inizio: state.funnelFrom, fine: state.funnelTo, p_start, p_end });
+      if (req !== funnelReqSeq) return;
+      if (res.error) throw res.error;
+      state.funnel = res.data;
+    }
+  } catch (e) { if (req !== funnelReqSeq) return; state.funnelError = e.message || 'Errore sconosciuto'; }
+  state.funnelLoading = false;
+  render();
+  if (state.funnelCache && state.funnelCache.pending) funnelCachePoll(scope, !!opts.force);
+  if (state.metaToken && state.funnel) fetchMetaFunnel();
+}
+
+// Serializza eventFunnelConfig in { flatSteps, parentMap, childMap } dove:
+//  - flatSteps = array [{event, events?, source?, filters?}] da mandare a kpi_funnel_v2 come p_steps (parent seguiti dai loro children in sequenza)
+//    `events` compare solo sugli step multi-evento (OR): uno step OR resta UNA riga flat, quindi
+//    gli indici di parentMap/childMap e i variant_of non si spostano.
+//  - parentMap[uiIdx] = posizione del parent in flatSteps (o null se il parent non ha event)
+//  - childMap[uiIdx][cIdx] = posizione del child in flatSteps (o null se il child non ha event)
+// La coorte del RPC (idx=0 con cohort_anchor) resta il primo evento inviato: se il primo step UI ha children, la coorte è il parent (event dei children conta contro quella).
+// Parsa un input testuale in una mappa di filtri metadata per kpi_funnel_v2.
+//   "provider=google"                     → { provider: "google" }
+//   "provider=google, source=onboarding"  → { provider: "google", source: "onboarding" }
+// Accetta virgole o `&` come separatori. Ritorna null se vuoto o malformato.
+function parseFilterInput(str) {
+  if (!str || typeof str !== 'string') return null;
+  const out = {};
+  str.split(/[,&]/).forEach(pair => {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) return;
+    const k = pair.slice(0, eq).trim();
+    const v = pair.slice(eq + 1).trim();
+    if (k && v) out[k] = v;
+  });
+  return Object.keys(out).length ? out : null;
+}
+
+// Serializza filters → stringa umana ("k=v, k2=v2"). Usato per popolare l'input in editing.
+function serializeFilters(f) {
+  if (!f || typeof f !== 'object') return '';
+  return Object.entries(f).map(([k, v]) => `${k}=${v}`).join(', ');
+}
+
+// Raccoglie gli eventi aggiuntivi in OR di una riga, ripuliti: niente vuoti, niente duplicati,
+// niente ripetizione del primario. Ritorna sempre un array (vuoto se la riga non ne ha).
+// `orEvents` è ADDITIVO rispetto a `event`: una riga senza il campo è indistinguibile da com'era
+// prima della spec multi-evento, e le config salvate su funnel_definitions restano valide.
+function rowOrEvents(row) {
+  if (!row || !Array.isArray(row.orEvents)) return [];
+  const primary = row.event ? String(row.event).trim() : '';
+  const seen = new Set();
+  return row.orEvents
+    .map(e => (e == null ? '' : String(e).trim()))
+    .filter(e => e && e !== primary && !seen.has(e) && seen.add(e));
+}
+
+// Tutti gli eventi di una riga in ordine di dichiarazione: primario per primo, poi gli OR.
+// È la lista che si mostra a schermo e che si manda alla RPC.
+function rowAllEvents(row) {
+  const primary = row && row.event ? String(row.event).trim() : '';
+  return primary ? [primary, ...rowOrEvents(row)] : rowOrEvents(row);
+}
+
+// Costruisce lo step piatto da passare a kpi_funnel_v2. Preferisce `filters` (formato moderno);
+// mantiene backward-compat con `source` (che il RPC mappa internamente a filters {source:x}).
+function buildFlatStep(row) {
+  const step = { event: row.event.trim() };
+  // Step multi-evento (OR): la RPC legge `events` se la chiave c'è (CTE `steps`, il CASE su
+  // `a.s ? 'events'`) e matcha chi ha emesso ALMENO UNO dei nomi. `event` resta nel payload
+  // perché il client lo rilegge (isInstallEvent, righe di fallback in computeEventFunnel).
+  // Senza OR la chiave non si aggiunge affatto: payload identico a prima, byte per byte.
+  const ors = rowOrEvents(row);
+  if (ors.length) step.events = [step.event, ...ors];
+  const inline = row.filters && typeof row.filters === 'object' ? row.filters : null;
+  if (inline) {
+    const clean = {};
+    Object.keys(inline).forEach(k => {
+      const v = inline[k];
+      if (v != null && String(v).trim() !== '') clean[k] = String(v);
+    });
+    if (Object.keys(clean).length) step.filters = clean;
+  }
+  if (!step.filters && row.source && String(row.source).trim()) step.source = String(row.source).trim();
+  // Profondità e sopravvivenza (RPC 2026-08-09). Copiati solo quando dicono davvero qualcosa,
+  // così il payload di uno step normale resta byte-identico a com'era prima della spec.
+  //   min_count > 1          → la N-esima occorrenza dell'evento contata dall'ancora coorte
+  //   active_after_hours > 0 → "vivo dopo N ore da quell'ancora", qualunque evento
+  const minCount = Number(row.min_count);
+  if (Number.isFinite(minCount) && minCount > 1) step.min_count = Math.floor(minCount);
+  const activeAfter = Number(row.active_after_hours);
+  if (Number.isFinite(activeAfter) && activeAfter > 0) step.active_after_hours = Math.floor(activeAfter);
+  return step;
+}
+
+function flattenEventFunnelConfig(cfg) {
+  const flatSteps = [];
+  const parentMap = [];
+  const childMap = [];
+  (cfg || []).forEach((row) => {
+    const hasEv = row && row.event && row.event.trim();
+    if (!hasEv) {
+      parentMap.push(null);
+      childMap.push([]);
+      // niente children se il parent non ha evento: bypassiamo per non introdurre uno step orfano in coorte
+      return;
+    }
+    const parentFlatIdx = flatSteps.length;
+    parentMap.push(parentFlatIdx);
+    flatSteps.push(buildFlatStep(row));
+    const childList = [];
+    (row.children || []).forEach((c) => {
+      if (!c || !c.event || !c.event.trim()) { childList.push(null); return; }
+      childList.push(flatSteps.length);
+      // variant_of = indice flat del parent: marca lo step come variante, così la RPC lo tiene
+      // FUORI dalla catena della cascata e lo conta come subset del parent raggiunto.
+      flatSteps.push({ ...buildFlatStep(c), variant_of: parentFlatIdx });
+    });
+    childMap.push(childList);
+  });
+  return { flatSteps, parentMap, childMap };
+}
+
+// Calcola il funnel a eventi (kpi_funnel_v2 legge la UNION user_events + anonymous_events).
+// Cascata temporale: coorte = step 0 configurato, ogni step successivo è il subset che ha
+// proseguito in sequenza. Pseudo-eventi install_* esclusi dalla cascata (righe contesto).
+// Funnel a eventi dalla cache (kpi_cache_get 'funnel_event'): solo per un funnel salvato, un periodo rapido, modalità
+// Coorte, sorgente «tutti» e nessun interruttore degli esclusi acceso. Torna la risposta solo se la riga è proprio
+// quella che la pagina chiederebbe adesso (stessi passi, provider, date e orari), altrimenti null e si calcola dal vivo.
+async function eventFunnelFromCache(flatSteps, force) {
+  const per = funnelQuickPeriod();
+  const f = state.activeFunnelPreset != null ? state.savedFunnels[state.activeFunnelPreset] : null;
+  if (!per || !f || !f.id || (f.tipo || 'catalog') !== 'event') return null;
+  if (state.eventFunnelMode !== 'cohort' || (state.eventFunnelSource || 'all') !== 'all') return null;
+  if (state.funnelIncludeEmulators || state.funnelIncludeTest || state.funnelIncludeBlocked || state.funnelIncludeBots) return null;
+  const scope = `${f.id}/${per}`;
+  const c = await funnelFromCache(scope, force, 'funnel_event');
+  const d = c && c.data;
+  if (!d || !d.result || !Array.isArray(d.p_steps)) return null;
+  const sel = state.sprints.find(x => x.id === state.funnelSprintId);
+  const ok = canonJson(d.p_steps) === canonJson(eventRpcSteps(flatSteps).rpcSteps)
+    && (d.provider || null) === (state.eventFunnelProvider || null)
+    && d.inizio === state.funnelFrom && d.fine === state.funnelTo
+    && sameInstant(d.p_start, sel ? sprintStartTs(sel) : null) && sameInstant(d.p_end, sel ? sprintEndTs(sel) : null);
+  return ok ? { scope, result: d.result, computedAt: c.computed_at, pending: !!c.pending, failed: c.failed } : null;
+}
+
+// Come funnelCachePoll, per il funnel a eventi: un ricalcolo, poi si rilegge la riga senza rilanciarlo.
+async function eventFunnelCachePoll(scope, force) {
+  const mine = () => state.eventFunnelCache && state.eventFunnelCache.scope === scope;
+  const r = await kpiRecompute('funnel_event', scope, force);
+  if (!mine()) return;
+  if (state.page === 'funnel' && state.funnelMode === 'event') await fetchEventFunnel({ quiet: true, failed: r.failed, fresh: !!r.recomputed });
+  else state.eventFunnelCache = { ...state.eventFunnelCache, pending: false, failed: r.failed };
+}
+
+async function fetchEventFunnel(opts = {}) {
+  const { flatSteps, parentMap, childMap } = flattenEventFunnelConfig(state.eventFunnelConfig);
+  state.eventFunnelFlatMap = { parent: parentMap, child: childMap };
+  const req = ++eventFunnelReqSeq;
+  if (!flatSteps.length) { state.eventFunnel = null; state.eventFunnelCache = null; state.eventFunnelLoading = false; render(); return; }
+  // «Aggiorna» e il rileggere dopo il ricalcolo: i numeri restano a schermo
+  state.eventFunnelLoading = !((opts.force || opts.quiet) && !!state.eventFunnel && !!state.eventFunnelCache);
+  state.eventFunnelError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    const p_start   = selSprint ? sprintStartTs(selSprint) : null;
+    const p_end     = selSprint ? sprintEndTs(selSprint) : null;
+    const hit = await eventFunnelFromCache(flatSteps, opts.force);
+    if (req !== eventFunnelReqSeq) return;
+    const result = await computeEventFunnel(flatSteps, {
+      inizio:   state.funnelFrom,
+      fine:     state.funnelTo,
+      provider: state.eventFunnelProvider || null,
+      source:   state.eventFunnelSource || 'all',
+      p_start,
+      p_end,
+      includeEmulators: state.funnelIncludeEmulators,
+      includeTest:      state.funnelIncludeTest,
+      includeBlocked:   state.funnelIncludeBlocked,
+      includeBots:      state.funnelIncludeBots,
+      mode:             state.eventFunnelMode,
+      cachedResult:     hit ? hit.result : null,
+    });
+    if (req !== eventFunnelReqSeq) return;
+    state.eventFunnel = result;
+    state.eventFunnelCache = hit ? { scope: hit.scope, computedAt: hit.computedAt, pending: opts.quiet ? false : hit.pending, failed: opts.quiet ? !!opts.failed : hit.failed, fresh: !!opts.fresh } : null;
+    // Baseline per il delta coorte della card Parametri: la fotografo solo quando
+    // nessun override è attivo, così il confronto è sempre "vs esclusioni standard".
+    if (!state.funnelIncludeEmulators && !state.funnelIncludeTest && !state.funnelIncludeBlocked && !state.funnelIncludeBots) {
+      state.funnelCohortBase = state.eventFunnel?.cohort_size ?? null;
+    }
+  } catch (e) { if (req !== eventFunnelReqSeq) return; state.eventFunnelError = e.message || 'Errore sconosciuto'; }
+  state.eventFunnelLoading = false;
+  render();
+  if (state.eventFunnelCache) state.eventFunnelCache.fresh = false;
+  if (state.eventFunnelCache && state.eventFunnelCache.pending) eventFunnelCachePoll(state.eventFunnelCache.scope, !!opts.force);
+}
+
+// Lista nominale degli utenti esclusi dalle metriche (card Parametri).
+// Caricata pigramente all'apertura della card, poi tenuta in cache nello state.
+async function fetchExcludedUsers() {
+  if (state.excludedUsers || state.excludedLoading) return;
+  state.excludedLoading = true;
+  state.excludedError = null;
+  render();
+  try {
+    const res = await sb.rpc('kpi_excluded_users_list');
+    if (res.error) throw res.error;
+    state.excludedUsers = res.data || [];
+  } catch (e) { state.excludedError = e.message || 'Errore sconosciuto'; }
+  state.excludedLoading = false;
+  render();
+}
+
+// Helper condiviso tra fetchEventFunnel (funnel a eventi corrente) e fetchSprintEventFunnel
+// (confronto sprint). flatSteps = array [{event, source?}]. opts = {inizio, fine, provider,
+// p_start, p_end, source?, includeEmulators?, includeTest?, includeBlocked?}.
+// La RPC kpi_funnel_v2 applica la cascata temporale: coorte = step 0 configurato, step N =
+// subset che ha proseguito in sequenza (monotono decrescente). Gli pseudo-step install_*
+// (aggregati esterni senza identità) NON entrano nella cascata: vengono esclusi dai p_steps
+// e ritornati come righe { context: true } + oggetto installContext per i chip di contesto.
+function eventRpcSteps(flatSteps) {
+  // Mappa idx_originale → step, e filtra fuori gli install per la RPC.
+  const rpcSteps = [];
+  const rpcToOriginal = []; // rpcIdx → originalIdx
+  flatSteps.forEach((s, i) => {
+    if (isInstallEvent(s.event)) return;
+    rpcToOriginal.push(i);
+    rpcSteps.push({ ...s }); // copia difensiva: sotto rimappiamo variant_of senza toccare flatSteps
+  });
+  // variant_of arriva in spazio-flat (indice del parent in flatSteps). La RPC ragiona in
+  // spazio-p_steps (post-filtro install), quindi lo rimappo all'indice del parent in rpcSteps.
+  // Se il parent è stato filtrato (es. install), la variante decade a step normale.
+  rpcSteps.forEach((s) => {
+    if (s.variant_of == null) return;
+    const rpcParent = rpcToOriginal.indexOf(s.variant_of);
+    if (rpcParent >= 0) s.variant_of = rpcParent; else delete s.variant_of;
+  });
+  return { rpcSteps, rpcToOriginal };
+}
+
+async function computeEventFunnel(flatSteps, opts) {
+  const { rpcSteps, rpcToOriginal } = eventRpcSteps(flatSteps);
+
+  // Chiamata RPC (solo se ci sono step non-install da contare).
+  let rpcSteps_out = [];
+  let rpcMeta = { cohort_anchor: true, source: opts.source || 'all', include_emulators: false, excluded_counts: null, cohort_size: null };
+  if (rpcSteps.length) {
+    const args = { inizio: opts.inizio, fine: opts.fine, p_steps: rpcSteps };
+    if (opts.provider) args.p_provider = opts.provider;
+    if (opts.p_start)  args.p_start   = opts.p_start;
+    if (opts.p_end)    args.p_end     = opts.p_end;
+    // Override di inclusione (card "Parametri"): passati solo se attivi, i default RPC sono false.
+    if (opts.includeEmulators) args.p_include_emulators = true;
+    if (opts.includeTest)      args.p_include_test      = true;
+    if (opts.includeBlocked)   args.p_include_blocked   = true;
+    if (opts.includeBots)      args.p_include_bots      = true;
+    // Filtro sorgente coorte (install_referrer di sessione, dati dall'11/07/2026).
+    if (opts.source && opts.source !== 'all') args.p_source = opts.source;
+    // Modalità volumi: conteggi indipendenti per step, niente cascata (default RPC = 'cohort').
+    if (opts.mode === 'absolute') args.p_mode = 'absolute';
+    // opts.cachedResult: la risposta già pronta nella cache, per gli stessi argomenti (vedi eventFunnelFromCache)
+    const res = opts.cachedResult ? { data: opts.cachedResult } : await sb.rpc('kpi_funnel_v2', args);
+    if (res.error) throw res.error;
+    rpcSteps_out = (res.data && res.data.steps) || [];
+    rpcMeta = {
+      cohort_anchor:     res.data?.cohort_anchor,
+      source:            res.data?.source || opts.source || 'all',
+      include_emulators: res.data?.include_emulators,
+      include_test:      res.data?.include_test,
+      include_blocked:   res.data?.include_blocked,
+      include_bots:      res.data?.include_bots,
+      excluded_counts:   res.data?.excluded_counts || null,
+      cohort_size:       res.data?.cohort_size ?? null,
+    };
+  }
+
+  // Contesto install (aggregati Play/Meta per il periodo) — sempre calcolato, alimenta i chip
+  // sopra il funnel. Le eventuali righe install del config restano nel result come context rows
+  // per mantenere allineati gli indici flat, ma non partecipano alla cascata né ai rate.
+  const installContext = await fetchInstallTotals(opts.inizio, opts.fine)
+    .catch(() => ({ google_play: 0, meta_ads: 0 }));
+
+  // Ricomponi l'output nell'ordine originale di flatSteps.
+  const steps = flatSteps.map((s, i) => {
+    if (isInstallEvent(s.event)) {
+      return {
+        idx: i, events: [s.event], label: s.event, context: true,
+        filters: s.source ? { source: s.source } : {},
+        numero: s.event === 'install_google_play' ? (installContext.google_play ?? 0) : (installContext.meta_ads ?? 0),
+      };
+    }
+    const rpcIdx  = rpcToOriginal.indexOf(i);
+    const rpcRow  = rpcSteps_out.find(r => r.idx === rpcIdx);
+    if (rpcRow) return { ...rpcRow, idx: i };
+    return { idx: i, events: [s.event], label: s.event, filters: s.source ? { source: s.source } : {}, numero: 0 };
+  });
+
+  return { ...rpcMeta, steps, installContext };
+}
+
+// Chi sono gli utenti di uno step del funnel (per ora step 10 Premium pagante / 18 Trial iniziato),
+// per uno specifico periodo (in confronto sprint = il periodo di quello sprint).
+async function fetchFunnelStepUsers(stepIdx, inizio, fine, label, sprintNome, p_start = null, p_end = null) {
+  state.funnelStepUsersModal = { stepIdx, label, sprintNome, inizio, fine };
+  state.funnelStepUsersData = null;
+  state.funnelStepUsersError = null;
+  state.funnelStepUsersLoading = true;
+  render();
+  try {
+    const res = await sb.rpc('kpi_funnel_step_users', { p_step: stepIdx, inizio, fine, p_start, p_end });
+    if (res.error) throw res.error;
+    state.funnelStepUsersData = res.data || [];
+  } catch (e) { state.funnelStepUsersError = e.message || 'Errore sconosciuto'; }
+  state.funnelStepUsersLoading = false;
+  render();
+}
+
+// Premium usa la stessa cache di Funnel: vista di base e ogni sprint, solo con genere «Tutti».
+// Uomini, donne e date libere si calcolano dal vivo con kpi_premium, come prima.
+async function premiumCachePoll(scope, force) {
+  const mine = () => state.premiumCache && state.premiumCache.scope === scope;
+  const r = await kpiRecompute('premium', scope, force);
+  if (!mine()) return;
+  if (r.data) state.premiumData = r.data;
+  state.premiumCache = { scope, computedAt: r.computed_at || state.premiumCache.computedAt, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  if (state.page === 'premium') render();
+  if (state.premiumCache) state.premiumCache.fresh = false;
+}
+
+async function fetchPremium(opts = {}) {
+  const req = ++premiumReqSeq;
+  const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+  const scope = state.premiumGender === 'all' ? funnelCacheScope(state.premiumFrom, state.premiumTo, selSprint) : null;
+  state.premiumLoading = true; state.premiumError = null; state.premiumErrorTimeout = false;
+  render();
+  try {
+    const cached = scope ? await funnelFromCache(scope, opts.force, 'premium') : null;
+    if (req !== premiumReqSeq) return;
+    if (cached) {
+      state.premiumData = cached.data;
+      state.premiumCache = { scope, computedAt: cached.computed_at, pending: !!cached.pending, failed: cached.failed };
+    } else {
+      state.premiumCache = null;
+      const { data, error } = await sb.rpc('kpi_premium', {
+        inizio: state.premiumFrom,
+        fine:   state.premiumTo,
+        p_gender: state.premiumGender,
+        p_start: selSprint ? sprintStartTs(selSprint) : null,
+        p_end:   selSprint ? sprintEndTs(selSprint) : null,
+      });
+      if (req !== premiumReqSeq) return;
+      if (error) throw error;
+      state.premiumData = data;
+    }
+  } catch (e) {
+    if (req !== premiumReqSeq) return;
+    state.premiumError = e.message || 'Errore caricamento dati premium';
+    state.premiumErrorTimeout = isRpcTimeout(e);
+  }
+  state.premiumLoading = false;
+  render();
+  if (state.premiumCache && state.premiumCache.pending) premiumCachePoll(scope, !!opts.force);
+}
+
+
+// Apre il modal e carica la lista degli utenti che hanno raggiunto uno step di una creatività.
+// Usa lo stesso periodo/genere della pagina Premium (state.premiumFrom/To/Gender).
+async function fetchStepUsers(variant, step, label, idx) {
+  // step può essere una stringa singola o un array di nomi (schermate unite con lo stesso idx).
+  const steps = Array.isArray(step) ? step : [step];
+  const stepLabel = steps.join(' + ');
+  state.stepUsersModal = { variant, step: stepLabel, label };
+  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
+  render();
+  try {
+    // stesso sprint (quindi stesso p_start/p_end) della pagina Premium, per coerenza dei conteggi
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const base = {
+      p_variant: variant,
+      inizio:    state.premiumFrom,
+      fine:      state.premiumTo,
+      p_gender:  state.premiumGender,
+      p_start:   selSprint ? sprintStartTs(selSprint) : null,
+      p_end:     selSprint ? sprintEndTs(selSprint) : null,
+      // Solo il gate lo passa: due sue schermate condividono il nome `recap` e
+      // senza l'indice i due box aprirebbero la stessa lista. NULL = come prima.
+      p_idx:     (idx === undefined || idx === null || idx === '') ? null : Number(idx),
+    };
+    const results = await Promise.all(steps.map(st =>
+      sb.rpc('kpi_premium_step_users', { ...base, p_step: st })));
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+    if (steps.length === 1) {
+      state.stepUsersData = results[0].data;
+    } else {
+      // più schermate con lo stesso idx: unisco le liste deduplicando per email (o nome+ts),
+      // sommando le viste. total_views è la somma esatta (conteggio eventi).
+      const byUser = new Map();
+      let totalViews = 0;
+      results.forEach(r => {
+        const d = r.data || {};
+        totalViews += d.total_views || 0;
+        (d.users || []).forEach(u => {
+          const key = u.email || `${u.nome || ''}|${u.ts || ''}`;
+          const ex = byUser.get(key);
+          if (!ex) byUser.set(key, { ...u });
+          else ex.views = (ex.views || 1) + (u.views || 1);
+        });
+      });
+      const users = Array.from(byUser.values());
+      state.stepUsersData = { variant, step: stepLabel, total_users: users.length, total_views: totalViews, users };
+    }
+  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti step'; }
+  state.stepUsersLoading = false;
+  render();
+}
+
+// Stato di salute di tutte le creatività nel periodo: alimenta il catalogo e le sue schede.
+// Chi è in prova (o pagante) grazie a una certa proposta. I dati sono già quelli della
+// tabella degli acquisti: una sola fonte, quindi la riga e la lista non possono divergere.
+// «prova iniziata» non è uno stato ma una storia: si filtra sul flag, e accanto a ognuno si
+// scrive com'è finita oggi (ancora in prova, pagante, finito).
+function showCreativeConvUsers(variant, stato, label) {
+  const storia = stato === 'prova iniziata';
+  const righe = ((state.purchases && state.purchases.acquisti) || [])
+    .filter(r => (r.variant || 'senza_attribuzione') === variant
+      && (storia ? r.prova_iniziata === true : r.stato === stato));
+  state.stepUsersModal = {
+    variant, step: stato, label,
+    desc: storia
+      ? 'prove partite da questa proposta, con lo stato di oggi di ciascuna · attribuito all\'ultimo paywall toccato prima del pagamento'
+      : 'attribuito all\'ultimo paywall toccato prima del pagamento',
+  };
+  state.stepUsersError = null; state.stepUsersLoading = false;
+  state.stepUsersData = {
+    total_users: righe.length,
+    total_views: righe.length,
+    users: righe.map(r => {
+      const min = r.minuti_prima;
+      const quando = min === null || min === undefined ? 'senza traccia'
+        : min > 90 ? Math.round(min / 60) + ' h prima'
+        : min >= 0 ? min + ' min prima'
+        : Math.abs(min) + ' min dopo';
+      const parti = String(r.quando || "").split(" ");
+      return {
+        nome: r.nome, email: r.email, views: 1, sotto: compratoDaText(r),
+        dettaglio: `${storia ? 'oggi ' + (r.stato || '—') + ' · ' : ''}${r.piano} · ${r.prezzo != null ? '€ ' + r.prezzo : '—'} · attribuzione ${r.forza} (${quando})`,
+        giorno: parti[0] || '—', ora: parti[1] || '—', ts: r.quando,
+      };
+    }),
+  };
+  render();
+}
+
+// Chi ha fatto un gesto d'acquisto su una creatività. Riempie la STESSA modale delle caselle
+// del percorso: una sola lista da guardare, comunque ci si arrivi.
+async function fetchCreativeActUsers(variant, event, label, desc) {
+  state.stepUsersModal = { variant, step: event, label, desc };
+  state.stepUsersData = null; state.stepUsersError = null; state.stepUsersLoading = true;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_paywall_event_users', {
+      p_variant: variant,
+      p_event:   event,
+      inizio:    state.premiumFrom,
+      fine:      state.premiumTo,
+      p_start:   selSprint ? sprintStartTs(selSprint) : null,
+      p_end:     selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.stepUsersData = data;
+  } catch (e) { state.stepUsersError = e.message || 'Errore caricamento utenti'; }
+  state.stepUsersLoading = false;
+  render();
+}
+
+async function fetchCreativesAudit() {
+  state.creativesAuditLoading = true; state.creativesAuditError = null; state.creativesAuditErrorTimeout = false;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_paywall_creatives_audit', {
+      inizio:  state.premiumFrom,
+      fine:    state.premiumTo,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.creativesAudit = data || [];
+  } catch (e) {
+    state.creativesAuditError = e.message || 'Errore caricamento creatività';
+    state.creativesAuditErrorTimeout = isRpcTimeout(e);
+  }
+  state.creativesAuditLoading = false;
+  render();
+}
+
+async function fetchPremiumFunnelRange() {
+  state.premiumFunnelRangeLoading = true; state.premiumFunnelRangeError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_premium', {
+      inizio: state.premiumFunnelRangeFrom,
+      fine:   state.premiumFunnelRangeTo,
+      p_gender: state.premiumGender,
+    });
+    if (error) throw error;
+    state.premiumFunnelRangeData = data;
+  } catch (e) { state.premiumFunnelRangeError = e.message || 'Errore caricamento dati funnel'; }
+  state.premiumFunnelRangeLoading = false;
+  render();
+}
+
+async function fetchSprints() {
+  state.sprintsLoading = true;
+  try {
+    const res = await sb.from('sprints').select('*').order('inizio', { ascending: false });
+    if (res.error) throw res.error;
+    state.sprints = res.data || [];
+  } catch (e) { console.error('fetchSprints', e); }
+  state.sprintsLoading = false;
+  render();
+}
+
+// Funnel salvati/nominati — caricati dal DB (funnel_definitions). Un tempo vivevano in localStorage
+// (hm_saved_funnels_v1): alla prima esecuzione li migriamo nel DB e svuotiamo la chiave, così diventano
+// condivisi (Danilo li vede) e non si perdono pulendo il browser. La forma runtime tiene .name/.config
+// per compatibilità col codice di render/apply esistente, più .id (per delete) e .tipo/.steps.
+async function fetchFunnelDefinitions() {
+  try {
+    const legacy = loadLS(LS_SAVED_FUNNELS, null);
+    if (Array.isArray(legacy) && legacy.length) {
+      const rows = legacy.map(f => ({
+        nome:  f.name || 'Senza nome',
+        tipo:  'catalog',
+        steps: Array.isArray(f.config) ? f.config : [],
+      }));
+      const ins = await sb.from('funnel_definitions').insert(rows);
+      if (!ins.error) localStorage.removeItem(LS_SAVED_FUNNELS);
+      else console.error('migrazione saved funnels', ins.error);
+    }
+    // preserva il preset attivo per ID (l'indice può cambiare se un altro utente aggiunge/rimuove funnel)
+    const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
+      ? state.savedFunnels[state.activeFunnelPreset].id : null;
+    const res = await sb.from('funnel_definitions').select('*')
+      .order('order_index', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true });
+    if (res.error) throw res.error;
+    state.savedFunnels = (res.data || []).map(r => ({
+      id: r.id, name: r.nome, descrizione: r.descrizione,
+      tipo: r.tipo, config: r.steps, steps: r.steps, provider: r.provider || null,
+      icon: r.icon || null, color: r.color || null, label: r.label || null,
+      orderIndex: r.order_index,
+    }));
+    if (activeId) {
+      const i = state.savedFunnels.findIndex(f => f.id === activeId);
+      state.activeFunnelPreset = i === -1 ? null : i; // se il funnel attivo è stato cancellato altrove → torna a Default
+    }
+  } catch (e) { console.error('fetchFunnelDefinitions', e); }
+  render();
+}
+
+// Patch parziale su un funnel salvato (nome, icon, color, label). Aggiorna anche state.savedFunnels in
+// place per riflettere subito la UI senza attendere il refetch.
+async function updateFunnelChip(id, patch) {
+  try {
+    const dbPatch = {};
+    if ('name'  in patch) dbPatch.nome  = patch.name;
+    if ('icon'  in patch) dbPatch.icon  = patch.icon;
+    if ('color' in patch) dbPatch.color = patch.color;
+    if ('label' in patch) dbPatch.label = patch.label;
+    dbPatch.updated_at = new Date().toISOString();
+    const upd = await sb.from('funnel_definitions').update(dbPatch).eq('id', id);
+    if (upd.error) throw upd.error;
+    const i = state.savedFunnels.findIndex(f => f.id === id);
+    if (i !== -1) {
+      if ('name'  in patch) state.savedFunnels[i].name  = patch.name;
+      if ('icon'  in patch) state.savedFunnels[i].icon  = patch.icon;
+      if ('color' in patch) state.savedFunnels[i].color = patch.color;
+      if ('label' in patch) state.savedFunnels[i].label = patch.label;
+    }
+  } catch (e) {
+    console.error('updateFunnelChip', e);
+    alert('Errore salvataggio chip: ' + (e.message || e));
+  }
+}
+
+// Riordina i funnel salvati e persiste order_index in batch. `newOrderIds` è l'array degli id nel nuovo
+// ordine desiderato. Assegna order_index 0..N-1 in sequenza — non serve preservare gap.
+async function reorderFunnels(newOrderIds) {
+  state.chipReorderSaving = true;
+  render();
+  try {
+    // Preserva il preset attivo per ID (l'indice cambia dopo il riordino)
+    const activeId = (state.activeFunnelPreset != null && state.savedFunnels[state.activeFunnelPreset])
+      ? state.savedFunnels[state.activeFunnelPreset].id : null;
+    const updates = newOrderIds.map((id, i) =>
+      sb.from('funnel_definitions').update({ order_index: i, updated_at: new Date().toISOString() }).eq('id', id)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find(r => r.error);
+    if (failed) throw failed.error;
+    // Riordina state.savedFunnels in place seguendo newOrderIds; aggiorna anche orderIndex locale
+    const byId = new Map(state.savedFunnels.map(f => [f.id, f]));
+    state.savedFunnels = newOrderIds.map((id, i) => {
+      const f = byId.get(id);
+      return f ? { ...f, orderIndex: i } : null;
+    }).filter(Boolean);
+    if (activeId) {
+      const i = state.savedFunnels.findIndex(f => f.id === activeId);
+      state.activeFunnelPreset = i === -1 ? null : i;
+    }
+  } catch (e) {
+    console.error('reorderFunnels', e);
+    alert('Errore riordino chip: ' + (e.message || e));
+  }
+  state.chipReorderSaving = false;
+  render();
+}
+
+// Fasi (macro-aree) del funnel — condivise dal DB (funnel_phases), come i funnel salvati: le modifichi
+// tu e le vede anche Danilo. Per ora il set è UNICO (leggiamo la riga più vecchia); la tabella tiene la
+// colonna nome per poter aggiungere set alternativi in futuro senza migrare.
+// I confini sono stepIdx del catalogo FUNNEL_LABELS, NON posizioni nel funnel di un singolo sprint:
+// le fasi sono una lente a sé, applicata IDENTICA a ogni sprint — è ciò che le rende confrontabili
+// anche tra sprint con funnel_config diversi. (kpi_funnel restituisce tutti gli step del catalogo,
+// quindi il dato c'è comunque; l'unico "—" vero è quando il numero è null, es. installs non importati.)
+const DEF_FUNNEL_PHASES = [
+  { nome: 'Acquisizione', from: 0, to: 2 },  // Installazioni → Onboarding iniziato
+  { nome: 'Onboarding',   from: 2, to: 3 },  // Onboarding iniziato → completato
+  { nome: 'Attivazione',  from: 3, to: 4 },  // Onboarding completato → Almeno 1 workout
+  { nome: 'Abitudine',    from: 4, to: 9 },  // Almeno 1 workout → 3-day streak
+];
+
+async function fetchFunnelPhases() {
+  try {
+    const res = await sb.from('funnel_phases').select('id, fasi').order('created_at', { ascending: true }).limit(1);
+    if (res.error) throw res.error;
+    const row = (res.data || [])[0];
+    if (row) {
+      state.funnelPhasesId = row.id;
+      // NON sovrascrivere mentre stai editando: l'auto-refresh gira ogni 5 min e ti cancellerebbe il lavoro
+      if (!state.sprintLeakEdit) state.funnelPhases = Array.isArray(row.fasi) ? row.fasi : [];
+    }
+  } catch (e) { console.error('fetchFunnelPhases', e); }
+  render();
+}
+
+async function saveFunnelPhases(fasi) {
+  state.sprintLeakSaving = true;
+  render();
+  try {
+    const res = state.funnelPhasesId
+      ? await sb.from('funnel_phases').update({ fasi, updated_at: new Date().toISOString() }).eq('id', state.funnelPhasesId)
+      : await sb.from('funnel_phases').insert({ nome: 'Fasi del funnel', fasi });
+    if (res.error) throw res.error;
+    state.funnelPhases = fasi;
+    state.sprintLeakEdit = null;
+  } catch (e) {
+    console.error('saveFunnelPhases', e);
+    alert('Errore salvataggio fasi: ' + (e.message || e));
+  }
+  state.sprintLeakSaving = false;
+  await fetchFunnelPhases();
+}
+
+// Le fasi attive: quelle salvate sul DB, o il default finché il DB non risponde / se il set è vuoto.
+function activeFunnelPhases() {
+  return (state.funnelPhases && state.funnelPhases.length) ? state.funnelPhases : DEF_FUNNEL_PHASES;
+}
+
+async function fetchBlockedUsers() {
+  try {
+    const { data, error } = await sb.from('blocked_users')
+      .select('id, user_id, username, email, nome, motivo')
+      .is('removed_at', null)
+      .order('created_at');
+    if (error) throw error;
+    state.blockedUsers = data || [];
+  } catch (e) { console.error('fetchBlockedUsers', e); }
+}
+
+async function fetchRecentlyUnblocked() {
+  try {
+    const { data, error } = await sb.from('blocked_users')
+      .select('id, user_id, username, email, nome, motivo')
+      .not('removed_at', 'is', null)
+      .order('removed_at', { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    state.recentlyUnblocked = data || [];
+  } catch (e) { console.error('fetchRecentlyUnblocked', e); }
+}
+
+let _blockSearchTimer = null;
+function renderBlockedSearchResults() {
+  const container = document.getElementById('blocked-search-results');
+  if (!container) return;
+  const results = state.blockSearchResults;
+  const query   = state.blockSearchQuery;
+  if (results.length) {
+    container.innerHTML = `
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:8px">
+        ${results.map((u, i) => `
+          <div class="blocked-add-result" data-idx="${i}"
+            style="padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
+            <div style="min-width:0">
+              <div style="font-size:12px;font-weight:600;color:var(--text)">${esc(u.name || u.username || '—')} <span style="color:var(--muted);font-weight:400">@${esc(u.username || '')}</span></div>
+              <div style="font-size:11px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.email || '')}</div>
+            </div>
+            <button class="btn btn-ghost" style="font-size:11px;padding:3px 10px;flex-shrink:0">+ Blocca</button>
+          </div>`).join('')}
+      </div>`;
+    container.querySelectorAll('.blocked-add-result').forEach(el =>
+      el.addEventListener('click', () => {
+        const u = state.blockSearchResults[+el.dataset.idx];
+        if (u) addBlockedUser(u);
+      }));
+  } else {
+    container.innerHTML = query.length >= 2
+      ? `<div style="font-size:12px;color:var(--muted);padding:6px 0">Nessun utente trovato.</div>`
+      : '';
+  }
+}
+
+async function searchUsersForBlock(query) {
+  state.blockSearchQuery = query;
+  clearTimeout(_blockSearchTimer);
+  if (!query || query.length < 2) {
+    state.blockSearchResults = [];
+    renderBlockedSearchResults();
+    return;
+  }
+  _blockSearchTimer = setTimeout(async () => {
+    try {
+      const { data, error } = await sb.rpc('kpi_search_users', { p_query: query });
+      if (error) throw error;
+      state.blockSearchResults = data || [];
+    } catch (e) { console.error('searchUsersForBlock', e); state.blockSearchResults = []; }
+    renderBlockedSearchResults();
+  }, 300);
+}
+
+// Le metriche escludono i bloccati lato RPC (legge blocked_users live). Quando la lista
+// cambia, azzero le cache delle pagine che dipendono dall'esclusione così si ricalcolano:
+// Premium/Funnel/Retention/Comportamento si rifanno al rientro pagina (refetch on-nav),
+// l'Overview non ha trigger on-nav quindi lo rinfresco subito.
+function invalidateExclusionCaches() {
+  state.premiumData            = null;
+  state.premiumFunnelRangeData = null;
+  state.sprintPremiumFunnelData = {};
+  state.funnel                 = null;
+  state.retention              = null;
+  BEH.data                     = null;
+  BEH.events                   = {};
+  fetchData(); // Overview: refetch immediato (nessun refetch automatico al cambio pagina)
+}
+
+async function addBlockedUser(user) {
+  try {
+    const { error } = await sb.from('blocked_users').upsert({
+      user_id:    user.id,
+      username:   user.username || null,
+      email:      user.email    || null,
+      nome:       user.name || user.username || '',
+      motivo:     'account interno',
+      removed_at: null,
+    }, { onConflict: 'user_id' });
+    if (error) throw error;
+    state.blockSearchOpen    = false;
+    state.blockSearchQuery   = '';
+    state.blockSearchResults = [];
+    await Promise.all([fetchBlockedUsers(), fetchRecentlyUnblocked()]);
+    invalidateExclusionCaches();
+    render();
+  } catch (e) { console.error('addBlockedUser', e); alert('Errore aggiunta: ' + e.message); }
+}
+
+async function removeBlockedUser(id) {
+  try {
+    const { error } = await sb.from('blocked_users').update({ removed_at: new Date().toISOString() }).eq('id', id);
+    if (error) throw error;
+    await Promise.all([fetchBlockedUsers(), fetchRecentlyUnblocked()]);
+    invalidateExclusionCaches();
+    render();
+  } catch (e) { console.error('removeBlockedUser', e); }
+}
+
+async function fetchRecentFeedback() {
+  try {
+    const { data, error } = await sb.rpc('kpi_recent_feedback', { lim: 5 });
+    if (error) throw error;
+    state.recentFeedback = data || [];
+  } catch (e) { console.error('fetchRecentFeedback', e); }
+}
+
+
+// Sessione ops: verifica al boot se c'è già un JWT persistito da Supabase Auth JS.
+async function refreshOpsSession() {
+  try {
+    const { data } = await sb.auth.getSession();
+    state.opsSession = data.session || null;
+  } catch (e) {
+    console.error('refreshOpsSession', e);
+    state.opsSession = null;
+  }
+  render();
+}
+
+async function opsLoginPassword(email, password) {
+  state.opsAuthError = null;
+  try {
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    state.opsSession = data.session || null;
+    render();
+  } catch (e) {
+    console.error('opsLoginPassword', e);
+    state.opsAuthError = e.message || String(e);
+    render();
+  }
+}
+
+async function opsLogout() {
+  try {
+    await sb.auth.signOut();
+    state.opsSession = null;
+    render();
+  } catch (e) { console.error('opsLogout', e); }
+}
+
+function metaDateParams() {
+  if (state.metaUseCustom && state.metaCustomFrom && state.metaCustomTo) {
+    return 'time_range=' + encodeURIComponent(JSON.stringify({ since: state.metaCustomFrom, until: state.metaCustomTo }));
+  }
+  return 'date_preset=' + state.metaDatePreset;
+}
+
+async function fetchMetaInsights(dateParam, token) {
+  const fields = 'spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,cost_per_action_type';
+  const res = await fetch(META_API + '/' + META_AD_ACCOUNT + '/insights?fields=' + fields + '&' + dateParam + '&access_token=' + token).then(r => r.json());
+  if (res.error) throw new Error(res.error.message);
+  return res.data?.[0] || null;
+}
+
+// Il time_range dell'API insights di Meta ha granularità giornaliera: l'orario di
+// uno sprint (inizio_ora/fine_ora) verrebbe ignorato, e due sprint che condividono
+// un giorno si prenderebbero entrambi la spesa dell'intera giornata. Quando lo
+// sprint ha un orario, chiedo il breakdown orario e riaggrego tenendo solo i
+// bucket che toccano la finestra. I bucket sono nel fuso dell'ad account (per noi
+// Europe/Rome, lo stesso in cui sono espressi gli orari degli sprint). Reach e
+// frequency non esistono su base oraria: restano null e la UI mostra '—' invece
+// di riportare il valore gonfiato dell'intera giornata.
+async function fetchMetaInsightsWindow(fromDate, toDate, inizioOra, fineOra, token) {
+  if (!inizioOra && !fineOra) {
+    const dp = 'time_range=' + encodeURIComponent(JSON.stringify({ since: fromDate, until: toDate }));
+    return fetchMetaInsights(dp, token);
+  }
+
+  let url = META_API + '/' + META_AD_ACCOUNT + '/insights'
+    + '?fields=spend,impressions,clicks,actions'
+    + '&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone'
+    + '&time_increment=1&limit=500'
+    + '&time_range=' + encodeURIComponent(JSON.stringify({ since: fromDate, until: toDate }))
+    + '&access_token=' + token;
+  const rows = [];
+  for (let page = 0; url && page < 10; page++) {
+    const res = await fetch(url).then(r => r.json());
+    if (res.error) throw new Error(res.error.message);
+    rows.push(...(res.data || []));
+    url = res.paging?.next || null;
+  }
+
+  const toHours = hhmm => { const p = String(hhmm).split(':'); return (+p[0]) + (+p[1] || 0) / 60; };
+  const startH = inizioOra ? toHours(inizioOra) : null;
+  const endH   = fineOra   ? toHours(fineOra)   : null;
+
+  // Bucket [h, h+1): dentro se tocca [startH, endH). Il ritaglio vale solo sul
+  // giorno di inizio/fine; i giorni pieni in mezzo passano interi.
+  const inWindow = row => {
+    const h = parseInt(String(row.hourly_stats_aggregated_by_advertiser_time_zone || '').slice(0, 2), 10);
+    if (isNaN(h)) return true;
+    if (startH != null && row.date_start === fromDate && h + 1 <= startH) return false;
+    if (endH   != null && row.date_start === toDate   && h >= endH)       return false;
+    return true;
+  };
+
+  let any = false;
+  const agg = { spend: 0, impressions: 0, clicks: 0, actions: {} };
+  for (const row of rows) {
+    if (!inWindow(row)) continue;
+    any = true;
+    agg.spend       += parseFloat(row.spend || 0);
+    agg.impressions += parseInt(row.impressions || 0, 10);
+    agg.clicks      += parseInt(row.clicks || 0, 10);
+    (row.actions || []).forEach(a => {
+      agg.actions[a.action_type] = (agg.actions[a.action_type] || 0) + parseFloat(a.value || 0);
+    });
+  }
+  if (!any) return null;
+
+  const actions = Object.keys(agg.actions).map(t => ({ action_type: t, value: String(agg.actions[t]) }));
+  return {
+    spend:       agg.spend.toFixed(2),
+    impressions: String(agg.impressions),
+    clicks:      String(agg.clicks),
+    ctr: agg.impressions > 0 ? String(agg.clicks / agg.impressions * 100) : null,
+    cpc: agg.clicks      > 0 ? String(agg.spend / agg.clicks)             : null,
+    cpm: agg.impressions > 0 ? String(agg.spend / agg.impressions * 1000) : null,
+    reach: null,
+    frequency: null,
+    actions,
+    cost_per_action_type: actions
+      .filter(a => parseFloat(a.value) > 0)
+      .map(a => ({ action_type: a.action_type, value: String(agg.spend / parseFloat(a.value)) })),
+    clipped: true,
+  };
+}
+
+async function fetchMetaAds() {
+  if (!state.metaToken) { render(); return; }
+  state.metaAdsLoading = true;
+  state.metaAdsError = null;
+  render();
+  try {
+    const dp = metaDateParams();
+    const useCustom = state.metaUseCustom && state.metaCustomFrom && state.metaCustomTo;
+    const campDp = useCustom
+      ? 'time_range({"since":"' + state.metaCustomFrom + '","until":"' + state.metaCustomTo + '"})'
+      : 'date_preset(' + state.metaDatePreset + ')';
+    const fields = 'spend,impressions,reach,clicks,ctr,cpm,cpc,frequency,actions,cost_per_action_type';
+    const [insRes, campRes] = await Promise.all([
+      fetch(META_API + '/' + META_AD_ACCOUNT + '/insights?fields=' + fields + '&' + dp + '&access_token=' + state.metaToken).then(r => r.json()),
+      fetch(META_API + '/' + META_AD_ACCOUNT + '/campaigns?fields=name,status,insights.' + campDp + '{spend,impressions,clicks,ctr,reach,cpc,actions,cost_per_action_type}&access_token=' + state.metaToken).then(r => r.json()),
+    ]);
+    if (insRes.error) throw new Error(insRes.error.message);
+    state.metaAds = insRes.data?.[0] || null;
+    state.metaCampaigns = campRes.error ? [] : (campRes.data || []);
+  } catch (e) { state.metaAdsError = e.message || 'Errore API Meta'; }
+  state.metaAdsLoading = false;
+  render();
+}
+
+async function fetchMetaFunnel() {
+  if (!state.metaToken) return;
+  state.metaFunnelLoading = true;
+  state.metaFunnelError = null;
+  state.metaFunnelPeriod = state.funnelFrom + ' → ' + state.funnelTo;
+  render();
+  try {
+    // se il periodo coincide con lo sprint selezionato, la spesa rispetta anche il suo orario
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    const clip = selSprint && selSprint.inizio === state.funnelFrom && selSprint.fine === state.funnelTo;
+    state.metaFunnelData = await fetchMetaInsightsWindow(
+      state.funnelFrom, state.funnelTo,
+      clip ? selSprint.inizio_ora : null,
+      clip ? selSprint.fine_ora : null,
+      state.metaToken);
+  } catch (e) { state.metaFunnelError = e.message || 'Errore API Meta'; }
+  state.metaFunnelLoading = false;
+  render();
+}
+
+async function fetchMetaSprintData() {
+  if (!state.metaToken || state.metaSprintSel.length === 0) { render(); return; }
+  state.metaSprintLoading = true;
+  render();
+  try {
+    await Promise.all(state.metaSprintSel.map(async id => {
+      const sprint = state.sprints.find(s => String(s.id) === String(id));
+      if (!sprint) return;
+      const data = await fetchMetaInsightsWindow(sprint.inizio, sprint.fine, sprint.inizio_ora, sprint.fine_ora, state.metaToken);
+      state.metaSprintData[id] = data;
+    }));
+  } catch (e) { console.error('fetchMetaSprintData', e); }
+  state.metaSprintLoading = false;
+  render();
+}
+
+async function fetchUserActivity(user) {
+  state.userActivityOpen    = true;
+  state.userActivityUser    = user;
+  state.userActivityData    = null;
+  state.userActivityLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_user_activity', { p_user_id: user.user_id, lim: 150 });
+    if (error) throw error;
+    state.userActivityData = data || [];
+  } catch (e) { console.error('fetchUserActivity', e); }
+  state.userActivityLoading = false;
+  render();
+}
+
+let _ueSearchTimer = null;
+
+function renderUeSearchResults() {
+  const container = document.getElementById('ue-search-results');
+  if (!container) return;
+  const results = state.ueSearchResults;
+  if (!results.length) {
+    container.innerHTML = state.ueSearchQuery.length >= 2
+      ? `<div style="font-size:12px;color:var(--muted);padding:6px 0">Nessun utente trovato.</div>`
+      : '';
+    return;
+  }
+  container.innerHTML = `
+    <div style="background:#12121e;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-top:6px">
+      ${results.map((u, i) => `
+        <div class="ue-result" data-idx="${i}"
+          style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;transition:background .15s"
+          onmouseenter="this.style.background='#1e1e30'" onmouseleave="this.style.background=''">
+          <div style="min-width:0">
+            <div style="font-size:12px;font-weight:600;color:var(--fg)">${esc(u.name || u.username || '—')} <span style="color:var(--muted);font-weight:400">@${esc(u.username || '')}</span></div>
+            <div style="font-size:11px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.email || '')}</div>
+          </div>
+          <span style="font-size:10px;background:#1e2a1e;color:#4ade80;padding:2px 8px;border-radius:10px;flex-shrink:0">Seleziona</span>
+        </div>`).join('')}
+    </div>`;
+  container.querySelectorAll('.ue-result').forEach(el =>
+    el.addEventListener('click', () => {
+      const u = state.ueSearchResults[+el.dataset.idx];
+      if (!u) return;
+      state.ueSelectedUser  = u;
+      state.ueSearchQuery   = '';
+      state.ueSearchResults = [];
+      state.ueData          = null;
+      render();
+    }));
+}
+
+function searchUsersForExplorer(query) {
+  state.ueSearchQuery = query;
+  clearTimeout(_ueSearchTimer);
+  if (!query || query.length < 2) {
+    state.ueSearchResults = [];
+    renderUeSearchResults();
+    return;
+  }
+  _ueSearchTimer = setTimeout(async () => {
+    try {
+      const { data, error } = await sb.rpc('kpi_search_users', { p_query: query });
+      if (error) throw error;
+      state.ueSearchResults = data || [];
+    } catch (e) { console.error('searchUsersForExplorer', e); state.ueSearchResults = []; }
+    renderUeSearchResults();
+  }, 300);
+}
+
+async function fetchUserExplorer() {
+  if (!state.ueSelectedUser) return;
+  state.ueLoading = true;
+  state.ueData    = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_user_activity', {
+      p_user_id: state.ueSelectedUser.id,
+      lim: 500,
+    });
+    if (error) throw error;
+    let events = data || [];
+    if (state.ueFromDateTime) {
+      const fromMs = new Date(state.ueFromDateTime).getTime();
+      events = events.filter(e => new Date(e.created_at).getTime() >= fromMs);
+    }
+    state.ueData = events;
+  } catch (e) { console.error('fetchUserExplorer', e); state.ueData = []; }
+  state.ueLoading = false;
+  render();
+}
+
+async function fetchAllFeedbacks() {
+  state.allFeedbacksLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_all_feedback');
+    if (error) throw error;
+    state.allFeedbacks = data || [];
+    if (!state.selectedFeedback && state.allFeedbacks.length)
+      state.selectedFeedback = state.allFeedbacks[0];
+  } catch (e) { console.error('fetchAllFeedbacks', e); }
+  state.allFeedbacksLoading = false;
+  render();
+}
+
+// Le curve di tutti gli sprint arrivano dalla cache della dashboard (kpi_cache_get 'sprint_curves'): si disegna subito
+// il valore salvato; se è scaduto (o c'è «Aggiorna») parte un solo ricalcolo e la scheda si ridisegna quando torna.
+async function fetchScoreboard(force) {
+  force = force || state.scoreForce; state.scoreForce = false;
+  const apply = d => {
+    state.scoreboard = d.data.map(r => ({ ...r, base: (r.elig && r.elig[0]) || 0 }));
+    state.scoreboardError = null;
+  };
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'sprint_curves', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      apply(data);
+      state.scoreboardCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      render();
+      if (!state.scoreboardCache.pending) return;
+    } else {
+      state.scoreboardCache = null;   // niente di salvato: la scheda resta in caricamento finché il ricalcolo non torna
+    }
+  } catch (e) {
+    console.error('fetchScoreboard', e);
+    state.scoreboardError = e.message || 'Errore caricamento confronto sprint';
+    render();
+    return;
+  }
+  const r = await kpiRecompute('sprint_curves', 'all', force || !state.scoreboard);
+  if (r.data && Array.isArray(r.data)) {
+    apply(r);
+    state.scoreboardCache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (state.scoreboard) {
+    state.scoreboardCache = { ...state.scoreboardCache, pending: false, failed: true, fresh: false };
+  } else {
+    state.scoreboardError = 'Confronto fra sprint non disponibile';
+  }
+  render();
+  if (state.scoreboardCache) state.scoreboardCache.fresh = false;
+}
+
+// Card «Attivazione per sprint»: stesso schema di fetchScoreboard sulla voce di cache 'sprint_activation'/'all'.
+async function fetchSprintActivation(force) {
+  force = force || state.saForce; state.saForce = false;
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'sprint_activation', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      state.sa = data.data; state.saError = null;
+      state.saCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      render();
+      if (!state.saCache.pending) return;
+    } else {
+      state.saCache = null;   // niente di salvato: la card resta in caricamento finché il ricalcolo non torna
+    }
+  } catch (e) {
+    console.error('fetchSprintActivation', e);
+    state.saError = e.message || 'Errore caricamento attivazione per sprint';
+    render();
+    return;
+  }
+  const r = await kpiRecompute('sprint_activation', 'all', force || !state.sa);
+  if (r.data && Array.isArray(r.data)) {
+    state.sa = r.data; state.saError = null;
+    state.saCache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (state.sa) {
+    state.saCache = { ...state.saCache, pending: false, failed: true, fresh: false };
+  } else {
+    state.saError = 'Attivazione per sprint non disponibile';
+  }
+  render();
+  if (state.saCache) state.saCache.fresh = false;
+}
+
+// Pagina «Goal»: stesso schema di fetchScoreboard sulla voce di cache 'goal_board'/'all' (kpi_goal_board).
+async function fetchGoalBoard(force) {
+  if (state.goalLoading) return;
+  state.goalLoading = true;
+  force = force || state.goalForce; state.goalForce = false;
+  const apply = d => { state.goalBoard = d.data; state.goalBoardError = null; };
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'goal_board', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      apply(data);
+      state.goalCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      if (!state.goalCache.pending) { state.goalLoading = false; render(); return; }
+      render();
+    } else {
+      state.goalCache = null;   // niente di salvato: la pagina resta in caricamento finché il ricalcolo non torna
+    }
+  } catch (e) {
+    console.error('fetchGoalBoard', e);
+    state.goalBoardError = e.message || 'Errore caricamento obiettivi';
+    state.goalLoading = false;
+    render();
+    return;
+  }
+  const r = await kpiRecompute('goal_board', 'all', force || !state.goalBoard);
+  if (r.data && Array.isArray(r.data)) {
+    apply(r);
+    state.goalCache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (state.goalBoard) {
+    state.goalCache = { ...state.goalCache, pending: false, failed: true, fresh: false };
+  } else {
+    state.goalBoardError = 'Numeri degli obiettivi non disponibili';
+  }
+  state.goalLoading = false;
+  render();
+  if (state.goalCache) state.goalCache.fresh = false;
+}
+
+async function fetchRecentAISessions() {
+  try {
+    const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 5 });
+    if (error) throw error;
+    state.recentAISessions = data || [];
+  } catch (e) { console.error('fetchRecentAISessions', e); }
+}
+
+// p_surface: null = tutte (modal Overview), altrimenti la superficie di un tab della
+// pagina AI Coach. Il filtro è server-side perché lim è un cap secco applicato prima:
+// filtrare client-side affamerebbe i tab magri (paywall su tutti).
+async function fetchAISessionsFull(surfaceFilter = null) {
+  state.aiSessionsLoading = true;
+  state.aiSessionsFilter  = surfaceFilter; // con quale filtro è stata caricata la lista corrente
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_ai_sessions', { lim: 50, p_surface: surfaceFilter });
+    if (error) throw error;
+    state.aiSessions = data || [];
+    if (!state.aiSelectedSession && state.aiSessions.length) {
+      state.aiSelectedSession = state.aiSessions[0];
+      fetchAISessionMessages(state.aiSelectedSession);
+      return;
+    }
+  } catch (e) { console.error('fetchAISessionsFull', e); }
+  state.aiSessionsLoading = false;
+  render();
+}
+
+async function fetchAISessionMessages(session) {
+  state.aiSelectedSession    = session;
+  state.aiSessionMessages    = null;
+  state.aiSessionMessagesLoading = true;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_ai_session_detail', {
+      p_user_id: session.user_id,
+      p_from:    session.session_start,
+      p_to:      session.session_end,
+    });
+    if (error) throw error;
+    state.aiSessionMessages = data || [];
+  } catch (e) { console.error('fetchAISessionMessages', e); }
+  state.aiSessionMessagesLoading = false;
+  state.aiSessionsLoading        = false;
+  render();
+}
+
+// Orario di partenza opzionale di uno sprint → timestamp ISO da passare come p_start alle RPC funnel.
+// s.inizio_ora è un 'HH:MM[:SS]' in ora locale: lo combino con la data di inizio nel fuso del browser.
+// Se non impostato ritorna null → le RPC usano il default (giorno intero), comportamento storico.
+function sprintStartTs(s) {
+  if (!s || !s.inizio_ora) return null;
+  const t = String(s.inizio_ora).slice(0, 5);        // 'HH:MM'
+  const d = new Date(`${s.inizio}T${t}`);            // interpretato in ora locale
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Orario di fine opzionale di uno sprint → timestamp ISO (esclusivo) da passare come p_end alle RPC.
+// s.fine_ora è un 'HH:MM[:SS]' in ora locale: lo combino con la data di fine nel fuso del browser.
+// Se non impostato ritorna null → le RPC contano fino a fine giornata, comportamento storico.
+function sprintEndTs(s) {
+  if (!s || !s.fine_ora) return null;
+  const t = String(s.fine_ora).slice(0, 5);
+  const d = new Date(`${s.fine}T${t}`);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// Preset periodo del funnel a eventi: oggi, settimana corrente (lunedì→oggi),
+// mese corrente (giorno 1→oggi). Calcolato a click-time così una tab aperta da
+// giorni resta comunque coerente con la data reale, non con quella di load.
+function eventFunnelPresetRange(kind) {
+  const now = new Date();
+  const iso = d => d.toISOString().slice(0, 10);
+  const to = iso(now);
+  if (kind === 'today') return { from: to, to };
+  if (kind === 'yesterday') { const y = iso(new Date(now.getTime() - 864e5)); return { from: y, to: y }; }
+  if (kind === 'week') {
+    // lunedì della settimana corrente (getDay: 0=domenica, 1=lunedì, …)
+    const dow = now.getDay();
+    const daysSinceMonday = (dow + 6) % 7;
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceMonday);
+    return { from: iso(monday), to };
+  }
+  if (kind === 'month') {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: iso(first), to };
+  }
+  return { from: to, to };
+}
+
+// Etichetta della finestra effettivamente calcolata per un pannello che riceve
+// p_start/p_end da uno sprint. Sprint con orario ritagliato → include HH:MM
+// esplicito + '(Europe/Rome)' e flag `tightened: true` per segnalare che il
+// periodo calcolato è più stretto dei giorni pieni. Sprint senza ritaglio o
+// periodo libero → solo date, `tightened: false`, comportamento visivo invariato.
+function sprintWindowText(selSprint, from, to) {
+  const hStart = selSprint && selSprint.inizio_ora ? String(selSprint.inizio_ora).slice(0, 5) : null;
+  const hEnd   = selSprint && selSprint.fine_ora   ? String(selSprint.fine_ora).slice(0, 5)   : null;
+  const tightened = !!(hStart || hEnd);
+  if (!tightened) return { text: `${from} → ${to}`, tightened: false };
+  const startTxt = hStart ? `${from} ${hStart}` : `${from} 00:00`;
+  const endTxt   = hEnd   ? `${to} ${hEnd}`    : `${to} 24:00`;
+  return { text: `${startTxt} → ${endTxt} (Europe/Rome)`, tightened: true };
+}
+
+// Suffisso compatto per la legenda del confronto sprint: aggiunge le ore quando
+// lo sprint ne ha (uno o entrambi gli estremi), stringa vuota altrimenti. Usa
+// lo stesso vocabolario visivo ('⏱ dalle … alle …') della pagina Sprint.
+function sprintHourSuffix(s) {
+  if (!s) return '';
+  const io = s.inizio_ora ? String(s.inizio_ora).slice(0, 5) : '';
+  const fo = s.fine_ora   ? String(s.fine_ora).slice(0, 5)   : '';
+  if (io && fo) return ` · ⏱ ${io}→${fo}`;
+  if (io)      return ` · ⏱ dalle ${io}`;
+  if (fo)      return ` · ⏱ fino alle ${fo}`;
+  return '';
+}
+
+async function fetchSprintFunnel() {
+  if (!state.sprintFunnelSel.length) return;
+  state.sprintFunnelLoading = true;
+  state.sprintFunnelError   = null;
+  state.sprintFunnelData    = {};
+  render();
+  try {
+    const selected = state.sprints.filter(s => state.sprintFunnelSel.includes(s.id));
+    const results  = await Promise.all(selected.map(async s => {
+      const cached = await funnelFromCache(s.id, false);
+      if (cached) return { id: s.id, data: cached.data, error: null };
+      const r = await sb.rpc('kpi_funnel', { inizio: s.inizio, fine: s.fine, p_start: sprintStartTs(s), p_end: sprintEndTs(s) });
+      return { id: s.id, data: r.data, error: r.error };
+    }));
+    const map = {};
+    for (const r of results) {
+      if (r.error) throw r.error;
+      map[r.id] = r.data;
+    }
+    state.sprintFunnelData = map;
+  } catch (e) { state.sprintFunnelError = e.message || 'Errore'; }
+  state.sprintFunnelLoading = false;
+  render();
+  if (state.metaToken && Object.keys(state.sprintFunnelData).length) {
+    state.metaSprintSel = state.sprintFunnelSel.map(String);
+    fetchMetaSprintData();
+  }
+}
+
+async function fetchSprintPremiumFunnel() {
+  if (!state.sprintPremiumFunnelSel.length) return;
+  state.sprintPremiumFunnelLoading = true;
+  state.sprintPremiumFunnelError   = null;
+  state.sprintPremiumFunnelData    = {};
+  render();
+  try {
+    const selected = state.sprints.filter(s => state.sprintPremiumFunnelSel.includes(s.id));
+    const results  = await Promise.all(selected.map(s =>
+      sb.rpc('kpi_premium', { inizio: s.inizio, fine: s.fine, p_gender: state.premiumGender, p_start: sprintStartTs(s), p_end: sprintEndTs(s) })
+        .then(r => ({ id: s.id, data: r.data, error: r.error }))
+    ));
+    const map = {};
+    for (const r of results) {
+      if (r.error) throw r.error;
+      map[r.id] = r.data;
+    }
+    state.sprintPremiumFunnelData = map;
+  } catch (e) { state.sprintPremiumFunnelError = e.message || 'Errore'; }
+  state.sprintPremiumFunnelLoading = false;
+  render();
+}
+
+async function fetchSprintRetention() {
+  if (!state.sprintRetSel.length) return;
+  state.sprintRetLoading = true;
+  state.sprintRetError   = null;
+  state.sprintRetData    = {};
+  render();
+  try {
+    const selected = state.sprints.filter(s => state.sprintRetSel.includes(s.id));
+    const min      = state.sprintRetCustom ? state.sprintRetMin   : state.retMin;
+    const weeks    = state.sprintRetCustom ? state.sprintRetWeeks : state.retWeeks;
+    const minW0    = state.sprintRetCustom ? state.sprintRetMinW0 : state.retMinW0;
+    const results  = await Promise.all(selected.map(s =>
+      sb.rpc('kpi_retention', { inizio: s.inizio, fine: s.fine, min_workouts: min, max_weeks: weeks, min_w0: minW0, p_start: sprintStartTs(s), p_end: sprintEndTs(s) })
+        .then(r => ({ id: s.id, data: r.data, error: r.error }))
+    ));
+    const map = {};
+    for (const r of results) {
+      if (r.error) throw r.error;
+      map[r.id] = r.data;
+    }
+    state.sprintRetData = map;
+  } catch (e) { state.sprintRetError = e.message || 'Errore'; }
+  state.sprintRetLoading = false;
+  render();
+}
+
+// Ogni ciclo ripesca funnel salvati, impostazioni e sprint (le tab aperte si sincronizzano con
+// ciò che salva l'altro utente) e i numeri dell'Overview — ma questi ultimi SOLO se l'Overview
+// è a schermo, e niente del tutto se la scheda del browser non è in primo piano.
+// Prima ogni scheda aperta, anche dimenticata in background o ferma su Premium, rilanciava le
+// sette RPC dell'Overview ogni 5 minuti: ~7.400 giri dal 24/08, e quello di kpi_ai_sessions
+// leggeva ~90 MB a volta. Svuotava la cache del DB, e la query che si chiedeva davvero
+// ripartiva a freddo e sforava gli 8 secondi.
+// L'Overview lasciata indietro resta segnata `overviewStale` e si rilegge quando ci si torna.
+let refreshDue = false;
+
+function autoRefreshTick() {
+  if (document.hidden) { refreshDue = true; return; }
+  refreshDue = false;
+  loadSettings();
+  fetchFunnelDefinitions();
+  fetchFunnelPhases();
+  fetchSprints();
+  if (state.page === 'overview') fetchData();
+  else { state.overviewStale = true; startCountdown(); }
+  if (state.page === 'stats') fetchStats({ silent: true, fresh: true });
+  if (state.page === 'goal') fetchGoalBoard();
+}
+
+function startAutoRefresh() {
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(autoRefreshTick, REFRESH_MS);
+}
+
+// Scheda tornata in primo piano dopo un giro saltato: si aggiorna subito e il timer riparte da lì.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !refreshDue || !state.opsSession) return;
+  autoRefreshTick();
+  startAutoRefresh();
+});
+
+function startCountdown() {
+  clearInterval(countdownTimer);
+  secondsLeft = 300;
+  countdownTimer = setInterval(() => {
+    secondsLeft = Math.max(0, secondsLeft - 1);
+    const el = document.getElementById('kpi-countdown');
+    if (el) el.textContent = `agg. tra ${fmt(secondsLeft)}`;
+  }, 1000);
+}
+
+function fmt(s) { return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+
+// ── LAYOUT ────────────────────────────────────────────────────────────
+
+function render() {
+  document.getElementById('app').innerHTML = layout();
+  attachEvents();
+  kcSync();
+}
+
+function updateHeaderActions() {
+  const el = document.getElementById('kpi-header-actions');
+  if (el) el.innerHTML = headerActions();
+  document.getElementById('refresh-btn')?.addEventListener('click', manualRefresh);
+}
+
+function manualRefresh() {
+  clearInterval(countdownTimer);
+  // gli sprint del grafico tentativi finiti in errore si riprovano: senza, restavano in errore fino al ricarico
+  state.attemptsChartErrors = {};
+  state.scoreForce = true;   // «Aggiorna» fa ricalcolare anche le curve di «Sprint vs record» (altrimenti restano quelle in cache)
+  state.saForce = true;      // … e la card «Attivazione per sprint»
+  fetchData();
+  // ripesca dal DB tutto ciò che è condiviso (impostazioni, funnel salvati, sprint) → vedi le modifiche
+  // dell'altro utente senza ricaricare la pagina
+  loadSettings();
+  fetchFunnelDefinitions();
+  fetchFunnelPhases();
+  fetchSprints();
+  if (state.page === 'funnel') {
+    if (state.funnelMode === 'event') fetchEventFunnel();
+    else if (state.funnelMode === 'activation') fetchActivation();
+    else fetchFunnel();
+  }
+  if (state.page === 'goal') fetchGoalBoard(true);   // gli obiettivi dell'altro operatore arrivano con loadSettings
+}
+
+// ── BARRA LATERALE APRIBILE ───────────────────────────────────────────
+// Sul telefono la barra è un pannello che si apre col ☰ e si chiude toccando fuori o scegliendo una
+// pagina; sul computer lo stesso pulsante la nasconde per lasciare tutto lo spazio ai dati, e la
+// scelta resta salvata. Le classi vivono su #app, che render() non ricrea: aprire o chiudere il menu
+// non ridisegna la pagina.
+const NAV_MOBILE_MQ = window.matchMedia('(max-width: 900px)');
+const LS_NAV_COLLAPSED = 'kpi_nav_collapsed';
+state.navOpen = false;
+try { state.navCollapsed = localStorage.getItem(LS_NAV_COLLAPSED) === '1'; } catch { state.navCollapsed = false; }
+
+function applyNavState() {
+  const app = document.getElementById('app');
+  if (!app) return;
+  app.classList.toggle('nav-collapsed', state.navCollapsed);
+  app.classList.toggle('nav-open', state.navOpen);
+  // col pannello aperto sul telefono la pagina dietro non deve scorrere
+  document.body.style.overflow = state.navOpen && NAV_MOBILE_MQ.matches ? 'hidden' : '';
+  const expanded = NAV_MOBILE_MQ.matches ? state.navOpen : !state.navCollapsed;
+  document.querySelectorAll('[data-nav-toggle]').forEach(b => b.setAttribute('aria-expanded', String(expanded)));
+}
+function toggleNav() {
+  if (NAV_MOBILE_MQ.matches) state.navOpen = !state.navOpen;
+  else {
+    state.navCollapsed = !state.navCollapsed;
+    try { localStorage.setItem(LS_NAV_COLLAPSED, state.navCollapsed ? '1' : '0'); } catch { /* storage bloccato: vale per la sessione */ }
+    document.querySelector('.nav-toggle-desk')?.setAttribute('title', state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu');
+  }
+  applyNavState();
+}
+NAV_MOBILE_MQ.addEventListener?.('change', () => { state.navOpen = false; applyNavState(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || !state.navOpen) return;
+  state.navOpen = false; applyNavState();
+  document.querySelector('.mtop [data-nav-toggle]')?.focus();
+});
+
+// Testata del funnel: Esc chiude il menu aperto o il pannello «Chi è escluso»; un clic fuori chiude il menu.
+// Il percorso del clic si legge da composedPath(): dopo un render() il bersaglio è già staccato dal DOM.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || state.page !== 'funnel') return;
+  if (state.funnelMenu) {
+    const id = state.funnelMenu === 'funnel' ? 'fn-funnel-btn' : 'fn-other-btn';
+    state.funnelMenu = null; render(); document.getElementById(id)?.focus();
+  } else if (state.funnelParamsOpen) {
+    state.funnelParamsOpen = false; render(); document.getElementById('funnel-params-toggle')?.focus();
+  }
+});
+document.addEventListener('click', e => {
+  if (state.page !== 'funnel' || !state.funnelMenu) return;
+  if (e.composedPath().some(n => n.classList && n.classList.contains('fn-pw'))) return;
+  state.funnelMenu = null; render();
+});
+
+const PAGE_LABELS = {
+  stats: 'Stats', goal: 'Goal', overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
+  premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS',
+};
+const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
+const NAV_PANEL_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>`;
+
+function layout() {
+  return `
+    ${sidebar()}
+    <div class="nav-backdrop" data-nav-close></div>
+    <div class="main${state.page === 'stats' || state.page === 'funnel' || state.page === 'ai-coach' ? ' main-stats' : ''}">
+      <div class="mtop">
+        <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
+        <span class="logo-mark">Hype<span>move</span></span>
+        <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
+      </div>
+      ${state.page === 'stats' ? pageStats() : state.page === 'ai-coach' ? pageAICoach() : state.page === 'funnel'
+        ? `<div class="st-page fn-page" id="fn-page">${pageFunnel()}${funnelParamsDrawer()}</div>`
+        : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div class="page-head-l">
+          <button class="nav-toggle nav-toggle-desk" data-nav-toggle
+            title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button>
+          <div>
+            <div class="page-title">KPI Dashboard</div>
+            <div class="page-sub">Metriche prodotto HypeMove · live da Supabase</div>
+          </div>
+        </div>
+        <div id="kpi-header-actions" class="refresh-meta">
+          ${headerActions()}
+        </div>
+      </div>
+      ${!needsGeneralData(state.page) ? page() : state.error ? pageError() : !state.data ? pageSkeleton() : page()}`}
+    </div>
+    ${deleteConfirmModal()}
+    ${funnelOverwriteModal()}
+    ${feedbackModal()}
+    ${aiConversationsModal()}
+    ${userActivityModal()}
+    ${stepUsersModal()}
+    ${creativeModal()}
+    ${premiumBucketModal()}
+    ${funnelStepUsersModal()}
+    ${eventBrowserModal()}`;
+}
+
+function deleteConfirmModal() {
+  if (!state.deleteConfirm) return '';
+  const { nome } = state.deleteConfirm;
+  return `
+    <div id="delete-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000">
+      <div style="
+        background:#13131f;border:1px solid #2a2a3d;border-radius:16px;
+        padding:32px;width:360px;max-width:calc(100vw - 32px);box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <div style="width:36px;height:36px;border-radius:50%;background:rgba(239,68,68,0.15);
+            display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">⚠</div>
+          <div style="font-size:16px;font-weight:700;color:var(--fg)">Elimina sprint</div>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:20px;margin-left:48px">
+          Stai per eliminare <strong style="color:var(--fg)">${nome}</strong>.
+          Questa azione è irreversibile.
+        </div>
+        <div style="background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;padding:16px;margin-bottom:20px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">
+            Scrivi <span style="color:#ef4444;font-weight:700">DELETE</span> per confermare
+          </div>
+          <input id="delete-confirm-input" type="text" autocomplete="off" spellcheck="false"
+            placeholder="DELETE"
+            style="width:100%;background:none;border:none;outline:none;color:#ef4444;
+              font-size:16px;font-weight:700;font-family:monospace;letter-spacing:.08em;
+              caret-color:#ef4444"/>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="delete-cancel-btn" class="btn btn-ghost" style="flex:1">Annulla</button>
+          <button id="delete-confirm-btn" class="btn" style="
+            flex:1;background:#ef4444;color:#fff;border:none;opacity:0.4;cursor:not-allowed;
+            transition:opacity .15s">Elimina</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Modal di conferma quando si sta per sovrascrivere il funnel di uno sprint GIÀ personalizzato
+// (da "Assegna a sprint" o dall'editor per-sprint). Richiede di digitare "Modifica".
+function funnelOverwriteModal() {
+  if (!state.funnelOverwriteConfirm) return '';
+  const { names } = state.funnelOverwriteConfirm;
+  const list = names.map(n => `<strong style="color:var(--fg)">${esc(n)}</strong>`).join(', ');
+  return `
+    <div id="overwrite-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000">
+      <div style="
+        background:#13131f;border:1px solid #2a2a3d;border-radius:16px;
+        padding:32px;width:380px;box-shadow:0 24px 64px rgba(0,0,0,0.6)">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+          <div style="width:36px;height:36px;border-radius:50%;background:rgba(251,191,36,0.15);
+            display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📌</div>
+          <div style="font-size:16px;font-weight:700;color:var(--fg)">Funnel già personalizzato</div>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:20px;margin-left:48px;line-height:1.6">
+          ${names.length > 1 ? `Gli sprint ${list} hanno` : `Lo sprint ${list} ha`} già un funnel personalizzato.
+          Sei sicuro di voler modificare? Mattia ci ha messo tanta cura. 🥲
+        </div>
+        <div style="background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;padding:16px;margin-bottom:20px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em">
+            Digita <span style="color:var(--amber);font-weight:700">Modifica</span> per poter modificare
+          </div>
+          <input id="overwrite-confirm-input" type="text" autocomplete="off" spellcheck="false"
+            placeholder="Modifica"
+            style="width:100%;background:none;border:none;outline:none;color:var(--amber);
+              font-size:16px;font-weight:700;font-family:monospace;letter-spacing:.08em;
+              caret-color:var(--amber)"/>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button id="overwrite-cancel-btn" class="btn btn-ghost" style="flex:1">Annulla</button>
+          <button id="overwrite-confirm-btn" class="btn" style="
+            flex:1;background:var(--amber);color:#1a1a28;border:none;font-weight:700;opacity:0.4;cursor:not-allowed;
+            transition:opacity .15s">Sovrascrivi</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function headerActions() {
+  const t = state.lastUpdated
+    ? state.lastUpdated.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    : '—';
+  // Icona refresh Lucide (rotate-cw), spin durante il loading.
+  const refreshSvg = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="${state.loading ? 'spin' : ''}"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>`;
+  return `
+    <span id="kpi-countdown">
+      ${state.loading ? 'Caricamento…' : state.lastUpdated ? `agg. tra ${fmt(secondsLeft)}` : ''}
+    </span>
+    <span>ultimo ${t}</span>
+    <button id="refresh-btn" class="btn-refresh" ${state.loading ? 'disabled' : ''}>
+      ${refreshSvg} Aggiorna
+    </button>`;
+}
+
+function sidebar() {
+  const nav = (id, icon, label) => `
+    <button class="nav-item ${state.page === id ? 'active' : ''}" data-nav="${id}">
+      <span class="icon">${icon}</span>${label}
+    </button>`;
+  return `
+    <div class="sidebar">
+      <a href="index.html" class="sidebar-logo">
+        <div class="logo-mark">Hype<span>move</span></div>
+        <div class="logo-sub">KPI</div>
+      </a>
+      <nav class="nav">
+        <div class="nav-section">KPI</div>
+        ${nav('stats',     '📈', 'Stats')}
+        ${nav('goal',      '🏁', 'Goal')}
+        ${nav('overview',  '📊', 'Overview')}
+        ${nav('funnel',    '🎯', 'Funnel')}
+        ${nav('retention', '🔄', 'Retention')}
+        ${nav('sprint',    '🏃', 'Sprint')}
+        ${nav('premium',    '💎', 'Premium')}
+        ${nav('ai-coach',   '🤖', 'AI Coach')}
+        ${nav('behavior',   '🖱️', 'Comportamento')}
+        <div class="nav-section" style="margin-top:8px">Marketing</div>
+        ${nav('meta-ads',   '📣', 'Meta ADS')}
+      </nav>
+      <div style="padding:14px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">
+        Mattia & Danilo · 50/50
+      </div>
+    </div>`;
+}
+
+// Solo queste pagine leggono i dati di fetchData(); le altre hanno il loro caricamento e non devono aspettarlo.
+function needsGeneralData(p) { return p === 'overview' || p === 'metriche'; }
+
+function pageError() {
+  return `<div class="empty" style="padding:80px 20px">
+    <div class="empty-icon">⚠️</div>
+    <div class="empty-text" style="font-size:16px;font-weight:600;margin-bottom:8px">Errore nel caricamento</div>
+    <div style="font-size:12px;color:var(--red);margin-top:6px">${state.error}</div>
+  </div>`;
+}
+
+function pageSkeleton() {
+  return `<div class="empty" style="padding:80px 20px">
+    <div class="empty-icon pulse">📊</div>
+    <div class="empty-text" style="color:var(--muted)">Caricamento dati da Supabase...</div>
+  </div>`;
+}
+
+function page() {
+  switch (state.page) {
+    case 'stats':      return pageStats();
+    case 'overview':   return pageOverview();
+    case 'goal':       return pageGoal();
+    case 'funnel':     return pageFunnel();
+    case 'retention':  return pageRetention();
+    case 'metriche':   return pageMetriche();
+    case 'sprint':      return pageSprint();
+    case 'premium':     return pagePremium();
+    case 'ai-coach':    return pageAICoach();
+    case 'behavior':    return pageBehavior();
+    case 'meta-ads':    return pageMetaAds();
+    default:            return pageOverview();
+  }
+}
+
+// ── OVERVIEW — customizable ───────────────────────────────────────────
+
+const GOAL_BAR_COLORS = ['#a78bfa', '#22d3ee', '#4ade80', '#f59e0b', '#f43f5e', '#60a5fa', '#fbbf24', '#34d399'];
+
+// ── Sezione "Prove gratuite" (overview) ───────────────────────────────
+// Una prova per riga da kpi_premium_timeline (fonte play_token_facts: test e account interni
+// già esclusi); i conti si fanno qui, così cambiare periodo non richiama il DB.
+// Numeri a sinistra (ha pagato / pagherà / disdette), a destra una linea per prova dal giorno
+// di avvio a quello di chiusura.
+const PT_COL = { paid: '#4ade80', soon: '#4361ee', quit: '#f87171' };
+const PT_LABEL = { paid: 'Ha pagato', soon: 'In prova', quit: 'Disdette' };
+const PT_ORDER = ['paid', 'soon', 'quit'];
+const PT_PERIODS = [['oggi', 'Oggi'], ['settimana', 'Settimana'], ['mese', 'Mese'], ['sprint', 'Sprint']];
+const romeDay = ts => new Date(ts).toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+const addDays = (day, n) => { const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const dayDiff = (a, b) => Math.round((new Date(b + 'T12:00:00Z') - new Date(a + 'T12:00:00Z')) / 864e5);
+const ddmm = day => day.slice(8, 10) + '/' + day.slice(5, 7);
+
+// Esito di una prova, guardando lo stato attuale del token.
+// 'pending': la prova è scaduta ma il token dice ancora "prova in corso". Google non ha ancora
+// comunicato se ha fatto pagare o ha chiuso: non è persa finché non lo dice.
+function ptlTrialOutcome(t, now) {
+  if (t.paid_at) return 'converted';
+  if (t.status === 'active' && t.payment_state === 1 && !t.is_trial) return 'converted';
+  const trialing = t.status !== 'revoked' && (t.payment_state === 2 || t.is_trial);
+  const expired  = !t.expires_at || new Date(t.expires_at) <= now;
+  if (!trialing) return 'lost';
+  if (expired) return t.status === 'active' ? 'pending' : 'lost';
+  return t.status === 'cancelled' ? 'canceling' : 'open';
+}
+
+// Sprint della sezione, con la regola di «Stats»: le righe con lo stesso numero sono un esperimento solo.
+// Una prova sta nello sprint della coorte dell'utente: il suo primo avvio cade fra inizio (con l'ora) e
+// fine dello sprint. Il gruppo è l'unione delle sue righe; ogni riga resta scegliibile come dettaglio.
+const ptStamp = (day, ora) => `${day} ${ora ? String(ora).slice(0, 8).padEnd(8, ':00') : '00:00:00'}`;
+const romeStamp = ts => new Date(ts).toLocaleString('sv-SE', { timeZone: 'Europe/Rome' });
+const ptHM = ora => ora ? ' ' + String(ora).slice(0, 5) : '';
+function ptSprints() {
+  const rows = (state.sprints || []).filter(s => !/test/i.test(s.nome || '')).map(s => {
+    const from = String(s.inizio).slice(0, 10);
+    return { id: s.id, nome: s.nome, num: (String(s.nome || '').match(/\d+/) || [])[0] || null, from,
+      ora: s.inizio_ora, fine: String(s.fine || s.inizio).slice(0, 10), t0: ptStamp(from, s.inizio_ora),
+      t1: s.fine_ora ? ptStamp(String(s.fine).slice(0, 10), s.fine_ora) : ptStamp(addDays(String(s.fine || s.inizio).slice(0, 10), 1)) };
+  });
+  const map = new Map();
+  rows.forEach(r => { const k = r.num != null ? 'g:' + r.num : 'r:' + r.id; if (!map.has(k)) map.set(k, []); map.get(k).push(r); });
+  const groups = [...map.entries()].map(([key, rs]) => {
+    rs.sort((a, b) => a.t0.localeCompare(b.t0));
+    const name = rs[0].num != null ? 'Sprint ' + rs[0].num : rs[0].nome;
+    const fine = rs.map(r => r.fine).sort().at(-1);
+    return { id: key, rows: rs, name, from: rs[0].from, t0: rs[0].t0, fine,
+      label: `${name} · ${ddmm(rs[0].from)}${ptHM(rs[0].ora)}–${ddmm(fine)}` };
+  }).sort((a, b) => a.t0.localeCompare(b.t0));
+  groups.forEach(g => {
+    g.t1 = g.rows.map(r => r.t1).sort().at(-1);
+    g.to = g.fine;
+    g.details = g.rows.length > 1 ? g.rows.map(r => ({ id: 'r:' + r.id, from: r.from, t0: r.t0, t1: r.t1, to: r.fine, fine: r.fine,
+      label: `${g.name} · dettaglio · ${r.nome} · ${ddmm(r.from)}${ptHM(r.ora)}–${ddmm(r.fine)}` })) : [];
+  });
+  return groups;
+}
+
+// Periodo scelto: { from, to (null = fino a oggi), t0/t1 (confini con l'ora), sprints, sprint }.
+function ptPeriod(today) {
+  const kind = state.ptlPeriod;
+  if (kind === 'oggi') return { from: today, to: today };
+  if (kind === 'settimana') return { from: addDays(today, -6), to: today };
+  if (kind === 'mese') return { from: addDays(today, -29), to: today };
+  const sprints = ptSprints();
+  if (!sprints.length) return null;
+  const all = sprints.flatMap(g => [g, ...g.details]);
+  const cur = all.find(s => s.id === state.ptlSprintId)
+    || [...sprints].reverse().find(s => s.from <= today) || sprints[sprints.length - 1];
+  return { from: cur.from, to: cur.to, t0: cur.t0, t1: cur.t1, sprints, sprint: cur };
+}
+
+function ptModel(per) {
+  const now = new Date(), today = romeDay(now);
+  const t0 = per.t0 || ptStamp(per.from), t1 = per.t1 || ptStamp(addDays(per.to || today, 1));
+  const inCohort = t => { const st = romeStamp(t.first_open_at || t.trial_at); return st >= t0 && st < t1; };
+  const trials = (state.premTimeline || []).filter(t => t.trial_at && inCohort(t)).map(t => {
+    const o = ptlTrialOutcome(t, now);
+    const start = romeDay(t.trial_at);
+    const kind = o === 'converted' ? 'paid' : (o === 'open' || o === 'pending') ? 'soon' : 'quit';
+    let end = null;
+    if (kind === 'paid') end = t.paid_at ? romeDay(t.paid_at) : addDays(start, 7) < today ? addDays(start, 7) : today;
+    else if (kind === 'quit') {
+      const exp = t.expires_at ? romeDay(t.expires_at) : start;
+      end = t.cancelled_at ? romeDay(t.cancelled_at) : exp;
+      if (end > exp) end = exp;
+    }
+    if (end && end < start) end = start;
+    // Fine stimata delle prove che stanno per pagare: scadenza del token se futura, sennò inizio + 7 giorni.
+    let est = null;
+    if (kind === 'soon') {
+      est = t.expires_at && new Date(t.expires_at) > now ? romeDay(t.expires_at) : addDays(start, 7);
+      if (est <= today) est = null;
+    }
+    return { kind, start, end, est };
+  }).sort((a, b) => a.start.localeCompare(b.start) || (a.end || '9').localeCompare(b.end || '9'));
+  const count = { paid: 0, soon: 0, quit: 0 };
+  trials.forEach(t => count[t.kind]++);
+  const toToday = !per.to || per.to >= today;
+  const from = trials.reduce((m, t) => t.start < m ? t.start : m, per.from);
+  let last = from;
+  trials.forEach(t => { if (t.end && t.end > last) last = t.end; if (t.est && t.est > last) last = t.est; if (t.start > last) last = t.start; });
+  let axisEnd = addDays(last, 1);
+  // Una prova aperta arriva a oggi: l'asse la contiene anche se il periodo è già chiuso.
+  if ((toToday || trials.some(t => !t.end)) && axisEnd < addDays(today, 1)) axisEnd = addDays(today, 1);
+  return { today, trials, count, from, axisEnd };
+}
+
+// Grafico: X = giorni di calendario, Y = numero della prova (1 in basso).
+function ptChart(m, W, animate, loading) {
+  const narrow = W < 520;
+  const X0 = narrow ? 36 : 56, X1 = W - (narrow ? 16 : 24), T = 20;
+  const N = m.trials.length, rows = Math.max(3, N);
+  const plotH = Math.max(narrow ? 130 : 264, (rows + 0.6) * 22);
+  const Y1 = T + plotH, top = rows + 0.6;
+  const nd = dayDiff(m.from, m.axisEnd) + 1;
+  const X = d => X0 + (X1 - X0) * dayDiff(m.from, d) / (nd - 1);
+  const Y = v => Y1 - plotH * v / top;
+  const every = Math.max(1, Math.ceil(40 / ((X1 - X0) / (nd - 1))));
+  let g = `<text x="${narrow ? 0 : X0 - 12}" y="${T - 8}" class="pt-axl" text-anchor="${narrow ? 'start' : 'end'}">prova</text>`;
+  for (let i = 0; i < nd; i++) {
+    const d = addDays(m.from, i), x = X(d).toFixed(1);
+    g += `<line x1="${x}" y1="${T}" x2="${x}" y2="${Y1 + (i % every === 0 ? 6 : 3)}" class="pt-gv"/>`;
+    if (d === m.today) g += `<line x1="${x}" y1="${T}" x2="${x}" y2="${Y1}" class="pt-today"/><text x="${x}" y="${Y1 + 24}" class="pt-tick pt-tick-now" text-anchor="middle">oggi</text>`;
+    else if (i % every === 0 && Math.abs(dayDiff(d, m.today)) >= every) g += `<text x="${x}" y="${Y1 + 24}" class="pt-tick" text-anchor="middle">${narrow ? d.slice(8) : ddmm(d)}</text>`;
+  }
+  g += `<line x1="${X0}" y1="${Y1}" x2="${X1}" y2="${Y1}" class="pt-axis"/><line x1="${X0}" y1="${T}" x2="${X0}" y2="${Y1}" class="pt-axis"/>`;
+  for (let v = 1; v <= rows; v++) {
+    g += `<line x1="${X0}" y1="${Y(v).toFixed(1)}" x2="${X1}" y2="${Y(v).toFixed(1)}" class="pt-gh"/><text x="${X0 - 12}" y="${(Y(v) + 4).toFixed(1)}" class="pt-tick ${v > N ? 'pt-tick-off' : ''}" text-anchor="end">${v}</text>`;
+  }
+  let lines = '', tips = '';
+  m.trials.forEach((t, i) => {
+    const y = Y(i + 1).toFixed(1);
+    const xa = X(t.start), xz = X(t.end || m.today);
+    const endTxt = t.end ? ddmm(t.end) : t.est ? `oggi · fine ~${ddmm(t.est)}` : 'oggi';
+    const xr = t.est ? X(t.est) : xz;
+    let s = (t.est ? `<line x1="${xz.toFixed(1)}" y1="${y}" x2="${xr.toFixed(1)}" y2="${y}" class="pt-est"/>` : '') + `<line x1="${xa.toFixed(1)}" y1="${y}" x2="${xz.toFixed(1)}" y2="${y}" class="pt-ln"/><circle cx="${xa.toFixed(1)}" cy="${y}" r="5" class="pt-start"/>`;
+    if (t.end) {
+      const c = PT_COL[t.kind], xe = X(addDays(t.end, 1));
+      s += `<line x1="${xz.toFixed(1)}" y1="${y}" x2="${xe.toFixed(1)}" y2="${y}" stroke="${c}" class="pt-endbar"/><circle cx="${xz.toFixed(1)}" cy="${y}" r="9" fill="${c}" class="pt-enddot"/>`;
+    }
+    const hitX = Math.min(xa, xz) - 10, hitW = Math.abs(xr - xa) + 20 + (t.end ? X(addDays(t.end, 1)) - xz : 0);
+    lines += `<g class="pt-row" data-pt-i="${i}"><rect x="${hitX.toFixed(1)}" y="${(Y(i + 1) - 11).toFixed(1)}" width="${hitW.toFixed(1)}" height="22" class="pt-hit"/>${s}`
+      + `<circle cx="${xa.toFixed(1)}" cy="${y}" r="13" class="pt-ring"/><circle cx="${xz.toFixed(1)}" cy="${y}" r="13" class="pt-ring"/></g>`;
+    const txt = `${ddmm(t.start)} – ${endTxt}`, w = txt.length * 7.6 + 28;
+    let px = xr + 24; if (px + w > W - 4) px = Math.max(4, xa - 24 - w);
+    tips += `<g class="pt-tip" data-pt-tip="${i}"><rect x="${px.toFixed(1)}" y="${(Y(i + 1) - 15).toFixed(1)}" width="${w.toFixed(1)}" height="30" rx="15"/><text x="${(px + w / 2).toFixed(1)}" y="${(Y(i + 1) + 4.5).toFixed(1)}" text-anchor="middle">${txt}</text></g>`;
+  });
+  const H = Y1 + 36;
+  const reveal = animate ? `<animate attributeName="width" from="0" to="${W}" dur="1.1s" fill="freeze" calcMode="spline" keySplines=".2 .7 .2 1" keyTimes="0;1"/>` : '';
+  return `<svg class="pt-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs><clipPath id="pt-clip"><rect x="0" y="0" width="${animate ? 0 : W}" height="${H}">${reveal}</rect></clipPath></defs>
+    ${g}<g clip-path="url(#pt-clip)">${lines}</g>${tips}
+    ${N || loading ? '' : `<text x="${(X0 + X1) / 2}" y="${(T + Y1) / 2}" class="pt-empty" text-anchor="middle">Nessuna prova</text>`}
+  </svg>`;
+}
+
+// Misura la colonna del grafico e lo ridisegna alla larghezza vera (il testo resta a misura piena).
+function ptFit() {
+  const wrap = document.querySelector('.pt-chart');
+  if (!wrap || !wrap.dataset.ptKey) return;
+  const w = Math.round(wrap.clientWidth);
+  if (!w || Math.abs(w - state.ptlW) < 6) return;
+  state.ptlW = w;
+  const per = ptPeriod(romeDay(new Date()));
+  if (!per || !state.premTimeline) return;
+  wrap.innerHTML = ptChart(ptModel(per), w, wrap.dataset.ptAnim === '1', false);
+}
+
+function ptSquares(trials) {
+  const order = { paid: 0, soon: 1, quit: 2 };
+  return [...trials].sort((a, b) => order[a.kind] - order[b.kind])
+    .map(t => `<i class="pt-sq" style="background:${PT_COL[t.kind]}"></i>`).join('');
+}
+
+function ptLegend() {
+  const bar = c => `<svg width="34" height="20" aria-hidden="true"><line x1="10" y1="10" x2="30" y2="10" stroke="${c}" stroke-width="8" stroke-linecap="round"/><circle cx="9" cy="10" r="8" fill="${c}"/></svg>`;
+  return `<div class="pt-legend"><span><svg width="34" height="20" aria-hidden="true"><circle cx="5" cy="10" r="4" fill="#1a1d24" stroke="${PT_COL.soon}" stroke-width="2"/><line x1="10" y1="10" x2="30" y2="10" stroke="${PT_COL.soon}" stroke-width="4" stroke-linecap="round"/></svg>prova</span>`
+    + `<span><svg width="34" height="20" aria-hidden="true"><line x1="4" y1="10" x2="30" y2="10" class="pt-est"/></svg>fine prova stimata</span>`
+    + `<span>${bar(PT_COL.paid)}pagato</span><span>${bar(PT_COL.quit)}disdetta</span></div>`;
+}
+
+function ptNums(count, total, skeleton) {
+  const num = (q, c) => skeleton ? '<span class="pt-num pt-sk"></span>' : `<span class="pt-num" style="color:${q ? c : '#6b7280'}">${q}</span>`;
+  const rows = PT_ORDER.map(k => `<div class="pt-nrow">${num(count[k], k === 'quit' ? '#ffffff' : PT_COL[k])}<span class="pt-nlab"><i class="pt-dot" style="background:${PT_COL[k]}"></i>${k === 'quit' && count.quit === 1 ? 'Disdetta' : PT_LABEL[k]}</span></div>`).join('');
+  return `<div class="pt-nrow">${num(total, '#ffffff')}<span class="pt-nlab pt-nlab-t">${total === 1 ? 'prova' : 'prove'}</span></div>${rows}`;
+}
+
+function ptHead(per, withSeg) {
+  const seg = withSeg ? `<div class="pt-seg">${PT_PERIODS.map(([k, l]) => `<button class="pt-segb${state.ptlPeriod === k ? ' pt-on' : ''}" data-pt-period="${k}">${l}</button>`).join('')}</div>` : '';
+  let mid = '';
+  if (state.ptlPeriod === 'sprint') {
+    mid = per && per.sprint
+      ? `<div class="pt-pillwrap"><button class="pt-pill" data-pt-menu aria-haspopup="listbox" aria-expanded="${state.ptlMenu}"><span>${esc(per.sprint.label)}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>`
+        + (state.ptlMenu ? `<div class="pt-menu" role="listbox">${[...per.sprints].reverse().flatMap(g => [g, ...g.details]).map(s => `<button class="pt-opt${s.id === per.sprint.id ? ' pt-sel' : ''}" role="option" data-pt-sprint="${esc(s.id)}"${s.id[0] === 'r' ? ' style="padding-left:28px;font-weight:500"' : ''}><span class="pt-optdot"></span>${esc(s.label)}</button>`).join('')}</div>` : '') + '</div>'
+      : '<span class="pt-pill pt-pill-sk"></span>';
+  } else if (per) {
+    mid = `<span class="pt-range">${state.ptlPeriod === 'oggi' ? ddmm(per.from) : ddmm(per.from) + ' – ' + ddmm(per.to)}</span>`;
+  }
+  return `<div class="pt-head"><h2 class="pt-title">Prove gratuite</h2>${mid}${seg}</div>`;
+}
+
+function premiumTimelineCard() {
+  const today = romeDay(new Date());
+  const per = ptPeriod(today);
+  if (state.premTimelineError) {
+    return `<section class="pt-card">${ptHead(per, false)}<div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-pt-retry>Riprova</button></div></section>`;
+  }
+  const loading = !state.premTimeline || !per;
+  const m = loading
+    ? { today, trials: [], count: { paid: 0, soon: 0, quit: 0 }, from: addDays(today, -2), axisEnd: addDays(today, 5) }
+    : ptModel(per);
+  const key = loading ? '' : `${state.ptlPeriod}|${per.sprint ? per.sprint.id : ''}|${m.trials.length}`;
+  const animate = !loading && !PT_REDUCED() && state.ptlAnimated !== key;
+  if (!loading) state.ptlAnimated = key;
+  return `<section class="pt-card">${ptHead(per, true)}
+    <div class="pt-body${loading ? ' pt-loading' : ''}">
+      <div class="pt-left"><div class="pt-nums">${ptNums(m.count, m.trials.length, loading)}</div>
+        <div class="pt-sqs">${ptSquares(m.trials)}</div></div>
+      <div class="pt-right"><div class="pt-ctitle">Durata prove</div>
+        <div class="pt-chart" ${loading ? '' : `data-pt-key="${esc(key)}" data-pt-anim="${animate ? 1 : 0}"`}>${ptChart(m, state.ptlW, animate, loading)}</div>${ptLegend()}</div>
+    </div></section>`;
+}
+const PT_REDUCED = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Gestori della sezione: periodo, selettore sprint, "Riprova", hover (e tocco) sulle linee.
+let ptGlobals = false;
+function attachPremiumTimeline() {
+  document.querySelectorAll('[data-pt-period]').forEach(el => el.addEventListener('click', () => {
+    state.ptlPeriod = el.dataset.ptPeriod; state.ptlMenu = false; render();
+  }));
+  document.querySelector('[data-pt-menu]')?.addEventListener('click', ev => {
+    ev.stopPropagation(); state.ptlMenu = !state.ptlMenu; render();
+  });
+  document.querySelectorAll('[data-pt-sprint]').forEach(el => el.addEventListener('click', () => {
+    state.ptlSprintId = el.dataset.ptSprint; state.ptlMenu = false; render();
+  }));
+  document.querySelector('[data-pt-retry]')?.addEventListener('click', () => {
+    state.premTimelineError = null; state.premTimeline = null; render(); fetchData();
+  });
+  // L'ascolto sta sul contenitore, che resta quando ptFit ridisegna il grafico.
+  const wrap = document.querySelector('.pt-chart');
+  if (wrap) {
+    const set = (i, on) => wrap.querySelectorAll(`[data-pt-i="${i}"], [data-pt-tip="${i}"]`).forEach(el => el.classList.toggle('pt-on', on));
+    const clear = () => wrap.querySelectorAll('.pt-on').forEach(el => el.classList.remove('pt-on'));
+    wrap.addEventListener('mouseover', ev => { const r = ev.target.closest('[data-pt-i]'); clear(); if (r) set(r.dataset.ptI, true); });
+    wrap.addEventListener('mouseleave', clear);
+    wrap.addEventListener('click', ev => {
+      const r = ev.target.closest('[data-pt-i]'), was = r && r.classList.contains('pt-on');
+      clear(); if (r && !was) set(r.dataset.ptI, true);
+    });
+  }
+  ptFit();
+  if (!ptGlobals) {
+    ptGlobals = true;
+    document.addEventListener('click', ev => {
+      if (state.ptlMenu && !ev.target.closest('.pt-pillwrap')) { state.ptlMenu = false; render(); }
+    });
+    let timer;
+    window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(ptFit, 120); });
+  }
+}
+
+// ── CARD «SPRINT VS RECORD» ──────────────────────────────────────────
+// Un riquadro per ognuno dei sette passi: sull'asse X i giorni dal primo avvio dell'app, sull'asse Y la % di
+// persone arrivate al passo entro quel giorno. Linea bianca = lo sprint scelto, linea grigia a tratti = lo sprint
+// che detiene il record di quel passo. Base unica: chi ha aperto l'app nella finestra dello sprint, la stessa coorte
+// del Funnel onboarding. I dati sono quelli di kpi_sprint_curves (letta dalla cache): per ogni sprint e passo, giorno
+// per giorno, quanti sono arrivati al passo e quanti erano ancora osservabili.
+const SCORE_KPIS = [
+  { k: 'home',   name: 'Arrivo in Home',    short: 'Home' },
+  { k: 'detail', name: 'Dettaglio workout', short: 'Dettaglio' },
+  { k: 'w1',     name: '1 workout',         short: '1 workout' },
+  { k: 'w2',     name: '2 workout',         short: '2 workout' },
+  { k: 'w3',     name: '3 workout',         short: '3 workout' },
+  { k: 'trial',  name: 'Prova gratuita',    short: 'Prova' },
+  // ogni passo conta entro 14 giorni dal primo avvio; il primo addebito entro 21 (fino a 14 per
+  // iniziare la prova + 7 di prova). Stesso tempo per tutti: altrimenti vince lo sprint più vecchio.
+  { k: 'paid',   name: 'Premium pagante',   short: 'Pagante', days: 21 },
+];
+// Per fare il record uno sprint dev'essere dalla beta, con almeno 100 persone e finito da almeno
+// 14 giorni (21 per «Premium pagante»): prima la finestra di qualcuno è ancora aperta e i numeri crescono.
+const SCORE_MIN_BASE = 100;
+// La curva di uno sprint si ferma al primo giorno in cui le persone con tanti giorni di vita sono meno di 30.
+const SCORE_MIN_CURVE = 30;
+const scoreMature = (s, kpi) => s.age_days >= (kpi.days || 14);
+const scorePct    = v => (v * 100).toLocaleString('it-IT', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const scoreDay    = d => String(d).split('-').reverse().slice(0, 2).join('/');
+const scoreLabel  = s => `${s.nome} · ${scoreDay(s.inizio)}–${scoreDay(s.fine)}`;
+// z-test a due proporzioni al 95%: true se la differenza fra i due sprint può essere solo rumore.
+// (La sovrapposizione degli intervalli di Wilson era troppo prudente: +8 punti su 257 contro 989
+// persone risultava «in linea».)
+function scoreSame(k1, n1, k2, n2) {
+  if (!n1 || !n2) return true;
+  const p = (k1 + k2) / (n1 + n2);
+  const se = Math.sqrt(p * (1 - p) * (1 / n1 + 1 / n2));
+  return se === 0 || Math.abs(k1 / n1 - k2 / n2) / se < 1.96;
+}
+// Uno sprint tutto dentro la finestra di uno più lungo (es. «Sprint 12 - Test» dentro «Sprint 12»)
+// conta le stesse persone due volte: resta selezionabile ma non concorre al record.
+function scoreIsSub(s, all) {
+  return all.some(o => o.id !== s.id && o.inizio <= s.inizio && o.fine >= s.fine && (o.inizio < s.inizio || o.fine > s.fine));
+}
+// Di default si analizza lo sprint iniziato più di recente; se ha ancora meno di 30 persone
+// (appena partito) quello prima, che ha già numeri da leggere.
+function scoreDefaultSel(rows) {
+  const started = rows.filter(s => s.inizio <= TODAY && s.base > 0);
+  if (!started.length) return rows[rows.length - 1]?.id ?? null;
+  const last = started[started.length - 1];
+  return last.base < 30 && started.length > 1 ? started[started.length - 2].id : last.id;
+}
+
+// Curva di un passo: per ogni giorno d, la sopravvivenza si moltiplica per (1 − nuovi arrivati / osservabili non
+// ancora arrivati) e il valore è 1 − sopravvivenza. Così una curva non scende mai, anche per gli sprint in corso, dove
+// non tutti hanno gli stessi giorni di vita. Ogni punto è [persone arrivate, persone osservabili a quel giorno].
+function scoreCurve(s, k, xmax) {
+  const steps = (s.steps && s.steps[k]) || [];
+  const out = [];
+  let surv = 1;
+  for (let d = 0; d <= xmax; d++) {
+    const el = (s.elig && s.elig[d]) || 0;
+    if (el < SCORE_MIN_CURVE) break;
+    if (d) {
+      const p = steps[d - 1];
+      if (p && p[1] > 0) surv *= 1 - p[0] / p[1];
+    }
+    out.push([(1 - surv) * el, el]);
+  }
+  return out;
+}
+const scoreXmax = kpi => kpi.days || 14;
+// Valore finale di uno sprint già maturo (tutti hanno almeno 14 giorni di vita: la curva coincide con arrivati/persone).
+function scoreFinal(s, kpi) {
+  const c = scoreCurve(s, kpi.k, scoreXmax(kpi));
+  const last = c[c.length - 1];
+  return last ? last[0] / last[1] : 0;
+}
+// Scala Y stretta sul dato: il primo passo "tondo" che dà al massimo 4 righe.
+function scoreAxis(maxPct) {
+  const mx = Math.max(maxPct, 0.5);
+  const step = [0.25, 0.5, 1, 2, 5, 10, 20, 25, 50].find(q => mx / q <= 4) || 50;
+  return { step, top: step * Math.ceil(mx / step) };
+}
+
+// Misure del grafico di un riquadro (viewBox 270 × 122, copiate dalla tavola «1 - Giorno per giorno»).
+const SB = { w: 270, h: 122, x0: 34, x1: 264, yt: 6, yb: 94 };
+let sbNow = null;
+let sbTiles = [];   // ciò che serve al passaggio del mouse, ricostruito a ogni disegno
+
+// Costruisce il riquadro di un passo: curve, ultimo giorno con dati, scarto dal record allo stesso giorno, verdetto.
+function scoreTile(kpi, now, fixed, rows) {
+  const xmax = scoreXmax(kpi);
+  const pool = rows.filter(s => s.inizio >= BETA_START && s.base >= SCORE_MIN_BASE && scoreMature(s, kpi) && !scoreIsSub(s, rows));
+  let ref = fixed, best = -1;
+  if (!ref) for (const s of pool) { const v = scoreFinal(s, kpi); if (v > best) { best = v; ref = s; } }
+  const sc = scoreCurve(now, kpi.k, xmax);
+  const rc = ref ? scoreCurve(ref, kpi.k, xmax) : [];
+  const t = { kpi, xmax, ref, rc, sc, D: sc.length - 1, v: null, b: null, sim: null };
+  if (!sc.length) return t;
+  const [ks0, ns0] = sc[t.D];
+  t.v = ks0 / ns0;
+  if (rc.length) {
+    const [kr, nr] = rc[Math.min(t.D, rc.length - 1)];
+    t.b = kr / nr;
+    // il verdetto pesa lo sprint su chi ha almeno un giorno di vita, non sulle poche persone dell'ultimo giorno
+    const n1 = now.elig[Math.min(1, t.D)] || ns0;
+    t.sim = scoreSame(t.v * n1, n1, kr, nr) ? 'eq' : (t.v > t.b ? 'up' : 'dn');
+  }
+  return t;
+}
+
+const SB_COL = { dn: '#f87171', eq: '#ffffff', up: '#4ade80' };
+
+// SVG di un riquadro. Senza `t` (caricamento) disegna solo la griglia.
+function scoreSvg(t) {
+  const { x0, x1, yt, yb } = SB;
+  const xmax = t ? t.xmax : 14;
+  const pc = c => c.map(([a, n]) => a * 100 / n);
+  const mx = t ? Math.max(0, ...pc(t.sc), ...pc(t.rc)) : 100;
+  const { step, top } = scoreAxis(mx);
+  const x = q => x0 + q * (x1 - x0) / xmax;
+  const y = q => yb - q / top * (yb - yt);
+  let g = '';
+  for (let q = 0; q <= Math.round(top / step); q++) {
+    const yy = y(q * step).toFixed(1);
+    g += `<line x1="${x0 - 4}" x2="${x1 + 4}" y1="${yy}" y2="${yy}" class="sbr-gh"/>`
+      + `<text x="26" y="${(+yy + 4).toFixed(1)}" text-anchor="end" class="sbr-tk">${(q * step).toLocaleString('it-IT', { maximumFractionDigits: 2 })}</text>`;
+  }
+  for (let q = 0; q <= xmax; q++) {
+    g += `<line x1="${x(q).toFixed(1)}" x2="${x(q).toFixed(1)}" y1="${yb}" y2="${yb + (q % 7 === 0 ? 7 : 4)}" class="sbr-gt"/>`;
+    if (q % 7 === 0) g += `<text x="${x(q).toFixed(1)}" y="${yb + 21}" text-anchor="middle" class="sbr-tk">${q}</text>`;
+  }
+  if (!t) return `<svg class="sbr-svg" viewBox="0 0 ${SB.w} ${SB.h}" aria-hidden="true">${g}</svg>`;
+  const pts = c => c.map(([a, n], q) => `${x(q).toFixed(1)},${y(a * 100 / n).toFixed(1)}`).join(' ');
+  if (t.rc.length) g += `<polyline points="${pts(t.rc)}" class="sbr-lr"/>`;
+  if (t.sc.length) {
+    g += `<polyline points="${pts(t.sc)}" class="sbr-ls"/>`
+      + `<circle cx="${x(t.D).toFixed(1)}" cy="${y(t.v * 100).toFixed(1)}" r="6" fill="${SB_COL[t.sim || 'eq']}" class="sbr-end"/>`;
+  }
+  t.geo = { x0, x1, xmax, top };
+  return `<svg class="sbr-svg" viewBox="0 0 ${SB.w} ${SB.h}" role="img" aria-label="${esc(t.kpi.name)}: giorni dal primo avvio e percentuale di persone arrivate al passo">${g}`
+    + `<circle class="sbr-hv" r="5.5"/><rect class="sbr-hit" x="${x0 - 8}" y="${yt - 6}" width="${x1 - x0 + 16}" height="${yb - yt + 12}"/></svg>`;
+}
+
+function scoreTileHtml(t, i) {
+  const { kpi } = t;
+  let big = '—', day = '', delta = '';
+  if (t.sc.length) {
+    big = scorePct(t.v) + '%';
+    day = `giorno ${t.D}`;
+    if (t.sim === 'eq') delta = '<span class="sbr-dl sbr-eq">in linea</span>';
+    else if (t.sim) delta = `<span class="sbr-dl sbr-${t.sim}">${t.v > t.b ? '+' : '−'}${scorePct(Math.abs(t.v - t.b))} pt</span>`;
+  }
+  return `<div class="sbr-tile" data-sbr-i="${i}">
+    <div class="sbr-r1"><span class="sbr-nm">${kpi.short}</span><span class="sbr-day">${day}</span></div>
+    <div class="sbr-r2"><span class="sbr-big${t.sc.length ? '' : ' sbr-nil'}">${big}</span>${delta}</div>
+    ${scoreSvg(t)}<div class="sbr-tip"></div></div>`;
+}
+
+function scoreSummaryHtml(tiles) {
+  const n = { dn: 0, eq: 0, up: 0 };
+  tiles.forEach(t => { if (t.sim) n[t.sim]++; });
+  const dash = '<svg width="18" height="18" aria-hidden="true"><line x1="0" x2="18" y1="9" y2="9" stroke="#9ca3af" stroke-width="2.5" stroke-dasharray="5 4"/></svg>';
+  const solid = '<svg width="18" height="18" aria-hidden="true"><line x1="0" x2="18" y1="9" y2="9" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/></svg>';
+  return `<div class="sbr-tile sbr-sum">
+    <div class="sbr-sbig${n.dn ? '' : ' sbr-nil'}">${n.dn}</div><div class="sbr-slab">sotto il record</div>
+    <div class="sbr-cnt"><span><i style="background:#9ca3af"></i>${n.eq} in linea</span><span><i style="background:#4ade80"></i>${n.up} sopra</span></div>
+    <div class="sbr-leg"><span>${solid}Sprint</span><span>${dash}Record</span></div>
+    <div class="sbr-axn">Asse X: giorni dal primo avvio</div></div>`;
+}
+
+function scoreHead(rows, now, fixed) {
+  const chev = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  if (!rows || !now) {
+    return `<div class="sbr-head"><h2 class="sbr-title">Sprint vs record</h2><span class="pt-pill pt-pill-sk"></span></div>`;
+  }
+  const menu = (kind, items, cur) => state.scoreMenu === kind
+    ? `<div class="pt-menu" role="listbox">${items.map(([id, label]) => `<button class="pt-opt${id === cur ? ' pt-sel' : ''}" role="option" data-sbr-${kind}="${esc(id)}"><span class="pt-optdot"></span>${esc(label)}</button>`).join('')}</div>` : '';
+  const list = [...rows].reverse().map(s => [s.id, scoreLabel(s)]);
+  const prov = now.age_days < 14 ? ' · provvisorio' : '';
+  return `<div class="sbr-head"><h2 class="sbr-title">${fixed ? 'Sprint a confronto' : 'Sprint vs record'}</h2>
+    <div class="pt-pillwrap sbr-w1"><button class="pt-pill" data-sbr-menu="sel" aria-haspopup="listbox" aria-expanded="${state.scoreMenu === 'sel'}" aria-label="Sprint da analizzare"><span>${esc(scoreLabel(now))}</span>${chev}</button>${menu('sel', list, now.id)}</div>
+    <span class="sbr-vs">vs</span>
+    <div class="pt-pillwrap sbr-w2"><button class="pt-pill sbr-pill2" data-sbr-menu="ref" aria-haspopup="listbox" aria-expanded="${state.scoreMenu === 'ref'}" aria-label="Confronta con"><span>${fixed ? esc(fixed.nome) : 'Il migliore'}</span>${chev}</button>${menu('ref', [['best', 'Il migliore'], ...list], fixed ? fixed.id : 'best')}</div>
+    <span class="sbr-pers">${now.base.toLocaleString('it-IT')} ${now.base === 1 ? 'persona' : 'persone'}${prov}</span>
+    ${state.scoreboardCache ? `<span class="sbr-upd">${kcMark(state.scoreboardCache)}</span>` : ''}</div>`;
+}
+
+function sprintScoreboardCard() {
+  const rows = state.scoreboard;
+  const shell = (head, body) => `<section class="sbr-card">${head}${body}</section>`;
+  if (state.scoreboardError && !rows) {
+    return shell(scoreHead(null), `<div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-sbr-retry>Riprova</button></div>`);
+  }
+  if (!rows) {
+    sbTiles = [];
+    const sk = SCORE_KPIS.map(kpi => `<div class="sbr-tile"><div class="sbr-r1"><span class="sbr-nm">${kpi.short}</span></div>
+      <div class="sbr-r2"><span class="pt-sk sbr-sk"></span></div>${scoreSvg(null)}</div>`).join('');
+    return shell(scoreHead(null), `<div class="sbr-grid sbr-loading" aria-busy="true">${sk}</div>`);
+  }
+  if (!rows.length) {
+    return shell(scoreHead(null), `<div class="pt-err sbr-none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <div class="pt-err-t">Nessuno sprint</div><div class="sbr-sub">Creane uno dalla pagina Sprint.</div></div>`);
+  }
+
+  if (!rows.some(s => s.id === state.scoreSel)) state.scoreSel = scoreDefaultSel(rows);
+  if (state.scoreRef !== 'best' && !rows.some(s => s.id === state.scoreRef)) state.scoreRef = 'best';
+  const now   = rows.find(s => s.id === state.scoreSel);
+  const fixed = state.scoreRef === 'best' ? null : rows.find(s => s.id === state.scoreRef);
+  const tiles = SCORE_KPIS.map(kpi => scoreTile(kpi, now, fixed, rows));
+  sbTiles = tiles; sbNow = now;
+  let note = '';
+  if (!now.base) note = 'Nessuno ha ancora aperto l’app in questo sprint: i grafici si riempiono con le prime persone.';
+  else if (now.base < SCORE_MIN_CURVE) note = `Meno di ${SCORE_MIN_CURVE} persone: il grafico parte quando sono abbastanza.`;
+  return shell(scoreHead(rows, now, fixed), (note ? `<div class="sbr-note">${note}</div>` : '')
+    + `<div class="sbr-grid">${tiles.map((t, i) => scoreTileHtml(t, i)).join('')}${scoreSummaryHtml(tiles)}</div>`);
+}
+
+// Gestori della card: menu degli sprint, «Riprova» e dato al passaggio del mouse (o al tocco) sul grafico.
+let sbGlobals = false;
+function attachSprintRecord() {
+  document.querySelectorAll('[data-sbr-menu]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation(); const k = el.dataset.sbrMenu; state.scoreMenu = state.scoreMenu === k ? null : k; render();
+  }));
+  document.querySelectorAll('[data-sbr-sel]').forEach(el => el.addEventListener('click', () => {
+    state.scoreSel = el.dataset.sbrSel; state.scoreMenu = null; render();
+  }));
+  document.querySelectorAll('[data-sbr-ref]').forEach(el => el.addEventListener('click', () => {
+    state.scoreRef = el.dataset.sbrRef; state.scoreMenu = null; render();
+  }));
+  document.querySelector('[data-sbr-retry]')?.addEventListener('click', () => {
+    state.scoreboardError = null; state.scoreboard = null; render(); fetchScoreboard(true);
+  });
+  const grid = document.querySelector('.sbr-grid');
+  if (grid) {
+    const clear = () => grid.querySelectorAll('.sbr-on').forEach(el => el.classList.remove('sbr-on'));
+    const move = ev => {
+      const hit = ev.target.closest && ev.target.closest('.sbr-hit');
+      clear();
+      if (!hit) return;
+      const tile = hit.closest('.sbr-tile'), t = sbTiles[+tile.dataset.sbrI];
+      if (!t || !t.geo) return;
+      const svg = hit.ownerSVGElement, r = svg.getBoundingClientRect(), tr = tile.getBoundingClientRect();
+      const k = SB.w / r.width, { x0, x1, xmax, top } = t.geo;
+      const sx = (ev.clientX - r.left) * k, sy = (ev.clientY - r.top) * k;
+      const d = Math.max(0, Math.min(xmax, Math.round((sx - x0) / ((x1 - x0) / xmax))));
+      const yOf = c => SB.yb - (c[0] * 100 / c[1]) / top * (SB.yb - SB.yt);
+      // il punto più vicino al cursore fra la linea dello sprint e quella del record
+      const cand = [];
+      if (t.sc[d]) cand.push({ c: t.sc[d], name: sbNow.nome, rec: false });
+      if (t.rc[d]) cand.push({ c: t.rc[d], name: t.ref.nome, rec: true });
+      if (!cand.length) return;
+      cand.sort((a, b) => Math.abs(yOf(a.c) - sy) - Math.abs(yOf(b.c) - sy));
+      const pick = cand[0], px = x0 + d * (x1 - x0) / xmax, py = yOf(pick.c);
+      const hv = svg.querySelector('.sbr-hv');
+      hv.setAttribute('cx', px.toFixed(1)); hv.setAttribute('cy', py.toFixed(1)); hv.classList.add('sbr-on');
+      const tip = tile.querySelector('.sbr-tip');
+      tip.innerHTML = `<b>Giorno ${d} · ${scorePct(pick.c[0] / pick.c[1])}%</b><span>${pick.rec ? 'Record · ' : ''}${esc(pick.name)}</span>`;
+      tip.classList.add('sbr-on');
+      const tw = tip.offsetWidth, left = (r.left - tr.left) + px / k + 14;
+      tip.style.left = Math.max(0, Math.min(left, tr.width - tw)) + 'px';
+      tip.style.top = Math.max(0, (r.top - tr.top) + py / k - 58) + 'px';
+    };
+    grid.addEventListener('mousemove', move);
+    grid.addEventListener('click', move);
+    grid.addEventListener('mouseleave', clear);
+  }
+  if (!sbGlobals) {
+    sbGlobals = true;
+    document.addEventListener('click', ev => {
+      if (state.scoreMenu && !ev.target.closest('.sbr-head .pt-pillwrap')) { state.scoreMenu = null; render(); }
+    });
+  }
+}
+
+// ── PAGINA «GOAL» ───────────────────────────────────────────────────────
+// Per ogni passo: il record (o lo sprint scelto nel «vs»), lo sprint analizzato e l'obiettivo, con le persone sotto.
+// Numeri da kpi_goal_board (cache 'goal_board'/'all'), stessa coorte e stesse finestre di «Sprint vs record».
+// L'obiettivo è uno per tutti gli operatori: vive in kpi_settings.goals e si cambia al clic sul numero
+// (kpi_goal_set aggiorna un passo alla volta, così due modifiche contemporanee non si cancellano).
+// Senza obiettivo salvato vale la proposta, tratteggiata: la media delle app di fitness dove c'è una fonte
+// primaria, altrimenti il record migliorato del 10%. Il bollino ha solo due esiti: obiettivo raggiunto oppure
+// i punti che mancano (decisione di Mattia, 11/10/2026: niente «in linea», niente «in corso»).
+const GOAL_GROUPS = [
+  { name: 'Attivazione', kpis: [
+    { k: 'ob_done', name: 'Finiscono il questionario' },
+    { k: 'home',    name: 'Arrivano in Home' },
+    { k: 'detail',  name: 'Vedono il workout' },
+    { k: 'start',   name: 'Iniziano il workout' },
+    { k: 'w1',      name: 'Finiscono il 1° workout' },
+  ] },
+  { name: 'Pagamento', kpis: [
+    { k: 'trial', name: 'Iniziano la prova' },
+    { k: 'paid',  name: 'Pagano' },
+  ] },
+  { name: 'Abitudine', kpis: [
+    { k: 'd1',    name: 'Tornano il giorno dopo' },
+    { k: 'd7',    name: 'Tornano il 7° giorno' },
+    { k: 'coach', name: 'Scrivono al coach' },
+    { k: 'w2',    name: 'Finiscono il 2° workout' },
+    { k: 'w3',    name: 'Finiscono il 3° workout' },
+    { k: 'meal',  name: 'Scansionano i pasti' },
+  ] },
+];
+// Mediane di settore, solo fonti primarie: RevenueCat «State of Subscription Apps 2026» (Health & Fitness,
+// installazione → prova; installazione → pagamento su Google Play) e AppsFlyer Benchmarks (Fitness, Android,
+// Italia, media di 4 trimestri fino a giugno 2026) per il ritorno al giorno 1 e al giorno 7.
+const GOAL_INDUSTRY = { trial: 0.069, paid: 0.0157, d1: 0.216, d7: 0.101 };
+let glToastTimer = null;
+
+const glRate = (s, k) => (s && s[k] != null && s.base ? s[k] / s.base : null);
+const glPct  = v => (v * 100).toLocaleString('it-IT', { minimumFractionDigits: v > 0 && v < 0.01 ? 2 : 1, maximumFractionDigits: v > 0 && v < 0.01 ? 2 : 1 }) + '%';
+const glGoalPct = v => (v * 100).toLocaleString('it-IT', { maximumFractionDigits: 2 }) + '%';
+const glPt  = d => (d * 100).toLocaleString('it-IT', { minimumFractionDigits: d < 0.01 ? 2 : 1, maximumFractionDigits: d < 0.01 ? 2 : 1 });
+const glNum = n => Number(n).toLocaleString('it-IT');
+// «S12». Un sotto-sprint con lo stesso numero di quello che lo contiene (es. «sprint 15 - Post onboarding» dentro
+// «Sprint 15») prende anche la data d'inizio, così i due non si confondono; lo sprint principale resta «S15».
+function glShort(s, rows) {
+  const n = (String(s.nome || '').match(/\d+/) || [])[0];
+  if (!n) return esc(s.nome);
+  const twin = scoreIsSub(s, rows) && rows.some(o => o.id !== s.id && (String(o.nome || '').match(/\d+/) || [])[0] === n);
+  return 'S' + n + (twin ? ' · dal ' + fnDM(s.inizio) : '');
+}
+// Record = lo sprint migliore fra quelli della beta con almeno 100 persone e che non stanno dentro un altro sprint.
+// Senza attesa di maturazione: conta il numero di oggi (a parità vince il più recente).
+function glRecord(rows, k) {
+  let best = null;
+  for (const s of rows) {
+    if (s.inizio < BETA_START || s.base < SCORE_MIN_BASE || scoreIsSub(s, rows) || s[k] == null || !(s[k] > 0)) continue;
+    const v = glRate(s, k);
+    if (!best || v > best.v || (v === best.v && s.inizio > best.s.inizio)) best = { s, v };
+  }
+  return best;
+}
+function glGoal(k, rec) {
+  const g = state.goals && state.goals[k];
+  if (g && typeof g.v === 'number') return { v: g.v, saved: true };
+  if (GOAL_INDUSTRY[k] != null) return { v: GOAL_INDUSTRY[k], saved: false };
+  return rec ? { v: Math.min(1, Math.ceil(rec.v * 1.1 * 1000) / 1000), saved: false } : null;
+}
+function glStatus(v, g) {
+  if (v == null) return { st: 'none', badge: 'non misurato' };
+  if (g == null) return { st: 'none', badge: 'senza obiettivo' };
+  if (v >= g) return { st: 'good', badge: '✓ obiettivo' };
+  return { st: v / g >= 0.75 ? 'mid' : 'bad', badge: '▼ ' + glPt(g - v) + ' pt' };
+}
+
+function glTile(kpi, now, fixed, rows) {
+  const k = kpi.k, v = glRate(now, k), rec = glRecord(rows, k), goal = glGoal(k, rec);
+  const ref = fixed ? { s: fixed, v: glRate(fixed, k) } : rec;
+  const st = glStatus(v, goal && goal.v);
+  const left = ref && ref.s
+    ? `<span class="gl-who">${fixed ? 'Confronto' : 'Record'} · <b>${glShort(ref.s, rows)}</b></span>
+       <span class="gl-val ${ref.v == null ? 'gl-c-none' : 'gl-c-ref'}">${ref.v == null ? '—' : glPct(ref.v)}</span>
+       <span class="gl-n">${ref.v == null ? 'non misurato' : `${glNum(ref.s[k])}/${glNum(ref.s.base)}`}</span>`
+    : `<span class="gl-who">Record</span><span class="gl-val gl-c-none">—</span><span class="gl-n">nessuno sprint</span>`;
+  const editing = state.goalEdit && state.goalEdit.k === k;
+  const goalCell = editing
+    ? `<span class="gl-edit"><input id="gl-goal-input" class="gl-input" type="text" inputmode="decimal" autocomplete="off"
+         value="${esc(state.goalEdit.text)}" aria-label="Obiettivo per «${esc(kpi.name)}», in percentuale"><span class="gl-suf">%</span></span>`
+    : `<button type="button" class="gl-goal${goal && !goal.saved ? ' gl-goal-prop' : ''}" data-gl-edit="${k}"
+         title="${goal && goal.saved ? 'Clic per cambiare l\'obiettivo' : 'Proposta: clic per fissarla o cambiarla'}"
+         aria-label="Obiettivo per «${esc(kpi.name)}»: ${goal ? glGoalPct(goal.v) : 'nessuno'}. Modifica">${goal ? glGoalPct(goal.v) : '—'}</button>`;
+  let need = '', foot = '';
+  if (goal && v != null && now.base) {
+    const want = Math.ceil(goal.v * now.base - 1e-9), d = want - now[k];
+    need = `${glNum(want)}/${glNum(now.base)}`;
+    foot = d > 0 ? `Mancano <b>${glNum(d)}</b> ${d === 1 ? 'persona' : 'persone'} all'obiettivo`
+      : d === 0 ? 'Obiettivo preso in pieno'
+      : `<b>${glNum(-d)}</b> ${-d === 1 ? 'persona' : 'persone'} oltre l'obiettivo`;
+  }
+  return `<div class="gl-tile">
+    <div class="gl-head"><span class="gl-title">${esc(kpi.name)}</span><span class="gl-badge gl-b-${st.st}">${st.badge}</span></div>
+    <div class="gl-trio">
+      <div class="gl-side">${left}</div>
+      <div class="gl-side">
+        <span class="gl-who"><b>${glShort(now, rows)}</b></span>
+        <span class="gl-val gl-c-${st.st}">${v == null ? '—' : glPct(v)}</span>
+        <span class="gl-n">${v == null ? 'non misurato' : `${glNum(now[k])}/${glNum(now.base)}`}</span>
+      </div>
+      <div class="gl-side">
+        <span class="gl-who">Obiettivo</span>
+        ${goalCell}
+        <span class="gl-n">${editing ? 'Invio per salvare' : need}</span>
+      </div>
+    </div>
+    ${foot ? `<div class="gl-foot">${foot}</div>` : ''}
+  </div>`;
+}
+
+// Chi ha cambiato l'ultimo obiettivo e quando: la prova che i numeri sono gli stessi per tutti e due.
+function glLastLine() {
+  const g = state.goals || {};
+  const n = GOAL_GROUPS.flatMap(x => x.kpis).filter(x => g[x.k] && typeof g[x.k].v === 'number').length;
+  if (!n && !g._last) return 'Nessun obiettivo fissato: quelli tratteggiati sono proposte, clicca il numero per fissarlo';
+  let txt = `${n} ${n === 1 ? 'obiettivo fissato' : 'obiettivi fissati'}, uguali per tutti`;
+  const last = g._last;
+  if (last && last.at) {
+    const who = String(last.by || '').split('@')[0] || 'qualcuno';
+    const at = new Date(last.at);
+    txt += ` · ultima modifica di ${esc(who)} il ${at.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })} alle ${at.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  return txt;
+}
+
+function pageGoal() {
+  if (state.goalBoardError && !state.goalBoard) {
+    return `<div class="card gl-headcard"><div class="card-title">Goal</div>
+      <div class="gl-note">${esc(state.goalBoardError)}</div>
+      <button class="btn-refresh gl-retry" data-gl-retry>Riprova</button></div>`;
+  }
+  if (!state.goalBoard) {
+    return `<div class="card gl-headcard"><div class="card-title">Goal</div><div class="gl-note pulse">Calcolo degli obiettivi…</div></div>`;
+  }
+  const rows = [...state.goalBoard].sort((a, b) => (a.inizio === b.inizio ? String(a.nome).localeCompare(String(b.nome)) : a.inizio < b.inizio ? -1 : 1));
+  if (!rows.length) return `<div class="card gl-headcard"><div class="card-title">Goal</div><div class="gl-note">Nessuno sprint dal 1° giugno.</div></div>`;
+  if (!rows.some(s => s.id === state.goalSel)) {
+    // di default lo sprint principale iniziato più di recente
+    const main = rows.filter(s => s.inizio <= TODAY && s.base > 0 && !scoreIsSub(s, rows));
+    state.goalSel = (main[main.length - 1] || rows[rows.length - 1]).id;
+  }
+  if (state.goalRef !== 'best' && !rows.some(s => s.id === state.goalRef)) state.goalRef = 'best';
+  const now = rows.find(s => s.id === state.goalSel);
+  const fixed = state.goalRef === 'best' ? null : rows.find(s => s.id === state.goalRef);
+  const newest = [...rows].reverse();
+  const opts = sel => newest.map(s => `<option value="${s.id}"${s.id === sel ? ' selected' : ''}>${esc(scoreLabel(s))}</option>`).join('');
+
+  let ok = 0, measured = 0;
+  for (const g of GOAL_GROUPS) for (const kpi of g.kpis) {
+    const v = glRate(now, kpi.k), goal = glGoal(kpi.k, glRecord(rows, kpi.k));
+    if (v == null || !goal) continue;
+    measured++;
+    if (v >= goal.v) ok++;
+  }
+
+  return `<div class="card gl-headcard">
+      <div class="gl-top">
+        <div class="gl-pick">
+          <select id="gl-sel" class="form-input" aria-label="Sprint da guardare">${opts(state.goalSel)}</select>
+          <span class="gl-vs">vs</span>
+          <select id="gl-ref" class="form-input gl-refsel" aria-label="Confronta con">
+            <option value="best"${state.goalRef === 'best' ? ' selected' : ''}>Il migliore</option>${opts(state.goalRef)}
+          </select>
+        </div>
+        <div class="gl-tally">
+          <span class="gl-tally-n${ok ? ' gl-c-good' : ''}">${ok}</span><span>su ${measured} obiettivi raggiunti</span>
+          ${measured - ok ? `<span class="gl-badge gl-b-bad">▼ ${measured - ok} sotto</span>` : ''}
+        </div>
+      </div>
+      <div class="gl-note">% su chi ha aperto l'app · ${glNum(now.base)} persone</div>
+      <div class="gl-note gl-last"><span>${glLastLine()}</span>${state.goalCache ? `<span>${kcMark(state.goalCache)}</span>` : ''}</div>
+    </div>
+    ${GOAL_GROUPS.map(g => `<div class="card gl-card">
+      <div class="card-title">${g.name}</div>
+      <div class="gl-grid" data-n="${g.kpis.length}">${g.kpis.map(kpi => glTile(kpi, now, fixed, rows)).join('')}</div>
+    </div>`).join('')}
+    ${state.goalToast ? `<div class="toast ${state.goalToast.err ? 'error' : 'success'}" role="status">${esc(state.goalToast.msg)}</div>` : ''}`;
+}
+
+function glToast(msg, err) {
+  state.goalToast = { msg, err: !!err };
+  render();
+  clearTimeout(glToastTimer);
+  glToastTimer = setTimeout(() => { state.goalToast = null; if (state.page === 'goal') render(); }, 2800);
+}
+
+// Scrittura dell'obiettivo: «6,9» o «6.9» = 6,9%; vuoto = si torna alla proposta. Resta in modifica se il numero non va.
+async function glSave(k, text) {
+  if (!state.goalEdit || state.goalEdit.k !== k || state.goalEdit.saving) return;
+  let raw = String(text || '').replace(/[%\s]/g, '');
+  if (raw.includes(',')) raw = raw.replace(/\./g, '').replace(',', '.');
+  let value = null;
+  if (raw !== '') {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0 || n > 100) { state.goalEdit.text = text; glToast('Scrivi una percentuale fra 0 e 100, per esempio 6,9', true); return; }
+    value = Math.round(n * 1000) / 100000;   // al centesimo di punto
+  }
+  const cur = state.goals && state.goals[k] && typeof state.goals[k].v === 'number' ? state.goals[k].v : null;
+  if (value === cur) { state.goalEdit = null; render(); return; }
+  // alla fine si chiude solo questo campo: nel frattempo può essersene aperto un altro
+  const edit = state.goalEdit;
+  edit.saving = true;
+  const { data, error } = await sb.rpc('kpi_goal_set', { p_kpi: k, p_value: value });
+  if (state.goalEdit === edit) state.goalEdit = null;
+  if (error) {
+    console.error('kpi_goal_set', error);
+    glToast('Obiettivo non salvato: riprova', true);
+    return;
+  }
+  state.goals = data && typeof data === 'object' ? data : {};
+  glToast(value == null ? 'Tornato alla proposta, per tutti' : 'Obiettivo salvato per tutti');
+}
+
+function attachGoal() {
+  if (state.page !== 'goal') return;
+  document.getElementById('gl-sel')?.addEventListener('change', e => { state.goalSel = e.target.value; state.goalEdit = null; render(); });
+  document.getElementById('gl-ref')?.addEventListener('change', e => { state.goalRef = e.target.value; render(); });
+  document.querySelector('[data-gl-retry]')?.addEventListener('click', () => {
+    state.goalBoardError = null; state.goalBoard = null; render(); fetchGoalBoard(true);
+  });
+  document.querySelectorAll('[data-gl-edit]').forEach(el => el.addEventListener('click', async () => {
+    const k = el.dataset.glEdit;
+    // un altro obiettivo era in modifica: prima si salva quello (se il numero non va, si resta lì)
+    const open = state.goalEdit;
+    if (open && open.k !== k && !open.saving) {
+      await glSave(open.k, open.text);
+      if (state.goalEdit === open) return;
+    }
+    const rows = state.goalBoard || [];
+    const goal = glGoal(k, glRecord(rows, k));
+    state.goalEdit = { k, text: goal ? (goal.v * 100).toLocaleString('it-IT', { maximumFractionDigits: 2 }) : '', saving: false, fresh: true };
+    render();
+  }));
+  // Un ridisegno (auto-refresh, dati arrivati) ricrea il campo con il testo già scritto: si rimette il cursore in fondo.
+  const input = document.getElementById('gl-goal-input');
+  if (input && state.goalEdit) {
+    const k = state.goalEdit.k;
+    input.focus();
+    if (state.goalEdit.fresh) { input.select(); state.goalEdit.fresh = false; }
+    else input.setSelectionRange(input.value.length, input.value.length);
+    input.addEventListener('input', () => { if (state.goalEdit) state.goalEdit.text = input.value; });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); glSave(k, input.value); }
+      if (e.key === 'Escape') { e.preventDefault(); state.goalEdit = null; render(); }
+    });
+    // Uscire dal campo salva (Escape azzera goalEdit prima, così il blur che segue non salva). Un ridisegno sostituisce il
+    // campo e il browser segnala il blur di quello vecchio: si guarda un attimo dopo, e se c'è già il campo nuovo non si salva.
+    input.addEventListener('blur', () => setTimeout(() => {
+      if (!state.goalEdit || state.goalEdit.k !== k || state.goalEdit.saving) return;
+      const live = document.getElementById('gl-goal-input');
+      if (live && (live !== input || document.activeElement === input)) return;
+      glSave(k, state.goalEdit.text);
+    }, 0));
+  }
+}
+
+// ── CARD «ATTIVAZIONE PER SPRINT» ───────────────────────────────────────
+// Per ogni sprint scelto, tre linee in % sulla stessa base: chi finisce l'onboarding ed entra in app (la prima
+// schermata dell'app, dopo l'eventuale paywall o registrazione). Attivati = allenamento finito O pasto salvato, una
+// persona conta una volta; premono Inizia; finiscono l'allenamento. Tutto entro 14 giorni dal primo avvio.
+// Numeri da kpi_sprint_activation (cache 'sprint_activation'/'all'), mai in diretta. Sopra il grafico due fasce
+// calcolate dai dati: se c'era il paywall a fine onboarding e su quale schermata si atterra per prima.
+const SA_MIN_BASE = 30;          // sotto: punto vuoto e niente etichette (regola dei grafici: niente curve su pochi dati)
+const SA_PAYWALL_SHARE = 0.5;    // dalla metà della base in su che ha visto il paywall → «Paywall»
+const SA_LANDING_SHARE = 0.7;    // una schermata d'arrivo vale per lo sprint se ci atterra almeno il 70%
+const SA_DEFAULT_N = 6;          // sprint accesi di default: gli ultimi sei principali
+// coo = attivati su chi ha aperto l'app (tasto «Dal primo avvio», spento di default)
+const SA_COL = { att: '#ffffff', ini: '#9ca3af', fin: '#4361ee', coo: '#fb8b04' };
+
+// Sprint 1 e 2 non hanno first_open: non si possono scegliere.
+function saSelectable(rows) { return rows.filter(r => r.coorte > 0); }
+function saDefaultSel(rows) { return rows.filter(r => r.principale && r.coorte > 0).slice(-SA_DEFAULT_N).map(r => r.id); }
+function saPct(n, base) { return base > 0 ? Math.round(n * 100 / base) : null; }
+// «S12», e per i sotto-sprint la prima parola dopo il numero: «S12 test», «S15 post», «S16 uomini».
+function saShort(row, narrow) {
+  if (row.numero == null) return String(row.nome).slice(0, 8);
+  if (row.principale || narrow) return 'S' + row.numero;
+  const word = String(row.nome).replace(/^\D*\d+\s*[-–·:]?\s*/, '').trim().split(/\s+/)[0] || '';
+  return ('S' + row.numero + ' ' + word.toLowerCase()).trim();
+}
+function saPhase(row) {
+  if (!row || row.base < SA_MIN_BASE) return null;
+  const paywall = row.paywall / row.base >= SA_PAYWALL_SHARE ? 'Paywall' : 'Senza paywall';
+  const l = row.landing || {}, tot = (l.home || 0) + (l.detail || 0) + (l.cibo || 0);
+  let landing = 'Misto';
+  if (tot > 0) {
+    const [name, n] = [['Home', l.home || 0], ['Dettaglio', l.detail || 0], ['Cibo', l.cibo || 0]].sort((a, b) => b[1] - a[1])[0];
+    if (n / tot >= SA_LANDING_SHARE) landing = name;
+  }
+  return { paywall, landing };
+}
+// Sprint vicini con la stessa etichetta condividono la fascia; uno sprint senza fase la spezza.
+function saBands(phases, key) {
+  const out = [];
+  phases.forEach((ph, i) => {
+    const label = ph ? ph[key] : null, last = out[out.length - 1];
+    if (!label) return;
+    if (last && last.label === label && last.to === i - 1) last.to = i;
+    else out.push({ from: i, to: i, label });
+  });
+  return out;
+}
+// Dove va l'etichetta di ogni valore: Inizia sopra, finiti sotto, attivati sopra o di lato se è vicino a Inizia.
+function saLabelSides(v) {
+  const s = { ini: 'up', fin: 'down', att: 'up' };
+  if (v.fin > v.ini) { s.fin = 'up'; s.ini = 'down'; }
+  if (Math.abs(v.att - v.ini) < 6) s.att = 'right';
+  // dal primo avvio: sotto i finiti se c'è spazio, sopra se li supera, a sinistra quando è troppo vicina
+  if (v.coo != null) {
+    if (v.coo >= v.fin) s.coo = Math.abs(v.att - v.coo) < 12 || v.coo - v.fin < 6 ? 'left' : 'up';
+    else s.coo = v.fin - v.coo >= 6 ? 'down' : 'left';
+  }
+  return s;
+}
+function saSelected(rows) {
+  const ids = Array.isArray(state.saSel) ? state.saSel : saDefaultSel(rows);
+  return ids.filter(id => rows.some(r => r.id === id && r.coorte > 0));
+}
+// Testo di una fascia: intero, accorciato o niente se non ci sta (12 px, circa 7 px per lettera).
+function saBandText(label, w) {
+  const SHORT = { 'Senza paywall': 'No paywall', Dettaglio: 'Dett.', Paywall: 'Pw', Home: 'Home', Cibo: 'Cibo', Misto: 'Misto' };
+  if (label.length * 7 + 10 <= w) return label;
+  const s = SHORT[label] || '';
+  return s && s.length * 7 + 10 <= w ? s : '';
+}
+
+function saChart(rows, W, phasesOn, coorteOn) {
+  const narrow = W < 600;
+  const bandH = phasesOn && rows ? 22 : 0;
+  const top = bandH ? bandH * 2 + 26 : 14, plotH = narrow ? 200 : 260, xLab = narrow ? 28 : 44;
+  const H = top + plotH + xLab;
+  const x0 = narrow ? 38 : 46, x1 = W - 12;
+  const n = rows ? rows.length : SA_DEFAULT_N, step = (x1 - x0) / n;
+  const X = i => x0 + step * (i + 0.5);
+  const Y = v => top + plotH - v / 100 * plotH;
+  let s = `<svg class="sa-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Attivazione per sprint">`;
+  [0, 20, 40, 60, 80, 100].forEach(v => {
+    s += `<line class="pt-gh" x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}"/><text class="sa-tk" x="${x0 - 8}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
+  });
+  if (!rows) return s + '</svg>';
+  for (let i = 1; i < n; i++) s += `<line class="sa-sep" x1="${x0 + step * i}" x2="${x0 + step * i}" y1="${bandH ? 8 : top}" y2="${top + plotH}"/>`;
+  if (bandH) {
+    const ph = rows.map(saPhase);
+    [['paywall', 8], ['landing', 8 + bandH + 6]].forEach(([key, y]) => saBands(ph, key).forEach(b => {
+      const bx = x0 + step * b.from + 3, bw = step * (b.to - b.from + 1) - 6;
+      const t = saBandText(b.label, bw);
+      s += `<rect class="sa-band${key === 'paywall' && b.label === 'Paywall' ? ' sa-band-pw' : ''}" x="${bx}" y="${y}" width="${bw}" height="${bandH}" rx="6"/>`
+        + (t ? `<text class="sa-band-t" x="${bx + bw / 2}" y="${y + bandH / 2 + 4}" text-anchor="middle">${esc(t)}</text>` : '');
+    }));
+  }
+  const pts = rows.map((r, i) => ({
+    r, i, x: X(i), ok: r.base > 0, few: r.base < SA_MIN_BASE,
+    v: { att: saPct(r.attivati, r.base), ini: saPct(r.inizia, r.base), fin: saPct(r.finisce, r.base),
+         ...(coorteOn ? { coo: saPct(r.attivati_coorte || 0, r.coorte) } : {}) },
+  }));
+  const showLbl = step >= 40;
+  // Inizia e finiti prima, attivati per ultimi: se due valori coincidono si vede il bianco
+  (coorteOn ? ['coo', 'ini', 'fin', 'att'] : ['ini', 'fin', 'att']).forEach(k => {
+    let seg = [];
+    const flush = () => { if (seg.length > 1) s += `<polyline class="sa-ln sa-ln-${k}" points="${seg.join(' ')}"/>`; seg = []; };
+    pts.forEach(p => { if (p.ok) seg.push(`${p.x.toFixed(1)},${Y(p.v[k]).toFixed(1)}`); else flush(); });
+    flush();
+    pts.filter(p => p.ok).forEach(p => {
+      const y = Y(p.v[k]);
+      s += `<circle class="sa-pt${p.few ? ' sa-hollow' : ''}" cx="${p.x.toFixed(1)}" cy="${y.toFixed(1)}" r="${k === 'att' ? 5.5 : 4.5}" style="--c:${SA_COL[k]}"/>`;
+      if (!showLbl || p.few) return;
+      const side = saLabelSides(p.v)[k];
+      const lx = side === 'right' ? p.x + 7 : side === 'left' ? p.x - 7 : p.x, ly = side === 'up' ? y - 11 : side === 'down' ? y + 20 : y + 4;
+      s += `<text class="sa-lbl${k === 'att' ? ' sa-lbl-att' : ''}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${side === 'right' ? 'start' : side === 'left' ? 'end' : 'middle'}" fill="${SA_COL[k]}">${p.v[k]}%</text>`;
+    });
+  });
+  pts.forEach(p => {
+    const r = p.r, prov = r.age_days < 14;
+    s += `<text class="sa-tk sa-xl${prov ? ' sa-prov' : ''}" x="${p.x.toFixed(1)}" y="${top + plotH + 18}" text-anchor="middle">${esc(saShort(r, narrow || step < 70))}</text>`;
+    if (!narrow) s += `<text class="sa-tk sa-xd" x="${p.x.toFixed(1)}" y="${top + plotH + 34}" text-anchor="middle">${ddmm(String(r.inizio))}</text>`;
+    const tip = `${r.nome} · ${r.base.toLocaleString('it-IT')} ${r.base === 1 ? 'persona' : 'persone'}`
+      + (p.ok ? ` · attivati ${r.attivati} (${p.v.att}%) · Inizia ${r.inizia} (${p.v.ini}%) · finiscono ${r.finisce} (${p.v.fin}%)` : '')
+      + (coorteOn && p.ok ? ` · dal primo avvio ${r.attivati_coorte || 0} su ${r.coorte} (${p.v.coo}%)` : '')
+      + (p.few && p.ok ? ' · pochi dati' : '') + (prov ? ' · provvisorio' : '');
+    s += `<rect class="sa-hit" x="${(x0 + step * p.i).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${H}"><title>${esc(tip)}</title></rect>`;
+  });
+  return s + '</svg>';
+}
+
+// Segno di una serie nella legenda: linea col pallino (tratteggiata per «dal primo avvio») o punto vuoto.
+function saSwatch(k) {
+  if (k === 'few') return `<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>`;
+  const dash = k === 'coo' ? ' stroke-dasharray="6 4"' : ' stroke-linecap="round"';
+  return `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${SA_COL[k]}" stroke-width="${k === 'att' ? 3 : 2.5}"${dash}/><circle cx="15" cy="7" r="4" fill="${SA_COL[k]}"/></svg>`;
+}
+// Sprint d'esempio della legenda completa: l'ultimo dei mostrati coi numeri chiusi (14 giorni) e abbastanza persone.
+function saExample(rows) {
+  return [...rows].reverse().find(r => r.age_days >= 14 && r.base >= SA_MIN_BASE) || null;
+}
+
+// Legenda: la riga corta, con la freccia che apre sotto la legenda completa (cosa conta ogni linea e su chi).
+function saLegend(coorteOn, rows) {
+  const open = !!state.saLegend;
+  const chev = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const short = `<div class="pt-legend sa-legend" data-sa-legend><span>${saSwatch('att')}attivati: allenamento o pasto, una persona conta una volta</span>`
+    + `<span>${saSwatch('ini')}premono Inizia</span><span>${saSwatch('fin')}finiscono l'allenamento</span>`
+    + (coorteOn ? `<span>${saSwatch('coo')}attivati su chi ha aperto l'app</span>` : '')
+    + `<span>${saSwatch('few')}meno di ${SA_MIN_BASE} persone</span>`
+    + `<button class="sa-lg-btn${open ? ' pt-on' : ''}" aria-expanded="${open}" aria-controls="sa-lg-full" aria-label="${open ? 'Chiudi' : 'Apri'} la legenda completa" title="Legenda completa">${chev}</button></div>`;
+  if (!open) return short;
+  const ex = saExample(rows);
+  const eg = (n, d) => ex && d > 0
+    ? `<p class="sa-lg-eg">In ${esc(saShort(ex))}: ${n.toLocaleString('it-IT')} su ${d.toLocaleString('it-IT')}, cioè ${saPct(n, d)} su 100.</p>` : '';
+  const item = (sw, title, body, extra = '') => `<div class="sa-lg-it"><div class="sa-lg-h">${sw}<b>${title}</b></div><p>${body}</p>${extra}</div>`;
+  const last = rows[rows.length - 1];
+  return short + `<div class="sa-lg-full" id="sa-lg-full">`
+    + item(saSwatch('att'), 'Attivati',
+      'Su 100 persone che finiscono l\'onboarding ed entrano in app, quante entro 14 giorni dal primo avvio finiscono almeno un allenamento o salvano almeno un pasto analizzato. Chi fa tutte e due le cose conta una volta. Quello che sta sopra la linea blu sono le persone attivate solo dal cibo.',
+      ex ? eg(ex.attivati, ex.base) : '')
+    + item(saSwatch('ini'), 'Premono Inizia',
+      'Su 100 persone entrate in app, quante entro 14 giorni premono Inizia su un allenamento almeno una volta. Dice chi ci prova: la distanza dalla linea blu è chi inizia e non finisce.',
+      ex ? eg(ex.inizia, ex.base) : '')
+    + item(saSwatch('fin'), 'Finiscono l\'allenamento',
+      'Su 100 persone entrate in app, quante entro 14 giorni finiscono almeno un allenamento.',
+      ex ? eg(ex.finisce, ex.base) : '')
+    + item(saSwatch('coo'), 'Attivati su chi ha aperto l\'app',
+      'Conta la stessa cosa della bianca, allenamento finito o pasto salvato entro 14 giorni, ma su 100 persone che aprono l\'app per la prima volta, comprese quelle che lasciano durante l\'onboarding. Per questo sta quasi sempre sotto la bianca: più è lontana, più persone si fermano prima di entrare in app.',
+      coorteOn ? (ex ? eg(ex.attivati_coorte || 0, ex.coorte) : '') : '<p class="sa-lg-eg">Si accende con il tasto «Dal primo avvio».</p>')
+    + item(saSwatch('few'), `Meno di ${SA_MIN_BASE} persone`,
+      `Lo sprint ha meno di ${SA_MIN_BASE} persone entrate in app. Il punto resta, ma senza percentuale: con così poche persone, una in più sposta il valore di oltre 3 punti.`)
+    + item(`<span class="sa-lg-prov">${esc(saShort(last))}</span>`, 'Nome dello sprint in grigio',
+      'Lo sprint è finito da meno di 14 giorni: chi è arrivato negli ultimi giorni ha ancora tempo per attivarsi, quindi i numeri possono salire.')
+    + '</div>';
+}
+
+function saHead(rows) {
+  const title = '<h2 class="sa-title">Attivazione per sprint</h2>';
+  if (!rows) return `<div class="sa-head">${title}<span class="pt-pill pt-pill-sk"></span></div>`;
+  const chev = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+  const sel = saSelected(rows);
+  const items = [...rows].reverse().map(r => {
+    const on = sel.includes(r.id), off = !(r.coorte > 0);
+    return `<button class="pt-opt sa-opt${on ? ' pt-sel' : ''}${r.principale ? '' : ' sa-sub'}" role="option" aria-selected="${on}"`
+      + (off ? ' disabled aria-disabled="true"' : ` data-sa-toggle="${esc(r.id)}"`)
+      + `><span class="sa-chk"></span>${esc(r.nome)}${off ? '<span class="sa-miss">dati mancanti</span>' : ''}</button>`;
+  }).join('');
+  const menu = state.saMenu
+    ? `<div class="pt-menu sa-menu" role="listbox" aria-multiselectable="true"><div class="sa-quick"><button class="sa-qb" data-sa-quick="def">Ultimi ${SA_DEFAULT_N}</button><button class="sa-qb" data-sa-quick="all">Tutti</button></div>${items}</div>`
+    : '';
+  return `<div class="sa-head">${title}
+    <div class="sa-pills"><div class="pt-pillwrap sa-w"><button class="pt-pill" data-sa-menu aria-haspopup="listbox" aria-expanded="${!!state.saMenu}"><span>${sel.length ? sel.length + ' sprint' : 'Nessuno sprint'}</span>${chev}</button>${menu}</div>
+    <button class="sa-phases${state.saPhases ? ' pt-on' : ''}" data-sa-phases aria-pressed="${!!state.saPhases}">Fasi</button>
+    <button class="sa-phases${state.saCoorte ? ' pt-on' : ''}" data-sa-coorte aria-pressed="${!!state.saCoorte}">Dal primo avvio</button></div>
+    ${state.saCache ? `<span class="sbr-upd">${kcMark(state.saCache)}</span>` : ''}</div>`;
+}
+
+function sprintActivationCard() {
+  const rows = state.sa;
+  const shell = body => `<section class="sa-card">${body}</section>`;
+  if (state.saError && !rows) {
+    return shell(saHead(null) + `<div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-sa-retry>Riprova</button></div>`);
+  }
+  if (!rows) return shell(saHead(null) + `<div class="sa-chart sa-loading" aria-busy="true">${saChart(null, state.saW, false)}</div>`);
+  const sel = saSelected(rows), shown = rows.filter(r => sel.includes(r.id));
+  if (!shown.length) {
+    return shell(saHead(rows) + `<div class="pt-err sbr-none">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+      <div class="pt-err-t">Nessuno sprint scelto</div><div class="sbr-sub">Sceglili dal menu.</div></div>`);
+  }
+  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases, state.saCoorte)}</div>${saLegend(state.saCoorte, shown)}`);
+}
+
+// Il grafico si ridisegna alla larghezza vera della card (come ptFit).
+function saFit() {
+  const wrap = document.querySelector('.sa-chart');
+  if (!wrap) return;
+  const w = Math.round(wrap.clientWidth);
+  if (!w || Math.abs(w - state.saW) < 6) return;
+  state.saW = w;
+  const rows = state.sa;
+  if (!rows) { wrap.innerHTML = saChart(null, w, false); return; }
+  const sel = saSelected(rows);
+  wrap.innerHTML = saChart(rows.filter(r => sel.includes(r.id)), w, state.saPhases, state.saCoorte);
+}
+
+// Gestori della card: menu a scelta multipla, «Ultimi 6» / «Tutti», interruttore delle fasi, «Riprova».
+let saGlobals = false;
+function attachSprintActivation() {
+  const saveSel = ids => {
+    state.saSel = ids;
+    try { ids ? localStorage.setItem(LS_SA_SEL, JSON.stringify(ids)) : localStorage.removeItem(LS_SA_SEL); } catch (e) { /* storage pieno o bloccato: resta in memoria */ }
+  };
+  document.querySelector('[data-sa-menu]')?.addEventListener('click', ev => {
+    ev.stopPropagation(); state.saMenu = !state.saMenu; render();
+  });
+  document.querySelectorAll('[data-sa-toggle]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation();
+    const cur = saSelected(state.sa || []), id = el.dataset.saToggle;
+    saveSel(cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]);
+    render();
+  }));
+  document.querySelectorAll('[data-sa-quick]').forEach(el => el.addEventListener('click', ev => {
+    ev.stopPropagation();
+    saveSel(el.dataset.saQuick === 'all' ? saSelectable(state.sa || []).map(r => r.id) : null);
+    render();
+  }));
+  document.querySelector('[data-sa-phases]')?.addEventListener('click', () => {
+    state.saPhases = !state.saPhases;
+    try { localStorage.setItem(LS_SA_PHASES, JSON.stringify(state.saPhases ? 'on' : 'off')); } catch (e) { /* idem */ }
+    render();
+  });
+  document.querySelector('[data-sa-coorte]')?.addEventListener('click', () => {
+    state.saCoorte = !state.saCoorte;
+    try { localStorage.setItem(LS_SA_COORTE, JSON.stringify(state.saCoorte ? 'on' : 'off')); } catch (e) { /* idem */ }
+    render();
+  });
+  // tutta la riga della legenda apre e chiude; la freccia è il bottone per tastiera e lettori di schermo
+  document.querySelector('[data-sa-legend]')?.addEventListener('click', () => {
+    state.saLegend = !state.saLegend; render();
+  });
+  document.querySelector('[data-sa-retry]')?.addEventListener('click', () => {
+    state.saError = null; state.sa = null; render(); fetchSprintActivation(true);
+  });
+  saFit();
+  if (!saGlobals) {
+    saGlobals = true;
+    document.addEventListener('click', ev => {
+      if (state.saMenu && !ev.target.closest('.sa-card .pt-pillwrap')) { state.saMenu = false; render(); }
+    });
+    let timer;
+    window.addEventListener('resize', () => { clearTimeout(timer); timer = setTimeout(saFit, 120); });
+  }
+}
+
+function pageOverview() {
+  const keys = state.overviewKeys.filter(k => METRICS[k]);
+  const colCount = Math.min(Math.max(keys.length, 1), 5);
+
+  const editPanel = state.editingOverview ? `
+    <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
+      <div class="card-title" style="margin-bottom:14px">Scegli le metriche da mostrare</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px">
+        ${Object.entries(METRICS).map(([k, m]) => {
+          const on = keys.includes(k);
+          return `<button class="tag" data-toggle-metric="${k}"
+            style="cursor:pointer;${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : ''}">
+            ${on ? '✓ ' : ''}${m.label}
+          </button>`;
+        }).join('')}
+      </div>
+      <button id="done-overview" class="btn btn-primary" style="font-size:12px;padding:6px 14px">Fatto</button>
+    </div>` : '';
+
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--muted)">${keys.length} metriche</div>
+      <button id="edit-overview" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">
+        ${state.editingOverview ? '← Chiudi' : '⚙ Personalizza'}
+      </button>
+    </div>
+
+    ${editPanel}
+
+    <div class="ov-stats" style="--cols:${colCount}">
+      ${keys.map(k => {
+        const m = METRICS[k];
+        return stat(m.label, m.get(state.data), '', m.color, k === 'eng.streaks' ? k : null);
+      }).join('')}
+    </div>
+
+    ${keys.includes('eng.streaks') && state.streakChartOpen ? streakChartCard() : ''}
+
+    ${sprintScoreboardCard()}
+
+    ${premiumTimelineCard()}
+
+    ${sprintActivationCard()}
+
+    <div class="grid-2" style="margin-bottom:16px;gap:16px">
+    <div class="card" style="min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Crescita utenti totali</div>
+        <div style="display:flex;gap:4px">
+          ${[30,60,90,0].map(r => `<button class="filter-btn ${state.growthRange===r?'active':''}" data-growth-range="${r}">${r||'Tutto'}</button>`).join('')}
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">cumulativo · esclusi account interni</div>
+      ${state.extraCharts?.growth?.length ? growthChart(state.extraCharts.growth, state.growthRange) : chartPlaceholder()}
+    </div>
+
+    <div class="card" style="min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Workout settimanali</div>
+        <div style="display:flex;gap:4px">
+          ${[4,8,12,16].map(w => `<button class="filter-btn ${state.weeklyRange===w?'active':''}" data-weekly-range="${w}">${w}sett</button>`).join('')}
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">workout totali per settimana</div>
+      ${state.extraCharts?.weekly_workouts?.length ? weeklyWorkoutsChart(state.extraCharts.weekly_workouts, state.weeklyRange) : chartPlaceholder()}
+    </div>
+    </div>
+
+    <div class="grid-2" style="margin-top:16px">
+      ${feedbackCard()}
+      ${aiChatsCard()}
+    </div>
+
+    <div style="margin-top:16px">
+      ${likedExercisesCard()}
+    </div>`;
+}
+
+function streakChartCard() {
+  return `
+    <div class="card" style="margin-bottom:24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">Streak giornaliere</div>
+        <div style="display:flex;gap:4px">
+          ${[7,14,30,60].map(r => `<button class="filter-btn ${state.streakRange===r?'active':''}" data-streak-range="${r}">${r}g</button>`).join('')}
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px">utenti con streak attiva (ieri o oggi) · stessa logica della card qui sopra</div>
+      ${state.extraCharts?.daily_streaks?.length ? dailyStreaksChart(state.extraCharts.daily_streaks, state.streakRange) : chartPlaceholder()}
+    </div>`;
+}
+
+// Card "Esercizi piu amati": classifica degli esercizi a cui gli utenti hanno
+// messo like (cuoricino nella schermata Card dell'app). Dati da kpi_liked_exercises
+// (SECURITY DEFINER, aggrega su tutti gli utenti esclusi i blocked, filtri genere/eta).
+const LIKED_TOP_N = 5;
+const LIKED_AGE_LABELS = {
+  'all': 'Tutte le età', '18-24': '18-24', '25-34': '25-34',
+  '35-44': '35-44', '45-54': '45-54', '55-': '55+',
+};
+function likedExercisesCard() {
+  const d = state.likedExercises;
+
+  const filterActive = state.likedGender !== 'all' || state.likedAge !== 'all';
+  const genderTxt = state.likedGender === 'male' ? 'Uomini' : state.likedGender === 'female' ? 'Donne' : 'Tutti';
+  const filterSummary = [
+    state.likedGender !== 'all' ? genderTxt : null,
+    state.likedAge !== 'all' ? LIKED_AGE_LABELS[state.likedAge] + ' anni' : null,
+  ].filter(Boolean).join(' · ') || 'Tutti gli utenti';
+
+  const head = `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div class="card-title" style="margin-bottom:0">❤️ Esercizi più amati</div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${d ? `<div style="font-size:11px;color:var(--muted)">${d.total_likes} like · ${d.distinct_users} utenti</div>` : ''}
+        <button id="liked-filter-toggle" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;${filterActive ? 'color:var(--purple)' : ''}">
+          ${state.likedFilterOpen ? '× Chiudi' : '⚙ Filtri' + (filterActive ? ' •' : '')}
+        </button>
+      </div>
+    </div>`;
+
+  const genderBtns = [['all','Tutti'],['female','Donne'],['male','Uomini']].map(([v,l]) =>
+    `<button class="filter-btn ${state.likedGender===v?'active':''}" data-liked-gender="${v}">${l}</button>`).join('');
+  const ageBtns = Object.entries(LIKED_AGE_LABELS).map(([v,l]) =>
+    `<button class="filter-btn ${state.likedAge===v?'active':''}" data-liked-age="${v}">${l}</button>`).join('');
+  const filterPanel = state.likedFilterOpen ? `
+    <div style="background:#12121e;border:1px solid #1e1e30;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Genere</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${genderBtns}</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">Fascia d'età</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">${ageBtns}</div>
+    </div>` : '';
+
+  const sub = `<div style="font-size:11px;color:var(--muted);margin-bottom:8px">like totali per esercizio · ${esc(filterSummary)} · esclusi account interni</div>`;
+
+  let body;
+  if (!d) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0" class="pulse">Caricamento…</div>`;
+  } else if (!(d.exercises || []).length) {
+    body = `<div style="color:var(--muted);font-size:12px;padding:12px 0">${filterActive
+      ? 'Nessun like per questo filtro. Prova ad allargare genere o fascia d\'età.'
+      : 'Nessun like ancora. Compaiono qui quando gli utenti mettono il cuoricino a un esercizio.'}</div>`;
+  } else {
+    const full     = d.exercises;
+    const showAll  = state.likedShowAll;
+    const list     = showAll ? full : full.slice(0, LIKED_TOP_N);
+    const maxLikes = Math.max(...full.map(e => e.likes), 1);
+    const rows = list.map((e, i) => {
+      const pct  = Math.round((e.likes / maxLikes) * 100);
+      const date = new Date(e.last_like).toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
+      return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid #1e1e30">
+        <div style="font-size:11px;color:var(--muted);width:18px;text-align:right;flex:none">${i + 1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:5px">
+            <span style="font-size:12px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.name || e.slug || ('#' + e.id))}</span>
+            <span style="font-size:10px;color:var(--muted);flex:none">${e.users} utent${e.users === 1 ? 'e' : 'i'} · ${date}</span>
+          </div>
+          <div style="height:6px;background:#1e1e30;border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#e0556e,#e07a8a);border-radius:4px"></div>
+          </div>
+        </div>
+        <div style="font-size:13px;font-weight:700;color:var(--purple);width:34px;text-align:right;flex:none">${e.likes}</div>
+      </div>`;
+    }).join('');
+    const moreBtn = full.length > LIKED_TOP_N
+      ? `<button id="liked-show-all" class="btn btn-ghost" style="font-size:11px;padding:6px 12px;margin-top:12px;width:100%">
+          ${showAll ? '↑ Mostra solo i primi ' + LIKED_TOP_N : '↓ Vedi tutti (' + full.length + ')'}
+        </button>`
+      : '';
+    body = rows + moreBtn;
+  }
+
+  const dim = state.likedLoading ? 'opacity:.5;pointer-events:none' : '';
+  return `<div class="card"><div style="${dim}">${head}${filterPanel}${sub}${body}</div></div>`;
+}
+
+// Solo gli obiettivi realmente offerti/scelti nel prodotto (vedi user_profile.primary_goal).
+// Ordine per diffusione. Se in futuro si aggiunge un programma, va inserito qui.
+const GOAL_LABEL = {
+  lose_fat: 'Perdere grasso',
+  tone_full: 'Tonificare tutto il corpo',
+  tone_lower: 'Tonificare gambe/glutei',
+  mobility: 'Migliorare mobilità',
+};
+const GENDER_LABEL = { m: 'Uomo', f: 'Donna', male: 'Uomo', female: 'Donna', other: 'Altro' };
+const LEVEL_LABEL = { '1': 'Base', '2': 'Intermedio', '3': 'Avanzato' };
+const GOAL_COLOR = Object.fromEntries(
+  Object.keys(GOAL_LABEL).map((g, i) => [g, GOAL_BAR_COLORS[i % GOAL_BAR_COLORS.length]])
+);
+
+function calcAge(birthDate) {
+  if (!birthDate) return null;
+  const bd = new Date(birthDate), now = new Date();
+  let age = now.getFullYear() - bd.getFullYear();
+  if (now.getMonth() < bd.getMonth() || (now.getMonth() === bd.getMonth() && now.getDate() < bd.getDate())) age--;
+  return age;
+}
+
+// ── COMPORTAMENTO ─────────────────────────────────────────────────────
+
+const EVENT_LABELS = {
+  exercise_complete: 'Esercizio completato', workout_complete: 'Workout completato',
+  workout_start: 'Workout avviato', workout_abandon: 'Workout abbandonato',
+  app_open: 'App aperta', exit: 'App chiusa', sign_in: 'Login',
+  settings_open: 'Impostazioni aperte', roadmap_node_select: 'Nodo roadmap selezionato',
+  roadmap_select: 'Roadmap selezionata', league_tab_switch: 'Tab lega cambiato',
+  workout_gen_start: 'Generazione workout AI avviata', chest_open: 'Baule aperto',
+  ai_chat_send: 'Messaggio AI inviato',
+  ai_chat_close: 'Chat AI chiusa', ai_chat_quota_exhausted: 'Quota AI esaurita',
+  ai_chat_workout_proposed: 'Workout proposto in chat',
+  workout_feedback_shown: 'Feedback post-workout mostrato',
+  workout_feedback_replied: 'Feedback post-workout — risposta',
+  workout_feedback_notification_scheduled: 'Notifica feedback schedulata',
+  view_Home: 'Home', view_WorkoutDetail: 'Dettaglio workout',
+  view_WorkoutComplete: 'Riepilogo workout', view_User: 'Profilo',
+  view_League: 'Classifica', view_ExerciseSearch: 'Libreria allenamenti',
+  view_Dev: 'Schermata Dev', view_PremiumActivated: 'Premium attivato',
+  view_RoadmapDetail: 'Dettaglio roadmap', view_Settings: 'Impostazioni',
+  view_CoachAIHub: 'Hub Coach AI',
+  feedback_opened: 'Feedback aperto',
+  paywall_product_updated: 'Paywall — prodotto aggiornato',
+  paywall_validator_step: 'Paywall — step validazione',
+  paywall_billing_error: 'Paywall — acquisto annullato',
+  paywall_purchase_error: 'Acquisto annullato',
+  paywall_plugin_event: 'Paywall — evento plugin',
+  paywall_fallback_opened: 'Paywall — fallback aperto',
+  paywall_purchase_attempt: 'Tentativo acquisto', trial_offer_shown: 'Offerta trial mostrata',
+  view_Paywall: 'Paywall mostrato', paywall_open: 'Paywall aperto (manuale)',
+  paywall_step_view: 'Paywall — step visualizzato',
+  paywall_plan_select: 'Paywall — piano selezionato',
+  workout_detail_close: 'Dettaglio workout chiuso senza iniziare',
+};
+
+const EVENT_DESCRIPTIONS = {
+  view_Home:            'L\'utente ha aperto la schermata principale (Home), con roadmap e workout suggeriti. Di solito ci arriva tramite la barra di navigazione in basso.',
+  view_User:            'L\'utente ha visitato la sezione Profilo. Ci arriva tramite l\'icona profilo nella barra di navigazione in basso.',
+  view_WorkoutDetail:   'L\'utente ha aperto il dettaglio di un workout specifico selezionandolo dalla roadmap.',
+  view_WorkoutComplete: 'L\'utente ha completato un workout e visualizzato il riepilogo dei risultati (XP, streak, chiavi guadagnate).',
+  view_League:          'L\'utente ha visitato la Classifica (Lega). Accessibile dalla barra di navigazione in basso.',
+  view_ExerciseSearch:  'L\'utente ha aperto la Libreria allenamenti, accessibile dalla barra di navigazione in basso. Mostra la raccolta di workout disponibili che l\'utente può esplorare.',
+  view_AIChat:          'L\'utente ha aperto la chat con l\'AI Coach.',
+  view_Dev:             'Schermata di sviluppo interna, non visibile agli utenti normali.',
+  view_PremiumActivated:'L\'utente ha visualizzato la schermata di conferma attivazione Premium.',
+  view_RoadmapDetail:   'L\'utente ha aperto il dettaglio di una roadmap.',
+  view_Settings:        'L\'utente ha aperto le impostazioni dell\'app.',
+  view_CoachAIHub:      'L\'utente ha aperto l\'Hub Coach AI: la schermata dove può cambiare il proprio obiettivo e vedere i dati che l\'AI usa per personalizzare il percorso (preferenze, feedback sugli esercizi, livello di fatica).',
+  exercise_complete:    'L\'utente ha completato un singolo esercizio all\'interno di un workout.',
+  workout_complete:     'L\'utente ha completato l\'intero workout (tutti gli esercizi).',
+  workout_start:        'L\'utente ha avviato un workout dal dettaglio.',
+  workout_abandon:      'L\'utente ha abbandonato il workout prima di completarlo.',
+  app_open:             'L\'utente ha aperto l\'app (cold start o warm start dalla home del telefono).',
+  exit:                 'L\'utente ha chiuso l\'app o è passato ad un\'altra app.',
+  roadmap_node_select:  'L\'utente ha selezionato un nodo sulla roadmap per vedere o avviare il workout.',
+  roadmap_select:       'L\'utente ha cambiato roadmap attiva.',
+  league_tab_switch:    'L\'utente ha cambiato tab nella sezione Classifica (es. Globale vs Amici).',
+  chest_open:           'L\'utente ha aperto un baule raccogliendo le chiavi accumulate.',
+  feedback_opened:           'L\'utente ha aperto la sezione per inviare un feedback agli sviluppatori. Il fatto che l\'abbia aperta non significa necessariamente che abbia inviato qualcosa.',
+  ai_chat_send:              'L\'utente ha inviato un messaggio all\'AI Coach. Ogni occorrenza rappresenta un singolo messaggio spedito nella chat. Se il contatore è 4, l\'utente ha scritto 4 messaggi in quella sessione.',
+  ai_chat_close:             'L\'utente ha chiuso la chat con l\'AI Coach.',
+  ai_chat_quota_exhausted:   'L\'utente ha provato a inviare un messaggio ma aveva esaurito la quota giornaliera di chiamate AI. Questo evento porta tipicamente all\'apertura del paywall (entry_source = ai_chat_quota_exhausted).',
+  ai_chat_workout_proposed:  'L\'AI Coach ha mostrato in chat una card di workout proposto. È la testa del funnel "proposta → avvio → completamento": misura quanti workout l\'AI propone, prima che l\'utente decida di avviarli. Evento rilasciato lato app: resta a 0 finché non è in produzione.',
+  workout_feedback_shown:    'È stata mostrata all\'utente la chat di feedback post-workout (in app o aprendo la notifica "+2 min" dopo un abbandono).',
+  workout_feedback_replied:  'L\'utente ha risposto almeno una volta nella chat di feedback post-workout.',
+  workout_feedback_notification_scheduled: 'Dopo un abbandono eleggibile, l\'app ha schedulato la notifica "+2 min" che invita l\'utente a dare un feedback sul workout.',
+  paywall_product_updated:   'Il plugin paywall ha aggiornato i prodotti disponibili (piani, prezzi). Avviene in background all\'avvio.',
+  paywall_validator_step:    'Step interno del processo di validazione abbonamento. Si attiva all\'avvio per verificare se l\'utente è Premium.',
+  paywall_validator_called:  'Il validator dell\'abbonamento è stato chiamato. Parte automaticamente all\'apertura dell\'app.',
+  paywall_plugin_event:      'Evento generico del plugin di pagamento (RevenueCat). Generato automaticamente, non richiede azione utente.',
+  paywall_billing_error:     'Errore nella fatturazione o nella verifica del pagamento.',
+  paywall_fallback_opened:   'È stata mostrata la versione "di riserva" della schermata paywall, probabilmente perché il template principale non era pronto in tempo. Non indica se l\'apertura è stata manuale o automatica (quello lo dicono "Paywall aperto" e "Paywall mostrato"): segnala solo quale versione della schermata è stata mostrata.',
+  paywall_purchase_attempt:  'L\'utente ha tentato di acquistare un piano Premium.',
+  trial_offer_shown:         'All\'utente è stata mostrata l\'offerta del periodo di prova gratuito.',
+  view_Paywall:              'Il paywall è stato mostrato all\'utente. Conta ogni visualizzazione, sia quando l\'utente lo apre da solo (es. tap su un pulsante Premium) sia quando compare automaticamente (es. a fine trial o in un punto del percorso). È il totale di tutte le volte che il paywall è apparso.',
+  paywall_open:              'L\'utente ha aperto il paywall manualmente, ad esempio toccando un pulsante o una sezione legata a Premium. Non conta le volte in cui il paywall compare automaticamente: solo le aperture volute dall\'utente.',
+  paywall_step_view:         'L\'utente ha visualizzato una pagina (step) del paywall a carosello. Se il paywall ha più pagine, ogni pagina vista genera un evento separato: con 3 pagine, vederle tutte in una sola apertura genera 3 eventi.',
+  paywall_plan_select:       'L\'utente ha toccato un\'opzione di piano nel paywall, ad esempio passando da mensile ad annuale per vedere prezzo e dettagli. Non significa che abbia acquistato: è solo un cambio della selezione tra le opzioni mostrate.',
+  workout_detail_close:      'L\'utente ha aperto il dettaglio di un workout (la schermata che lo descrive prima di iniziarlo) ma poi è uscito senza avviarlo. Segnala un workout "visto ma scartato": utile per capire quali workout convincono meno a partire.',
+};
+
+function renderInfoTooltip(e, innerHtml) {
+  e.stopPropagation();
+  document.getElementById('ev-tooltip')?.remove();
+  const tip = document.createElement('div');
+  tip.id = 'ev-tooltip';
+  tip.style.cssText = [
+    'position:fixed;z-index:9999',
+    'background:#1a1a2e;border:1px solid #3a3a5c',
+    'border-radius:10px;padding:12px 16px',
+    'font-size:12px;color:#d0d0f0;line-height:1.6',
+    'max-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.7)',
+    'pointer-events:none',
+  ].join(';');
+  tip.innerHTML = innerHtml;
+  const x = Math.min(e.clientX + 12, window.innerWidth - 300);
+  const y = Math.max(e.clientY - 60, 8);
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+  document.body.appendChild(tip);
+  setTimeout(() => document.addEventListener('click', () => tip.remove(), { once: true }), 0);
+}
+
+function showEventTooltip(e, key) {
+  const text = EVENT_DESCRIPTIONS[key];
+  if (!text) return;
+  renderInfoTooltip(e, `<div style="font-family:var(--mono);font-size:11px;color:#a78bfa;margin-bottom:7px;padding-bottom:7px;border-bottom:1px solid #2a2a3d;word-break:break-all">${esc(key)}</div>${esc(text)}`);
+}
+
+const KPI_INFO_TEXTS = {
+  frequenza_paywall: 'Quante volte in media il paywall viene mostrato a ogni utente che lo vede almeno una volta. Calcolo: paywall mostrati totali (paywall_step_view index=0, tutte le varianti) ÷ utenti unici che l\'hanno visto, nel periodo. Un valore alto significa che mostri il paywall molto spesso alla stessa persona — utile per non risultare insistenti.',
+  abbonati_attivi: 'Abbonati PAGANTI attivi ORA, contati per purchase_token (l\'identità reale dell\'abbonamento su Google), NON per utente — così lo stesso acquisto non viene contato due volte se è agganciato a più account. Condizioni: ultima riga del token con expires_at futuro, status ≠ revoked, is_trial=false. Esclude i token legati ad account interni bloccati. Indipendente dal periodo.',
+  in_prova_ora: 'Utenti attualmente in prova gratuita 7 giorni: token con is_trial=true ancora attivo (expires_at futuro), dato server di Google. Quando un trial si converte in pagamento, esce da qui ed entra in "Abbonati paganti". Resta 0 finché non parte un trial reale.',
+  nuovi_acquisti: 'Nuovi abbonamenti reali nel periodo (per purchase_token, event_type=SUBSCRIPTION_PURCHASED), esclusi gli account interni e le licenze tester della closed-track (durata < 2 giorni = test accelerati, non clienti). La nota mostra data e giorni dall\'ultimo acquisto reale — se cresce, le vendite si sono fermate.',
+  mrr_stimato: 'Ricavo mensile ricorrente stimato dagli abbonati attivi: mensili × 9,90 € + annuali × (29,99/12 ≈ 2,50 €). Stima lorda, non al netto delle commissioni store.',
+  paywall_mostrati: 'Quante volte un paywall è stato mostrato, contando paywall_step_view con index=0. È l\'UNICO segnale che copre il 100% delle varianti (view_Paywall non copre i paywall custom coach_ai_*; paywall_open salta ~30% delle aperture). Denominatore corretto del funnel.',
+};
+
+function showKpiInfo(e, key) {
+  const text = KPI_INFO_TEXTS[key];
+  if (!text) return;
+  renderInfoTooltip(e, esc(text));
+}
+
+const TYPE_COLOR  = { action: '#4ade80', navigation: '#60a5fa', click: '#fbbf24', error: '#f87171' };
+const TYPE_LABEL  = { action: 'Azione', navigation: 'Nav', click: 'Click', error: 'Errore' };
+
+// SDK/system events che non riflettono azioni utente reali
+const SYSTEM_EVENTS = new Set([
+  'paywall_product_updated',
+  'paywall_validator_step',
+  'paywall_validator_called',
+  'paywall_plugin_event',
+]);
+
+function userExplorerSection() {
+  const u      = state.ueSelectedUser;
+  const events = state.ueData || [];
+
+  if (!u && state.ueData === null && !state.ueLoading) {
+    return `
+      <div class="card" style="margin-top:20px;border-style:dashed;opacity:.6">
+        <div style="font-size:12px;color:var(--muted);text-align:center;padding:16px 0">
+          Seleziona un utente nel filtro in alto per vedere il suo flusso di eventi
+        </div>
+      </div>`;
+  }
+
+  let timelineHtml = '';
+  if (state.ueLoading) {
+    timelineHtml = `<div style="padding:32px;color:var(--muted);font-size:12px;text-align:center" class="pulse">Caricamento attività…</div>`;
+  } else if (state.ueData !== null) {
+    if (!events.length) {
+      timelineHtml = `<div style="padding:24px;color:var(--muted);font-size:12px;text-align:center">Nessuna attività nel periodo selezionato.</div>`;
+    } else {
+      const byDay = {};
+      events.forEach(e => {
+        const day = new Date(e.created_at).toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+        if (!byDay[day]) byDay[day] = [];
+        byDay[day].push(e);
+      });
+      const rows = Object.entries(byDay).map(([day, evs]) => {
+        const evRows = evs.map(e => {
+          const t     = new Date(e.created_at).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+          const color = TYPE_COLOR[e.event_type] || '#a78bfa';
+          const label = EVENT_LABELS[e.event_name] || e.event_name;
+          const desc  = e.description || label;
+          return `<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:1px solid #12121e">
+            <span style="font-size:10px;color:var(--muted);width:56px;flex-shrink:0;margin-top:2px;font-family:var(--mono)">${t}</span>
+            <span style="width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;color:var(--fg);line-height:1.4">${esc(desc)}</div>
+              ${e.screen && e.screen !== e.event_name ? `<span style="font-size:10px;color:var(--muted)">${esc(e.screen)}</span>` : ''}
+            </div>
+            <span style="font-size:9px;background:${color}22;color:${color};padding:2px 6px;border-radius:4px;flex-shrink:0;margin-top:1px;min-width:36px;text-align:center">${TYPE_LABEL[e.event_type] || e.event_type}</span>
+          </div>`;
+        }).join('');
+        return `<div style="margin-bottom:6px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;
+            letter-spacing:.08em;padding:8px 0 5px;border-bottom:1px solid #2a2a3d;margin-bottom:3px">${day}</div>
+          ${evRows}
+        </div>`;
+      }).join('');
+      timelineHtml = `<div style="font-size:11px;color:var(--muted);margin-bottom:12px">${events.length} eventi trovati</div>${rows}`;
+    }
+  }
+
+  const userName = u ? `${esc(u.name || u.username || '—')} <span style="color:var(--muted);font-weight:400">@${esc(u.username || '')}</span>` : '—';
+  const fromLabel = state.ueFromDateTime
+    ? new Date(state.ueFromDateTime).toLocaleString('it-IT', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })
+    : '';
+
+  return `
+    <div class="card" style="margin-top:20px">
+      <div style="margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:2px">Sessione utente · <span style="font-weight:400">${userName}</span></div>
+        ${fromLabel ? `<div style="font-size:11px;color:var(--muted)">Dal ${fromLabel}</div>` : ''}
+      </div>
+      ${timelineHtml}
+    </div>`;
+}
+
+
+function feedbackCard() {
+  const rows = state.recentFeedback;
+  const body = !rows
+    ? `<div style="color:var(--muted);font-size:12px;padding:12px 0" class="pulse">Caricamento…</div>`
+    : !rows.length
+    ? `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun feedback</div>`
+    : rows.map(r => {
+        const date = new Date(r.created_at).toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'numeric' });
+        const user = esc(r.username || r.email || '—');
+        const txt  = esc((r.feedback_text || '—').slice(0, 110) + ((r.feedback_text || '').length > 110 ? '…' : ''));
+        return `<div class="fb-mini-row" data-fb-id="${esc(r.id)}"
+          style="padding:10px 0;border-bottom:1px solid #1e1e30;cursor:pointer;transition:background .15s"
+          onmouseenter="this.style.background='#12121e'" onmouseleave="this.style.background=''">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+            <span style="font-size:11px;font-weight:600;color:var(--purple)">${user}</span>
+            <span style="font-size:10px;color:var(--muted)">${date}</span>
+          </div>
+          <div style="font-size:12px;color:var(--fg);line-height:1.5">${txt}</div>
+        </div>`;
+      }).join('');
+  return `<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:0">Ultimi feedback utenti</div>
+      <button id="open-feedback-modal" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Tutti i feedback →</button>
+    </div>
+    ${body}
+  </div>`;
+}
+
+function feedbackModal() {
+  if (!state.feedbackModalOpen) return '';
+
+  const feedbacks = state.allFeedbacks || [];
+  const q = (state.feedbackSearchQuery || '').toLowerCase();
+  const filtered = q
+    ? feedbacks.filter(f =>
+        (f.username || f.email || '').toLowerCase().includes(q) ||
+        (f.feedback_text || '').toLowerCase().includes(q))
+    : feedbacks;
+
+  const listHtml = state.allFeedbacksLoading
+    ? `<div style="padding:20px;color:var(--muted);font-size:12px" class="pulse">Caricamento…</div>`
+    : !filtered.length
+    ? `<div style="padding:20px;color:var(--muted);font-size:12px">Nessun feedback trovato</div>`
+    : filtered.map(f => {
+        const sel  = state.selectedFeedback?.id === f.id;
+        const date = new Date(f.created_at).toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'2-digit' });
+        const time = new Date(f.created_at).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+        const user = esc(f.username || f.email || '—');
+        const prev = esc((f.feedback_text || '').slice(0, 55) + ((f.feedback_text || '').length > 55 ? '…' : ''));
+        return `<div class="fb-list-item" data-fb-id="${esc(f.id)}"
+          style="padding:12px 14px;border-bottom:1px solid #1a1a2e;cursor:pointer;
+          background:${sel ? '#1e1a3d' : 'transparent'};
+          border-left:3px solid ${sel ? 'var(--accent)' : 'transparent'}">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+            <span style="font-size:12px;font-weight:600;color:${sel ? 'var(--purple)' : 'var(--fg)'}">${user}</span>
+            <span style="font-size:10px;color:var(--muted);white-space:nowrap;margin-left:6px">${date} ${time}</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${prev}</div>
+        </div>`;
+      }).join('');
+
+  const detailHtml = feedbackDetailPanel();
+
+  return `
+    <div id="fb-modal-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:960px;height:min(88vh,700px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="font-size:15px;font-weight:700;color:var(--fg);flex:1">
+            Feedback utenti <span style="font-size:12px;font-weight:400;color:var(--muted)">(${feedbacks.length})</span>
+          </div>
+          <input id="fb-search" type="text" placeholder="Cerca utente o testo…"
+            value="${esc(state.feedbackSearchQuery)}"
+            class="form-input" style="width:220px;font-size:12px;padding:5px 10px">
+          <button id="fb-modal-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
+        </div>
+
+        <div style="display:flex;flex:1;min-height:0">
+          <div style="width:300px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">
+            ${listHtml}
+          </div>
+          <div style="flex:1;overflow-y:auto;min-width:0">
+            ${detailHtml}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function feedbackDetailPanel() {
+  if (!state.selectedFeedback) {
+    return `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">
+      Seleziona un feedback
+    </div>`;
+  }
+  const f    = state.selectedFeedback;
+  const date = new Date(f.created_at).toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+  const time = new Date(f.created_at).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+  const age  = calcAge(f.birth_date);
+  const gender = GENDER_LABEL[f.gender?.toLowerCase()] || f.gender || null;
+  const goal   = GOAL_LABEL[f.primary_goal] || f.primary_goal || null;
+  const goal2  = GOAL_LABEL[f.secondary_goal] || f.secondary_goal || null;
+
+  const profileRows = [
+    f.email          && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Email</span><span style="font-size:12px;color:var(--fg)">${esc(f.email)}</span></div>`,
+    (age || gender)  && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Anagrafica</span><span style="font-size:12px;color:var(--fg)">${[age ? age + ' anni' : null, gender].filter(Boolean).map(esc).join(' · ')}</span></div>`,
+    (f.height_cm || f.weight_kg) && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Fisico</span><span style="font-size:12px;color:var(--fg)">${[f.height_cm ? f.height_cm + ' cm' : null, f.weight_kg ? f.weight_kg + ' kg' : null].filter(Boolean).join(' · ')}</span></div>`,
+    goal             && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Obiettivo</span><span style="font-size:12px;color:var(--fg)">${esc(goal)}${goal2 ? ` <span style="color:var(--muted)">· ${esc(goal2)}</span>` : ''}</span></div>`,
+    (f.weekly_frequency_target || f.session_duration_min) && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Allenamento</span><span style="font-size:12px;color:var(--fg)">${[f.weekly_frequency_target ? f.weekly_frequency_target + 'x/sett' : null, f.session_duration_min ? f.session_duration_min + ' min/sessione' : null].filter(Boolean).join(' · ')}</span></div>`,
+    f.location       && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Luogo</span><span style="font-size:12px;color:var(--fg)">${esc(f.location)}</span></div>`,
+    f.app_version    && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">App</span><span style="font-size:12px;color:var(--fg)">${esc(f.app_version)}${f.device_info ? ` · ${esc(f.device_info)}` : ''}</span></div>`,
+    f.source         && `<div style="display:flex;gap:8px;align-items:baseline"><span style="color:var(--muted);font-size:11px;width:110px;flex-shrink:0">Sorgente</span><span style="font-size:12px;color:var(--fg)">${esc(f.source)}</span></div>`,
+  ].filter(Boolean).join('');
+
+  return `<div style="padding:24px">
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px">${date} · ${time}</div>
+    <div style="font-size:15px;color:var(--fg);line-height:1.65;margin-bottom:24px;padding:16px;background:#12121e;border-radius:10px;border-left:3px solid var(--accent)">
+      ${esc(f.feedback_text || '—')}
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">
+        Profilo utente · ${esc(f.username || f.email || '—')}
+      </div>
+      ${f.user_id ? `<button class="btn btn-ghost open-user-activity"
+        data-user-id="${esc(f.user_id)}"
+        data-username="${esc(f.username || f.email || '—')}"
+        data-email="${esc(f.email || '')}"
+        style="font-size:11px;padding:4px 10px">🕐 Vedi attività →</button>` : ''}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${profileRows || `<div style="color:var(--muted);font-size:12px">Nessun dato profilo disponibile</div>`}
+    </div>
+  </div>`;
+}
+
+function userActivityModal() {
+  if (!state.userActivityOpen) return '';
+  const u = state.userActivityUser || {};
+  const events = state.userActivityData || [];
+
+  // Group by day
+  let bodyHtml;
+  if (state.userActivityLoading) {
+    bodyHtml = `<div style="padding:32px;color:var(--muted);font-size:12px" class="pulse">Caricamento attività…</div>`;
+  } else if (!events.length) {
+    bodyHtml = `<div style="padding:32px;color:var(--muted);font-size:12px">Nessuna attività trovata.</div>`;
+  } else {
+    const byDay = {};
+    events.forEach(e => {
+      const day = new Date(e.created_at).toLocaleDateString('it-IT', { weekday:'long', day:'2-digit', month:'long', year:'numeric' });
+      if (!byDay[day]) byDay[day] = [];
+      byDay[day].push(e);
+    });
+    bodyHtml = Object.entries(byDay).map(([day, evs]) => {
+      const rows = evs.map(e => {
+        const t     = new Date(e.created_at).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+        const color = TYPE_COLOR[e.event_type] || '#a78bfa';
+        const label = EVENT_LABELS[e.event_name] || e.event_name;
+        const desc  = e.description || label;
+        return `<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #12121e">
+          <span style="font-size:10px;color:var(--muted);width:36px;flex-shrink:0;margin-top:2px">${t}</span>
+          <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0;margin-top:5px"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;color:var(--fg);line-height:1.45">${esc(desc)}</div>
+            ${e.screen && e.screen !== e.event_name ? `<span style="font-size:10px;color:var(--muted)">${esc(e.screen)}</span>` : ''}
+          </div>
+          <span style="font-size:9px;color:${color};flex-shrink:0;margin-top:2px">${TYPE_LABEL[e.event_type] || e.event_type}</span>
+        </div>`;
+      }).join('');
+      return `<div style="margin-bottom:4px">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;
+          letter-spacing:.08em;padding:10px 0 6px;border-bottom:1px solid #2a2a3d;margin-bottom:4px">${day}</div>
+        ${rows}
+      </div>`;
+    }).join('');
+  }
+
+  const totalEvents = events.length;
+  return `
+    <div id="ua-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1010;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:640px;height:min(88vh,720px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.8);overflow:hidden">
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:700;color:var(--fg)">${esc(u.username || '—')}</div>
+            <div style="font-size:11px;color:var(--muted)">${esc(u.email || '')} · ultimi ${totalEvents} eventi</div>
+          </div>
+          <button id="ua-close" style="background:none;border:1px solid #2a2a3d;color:var(--muted);
+            border-radius:8px;padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:16px 20px">
+          ${bodyHtml}
+        </div>
+      </div>
+    </div>`;
+}
+
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function aiChatsCard() {
+  const sessions = state.recentAISessions;
+  const body = !sessions
+    ? `<div style="color:var(--muted);font-size:12px;padding:12px 0" class="pulse">Caricamento…</div>`
+    : !sessions.length
+    ? `<div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun messaggio AI</div>`
+    : sessions.map(s => {
+        const date = new Date(s.session_start).toLocaleDateString('it-IT', { day:'2-digit', month:'short' });
+        const time = new Date(s.session_start).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+        const user = esc(s.username || s.email || '—');
+        const preview = esc((s.first_msg || '—').slice(0, 90) + ((s.first_msg || '').length > 90 ? '…' : ''));
+        const count = s.msg_count > 1 ? `<span style="font-size:9px;background:#2a2a3d;color:var(--muted);padding:1px 7px;border-radius:10px;margin-left:4px">${s.msg_count} msg</span>` : '';
+        const age   = calcAge(s.birth_date);
+        const goal  = GOAL_LABEL[s.primary_goal] || s.primary_goal || null;
+        const meta  = [s.email, goal, age ? age + ' anni' : null].filter(Boolean).map(esc).join(' · ');
+        return `<div class="ai-session-row" data-session-id="${esc(s.session_id)}"
+          style="padding:10px 0;border-bottom:1px solid #1e1e30;cursor:pointer;transition:background .15s"
+          onmouseenter="this.style.background='#12121e'" onmouseleave="this.style.background=''"
+          title="Apri conversazione">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+            <div style="display:flex;align-items:center;gap:4px">
+              <span style="font-size:11px;font-weight:600;color:var(--purple)">${user}</span>
+              ${count}
+            </div>
+            <span style="font-size:10px;color:var(--muted)">${date} ${time}</span>
+          </div>
+          ${meta ? `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">${meta}</div>` : ''}
+          <div style="font-size:12px;color:var(--fg);line-height:1.5">${preview}</div>
+        </div>`;
+      }).join('');
+  return `<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:0">Ultimi messaggi all'AI</div>
+      <button id="open-ai-conv" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Tutte le conv. →</button>
+    </div>
+    ${body}
+  </div>`;
+}
+
+// Lista delle sessioni di chat AI (filtrata per ricerca). Riusata sia dal modal solo-lettura
+// in Overview sia dal browser conversazioni della pagina AI Coach.
+function aiSessionListHtml() {
+  const sessions = state.aiSessions || [];
+  const q = (state.aiSearchQuery || '').toLowerCase();
+  const filtered = q
+    ? sessions.filter(s => (s.username || s.email || '').toLowerCase().includes(q))
+    : sessions;
+
+  if (state.aiSessionsLoading) {
+    return `<div style="padding:20px;color:var(--muted);font-size:12px" class="pulse">Caricamento sessioni…</div>`;
+  }
+  if (!filtered.length) {
+    return `<div style="padding:20px;color:var(--muted);font-size:12px">Nessuna sessione trovata</div>`;
+  }
+  return filtered.map(s => {
+    const sel = state.aiSelectedSession?.session_id === s.session_id;
+    const date = new Date(s.session_start).toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'2-digit' });
+    const time = new Date(s.session_start).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+    const user = esc(s.username || s.email || '—');
+    const preview = esc((s.first_msg || '—').slice(0, 60) + ((s.first_msg || '').length > 60 ? '…' : ''));
+    const age2  = calcAge(s.birth_date);
+    const goal2 = GOAL_LABEL[s.primary_goal] || s.primary_goal || null;
+    const meta2 = [goal2, age2 ? age2 + ' anni' : null].filter(Boolean).map(esc).join(' · ');
+    return `<div class="ai-session-list-item" data-session-id="${esc(s.session_id)}"
+      style="padding:12px 14px;border-bottom:1px solid #1a1a2e;cursor:pointer;
+      background:${sel ? '#1e1a3d' : 'transparent'};border-left:3px solid ${sel ? 'var(--accent)' : 'transparent'};
+      transition:background .15s"
+      onmouseenter="if(!this.classList.contains('selected'))this.style.background='#14141f'"
+      onmouseleave="if(!this.classList.contains('selected'))this.style.background='${sel ? '#1e1a3d' : 'transparent'}'">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px">
+        <span style="font-size:12px;font-weight:600;color:${sel ? 'var(--purple)' : 'var(--fg)'}">${user}</span>
+        <span style="font-size:10px;color:var(--muted)">${date} ${time}</span>
+      </div>
+      ${meta2 ? `<div style="font-size:10px;color:var(--muted);margin-bottom:3px">${meta2}</div>` : ''}
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</span>
+        ${s.msg_count > 1 ? `<span style="font-size:9px;background:#2a2a3d;color:var(--muted);padding:1px 6px;border-radius:10px;flex-shrink:0">${s.msg_count}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// Modal SOLO-LETTURA delle conversazioni, aperto dalla card "Ultimi messaggi all'AI" in Overview.
+// Statistiche e funnel vivono ora nella pagina dedicata AI Coach, non più qui.
+function aiConversationsModal() {
+  if (!state.aiConvOpen) return '';
+
+  return `
+    <div id="ai-conv-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:960px;height:min(88vh,700px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+
+        <!-- Header -->
+        <div style="display:flex;align-items:center;gap:10px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0;flex-wrap:wrap">
+          <div style="font-size:15px;font-weight:700;color:var(--fg);flex:1;min-width:120px">Conversazioni AI</div>
+          <input id="ai-conv-search" type="text" placeholder="Cerca utente…"
+            value="${esc(state.aiSearchQuery)}"
+            class="form-input" style="width:200px;font-size:12px;padding:5px 10px">
+          <button id="ai-conv-goto-page" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;white-space:nowrap" title="Apri la pagina AI Coach (benchmark, uso, conversazioni)">📊 Pagina AI Coach →</button>
+          <button id="ai-conv-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit">✕ Chiudi</button>
+        </div>
+
+        <!-- Body -->
+        <div style="display:flex;flex:1;min-height:0">
+          <!-- Session list -->
+          <div style="width:280px;flex-shrink:0;border-right:1px solid #1e1e30;overflow-y:auto">
+            ${aiSessionListHtml()}
+          </div>
+          <!-- Chat panel -->
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+            ${aiChatPanel()}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function aiChatPanel() {
+  if (!state.aiSelectedSession) {
+    return `<div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px">
+      Seleziona una conversazione
+    </div>`;
+  }
+  const s = state.aiSelectedSession;
+  const dateRange = new Date(s.session_start).toLocaleDateString('it-IT', { day:'2-digit', month:'long', year:'numeric' });
+
+  const messages = state.aiSessionMessages;
+  const loading  = state.aiSessionMessagesLoading;
+
+  let msgHtml;
+  if (loading) {
+    msgHtml = `<div style="padding:24px;color:var(--muted);font-size:12px" class="pulse">Caricamento messaggi…</div>`;
+  } else if (!messages || !messages.length) {
+    msgHtml = `<div style="padding:24px;color:var(--muted);font-size:12px">Nessun messaggio trovato</div>`;
+  } else {
+    const TOOL_NICE = {
+      get_exercises: 'cerca esercizi',
+      get_user_profile: 'legge profilo',
+      get_user_workouts: 'guarda allenamenti',
+      create_workout: 'crea workout',
+      save_coach_note: 'salva nota',
+      propose_workout: 'propone workout',
+    };
+    const ICON_MAP = { dumbbell:'💪', coffee:'☕', fire:'🔥', star:'⭐', heart:'❤️', lightning:'⚡', run:'🏃' };
+    const LEVEL_DOT = { Easy:'🟢', Medium:'🟡', Hard:'🔴' };
+
+    msgHtml = messages.map(m => {
+      const t = new Date(m.ts).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+
+      if (m.event === 'start' && m.user_msg) {
+        return `<div style="margin-bottom:14px">
+          <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px">
+            <span style="font-size:10px;font-weight:700;color:var(--purple);text-transform:uppercase;letter-spacing:.06em">${esc(s.username || s.email || '?')}</span>
+            <span style="font-size:10px;color:var(--muted)">${t}</span>
+          </div>
+          <div style="background:#1a1a2e;border-radius:10px 10px 10px 2px;padding:10px 14px;font-size:13px;color:var(--fg);line-height:1.55;max-width:85%;word-break:break-word">${esc(m.user_msg)}</div>
+        </div>`;
+      }
+
+      if (m.event === 'ai_response' && m.tool_names) {
+        let tools = [];
+        try { tools = JSON.parse(m.tool_names); } catch { tools = [m.tool_names]; }
+        const toolStr = tools.map(n => TOOL_NICE[n] || n).join(' · ');
+        return `<div style="margin:4px 0 8px 8px;font-size:10px;color:#555;display:flex;align-items:center;gap:5px">
+          <span style="color:#3a3a5a">⚙</span> ${esc(toolStr)}
+        </div>`;
+      }
+
+      if (m.event === 'ai_response' && m.ai_text) {
+        return `<div style="margin-bottom:18px;display:flex;justify-content:flex-end">
+          <div>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:4px;justify-content:flex-end">
+              <span style="font-size:10px;color:var(--muted)">${t}</span>
+              <span style="font-size:10px;font-weight:700;color:#4ade80;text-transform:uppercase;letter-spacing:.06em">Coach AI</span>
+            </div>
+            <div style="background:#0d2218;border:1px solid #1a3a28;border-radius:10px 10px 2px 10px;padding:10px 14px;font-size:13px;color:#d1fae5;line-height:1.55;max-width:85%;word-break:break-word;text-align:left">${esc(m.ai_text)}</div>
+          </div>
+        </div>`;
+      }
+
+      if (m.event === 'tool_result' && m.tool_name === 'propose_workout' && m.tool_result_data) {
+        let w;
+        try { w = JSON.parse(m.tool_result_data); } catch { return ''; }
+        const icon  = ICON_MAP[w.icon] || '🏋️';
+        const dot   = LEVEL_DOT[w.level] || '';
+        const exs   = (w.exercises_resolved || []).map(ex =>
+          `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #1a2530">
+            <span style="flex:1;font-size:12px;color:var(--fg)">${esc(ex.name)}</span>
+            <span style="font-size:11px;color:var(--muted);width:38px;text-align:right">${ex.time_seconds}s</span>
+            <span style="font-size:10px;color:#4a6a8a;width:60px;text-align:right">${esc(ex.muscle)}</span>
+          </div>`
+        ).join('');
+        return `<div style="margin:6px 0 18px 0;background:#0a1a28;border:1px solid #1a3a50;border-radius:12px;padding:14px 16px;max-width:90%">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-size:18px">${icon}</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#7dd3fc">${esc(w.name)}</div>
+              <div style="font-size:11px;color:var(--muted)">${dot} ${esc(w.level)} · ${w.time_minutes} min · ${w.exp_preview} XP</div>
+            </div>
+          </div>
+          <div style="margin-bottom:10px">${exs}</div>
+          ${w.reasoning ? `<div style="font-size:11px;color:#4a6a8a;line-height:1.5;font-style:italic;border-top:1px solid #1a2530;padding-top:8px">${esc(w.reasoning)}</div>` : ''}
+        </div>`;
+      }
+
+      return '';
+    }).join('');
+  }
+
+  const panelAge  = calcAge(s.birth_date);
+  const panelGoal = GOAL_LABEL[s.primary_goal] || s.primary_goal || null;
+  const panelGender = GENDER_LABEL[s.gender?.toLowerCase()] || null;
+  const profileChips = [
+    s.email     && `<span style="font-size:10px;color:var(--muted)">${esc(s.email)}</span>`,
+    panelGoal   && `<span style="font-size:10px;background:#1e1a3d;color:var(--purple);padding:1px 8px;border-radius:10px">${esc(panelGoal)}</span>`,
+    (panelAge || panelGender) && `<span style="font-size:10px;color:var(--muted)">${[panelAge ? panelAge + ' anni' : null, panelGender].filter(Boolean).map(esc).join(' · ')}</span>`,
+  ].filter(Boolean).join('');
+
+  return `
+    <div style="padding:14px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+      <div style="font-size:12px;font-weight:600;color:var(--fg);margin-bottom:4px">${esc(s.username || s.email || '—')}</div>
+      ${profileChips ? `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">${profileChips}</div>` : ''}
+      <div style="font-size:11px;color:var(--muted)">${dateRange} · ${s.msg_count} messaggio${s.msg_count !== 1 ? 'i' : ''}</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:20px">
+      ${msgHtml}
+    </div>`;
+}
+
+// ── EVENT BROWSER — popup selezione evento ────────────────────────────
+
+// Carica il catalogo eventi dal DB (event_registry, popolato da build-event-map.ts). Metadati non
+// sensibili → RLS read pubblica. Ordinato per volume 30g desc così i più rilevanti vengono prima.
+// In coda al fetch iniettiamo 2 pseudo-eventi install_* aggregati (Google Play + Meta Ads): non
+// stanno in user_events, i loro volumi sono SUM sulle tabelle esterne. Vedi syntheticInstallEvents.
+async function fetchEventRegistry() {
+  try {
+    const [regRes, installs] = await Promise.all([
+      sb.from('event_registry').select('*').order('vol_30d', { ascending: false }),
+      syntheticInstallEvents().catch(e => { console.warn('syntheticInstallEvents', e); return []; }),
+    ]);
+    if (regRes.error) throw regRes.error;
+    const all = [...installs, ...(regRes.data || [])];
+    all.sort((a, b) => (b.vol_30d || 0) - (a.vol_30d || 0));
+    state.eventRegistry = all;
+  } catch (e) { console.error('fetchEventRegistry', e); }
+  if (state.eventBrowserOpen) render();
+}
+
+// Colore/glifo per tipo evento (coerente col mockup).
+// `install` = pseudo-evento aggregato (Google Play / Meta Ads): non è in user_events, il numero
+// arriva da google_play_installs / meta_ads_insights_daily (vedi syntheticInstallEvents()).
+function eventTypeColor(type) {
+  return { action: 'var(--purple)', click: '#5b9bff', navigation: '#3ecacd', install: '#22c55e', error: 'var(--red)' }[type] || 'var(--muted)';
+}
+function eventTypeGlyph(type) {
+  return { action: '⚡', click: '◉', navigation: '→', install: '↓', error: '!' }[type] || '·';
+}
+
+// Nomi degli pseudo-eventi install (usati anche per riconoscerli in fetchEventFunnel/fetchSprintEventFunnel).
+const INSTALL_EVENT_NAMES = ['install_google_play', 'install_meta_ads'];
+function isInstallEvent(name) { return INSTALL_EVENT_NAMES.includes(name); }
+
+// Totali install {google_play, meta_ads} per un periodo [from, to] date-inclusive. La dashboard
+// gira con anon key ma google_play_installs / meta_ads_insights_daily sono service_role-only:
+// la RPC kpi_install_totals è SECURITY DEFINER (stesso pattern di kpi_funnel).
+async function fetchInstallTotals(from, to) {
+  const { data, error } = await sb.rpc('kpi_install_totals', { inizio: from, fine: to });
+  if (error) throw error;
+  const out = { google_play: 0, meta_ads: 0 };
+  for (const row of data || []) out[row.source] = Number(row.total || 0);
+  return out;
+}
+
+// Data ISO (YYYY-MM-DD) a N giorni fa in ora locale.
+function daysAgoIso(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Costruisce le 2 entry sintetiche install_* da iniettare in state.eventRegistry. Volumi 7g/30g
+// calcolati dalle stesse tabelle usate dal funnel Default (kpi_funnel step 0). Se la RPC fallisce
+// lasciamo volumi a 0 per non bloccare il render del modal.
+async function syntheticInstallEvents() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [t7, t30] = await Promise.all([
+    fetchInstallTotals(daysAgoIso(7),  today).catch(() => ({ google_play: 0, meta_ads: 0 })),
+    fetchInstallTotals(daysAgoIso(30), today).catch(() => ({ google_play: 0, meta_ads: 0 })),
+  ]);
+  const now = new Date().toISOString();
+  return [
+    {
+      event_name: 'install_google_play',
+      screens: ['Google Play'], types: ['install'], verdict: 'alive',
+      funnels_used: 0, vol_7d: t7.google_play, vol_30d: t30.google_play, updated_at: now,
+    },
+    {
+      event_name: 'install_meta_ads',
+      screens: ['Meta Ads'], types: ['install'], verdict: 'alive',
+      funnels_used: 0, vol_7d: t7.meta_ads, vol_30d: t30.meta_ads, updated_at: now,
+    },
+  ];
+}
+
+// Numeri install per il periodo, mappati sui nomi pseudo-evento usati nel funnel a eventi.
+async function computeInstallStepNumbers(eventNames, from, to) {
+  const totals = await fetchInstallTotals(from, to).catch(() => ({ google_play: 0, meta_ads: 0 }));
+  const out = {};
+  if (eventNames.includes('install_google_play')) out.install_google_play = totals.google_play;
+  if (eventNames.includes('install_meta_ads'))    out.install_meta_ads    = totals.meta_ads;
+  return out;
+}
+function eventPrimaryType(ev) { return (ev.types && ev.types[0]) || 'action'; }
+function eventPrimaryScreen(ev) { return (ev.screens && ev.screens[0]) || '—'; }
+
+// Applica i filtri correnti (ricerca, schermata, tipo, volume, alive) al registry.
+function eventBrowserFiltered() {
+  const q = state.ebSearch.trim().toLowerCase();
+  return state.eventRegistry.filter(ev => {
+    if (state.ebAliveOnly && ev.verdict !== 'alive') return false;
+    if (!state.ebVolAll && (ev.vol_30d || 0) <= 100) return false;
+    if (state.ebType && !(ev.types || []).includes(state.ebType)) return false;
+    if (state.ebScreen && !(ev.screens || []).includes(state.ebScreen)) return false;
+    if (q && !ev.event_name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+// Query on-demand "cosa segue": per l'evento X il primo evento successivo dello stesso utente entro
+// 30 min (ultimi 14 giorni), aggregato in percentuali. Nessuna infra pre-calcolata: gira solo quando
+// apri il tab. ~1-2s. Usa la RPC event_next_transitions.
+async function fetchEventNext(eventName) {
+  state.ebNextLoading = true; state.ebNextRows = null; render();
+  try {
+    const res = await sb.rpc('event_next_transitions', { p_event: eventName, p_days: 14, p_window_min: 30 });
+    if (res.error) throw res.error;
+    state.ebNextRows = (res.data || []).map(r => ({ event: r.next_event, pct: Number(r.pct) })).slice(0, 6);
+  } catch (e) {
+    console.error('fetchEventNext', e);
+    state.ebNextRows = 'error';
+  }
+  state.ebNextLoading = false; render();
+}
+
+// Modale event browser. Renderizzato globalmente in layout(); visibile solo se eventBrowserOpen.
+function eventBrowserModal() {
+  if (!state.eventBrowserOpen) return '';
+  const filtered = eventBrowserFiltered();
+  const tgt = state.eventBrowserTargetRow;
+  // In modalità OR il modale non sta scegliendo *l'*evento dello step ma uno in più: il testo
+  // lo dice, altrimenti sembra che si stia per sovrascrivere quello già scelto.
+  const isOr = state.eventBrowserTargetOr != null;
+  const stepCtx = tgt != null
+    ? (isOr ? ` · in OR allo step ${tgt + 1}` : ` · Step ${tgt + 1} del funnel`)
+    : '';
+
+  // colonna schermate: conta gli eventi (post alive/vol/type, ignorando il filtro schermata) per screen
+  const forScreens = state.eventRegistry.filter(ev => {
+    if (state.ebAliveOnly && ev.verdict !== 'alive') return false;
+    if (!state.ebVolAll && (ev.vol_30d || 0) <= 100) return false;
+    if (state.ebType && !(ev.types || []).includes(state.ebType)) return false;
+    return true;
+  });
+  const screenCounts = {};
+  forScreens.forEach(ev => { const s = eventPrimaryScreen(ev); screenCounts[s] = (screenCounts[s] || 0) + 1; });
+  const screenList = Object.keys(screenCounts).filter(s => s !== '—').sort();
+  const screensHtml = `
+    <div class="eb-sc-item ${state.ebScreen === null ? 'on' : ''}" data-screen="">
+      <span>Tutte le schermate</span><span class="n">${forScreens.length}</span>
+    </div>` +
+    screenList.map(s => `
+      <div class="eb-sc-item ${state.ebScreen === s ? 'on' : ''}" data-screen="${esc(s)}">
+        <span>${esc(s)}</span><span class="n">${screenCounts[s]}</span>
+      </div>`).join('');
+
+  const maxVol = Math.max(...filtered.map(e => e.vol_30d || 0), 1);
+  const eventsHtml = filtered.length ? filtered.map(ev => {
+    const t = eventPrimaryType(ev), col = eventTypeColor(t), sel = state.ebSelected === ev.event_name;
+    const usedIn = ev.funnels_used > 0 ? `<span>usato in ${ev.funnels_used} funnel</span>` : '';
+    return `
+      <div class="eb-ev ${sel ? 'sel' : ''}" data-event="${esc(ev.event_name)}">
+        <div class="eb-tico" style="background:${col}22;color:${col}">${eventTypeGlyph(t)}</div>
+        <div style="min-width:0">
+          <div class="eb-name">${esc(ev.event_name)}</div>
+          <div class="eb-meta"><span class="eb-badge">${esc(t)}</span>${usedIn}</div>
+        </div>
+        <div class="eb-vol">
+          <div class="num">${(ev.vol_30d || 0).toLocaleString('it-IT')}</div>
+          <div class="bar"><i style="width:${Math.round((ev.vol_30d || 0) / maxVol * 100)}%;background:${col}"></i></div>
+        </div>
+      </div>`;
+  }).join('') : `<div style="padding:30px 16px;color:var(--muted);font-size:12.5px;text-align:center">Nessun evento con questi filtri.</div>`;
+
+  const sel = state.eventRegistry.find(e => e.event_name === state.ebSelected);
+  const detailHtml = !sel ? `
+    <div style="padding:30px 16px;color:var(--muted);font-size:12px;text-align:center">Seleziona un evento per i dettagli.</div>`
+    : (() => {
+      const t = eventPrimaryType(sel), col = eventTypeColor(t);
+      const tabs = `
+        <div class="eb-d-tabs">
+          <div class="eb-d-tab ${state.ebTab === 'details' ? 'on' : ''}" data-tab="details">Dettagli</div>
+          <div class="eb-d-tab ${state.ebTab === 'next' ? 'on' : ''}" data-tab="next">Cosa segue</div>
+        </div>`;
+      if (state.ebTab === 'next') {
+        let body;
+        if (state.ebNextLoading) body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Calcolo sequenza… (~2s)</div>`;
+        else if (state.ebNextRows === 'error') body = `<div style="color:var(--red);font-size:12px;padding:8px 0">Query non disponibile (RPC event_next_transitions mancante).</div>`;
+        else if (Array.isArray(state.ebNextRows)) {
+          if (!state.ebNextRows.length) body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuna sequenza rilevata negli ultimi 14 giorni.</div>`;
+          else {
+            const top = state.ebNextRows[0];
+            body = state.ebNextRows.map(r => `
+              <div class="eb-next-row">
+                <span class="nm">${esc(r.event)}</span>
+                <div class="nbar"><i style="width:${Math.round(r.pct)}%"></i></div>
+                <span class="pct">${r.pct.toFixed(0)}%</span>
+              </div>`).join('')
+              + `<div class="eb-next-note">Su user_events, ultimi 14 giorni, stesso utente entro 30 min.</div>`
+              + `<div class="eb-next-cta">Suggerimento step successivo:<br><b data-suggest="${esc(top.event)}">+ ${esc(top.event)} (${top.pct.toFixed(0)}%)</b></div>`;
+          }
+        } else body = `<div style="color:var(--muted);font-size:12px;padding:8px 0">Apri il tab per calcolare.</div>`;
+        return `${tabs}<div class="eb-d-pad">
+          <div class="eb-d-name" style="color:${col}">${eventTypeGlyph(t)} ${esc(sel.event_name)}</div>
+          <div><div class="eb-d-sec" style="margin-bottom:6px">Dopo questo evento (entro 30 min)</div>${body}</div>
+        </div>`;
+      }
+      const funnelsRow = sel.funnels_used > 0
+        ? `<div class="eb-kv"><div class="k">Funnel che lo usano</div><div class="v">${sel.funnels_used}</div></div>` : '';
+      return `${tabs}<div class="eb-d-pad">
+        <div class="eb-d-name" style="color:${col}">${eventTypeGlyph(t)} ${esc(sel.event_name)}</div>
+        <div class="eb-d-kv">
+          <div class="eb-kv"><div class="k">Volume 7g</div><div class="v">${(sel.vol_7d||0).toLocaleString('it-IT')}</div></div>
+          <div class="eb-kv"><div class="k">Volume 30g</div><div class="v">${(sel.vol_30d||0).toLocaleString('it-IT')}</div></div>
+          <div class="eb-kv"><div class="k">Tipo</div><div class="v" style="font-size:12px;color:${col}">${esc((sel.types||[]).join(', ')||'—')}</div></div>
+          <div class="eb-kv"><div class="k">Stato</div><div class="v" style="font-size:12px">${esc(sel.verdict||'—')}</div></div>
+        </div>
+        <div><div class="eb-d-sec" style="margin-bottom:6px">Schermate</div>
+          <div style="font-family:var(--mono);font-size:11.5px;color:var(--muted)">${esc((sel.screens||[]).join(', ')||'nessuna')}</div>
+        </div>
+        ${funnelsRow}
+      </div>`;
+    })();
+
+  return `
+    <div class="eb-overlay" id="eb-overlay">
+      <div class="eb-modal">
+        <div class="eb-head">
+          <div class="eb-title">${isOr ? 'Aggiungi evento in OR' : 'Scegli evento'}<span class="ctx">${stepCtx}</span></div>
+          <input id="eb-search" class="eb-search" type="text" placeholder="🔍  Cerca evento…" value="${esc(state.ebSearch)}" autocomplete="off">
+          <button class="eb-close" id="eb-close">×</button>
+        </div>
+        <div class="eb-filters">
+          <button class="eb-fchip ${!state.ebType ? 'on' : ''}" data-type="">Tutti i tipi</button>
+          <button class="eb-fchip ${state.ebType === 'action' ? 'on' : ''}" data-type="action"><span class="dot" style="background:var(--purple)"></span>action</button>
+          <button class="eb-fchip ${state.ebType === 'click' ? 'on' : ''}" data-type="click"><span class="dot" style="background:#5b9bff"></span>click</button>
+          <button class="eb-fchip ${state.ebType === 'navigation' ? 'on' : ''}" data-type="navigation"><span class="dot" style="background:#3ecacd"></span>navigation</button>
+          <button class="eb-fchip ${state.ebType === 'install' ? 'on' : ''}" data-type="install"><span class="dot" style="background:#22c55e"></span>install</button>
+          <div class="eb-fsep"></div>
+          <button class="eb-fchip ${!state.ebVolAll ? 'on' : ''}" id="eb-vol-hi">Volume &gt; 100/30g</button>
+          <button class="eb-fchip ${state.ebVolAll ? 'on' : ''}" id="eb-vol-all">Tutti (${state.eventRegistry.filter(e=>state.ebAliveOnly?e.verdict==='alive':true).length})</button>
+          <label class="eb-toggle" id="eb-alive"><span>solo eventi vivi</span><span class="sw ${state.ebAliveOnly ? 'on' : ''}"></span></label>
+        </div>
+        <div class="eb-body">
+          <div class="eb-screens">${screensHtml}</div>
+          <div class="eb-events">${eventsHtml}</div>
+          <div class="eb-detail">${detailHtml}</div>
+        </div>
+        <div class="eb-foot">
+          <div class="eb-selprev">${state.ebSelected ? `Selezionato: <span class="nm">${esc(state.ebSelected)}</span>` : 'Nessun evento selezionato'}</div>
+          <button class="btn btn-ghost" id="eb-cancel" style="font-size:12px;padding:8px 14px">Annulla</button>
+          <button class="eb-add" id="eb-add" ${state.ebSelected ? '' : 'disabled'}>${tgt != null ? (isOr ? `Aggiungi in OR allo step ${tgt + 1}` : `Aggiungi allo step ${tgt + 1}`) : 'Aggiungi'}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Apre il modale event browser puntando allo step targetRow di eventFunnelConfig. Se targetChild
+// è un numero, il target è la variante children[targetChild] dello step, non il parent stesso.
+// Se targetOr è un numero, si sta lavorando sugli eventi in OR di quel target: -1 = aggiungi uno
+// slot nuovo, >= 0 = sostituisci l'OR in quella posizione.
+// Preseleziona l'evento già presente sul target (se c'è) così si può anche solo cambiarlo.
+function openEventBrowser(targetRow, targetChild, targetOr) {
+  state.eventBrowserOpen = true;
+  state.eventBrowserTargetRow = targetRow;
+  state.eventBrowserTargetChild = (typeof targetChild === 'number') ? targetChild : null;
+  state.eventBrowserTargetOr = (typeof targetOr === 'number') ? targetOr : null;
+  const row = state.eventFunnelConfig[targetRow];
+  const target = state.eventBrowserTargetChild !== null && row && Array.isArray(row.children)
+    ? row.children[state.eventBrowserTargetChild]
+    : row;
+  state.ebSelected = state.eventBrowserTargetOr != null
+    // Slot OR: in modifica preseleziona l'evento di quello slot, in aggiunta si parte puliti
+    // (preselezionare il primario farebbe scattare il dedup e il bottone resterebbe morto).
+    ? (state.eventBrowserTargetOr >= 0 ? (rowOrEvents(target)[state.eventBrowserTargetOr] || null) : null)
+    : ((target && target.event) || null);
+  state.ebSearch = ''; state.ebScreen = null; state.ebType = null;
+  state.ebVolAll = false; state.ebAliveOnly = true;
+  state.ebTab = 'details'; state.ebNextRows = null; state.ebNextLoading = false;
+  render();
+  document.getElementById('eb-search')?.focus();
+}
+
+function closeEventBrowser() {
+  state.eventBrowserOpen = false;
+  state.eventBrowserTargetRow = null;
+  state.eventBrowserTargetChild = null;
+  state.eventBrowserTargetOr = null;
+  state.ebSelected = null;
+  render();
+}
+
+// Conferma la selezione: scrive event + label sullo step target (parent o child) e chiude.
+// In modalità OR scrive invece dentro target.orEvents e NON tocca la label: la label descrive
+// lo step nel suo insieme ("Registrati + attivati"), non il singolo evento che lo alimenta.
+function confirmEventBrowser() {
+  const i = state.eventBrowserTargetRow;
+  if (i == null || !state.ebSelected) return;
+  const row = state.eventFunnelConfig[i];
+  if (row) {
+    const target = state.eventBrowserTargetChild !== null && Array.isArray(row.children)
+      ? row.children[state.eventBrowserTargetChild]
+      : row;
+    if (target) {
+      const orIdx = state.eventBrowserTargetOr;
+      if (orIdx != null) {
+        const ors = rowOrEvents(target);
+        const already = ors.indexOf(state.ebSelected);
+        // Già presente (come primario o come altro OR): niente da fare, si chiude e basta.
+        if (state.ebSelected !== target.event && (already === -1 || already === orIdx)) {
+          if (orIdx >= 0 && orIdx < ors.length) ors[orIdx] = state.ebSelected;
+          else ors.push(state.ebSelected);
+          target.orEvents = ors;
+          persistEventFunnelConfig();
+        }
+      } else {
+        target.event = state.ebSelected;
+        // Dedup inverso: se il nuovo primario era fra gli OR, esce da lì (altrimenti lo step
+        // manderebbe due volte lo stesso nome alla RPC).
+        const ors = rowOrEvents(target);
+        if (ors.length) target.orEvents = ors; else delete target.orEvents;
+        const c = EVENT_CATALOG.find(e => e.event === state.ebSelected);
+        target.label = c ? c.label : '';  // label amichevole se in catalogo, altrimenti raw
+        persistEventFunnelConfig();
+      }
+    }
+  }
+  closeEventBrowser();
+}
+
+// Attacca gli handler del modale (chiamato a ogni render da attachEvents).
+function attachEventBrowserHandlers() {
+  if (!state.eventBrowserOpen) return;
+
+  // click sull'overlay (fuori dal modale) chiude
+  document.getElementById('eb-overlay')?.addEventListener('mousedown', e => {
+    if (e.target.id === 'eb-overlay') closeEventBrowser();
+  });
+  document.getElementById('eb-close')?.addEventListener('click', closeEventBrowser);
+  document.getElementById('eb-cancel')?.addEventListener('click', closeEventBrowser);
+
+  // ricerca — render ricrea l'input; preserva caret così i caratteri non compaiono al contrario
+  const search = document.getElementById('eb-search');
+  if (search) {
+    search.addEventListener('input', e => {
+      const caret = e.target.selectionStart;
+      state.ebSearch = e.target.value;
+      render();
+      const s = document.getElementById('eb-search');
+      if (s) { s.focus(); try { s.setSelectionRange(caret, caret); } catch (_) {} }
+    });
+    search.addEventListener('keydown', e => { if (e.key === 'Escape') closeEventBrowser(); });
+  }
+
+  // filtri tipo
+  document.querySelectorAll('.eb-fchip[data-type]').forEach(el =>
+    el.addEventListener('click', () => { state.ebType = el.dataset.type || null; render(); }));
+  document.getElementById('eb-vol-hi')?.addEventListener('click', () => { state.ebVolAll = false; render(); });
+  document.getElementById('eb-vol-all')?.addEventListener('click', () => { state.ebVolAll = true; render(); });
+  document.getElementById('eb-alive')?.addEventListener('click', () => { state.ebAliveOnly = !state.ebAliveOnly; render(); });
+
+  // colonna schermate
+  document.querySelectorAll('.eb-sc-item').forEach(el =>
+    el.addEventListener('click', () => { state.ebScreen = el.dataset.screen || null; render(); }));
+
+  // selezione evento: click = seleziona; doppio click = seleziona + conferma
+  document.querySelectorAll('.eb-ev').forEach(el => {
+    el.addEventListener('click', () => {
+      state.ebSelected = el.dataset.event;
+      if (state.ebTab === 'next') { state.ebNextRows = null; }  // reset sequenza per il nuovo evento
+      render();
+    });
+    el.addEventListener('dblclick', () => { state.ebSelected = el.dataset.event; confirmEventBrowser(); });
+  });
+
+  // tab dettaglio
+  document.querySelectorAll('.eb-d-tab').forEach(el =>
+    el.addEventListener('click', () => {
+      state.ebTab = el.dataset.tab;
+      if (state.ebTab === 'next' && state.ebSelected && state.ebNextRows == null && !state.ebNextLoading) {
+        fetchEventNext(state.ebSelected);
+      } else render();
+    }));
+
+  // suggerimento "cosa segue" → seleziona quell'evento
+  document.querySelector('[data-suggest]')?.addEventListener('click', el => {
+    state.ebSelected = el.target.dataset.suggest;
+    state.ebTab = 'details'; render();
+  });
+
+  document.getElementById('eb-add')?.addEventListener('click', confirmEventBrowser);
+}
+
+// ── FUNNEL — custom builder ───────────────────────────────────────────
+
+// Set curato di 24 icone Lucide per le chip funnel (analytics-oriented). Ogni SVG copiato raw da
+// lucide.dev (stroke=2, size=16). Chiave = nome breve usato come identifier persistito su DB.
+// Aggiungi/rimuovi qui: il picker legge le chiavi in automatico.
+const LUCIDE_ICONS = {
+  zap:              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  target:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+  users:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  'trending-up':    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+  'mouse-pointer':  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="M13 13l6 6"/></svg>',
+  'shopping-cart':  '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>',
+  activity:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  brain:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/></svg>',
+  'dollar-sign':    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+  flag:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>',
+  gift:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>',
+  sparkles:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>',
+  'message-circle': '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  play:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>',
+  'check-circle':   '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+  filter:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>',
+  'bar-chart':      '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>',
+  rocket:           '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>',
+  crown:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"/><path d="M5 21h14"/></svg>',
+  heart:            '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',
+  eye:              '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  bell:             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+  'map-pin':        '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',
+  calendar:         '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+};
+
+// Palette 8 colori per le chip. Hex derivati dallo stile HypeMove dashboard: viola come var(--accent),
+// più 7 tinte per differenziare a colpo d'occhio. Chiave (nome breve) = valore persistito.
+const CHIP_COLORS = {
+  purple: '#a879ff',
+  blue:   '#5b9bff',
+  cyan:   '#3ecacd',
+  green:  '#4ade80',
+  yellow: '#facc15',
+  orange: '#fb923c',
+  pink:   '#f472b6',
+  red:    '#ef4444',
+};
+
+const DEFAULT_CHIP_ICON  = 'zap';
+const DEFAULT_CHIP_COLOR = 'purple';
+
+// Render inline dell'icona Lucide. Fallback su DEFAULT_CHIP_ICON se il nome non esiste (icona rimossa).
+function chipIconSvg(name) {
+  return LUCIDE_ICONS[name] || LUCIDE_ICONS[DEFAULT_CHIP_ICON];
+}
+function chipColorHex(name) {
+  return CHIP_COLORS[name] || CHIP_COLORS[DEFAULT_CHIP_COLOR];
+}
+
+// Ordine unificato delle chip in toolbar come array di token: 'default', 'onboarding', o id funnel.
+// Seed di default: [default, onboarding, ...saved by order_index]. Se esiste un ordine salvato in
+// localStorage lo si rispetta (filtrando token spariti), accodando i token nuovi non ancora ordinati.
+function funnelToolbarTokens() {
+  const seed = ['default', 'onboarding', 'activation', ...state.savedFunnels.map(f => f.id)];
+  let stored = [];
+  try { stored = JSON.parse(localStorage.getItem(LS_FUNNEL_TOOLBAR_ORDER)) || []; } catch { stored = []; }
+  const seedSet = new Set(seed);
+  const ordered = stored.filter(t => seedSet.has(t));      // token ancora esistenti, nell'ordine salvato
+  const orderedSet = new Set(ordered);
+  const appended = seed.filter(t => !orderedSet.has(t));   // token nuovi non ancora in localStorage
+  return [...ordered, ...appended];
+}
+
+// Persiste il nuovo ordine dei token in localStorage e propaga l'ordine dei soli funnel salvati sul DB
+// (order_index) così un browser fresco parte da un ordine sensato. I due built-in vivono solo qui.
+async function saveFunnelToolbarOrder(tokens) {
+  try { localStorage.setItem(LS_FUNNEL_TOOLBAR_ORDER, JSON.stringify(tokens)); } catch (e) { console.error('saveFunnelToolbarOrder LS', e); }
+  const savedIds = tokens.filter(t => t !== 'default' && t !== 'onboarding' && t !== 'activation');
+  if (savedIds.length) await reorderFunnels(savedIds);
+  else render();
+}
+
+// Editor chip — versione compatta inline dentro il costruttore funnel.
+// Nome+etichetta stessa riga. Icona collassata (mostra solo quella corrente), la griglia si apre
+// in hover sotto forma di popover. Colori inline. Save/Annulla piccoli a destra.
+function chipEditorPanel(idx) {
+  const f = state.savedFunnels[idx];
+  if (!f) return '';
+  const d = state.chipDraft || {
+    name: f.name || '', icon: f.icon || DEFAULT_CHIP_ICON,
+    color: f.color || DEFAULT_CHIP_COLOR, label: f.label || '',
+  };
+  const accentHex = chipColorHex(d.color);
+
+  const iconGrid = Object.keys(LUCIDE_ICONS).map(name => {
+    const active = name === d.icon;
+    return `<button class="chip-icon-btn" data-icon="${name}" title="${name}"
+      style="width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid ${active ? accentHex : 'var(--border)'};background:${active ? accentHex + '22' : 'transparent'};color:${active ? accentHex : 'var(--muted)'};cursor:pointer;padding:0">${chipIconSvg(name)}</button>`;
+  }).join('');
+
+  const colorSwatches = Object.entries(CHIP_COLORS).map(([name, hex]) => {
+    const active = name === d.color;
+    return `<button class="chip-color-btn" data-color="${name}" title="${name}"
+      style="width:20px;height:20px;border-radius:50%;background:${hex};border:2px solid ${active ? '#fff' : 'transparent'};box-shadow:${active ? '0 0 0 2px ' + hex : 'none'};cursor:pointer;padding:0"></button>`;
+  }).join('');
+
+  return `
+    <div class="chip-inline-editor" style="display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--surface2);border:1px solid var(--border);border-left:3px solid ${accentHex};border-radius:8px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">
+        <span style="color:${accentHex};display:inline-flex;align-items:center">${chipIconSvg(d.icon)}</span>
+        Aspetto della chip
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:nowrap">
+        <input id="chip-editor-name" class="form-input" type="text" value="${esc(d.name)}"
+               placeholder="Nome" style="flex:1 1 55%;padding:5px 10px;font-size:12px;min-width:0" autocomplete="off">
+        <input id="chip-editor-label" class="form-input" type="text" value="${esc(d.label)}"
+               placeholder="Etichetta (opzionale)"
+               style="flex:1 1 45%;padding:5px 10px;font-size:12px;min-width:0" autocomplete="off">
+      </div>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+        <div class="chip-icon-picker" style="position:relative;display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Icona</span>
+          <button type="button" class="chip-icon-current"
+                  style="width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid ${accentHex};background:${accentHex}22;color:${accentHex};cursor:pointer;padding:0">${chipIconSvg(d.icon)}</button>
+          <div class="chip-icon-grid"
+               style="position:absolute;top:100%;left:0;margin-top:4px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.4);grid-template-columns:repeat(10,24px);gap:4px;z-index:30">
+            ${iconGrid}
+          </div>
+        </div>
+        <div style="display:inline-flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Colore</span>
+          <div style="display:flex;gap:6px">${colorSwatches}</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button id="chip-editor-delete" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;color:var(--red)" title="Elimina questo funnel salvato">Elimina</button>
+          <button id="chip-editor-cancel" class="btn btn-ghost" style="font-size:11px;padding:4px 10px">Annulla</button>
+          <button id="chip-editor-save" class="btn btn-primary" style="font-size:11px;padding:4px 12px">Salva chip</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── TESTATA DEL FUNNEL («Una riga sola») ─────────────────────────────────────────────
+// Una riga: nome della pagina, pillola-menu col funnel aperto, periodi rapidi, «Altro periodo».
+// Sostituisce le vecchie tab dei funnel + la striscia periodo. L'ordine a trascinamento dei funnel
+// vive ancora qui: ogni voce del menu è un `.funnel-chip-wrap` con il suo data-token.
+const FN_CHEV = `<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="#9ca3af" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const FN_GEAR = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h8M16 18h4"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="14" cy="18" r="2"/></svg>`;
+
+// Il funnel aperto: nome e colore per la pillola e per il titolo del riquadro.
+// `funnelMode === 'event'` con `activeFunnelPreset === null` è lo stato del vecchio funnel onboarding
+// built-in (chip tolta: era un doppione del funnel salvato «Onboarding»); lo si nomina «Onboarding».
+function funnelActive() {
+  if (state.funnelMode === 'activation') return { name: 'Attivazione', color: '#a78bfa' };
+  const f = state.activeFunnelPreset != null ? state.savedFunnels[state.activeFunnelPreset] : null;
+  if (f) return { name: f.name, color: chipColorHex(f.color) };
+  if (state.funnelMode === 'event') return { name: 'Onboarding', color: chipColorHex('purple') };
+  return { name: 'Default', color: '#9ca3af' };
+}
+
+const fnDM = iso => iso ? `${String(iso).slice(8, 10)}/${String(iso).slice(5, 7)}` : '';
+// «Sprint 15 · dal 06/10»: il numero è il primo numero del nome; la data di inizio distingue gli sprint omonimi.
+function fnSprintLabel(s) {
+  const n = (String(s.nome || '').match(/\d+/) || [])[0];
+  return `${n ? 'Sprint ' + n : s.nome} · dal ${fnDM(s.inizio)}`;
+}
+// Sprint in corso e precedente, presi per data di inizio (non per nome).
+// Finestra per la didascalia, come nella tavola 1A: «04/10 → 12/10», con l'ora solo dove lo sprint la ritaglia.
+function fnWindowText(sel, from, to) {
+  const hs = sel && sel.inizio_ora ? ' ' + String(sel.inizio_ora).slice(0, 5) : '';
+  const he = sel && sel.fine_ora ? ' ' + String(sel.fine_ora).slice(0, 5) : '';
+  return `${fnDM(from)}${hs} → ${fnDM(to)}${he}`;
+}
+function funnelQuickSprints() {
+  const all = [...state.sprints].sort((a, b) => String(b.inizio).localeCompare(String(a.inizio)));
+  const started = all.filter(s => s.inizio <= TODAY);
+  const cur = started[0] || null, prev = started[1] || null;
+  const rest = all.filter(s => s !== cur && s !== prev);
+  return { cur, prev, rest };
+}
+
+function funnelPickerMenu() {
+  const { savedFunnels, activeFunnelPreset, chipDragOver } = state;
+  const mode = state.funnelMode;
+  const act = mode === 'activation';
+  const wrap = (token, inner) => `
+    <div class="funnel-chip-wrap" data-token="${token}" draggable="true"
+         style="${chipDragOver === token ? 'box-shadow:inset 0 3px 0 #4361ee;' : ''}">${inner}</div>`;
+  const opt = ({ token, id, cls, dataIdx, on, color, name, label }) => wrap(token, `
+      <button ${id ? `id="${id}"` : ''} class="st-opt ${cls || ''}${on ? ' st-act' : ''}" role="option" aria-selected="${on}"
+              ${dataIdx != null ? `data-preset-idx="${dataIdx}"` : ''} data-fn-close>
+        <span class="fn-dot" style="background:${color}"></span><span class="st-optl">${esc(name)}</span>
+        ${label ? `<span class="st-optd">${esc(label)}</span>` : ''}
+      </button>`);
+  const items = funnelToolbarTokens().map(token => {
+    if (token === 'onboarding') return ''; // doppione del funnel salvato «Onboarding»
+    if (token === 'default') return opt({ token, cls: 'funnel-preset-btn', dataIdx: 'default', on: mode === 'catalog' && activeFunnelPreset === null, color: '#9ca3af', name: 'Default' });
+    if (token === 'activation') return opt({ token, id: 'funnel-activation-btn', on: act, color: '#a78bfa', name: 'Attivazione' });
+    const i = savedFunnels.findIndex(f => f.id === token);
+    if (i === -1) return '';
+    const f = savedFunnels[i];
+    return opt({ token, cls: 'funnel-preset-btn', dataIdx: i, on: !act && activeFunnelPreset === i, color: chipColorHex(f.color), name: f.name, label: f.label });
+  }).join('');
+
+  const editId = mode === 'event' ? 'edit-event-funnel' : 'edit-funnel';
+  const editing = mode === 'event' ? state.editingEventFunnel : state.editingFunnel;
+  const acts = [];
+  if (!act && !editing) acts.push(`<button id="${editId}" class="st-opt fn-act" data-fn-close>Modifica i passi</button>`);
+  if (!act) acts.push(state.funnelSaveOpen
+    ? `<div class="fn-save">
+        <input id="funnel-save-name" class="form-input" type="text" placeholder="Nome funnel…" value="${esc(state.funnelSaveName)}" autocomplete="off">
+        <button id="funnel-save-confirm" class="fn-calc" data-fn-close>Salva</button>
+        <button id="funnel-save-cancel" class="fn-x" data-fn-close aria-label="Annulla">×</button>
+      </div>`
+    : `<button id="funnel-save-open" class="st-opt fn-act">Salva come nuovo</button>`);
+  if (mode === 'catalog' && state.sprints.length) acts.push(`<button id="funnel-assign-open" class="st-opt fn-act" data-fn-close>Assegna a sprint</button>`);
+  return `<div class="st-menu fn-menu" role="listbox" aria-label="Scegli il funnel">
+      ${items}
+      ${state.chipReorderSaving ? `<div class="fn-sub">Salvo l'ordine…</div>` : ''}
+      ${acts.length ? `<div class="fn-hr"></div>${acts.join('')}` : ''}
+    </div>`;
+}
+
+// Periodi rapidi: Oggi, Ieri, sprint in corso, sprint precedente. Il resto sta sotto «Altro periodo».
+function funnelPeriodBar() {
+  const act = state.funnelMode === 'activation';
+  const { cur, prev, rest } = funnelQuickSprints();
+  const sprintOn = !!state.funnelSprintId;
+  const same = r => !sprintOn && state.funnelFrom === r.from && state.funnelTo === r.to;
+  const opts = [];
+  if (!act) {
+    opts.push({ id: 'fn-per-today', label: 'Oggi', on: same(eventFunnelPresetRange('today')) });
+    opts.push({ id: 'fn-per-yesterday', label: 'Ieri', on: same(eventFunnelPresetRange('yesterday')) });
+  }
+  [cur, prev].forEach(s => { if (s) opts.push({ sprint: s, label: fnSprintLabel(s), live: cur === s && (!s.fine || s.fine >= TODAY), on: state.funnelSprintId === s.id }); });
+  const seg = opts.map(o => `
+      <button class="fn-segb${o.on ? ' on' : ''}" ${o.id ? `id="${o.id}"` : `data-fn-sprint="${o.sprint.id}"`} data-fn-close>
+        ${o.live ? '<span class="fn-live" title="Sprint in corso"></span>' : ''}${esc(o.label)}</button>`).join('');
+
+  const otherOn = !opts.some(o => o.on);
+  const selRest = rest.find(s => s.id === state.funnelSprintId);
+  const otherLabel = selRest ? fnSprintLabel(selRest)
+    : otherOn && !sprintOn ? `${fnDM(state.funnelFrom)} → ${fnDM(state.funnelTo)}` : 'Altro periodo';
+  const openO = state.funnelMenu === 'other';
+  const calcId = state.funnelMode === 'event' ? 'event-funnel-apply' : state.funnelMode === 'activation' ? 'activation-apply' : 'funnel-apply';
+  const otherMenu = openO ? `
+    <div class="st-menu fn-menu fn-menu-other">
+      <div class="fn-dates">
+        <input type="date" id="funnel-from" value="${state.funnelFrom}" aria-label="Dal">
+        <span>→</span>
+        <input type="date" id="funnel-to" value="${state.funnelTo}" aria-label="Al">
+        <button id="${calcId}" class="fn-calc" data-fn-close>Calcola</button>
+      </div>
+      ${rest.length ? `<div class="fn-hr"></div><div class="fn-sub">Altri sprint</div>` + rest.map(s => `
+        <button class="st-opt${state.funnelSprintId === s.id ? ' st-act' : ''}" data-fn-sprint="${s.id}" data-fn-close>
+          <span class="st-optl">${esc(fnSprintLabel(s))}</span><span class="st-optd">${fnDM(s.inizio)}–${fnDM(s.fine)}</span>
+        </button>`).join('') : ''}
+    </div>` : '';
+  return `<div class="fn-per">
+      ${seg ? `<div class="fn-seg" role="group" aria-label="Periodo">${seg}</div>` : ''}
+      <div class="st-pillwrap fn-pw">
+        <button class="st-pill st-pill-sel${otherOn ? ' st-pill-blue' : ''}" id="fn-other-btn" aria-haspopup="true" aria-expanded="${openO}">
+          <span>${esc(otherLabel)}</span>${FN_CHEV}</button>${otherMenu}
+      </div>
+    </div>`;
+}
+
+// Quante persone sono escluse adesso: i motivi con l'interruttore su «esclusi», senza contare due volte
+// chi ha più motivi. null finché non c'è né la lista né il calcolo.
+function funnelExclCount() {
+  const act = state.funnelMode === 'activation';
+  const incl = { emulator: state.funnelIncludeEmulators, test: state.funnelIncludeTest, blocked: state.funnelIncludeBlocked, bot: state.funnelIncludeBots };
+  const reasons = (act ? ['bot'] : ['emulator', 'test', 'blocked', 'bot']).filter(r => !incl[r]);
+  if (act) return state.activation ? (state.funnelIncludeBots ? 0 : (state.activation.bots_excluded || 0)) : null;
+  // Prima i conteggi del calcolo (limitati al periodo); l'elenco nominale è tagliato a 1000 righe e non
+  // è del periodo, quindi serve solo se i conteggi mancano.
+  const c = state.eventFunnel && state.eventFunnel.excluded_counts;
+  if (c) return reasons.reduce((s, r) => s + (Number(c[r]) || 0), 0);
+  if (state.excludedUsers) return state.excludedUsers.filter(u => (u.reason || '').split(',').some(r => reasons.includes(r))).length;
+  return null;
+}
+
+// Pillola «N esclusi»: apre il pannello laterale. Sul funnel a catalogo (Default) non c'è niente da regolare.
+function exclPill() {
+  if (state.funnelMode === 'catalog') return '';
+  const n = funnelExclCount();
+  const label = state.funnelMode === 'activation' ? (n != null ? `${n} ${n === 1 ? 'bot escluso' : 'bot esclusi'}` : 'Bot') : (n != null ? `${n} ${n === 1 ? 'escluso' : 'esclusi'}` : 'Esclusi');
+  return `<button class="fn-excl" id="funnel-params-toggle" aria-haspopup="dialog" aria-expanded="${!!state.funnelParamsOpen}" title="Chi è escluso dal funnel">${FN_GEAR}${label}</button>`;
+}
+
+function funnelTopBar() {
+  const a = funnelActive();
+  const open = state.funnelMenu === 'funnel';
+  return `<div class="st-head fn-head">
+      <button class="nav-toggle nav-toggle-desk" data-nav-toggle title="Mostra il menu" aria-label="Mostra il menu">${NAV_PANEL_ICON}</button>
+      <h1 class="st-h1">Funnel</h1>
+      <div class="st-pillwrap fn-pw">
+        <button class="st-pill st-pill-sel" id="fn-funnel-btn" aria-haspopup="listbox" aria-expanded="${open}" title="Scegli il funnel">
+          <span class="fn-dot" style="background:${a.color}"></span><span>${esc(a.name)}</span>${FN_CHEV}</button>${open ? funnelPickerMenu() : ''}
+      </div>
+      ${funnelPeriodBar()}
+      <div class="st-grow"></div>
+      ${state.funnelMode === 'activation' ? exclPill() : ''}
+      <button class="st-refresh" id="fn-refresh-btn">Aggiorna</button>
+    </div>`;
+}
+
+// Ora dell'ultimo calcolo e tasto «Aggiorna», solo quando i numeri a schermo vengono dalla cache.
+function funnelCacheBadge(c = state.funnelCache, ready = state.funnel, loading = state.funnelLoading) {
+  if (!c || !c.computedAt || loading || !ready) return '';
+  return `<div style="display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted)">
+      ${kcMark(c)}
+      <button id="funnel-cache-refresh" class="tab-action" ${c.pending ? 'disabled' : ''}>Aggiorna</button>
+    </div>`;
+}
+
+function pageFunnel() {
+  if (state.funnelMode === 'event') return pageFunnelEvent();
+  if (state.funnelMode === 'activation') return pageActivation();
+  const chipEditor = state.editingFunnel && state.chipEditorIdx != null
+    ? chipEditorPanel(state.chipEditorIdx) : '';
+  const editPanel = state.editingFunnel ? `
+    <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
+      <div class="card-title" style="margin-bottom:16px">Costruttore Funnel</div>
+      ${chipEditor}
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+        ${state.funnelConfig.map((row, i) => funnelEditRow(row, i)).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
+        <button id="close-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
+      </div>
+    </div>` : '';
+
+  const body = state.funnelLoading
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo funnel...</div></div>`
+    : state.funnelError
+    ? `<div style="padding:20px;color:var(--red);font-size:13px">⚠️ ${state.funnelError}</div>`
+    : !state.funnel
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon">🎯</div><div class="empty-text" style="color:var(--muted)">Seleziona un periodo e clicca Calcola.</div></div>`
+    : funnelViz();
+
+  return `
+    ${funnelTopBar()}
+
+    ${funnelAssignPanel()}
+    ${editPanel}
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-title" style="margin-bottom:0">${esc(funnelActive().name)}</div>
+        ${funnelCacheBadge()}
+      </div>
+      ${(() => {
+        const sel = state.sprints.find(s => s.id === state.funnelSprintId);
+        const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
+        return `<div style="font-size:11px;color:var(--muted);margin-bottom:20px">
+          ${win.text} · esclusi account interni (Napo, Dan, Carlito…)
+        </div>`;
+      })()}
+      ${body}
+    ${metaFunnelSection()}
+    </div>
+    ${sprintFunnelSection()}
+    ${sprintLeakSection()}`;
+}
+
+// ── FUNNEL A EVENTI (kpi_funnel_v2, UNION user_events + anonymous_events) ──────────
+// Builder libero: ogni step è un event_name qualsiasi (es. le schermate onboarding view_Onboarding*).
+// Serve a costruire funnel iper-specifici che il catalogo fisso non copre.
+
+function pageFunnelEvent() {
+  const cfg = state.eventFunnelConfig || [];
+
+  // Editor collassabile (come "Modifica funnel" del Default): visibile solo se editingEventFunnel.
+  const chipEditor = state.editingEventFunnel && state.chipEditorIdx != null
+    ? chipEditorPanel(state.chipEditorIdx) : '';
+  const editor = state.editingEventFunnel ? `
+    <div class="card" style="margin-bottom:20px;border-color:var(--accent)">
+      <div class="card-title" style="margin-bottom:16px">Costruttore · ${esc(funnelActive().name)}</div>
+      ${chipEditor}
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+        ${cfg.length ? cfg.map((row, i) => eventFunnelEditRow(row, i)).join('')
+          : `<div style="color:var(--muted);font-size:12px;padding:8px 0">Nessuno step. Aggiungi il primo evento del funnel.</div>`}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="event-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="event-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Onboarding standard</button>
+        <button id="close-event-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
+      </div>
+    </div>` : '';
+
+  const body = state.eventFunnelLoading
+    ? `<div class="fun-empty"><div class="fun-empty-ring spin"></div><div class="fun-empty-text">Calcolo funnel…</div></div>`
+    : state.eventFunnelError
+    ? `<div style="padding:20px;color:var(--red);font-size:13px">${esc(state.eventFunnelError)}</div>`
+    : !state.eventFunnel
+    ? `<div class="fun-empty"><div class="fun-empty-ring"></div><div class="fun-empty-text">Nessun calcolo per questo periodo.<br>Premi <b>Calcola</b> per costruire il funnel.</div></div>`
+    : eventFunnelViz();
+
+  // Semantica delle due modalità → tooltip sul titolo (non più riga descrittiva in card).
+  const sel = state.sprints.find(s => s.id === state.funnelSprintId);
+  const win = sprintWindowText(sel, state.funnelFrom, state.funnelTo);
+  const titleTip = `${win.text} — Coorte: cascata temporale (coorte = step 1, ogni step prosegue dal precedente), esclusi bloccati. Volumi: conteggi indipendenti per step nella finestra, nessuna cascata.`;
+
+  return `
+    ${funnelTopBar()}
+
+    ${editor}
+
+    <div class="card fun-card" data-mode="${state.eventFunnelMode}">
+      <div class="fun-head">
+        <div class="fun-headl">
+          <div class="fun-title" title="${esc(titleTip)}">${esc(funnelActive().name)}</div>
+          <div class="fun-cap">${esc(fnWindowText(sel, state.funnelFrom, state.funnelTo))}${state.eventFunnel && state.eventFunnel.cohort_size != null ? ` · ${state.eventFunnel.cohort_size} persone` : ''}${exclPill()}</div>
+          ${funnelCacheBadge(state.eventFunnelCache, state.eventFunnel, state.eventFunnelLoading)}
+        </div>
+        <div class="mode-toggle" role="group" aria-label="Modalità funnel">
+          <button class="event-funnel-mode-btn ${state.eventFunnelMode === 'cohort' ? 'on' : ''}" data-mode="cohort"
+            title="Cascata temporale: coorte = step 1, ogni step prosegue dal precedente">Coorte</button>
+          <button class="event-funnel-mode-btn ${state.eventFunnelMode === 'absolute' ? 'on' : ''}" data-mode="absolute"
+            title="Conteggi indipendenti per step nella finestra — non è un funnel">Volumi</button>
+        </div>
+      </div>
+      ${body}
+    </div>
+    ${sprintEventFunnelSection()}`;
+}
+
+// ── ATTIVAZIONE ───────────────────────────────────────────────────────
+// Tre pannelli su una sola coorte: dove si perde la gente (funnel), se quella perdita conta per
+// il pagamento (barre per allenamenti fatti), e se la quota di attivazione si muove nel tempo.
+// Una sola RPC per tutti e tre — vedi supabase/functions/rpc/kpi_activation.sql.
+// Lo sprint selezionato filtra i primi due pannelli quando è maturo (finito da almeno
+// ACT_MATURITY_DAYS giorni); altrimenti resta solo l'avviso ambra e i numeri sono di tutte le
+// coorti mature. La serie settimanale non si filtra mai.
+
+const ACT_MATURITY_DAYS = 14;
+
+// 'YYYY-MM-DD' → istante di inizio giornata nel fuso del browser, e inizio del giorno dopo:
+// la finestra passata alla RPC è chiusa a sinistra e aperta a destra.
+const dayStartTs = d => (d ? new Date(`${d}T00:00:00`).toISOString() : null);
+const dayAfterTs = d => {
+  if (!d) return null;
+  const x = new Date(`${d}T00:00:00`);
+  x.setDate(x.getDate() + 1);
+  return x.toISOString();
+};
+
+// Come eventFunnelCachePoll, per Attivazione.
+async function activationCachePoll(scope, force) {
+  const mine = () => state.activationCache && state.activationCache.scope === scope;
+  const r = await kpiRecompute('activation', scope, force);
+  if (!mine()) return;
+  if (state.page === 'funnel' && state.funnelMode === 'activation') await fetchActivation({ quiet: true, failed: r.failed, fresh: !!r.recomputed });
+  else state.activationCache = { ...state.activationCache, pending: false, failed: r.failed };
+}
+
+async function fetchActivation(opts = {}) {
+  const req = ++activationReqSeq;
+  state.activationLoading = !((opts.force || opts.quiet) && !!state.activation && !!state.activationCache);
+  state.activationError = null;
+  render();
+  try {
+    // La finestra arriva dallo sprint se ne è selezionato uno, altrimenti dalle due date scritte
+    // a mano: senza questo, cambiare le date in alto non cambiava un solo numero.
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    const p_start = (selSprint && sprintStartTs(selSprint)) || dayStartTs(state.funnelFrom);
+    const p_end   = (selSprint && sprintEndTs(selSprint))   || dayAfterTs(state.funnelTo);
+    // p_cohort_start resta al default: è la storia su cui vive la serie settimanale, che non si
+    // filtra mai. Il periodo scelto viaggia in p_start/p_end e tocca solo gli altri due pannelli.
+    // p_include_bots solo se acceso: col chip spento vale il default della RPC (bot esclusi).
+    const args = { p_start, p_end };
+    if (state.funnelIncludeBots) args.p_include_bots = true;
+    // dalla cache solo per sprint in corso e precedente, con i bot esclusi; la riga vale se ha la stessa finestra
+    const per = funnelQuickPeriod();
+    const scope = (per === 'cur' || per === 'prev') && !state.funnelIncludeBots ? per : null;
+    const c = scope ? await funnelFromCache(scope, opts.force, 'activation') : null;
+    if (req !== activationReqSeq) return;
+    const d = c && c.data;
+    if (d && d.result && sameInstant(d.p_start, p_start) && sameInstant(d.p_end, p_end)) {
+      state.activation = d.result;
+      state.activationCache = { scope, computedAt: c.computed_at, pending: opts.quiet ? false : !!c.pending, failed: opts.quiet ? !!opts.failed : c.failed, fresh: !!opts.fresh };
+    } else {
+      state.activationCache = null;
+      const res = await sb.rpc('kpi_activation', args);
+      if (req !== activationReqSeq) return;
+      if (res.error) throw res.error;
+      state.activation = res.data;
+    }
+  } catch (e) { if (req !== activationReqSeq) return; state.activationError = e.message || 'Errore sconosciuto'; }
+  state.activationLoading = false;
+  render();
+  if (state.activationCache) state.activationCache.fresh = false;
+  if (state.activationCache && state.activationCache.pending) activationCachePoll(state.activationCache.scope, !!opts.force);
+}
+
+const actInt = n => Number(n || 0).toLocaleString('it-IT');
+// Le percentuali arrivano dal DB come numeric: virgola decimale e niente zeri di coda finti.
+const actPct = (v, dec = 1) =>
+  v == null ? '—' : Number(v).toLocaleString('it-IT', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + '%';
+
+// Blocco 1 — cascata sulla coorte matura. Barra piena + area tratteggiata della perdita +
+// pillola rossa col drop, stessa resa del funnel a eventi.
+function actFunnelViz(fun) {
+  const base = fun.cohort || 0;
+  const steps = fun.steps || [];
+  if (!base) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna persona nel periodo scelto.</div>`;
+
+  const worst = steps.reduce((a, s) => (s.lost_pct != null && (!a || s.lost_pct > a.lost_pct) ? s : a), null);
+  const last  = steps[steps.length - 1] || {};
+  const pay   = steps.find(s => s.evento === 'paywall_purchase_attempt') || {};
+
+  const rows = steps.map(s => {
+    const w = Number(s.pct || 0);
+    // La barra si divide in due: la parte piena sono le persone che hanno già finito la loro
+    // settimana, quella tratteggiata chi la sta ancora vivendo. Il secondo numero può solo salire.
+    const pend  = Number(s.n_pending || 0);
+    const pendW = base > 0 ? (100 * pend) / base : 0;
+    const doneW = Math.max(w - pendW, 0);
+    const pendBar = pend > 0
+      ? `<div class="act-fpend" style="left:${doneW}%;width:${pendW}%" title="${actInt(pend)} ancora dentro la loro settimana"></div>`
+      : '';
+    const loss = s.lost_pct != null && s.lost > 0
+      ? `<div class="act-floss" style="left:${w}%;width:${Number(s.lost_pct)}%"></div>
+         <div class="act-fdrop">↘ −${actPct(s.lost_pct)} · −${actInt(s.lost)}</div>`
+      : '';
+    return `
+      <div class="act-frow">
+        <div class="lab">${esc(s.label)}<span class="ev">${esc(s.evento)}</span></div>
+        <div class="act-ftrack" title="${esc(s.label)}: ${actInt(s.n)} su ${actInt(base)}">
+          <div class="act-ffill" style="width:${Math.max(doneW, pend > 0 ? 0 : 0.4)}%"></div>${pendBar}${loss}
+        </div>
+        <div class="val"><b>${actInt(s.n)}</b><span>${actPct(s.pct, s.pct != null && s.pct < 1 ? 2 : 1)}</span>
+          ${pend > 0 && pend < Number(s.n || 0) ? `<span class="act-pend-n">${actInt(pend)} in corso</span>` : ''}</div>
+      </div>`;
+  }).join('');
+
+  const pending = Number(fun.pending || 0);
+  const gg = Number(fun.giorni_mancanti || 0);
+  const pendNote = pending > 0
+    ? `<div class="act-pendnote">
+         <b>${actInt(pending)} person${pending === 1 ? 'a è ancora' : 'e sono ancora'} dentro la loro prima settimana.</b>
+         I loro conteggi sono disegnati tratteggiati e possono solo salire.
+         Il periodo sarà leggibile per intero fra ${actInt(gg)} giorn${gg === 1 ? 'o' : 'i'}.
+       </div>`
+    : '';
+
+  return `
+    ${pendNote}
+    <div class="act-fstats">
+      <div><div class="act-stat-l">Coorte</div><div class="act-stat-v">${actInt(base)}</div></div>
+      <div><div class="act-stat-l">Arriva in fondo</div>
+        <div class="act-stat-v">${actPct(last.pct, 2)}<small>${actInt(last.n)} su ${actInt(base)}</small></div></div>
+      <div><div class="act-stat-l">Drop peggiore</div>
+        <div class="act-stat-v" style="color:var(--red)">${worst ? '−' + actPct(worst.lost_pct) : '—'}<small style="color:var(--muted)">${worst ? actInt(worst.lost) + ' · ' + esc(worst.label) : ''}</small></div></div>
+      <div><div class="act-stat-l">Tocca «paga»</div>
+        <div class="act-stat-v">${actInt(pay.n)}<small>${actPct(pay.pct)}</small></div></div>
+    </div>
+    ${rows}
+    <div class="act-tie">
+      <span>↓</span>
+      <div>Il funnel dice <b>dove</b> si perde la gente${worst ? `: ${actInt(worst.lost)} persone su «${esc(worst.label)}»` : ''}.
+      I due grafici sotto dicono <b>se quella perdita conta</b> per il pagamento, e quanto è rumore.</div>
+    </div>`;
+}
+
+// Blocco 2 — barre orizzontali con dentro l'intervallo di Wilson al 95%.
+// Le righe il cui intervallo si sovrappone a quello della riga sopra restano grigie: non è una
+// differenza che i dati contengono, e colorarle la farebbe leggere come tale.
+function actWorkoutsViz(bw, sprintWarn) {
+  const rows = bw.rows || [];
+  if (!rows.length) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna coorte matura da mostrare.</div>`;
+
+  // Scala comune: il massimo estremo superiore, arrotondato per eccesso a un multiplo comodo.
+  const maxCi = Math.max(...rows.map(r => Number(r.ci_hi || 0)), 1);
+  const top   = Math.ceil(maxCi / 11) * 11;
+  const x     = v => (Number(v || 0) / top) * 100;
+
+  // Una riga resta grigia finché il suo intervallo contiene ancora il tasso della prima riga:
+  // è il modo diretto di dire "questa quota non è distinguibile da chi non ha fatto niente".
+  // Confrontarla con la riga immediatamente sopra invece della baseline non funziona — due
+  // intervalli adiacenti si sfiorano quasi sempre e non si uscirebbe mai dal grigio.
+  const baseRate = Number(rows[0]?.pct || 0);
+  let flat = true;
+  const marked = rows.map((r, i) => {
+    if (i > 0 && flat) {
+      const contiene = Number(r.ci_lo || 0) <= baseRate && baseRate <= Number(r.ci_hi || 0);
+      if (!contiene) flat = false;
+    }
+    return { ...r, flat };
+  });
+
+  // Soglia = prima riga che si stacca davvero dalle precedenti.
+  const firstSolid = marked.findIndex(r => !r.flat);
+  const sotto = marked.filter((r, i) => firstSolid === -1 || i < firstSolid);
+  const sopra = marked.filter((r, i) => firstSolid !== -1 && i >= firstSolid);
+  const sum = (arr, k) => arr.reduce((a, r) => a + Number(r[k] || 0), 0);
+  const rateSotto = sum(sotto, 'tot') ? sum(sotto, 'hit') / sum(sotto, 'tot') : 0;
+  const rateSopra = sum(sopra, 'tot') ? sum(sopra, 'hit') / sum(sopra, 'tot') : 0;
+  const stacco = rateSotto > 0 ? Math.round(rateSopra / rateSotto) : null;
+  const nSotto = sum(sotto, 'tot');
+
+  const body = marked.map(r => {
+    const g = r.flat ? ' flat' : '';
+    const lo = x(r.ci_lo), hi = x(r.ci_hi);
+    return `
+      <div class="act-row">
+        <div class="row-l">${esc(r.label)}<span class="n">${actInt(r.hit)} su ${actInt(r.tot)}</span></div>
+        <div class="act-track" title="${esc(r.label)}: ${actPct(r.pct, 2)} (${actPct(r.ci_lo, 2)} – ${actPct(r.ci_hi, 2)})">
+          <div class="act-fill${g}" style="width:${Math.max(x(r.pct), 0.4)}%"></div>
+          <div class="act-ci${g}" style="left:${lo}%;width:${Math.max(hi - lo, 0.5)}%"></div>
+        </div>
+        <div class="row-r"><span class="p">${actPct(r.pct, 2)}</span><span class="k">${actPct(r.ci_lo, 2).replace('%','')} – ${actPct(r.ci_hi, 2).replace('%','')}</span></div>
+      </div>`;
+  }).join('');
+
+  const sogliaLabel = firstSolid === -1 ? '—' : String(marked[firstSolid].bucket);
+
+  return `
+    ${sprintWarn}
+    <div class="act-stats">
+      <div><div class="act-stat-l">Coorte</div><div class="act-stat-v">${actInt(bw.cohort)}<small>la stessa di sopra</small></div></div>
+      <div><div class="act-stat-l">Soglia che conta</div><div class="act-stat-v">${sogliaLabel}<small>allenamenti</small></div></div>
+      <div><div class="act-stat-l">Stacco sopra soglia</div><div class="act-stat-v act-up">${stacco ? stacco + '×' : '—'}</div></div>
+      <div><div class="act-stat-l">Sotto soglia</div><div class="act-stat-v">${actInt(nSotto)}<small>${bw.cohort ? Math.round(100 * nSotto / bw.cohort) + '%' : '—'}</small></div></div>
+    </div>
+    <div class="act-rows">${body}</div>
+    <div class="act-axis"><span>0%</span><span>${actPct(top / 2, 0)}</span><span>${actPct(top, 0)}</span></div>
+    <div class="act-callout">
+      ${stacco && firstSolid > 0
+        ? `Chi arriva a ${sogliaLabel} allenamenti tocca «paga» <b>${stacco} volte più spesso</b> di chi ne fa meno:
+           ${actInt(sum(sopra, 'hit'))} persone su ${actInt(sum(sopra, 'tot'))} contro ${actInt(sum(sotto, 'hit'))} su ${actInt(nSotto)}.
+           Le prime ${firstSolid === 1 ? 'riga è grigia' : firstSolid + ' righe sono grigie'} perché
+           ${firstSolid === 1 ? 'il suo intervallo comprende' : 'i loro intervalli comprendono'} ancora
+           il tasso di chi non ha fatto niente: fra di loro non cambia nulla.`
+        : `Nessuna riga si stacca davvero dalle altre: tutti gli intervalli comprendono il tasso di partenza.`}
+    </div>
+    <div class="act-foot">
+      esito = evento paywall_purchase_attempt · account is_test esclusi<br>
+      coorte = ${actCohortFoot()} · intervallo di Wilson 95%
+    </div>`;
+}
+
+// Blocco 3 — punti con segmento di incertezza, media tratteggiata, sprint come bande di sfondo.
+// NON si filtra per sprint: una serie settimanale tagliata su uno sprint di quattro giorni
+// lascerebbe un punto solo.
+function actWeeklyViz(wk) {
+  const rows = wk.rows || [];
+  if (!rows.length) return `<div style="padding:20px;color:var(--muted);font-size:13px">Nessuna settimana da mostrare.</div>`;
+
+  // Asse Y fino al multiplo di 20 sopra l'estremo superiore più alto, minimo 40%.
+  const topY = Math.max(40, Math.ceil(Math.max(...rows.map(r => Number(r.ci_hi || 0))) / 20) * 20);
+  const y = v => (Number(v || 0) / topY) * 100;   // % dal basso
+  const colW = 100 / rows.length;
+
+  // Le bande degli sprint si posizionano sulle settimane che coprono: la prima e l'ultima
+  // settimana toccate dallo sprint, così la banda resta allineata alla griglia dei punti.
+  const weekStarts = rows.map(r => new Date(r.week_start + 'T00:00:00Z').getTime());
+  const bands = (state.sprints || []).map(sp => {
+    if (!sp.inizio || !sp.fine) return null;
+    const a = new Date(sp.inizio + 'T00:00:00Z').getTime();
+    const b = new Date(sp.fine   + 'T00:00:00Z').getTime() + 86400000;
+    const idx = weekStarts.map((w, i) => (w + 7 * 86400000 > a && w < b ? i : -1)).filter(i => i >= 0);
+    if (!idx.length) return null;
+    const from = Math.min(...idx), to = Math.max(...idx);
+    return `<div class="act-band" style="left:${from * colW}%;width:${(to - from + 1) * colW}%"><b>${esc(sp.nome)}</b></div>`;
+  }).filter(Boolean).join('');
+
+  const pts = rows.map((r, i) => {
+    const lo = y(r.ci_lo), hi = y(r.ci_hi);
+    const tip = `${fmtDateIt(r.week_start)}: ${actInt(r.attivi)} su ${actInt(r.tot)} = ${actPct(r.pct)} (${actPct(r.ci_lo)} – ${actPct(r.ci_hi)})`;
+    return `<div class="act-wk" style="left:${i * colW}%;width:${colW}%" title="${esc(tip)}">
+      <div class="act-bar-ci" style="bottom:${lo}%;height:${Math.max(hi - lo, 0.5)}%"></div>
+      <div class="act-dot" style="bottom:${y(r.pct)}%"></div>
+    </div>`;
+  }).join('');
+
+  const xl = rows.map(r =>
+    `<div style="width:${colW}%">${fmtWeekLabel(r.week_start)}${r.in_corso ? '*' : ''}</div>`).join('');
+
+  const inCorso = rows.some(r => r.in_corso);
+
+  return `
+    <div class="act-chartbox">
+      <div class="act-dots">
+        ${bands}
+        <div class="act-yl" style="top:0">${actPct(topY, 0)}</div>
+        <div class="act-yl" style="top:50%">${actPct(topY / 2, 0)}</div>
+        <div class="act-yl" style="top:100%">0%</div>
+        <div class="act-mean" style="top:${100 - y(wk.mean_pct)}%"><span>media ${actPct(wk.mean_pct)}</span></div>
+        ${pts}
+      </div>
+      <div class="act-xl">${xl}</div>
+    </div>
+    <div class="act-legend">
+      <span><i></i>periodo di uno sprint</span>
+      <span>segmento verticale = intervallo al 95%</span>
+      ${inCorso ? '<span>* settimana ancora in corso</span>' : ''}
+    </div>
+    <div class="act-foot">
+      attivazione = almeno 2 allenamenti finiti entro 7 giorni dal primo evento<br>
+      ${actInt(wk.attivi)} su ${actInt(wk.cohort)} = ${actPct(wk.mean_pct)} · account is_test esclusi · settimane da lunedì
+    </div>`;
+}
+
+// Come si chiama il periodo su cui sono i numeri dei due pannelli filtrabili: il nome dello
+// sprint se ne è selezionato uno, altrimenti le due date scritte a mano.
+function actWindowLabel() {
+  const sp = state.sprints.find(s => s.id === state.funnelSprintId);
+  if (sp) return esc(sp.nome);
+  return `${fmtDateIt(state.funnelFrom)} → ${fmtDateIt(state.funnelTo)}`;
+}
+
+// Riga di coda dei due pannelli filtrabili: dice su quale insieme di persone sono i numeri.
+function actCohortFoot() {
+  return `primo evento dentro ${actWindowLabel()}, con ${ACT_MATURITY_DAYS} giorni di maturità`;
+}
+
+function fmtDateIt(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return isNaN(d) ? iso : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+}
+function fmtWeekLabel(iso) {
+  const d = new Date(iso + 'T00:00:00Z');
+  return isNaN(d) ? iso : d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', timeZone: 'UTC' }).replace('.', '');
+}
+
+// Avviso ambra: lo sprint scelto in alto non ha ancora nessuno con 14 giorni di vita, quindi le
+// barre uscirebbero vuote. Invece di mostrarle vuote si dice perché, e si ricade su tutte le
+// coorti mature.
+function actSprintWarning() {
+  const sp = state.activation?.sprint;
+  if (!sp || sp.mature) return '';
+  const sel = state.sprints.find(s => s.id === state.funnelSprintId)
+           || { nome: actWindowLabel(), fine: state.funnelTo };
+  const prev = [...state.sprints]
+    .filter(s => s.fine && sel.fine && s.fine < sel.fine)
+    .sort((a, b) => (a.fine < b.fine ? 1 : -1))[0];
+  return `
+    <div class="act-warn">
+      <span>${actWarnSvg}</span>
+      <div><b>${esc(sel.nome)} non è ancora leggibile.</b> Si contano i primi 7 giorni di ogni persona e poi
+      ne servono altri ${ACT_MATURITY_DAYS - 7} di attesa. Le sue ${actInt(sp.cohort)} persone hanno al massimo
+      ${actInt(sp.eta_max_giorni)} giorn${sp.eta_max_giorni === 1 ? 'o' : 'i'}: il funnel qui sopra le mostra
+      tratteggiate, ma queste barre restano vuote finché la prima non finisce la sua settimana.</div>
+      ${prev ? `<button class="act-warn-act" data-act-sprint="${esc(prev.id)}">${esc(prev.nome)} →</button>` : ''}
+    </div>`;
+}
+
+const actWarnSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+
+function pageActivation() {
+  const a = state.activation;
+  const loading = state.activationLoading;
+  const err = state.activationError;
+
+  const card = (title, sub, body) => `
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title" style="margin-bottom:0">${title}</div>
+      <p class="act-card-sub">${sub}</p>
+      ${body}
+    </div>`;
+
+  const spinner = `<div class="fun-empty"><div class="fun-empty-ring spin"></div><div class="fun-empty-text">Calcolo attivazione…</div></div>`;
+
+  const body = loading
+    ? card('Attivazione', 'Calcolo in corso sulla coorte matura.', spinner)
+    : err
+    ? `<div class="card"><div style="padding:20px;color:var(--red);font-size:13px">${esc(err)}</div></div>`
+    : !a
+    ? card('Attivazione', 'Nessun calcolo.', `<div class="fun-empty"><div class="fun-empty-ring"></div><div class="fun-empty-text">Premi <b>Calcola</b> per costruire i tre grafici.</div></div>`)
+    : [
+        card(
+          (a.funnel?.pending || 0) >= (a.funnel?.cohort || 0) && (a.funnel?.cohort || 0) > 0
+            ? 'Funnel del periodo, ancora in corso'
+            : 'Funnel della coorte matura',
+          (a.funnel?.pending || 0) > 0
+            ? `Chi ha il primo evento dentro ${actWindowLabel()}. Le persone che non hanno ancora finito la loro settimana sono disegnate tratteggiate.`
+            : `Solo chi ha il primo evento dentro ${actWindowLabel()} e almeno ${a.maturity_days} giorni di maturità. È la stessa coorte del grafico qui sotto.`,
+          actFunnelViz(a.funnel || {})),
+        card('Allenamenti fatti → tocca «paga»',
+          `Quota che tocca il pulsante di pagamento, per allenamenti finiti nei primi ${a.window_days} giorni dal primo avvio. Stesso periodo: ${actWindowLabel()}.`,
+          actWorkoutsViz(a.by_workouts || {}, actSprintWarning())),
+        card('Attivazione per settimana',
+          'Quota di ogni settimana che arriva a 2 allenamenti entro 7 giorni. La serie non si taglia sullo sprint: gli sprint sono le bande sullo sfondo.',
+          actWeeklyViz(a.weekly || {})),
+      ].join('');
+
+  const badge = funnelCacheBadge(state.activationCache, a, loading);
+  return `
+    ${funnelTopBar()}
+    ${badge ? `<div style="margin:0 0 12px">${badge}</div>` : ''}
+    ${body}`;
+}
+
+// Sub-riga con gli eventi in OR di uno step (parent o variante). Uno step multi-evento conta
+// chi ha emesso ALMENO UNO dei nomi: serve per gli step che hanno due esiti legittimi, es.
+// "Registrati + attivati" = sign_up OR sign_in, dove chi rientra con un account esistente
+// altrimenti risulterebbe perso dalla cascata.
+// Nascosta finché lo step non ha un evento primario (l'OR di niente non vuol dire niente) e sugli
+// pseudo-eventi install, che non passano dalla RPC e si contano client-side su un nome solo.
+function orEventsChipsHtml(row, i, ci) {
+  if (!row || !row.event || isInstallEvent(row.event)) return '';
+  const isChild = typeof ci === 'number';
+  const ds = isChild ? `data-parent="${i}" data-child="${ci}"` : `data-row="${i}"`;
+  const ors = rowOrEvents(row);
+  const chips = ors.map((ev, k) => `
+    <span class="event-funnel-or-chip" style="display:inline-flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;border:1px solid var(--border);border-radius:5px;background:var(--surface2);font-family:var(--mono);font-size:11px">
+      <span style="color:var(--muted);font-size:9px;letter-spacing:.08em">OR</span>
+      <button class="event-funnel-or-edit" ${ds} data-or="${k}" title="Cambia questo evento"
+        style="background:transparent;border:0;padding:0;color:var(--fg);font-family:inherit;font-size:inherit;cursor:pointer">${esc(ev)}</button>
+      <button class="event-funnel-or-remove" ${ds} data-or="${k}" title="Togli questo evento dallo step"
+        style="background:transparent;border:0;padding:0 2px;color:var(--red);font-size:13px;line-height:1;cursor:pointer;font-family:inherit">×</button>
+    </span>`).join('');
+  const addBtn = `
+    <button class="event-funnel-or-add" ${ds}
+      title="Aggiungi un evento in OR: lo step conterà chi ha emesso almeno uno dei nomi"
+      style="padding:2px 9px;font-size:10px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:5px;cursor:pointer;font-family:inherit;${ors.length ? '' : 'opacity:.7'}">+ OR</button>`;
+  return `
+    <div class="event-funnel-or-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:${ors.length ? '4px' : '2px'} 0 ${ors.length ? '6px' : '2px'} ${isChild ? 28 : 52}px">
+      ${chips}${addBtn}
+    </div>`;
+}
+
+// Riga editor del funnel a eventi. row = {event, label, children?}. Ordine colonne: label
+// (rinominabile) → evento (picker) → preview % (regola fissa: % vs step precedente + % vs primo
+// step). Il campo `vsIdx` in row resta per retro-compatibilità coi preset salvati ma non è più
+// configurabile. Sotto la riga parent c'è la sezione "varianti" (children annidati).
+function eventFunnelEditRow(row, i) {
+  const cfg = state.eventFunnelConfig || [];
+  // Preview percentuali usando i dati dell'ultima Calcola (se presenti). Se manca il calcolo o
+  // uno dei due riferimenti è 0/null, mostra "—". Le posizioni nel result sono nella scala flat
+  // (parent + children serializzati): risolviamo via eventFunnelFlatMap.
+  const data = (state.eventFunnel && state.eventFunnel.steps) || [];
+  const numById = {};
+  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); });
+  const hasData = !!(state.eventFunnel && data.length);
+  const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
+  const parentFlat = flatMap.parent?.[i];
+  const prevFlat = i > 0 ? flatMap.parent?.[i - 1] : null;
+  const headFlat = flatMap.parent?.[0];
+  const n     = hasData && parentFlat != null ? (numById[parentFlat] ?? 0) : null;
+  const prevN = hasData && prevFlat != null ? (numById[prevFlat] ?? 0) : null;
+  const headN = hasData && headFlat != null ? (numById[headFlat] ?? 0) : null;
+  const pctPrev = (i === 0 || prevN === null || prevN <= 0 || n === null) ? null : (n / prevN * 100);
+  const pctHead = (i === 0 || headN === null || headN <= 0 || n === null) ? null : (n / headN * 100);
+  const pctColor = pct => pct === null ? 'var(--muted)' : pct < 20 ? 'var(--red)' : pct >= 50 ? 'var(--mattia)' : 'var(--purple)';
+  const fmt = pct => pct === null ? '—' : pct.toFixed(1) + '%';
+  const previewCell = i === 0
+    ? `<div style="width:150px;flex-shrink:0;text-align:right;font-size:10px;color:var(--muted);line-height:1.4" title="Primo step: base 100%">base 100%</div>`
+    : `<div style="width:150px;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2">
+        <div style="font-size:11px;font-weight:600;color:${pctColor(pctPrev)}" title="% rispetto allo step precedente">${fmt(pctPrev)} <span style="color:var(--muted);font-weight:400;font-size:9px">vs prec</span></div>
+        <div style="font-size:11px;font-weight:500;color:${pctColor(pctHead)}" title="% rispetto al primo step del funnel">${fmt(pctHead)} <span style="color:var(--muted);font-weight:400;font-size:9px">vs #1</span></div>
+      </div>`;
+
+  // Label rinominabile a mano (fallback: catalogo o nome grezzo dell'evento).
+  const labelValue = row.label || '';
+  const labelPlaceholder = row.event ? (EVENT_CATALOG.find(e => e.event === row.event)?.label || row.event) : 'Nome step';
+
+  // Evento = picker (apre event browser). Mostra prevalentemente l'event_name tecnico.
+  // Con eventi in OR il picker resta sul primario e porta un contatore: la lista completa vive
+  // nella sub-riga sotto, che può finire fuori vista quando l'editor è lungo.
+  const picked = row.event;
+  const orCount = rowOrEvents(row).length;
+  const pickText = picked ? (orCount ? `${picked}  +${orCount}` : picked) : '— scegli evento —';
+
+  // Sezione children (varianti annidate). Se il parent ha già children è sempre visibile; se non
+  // ne ha, è visibile solo se il parent è espanso (per non appesantire la lista). L'expand qui
+  // condivide lo stesso state.eventFunnelExpanded della viz — coerente con "vedo dove sto lavorando".
+  const children = Array.isArray(row.children) ? row.children : [];
+  const hasChildren = children.length > 0;
+  const expanded = !!state.eventFunnelExpanded[i];
+  const showChildrenBlock = hasChildren || expanded;
+  const childrenHtml = children.map((c, ci) => eventFunnelEditChildRow(c, i, ci, numById, flatMap, n)).join('');
+  const childrenBlock = showChildrenBlock
+    ? `<div class="event-funnel-children" data-parent="${i}" style="padding:6px 0 6px 52px;display:flex;flex-direction:column;gap:6px;border-left:2px solid var(--border);margin-left:14px">
+         ${childrenHtml}
+         <button class="event-funnel-child-add" data-row="${i}"
+           style="align-self:flex-start;padding:4px 12px;font-size:11px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;cursor:pointer;font-family:inherit">↳ aggiungi variante</button>
+       </div>`
+    : `<div style="padding:2px 0 2px 52px">
+         <button class="event-funnel-child-add" data-row="${i}"
+           style="padding:2px 10px;font-size:10px;color:var(--muted);background:transparent;border:1px dashed var(--border);border-radius:4px;cursor:pointer;font-family:inherit;opacity:.7"
+           title="Annida varianti di questo step (es. signup_google + signup_email sotto sign_up)">↳ annida varianti</button>
+       </div>`;
+
+  return `
+    <div class="event-funnel-block" data-block="${i}" style="display:flex;flex-direction:column;gap:0">
+      <div class="event-funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+        <span class="event-funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+          style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
+        <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+        <input class="form-input event-funnel-label" data-row="${i}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
+          title="Nome dello step nel funnel (rinominabile a piacere)"
+          style="flex:1;min-width:0;font-size:12px;padding:6px 10px">
+        <button class="event-funnel-pick" data-row="${i}" title="Scegli evento"
+          style="width:210px;flex-shrink:0;text-align:left;font-size:12px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
+          <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
+        </button>
+        <input class="form-input event-funnel-filter" data-row="${i}" type="text"
+          value="${esc(serializeFilters(row.filters))}" placeholder="filtro metadata (opz.)"
+          title="Filtro AND sui metadata dell'evento, formato chiave=valore separato da virgola. Es. provider=google · source=onboarding_end"
+          style="width:150px;flex-shrink:0;font-size:11px;padding:6px 8px;font-family:var(--mono)">
+        ${previewCell}
+        <button class="event-funnel-expand-toggle" data-row="${i}" title="${expanded ? 'Nascondi sezione varianti' : 'Mostra sezione varianti'}"
+          style="padding:4px 8px;font-size:11px;line-height:1;color:${hasChildren ? 'var(--purple)' : 'var(--muted)'};background:transparent;border:1px solid var(--border);border-radius:6px;cursor:pointer;flex-shrink:0;font-family:inherit">${hasChildren ? (expanded ? '▾ ' + children.length : '▸ ' + children.length) : (expanded ? '▾' : '▸')}</button>
+        <button class="btn btn-ghost event-funnel-remove" data-row="${i}" style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+      </div>
+      ${orEventsChipsHtml(row, i)}
+      ${childrenBlock}
+    </div>`;
+}
+
+// Riga editor di una variante annidata (child). Preview a destra = n della variante + % sul parent.
+function eventFunnelEditChildRow(child, parentI, ci, numById, flatMap, parentN) {
+  const cFlat = flatMap.child?.[parentI]?.[ci];
+  const hasData = numById && Object.keys(numById).length > 0;
+  const cn = hasData && cFlat != null ? (numById[cFlat] ?? 0) : null;
+  const pct = (cn !== null && parentN !== null && parentN > 0) ? (cn / parentN * 100) : null;
+  const pctStr = pct !== null ? pct.toFixed(1) + '%' : '—';
+  const previewCell = hasData
+    ? `<div style="width:150px;flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.2">
+        <div style="font-family:var(--mono);font-size:12px;color:var(--muted)">${cn ?? '—'}</div>
+        <div style="font-size:10px;color:var(--muted)">${pctStr} <span style="font-size:9px">del parent</span></div>
+      </div>`
+    : `<div style="width:150px;flex-shrink:0"></div>`;
+  const labelValue = child.label || '';
+  const labelPlaceholder = child.event ? (EVENT_CATALOG.find(e => e.event === child.event)?.label || child.event) : 'Nome variante';
+  const picked = child.event;
+  const cOrCount = rowOrEvents(child).length;
+  const pickText = picked
+    ? (cOrCount ? `${picked}  +${cOrCount}` : picked)
+    : '— scegli evento variante —';
+  return `
+    <div class="event-funnel-child-block" style="display:flex;flex-direction:column;gap:0">
+    <div class="event-funnel-child-row" data-parent="${parentI}" data-child="${ci}" style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:#5a5a80;flex-shrink:0;width:20px;text-align:right">↳</span>
+      <input class="form-input event-funnel-child-label" data-parent="${parentI}" data-child="${ci}" type="text" value="${esc(labelValue)}" placeholder="${esc(labelPlaceholder)}"
+        title="Nome della variante (es. Google, Email)"
+        style="flex:1;min-width:0;font-size:12px;padding:5px 10px">
+      <button class="event-funnel-pick-child" data-parent="${parentI}" data-child="${ci}" title="Scegli evento variante"
+        style="width:210px;flex-shrink:0;text-align:left;font-size:12px;padding:5px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:${picked ? 'var(--fg)' : 'var(--muted)'};cursor:pointer;font-family:var(--mono);display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(pickText)}</span>
+        <span style="color:var(--muted);flex-shrink:0;font-family:inherit">▾</span>
+      </button>
+      <input class="form-input event-funnel-child-filter" data-parent="${parentI}" data-child="${ci}" type="text"
+        value="${esc(serializeFilters(child.filters))}" placeholder="filtro metadata (opz.)"
+        title="Filtro AND sui metadata dell'evento della variante. Es. provider=google — la variante conta solo gli eventi che matchano quel valore. NB: il RPC filtra per uguaglianza, quindi non serve per 'valore assente'."
+        style="width:150px;flex-shrink:0;font-size:11px;padding:5px 8px;font-family:var(--mono)">
+      ${previewCell}
+      <span style="width:29px;flex-shrink:0"></span>
+      <button class="btn btn-ghost event-funnel-child-remove" data-parent="${parentI}" data-child="${ci}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>
+    ${orEventsChipsHtml(child, parentI, ci)}
+    </div>`;
+}
+
+// Cutoff attribuzione sorgente: anonymous_sessions.install_referrer è popolato dalla build
+// di questa data. Prima, il filtro sorgente meta/organic non ha dati (coorte vuota/parziale).
+const ATTRIBUTION_CUTOFF = '2026-07-11';
+
+// Chip di contesto install (aggregati Play/Meta) + badge attribuzione. Condivisi tra il funnel
+// corrente e il confronto sprint. `from` = inizio finestra per il check cutoff.
+function installContextChips(installContext, from) {
+  if (!installContext) return '';
+  const item = (label, n) => `
+    <span>${esc(label)}<b>${Number(n ?? 0)}</b></span>`;
+  const preCutoff = from && from < ATTRIBUTION_CUTOFF;
+  const sourceOn  = state.eventFunnelSource && state.eventFunnelSource !== 'all';
+  const badge = preCutoff
+    ? `<span style="font-size:10px;color:${sourceOn ? 'var(--amber)' : '#4a4a68'}"
+         title="install_referrer è raccolto dalla build dell'11/07/2026: prima di quella data il filtro sorgente non ha dati">
+         attribuzione non disponibile prima dell'11/07/2026</span>`
+    : '';
+  return `
+    <div class="fun-context">
+      ${item('Installazioni da Meta Ads', installContext.meta_ads)}
+      <span class="note" title="Aggregati esterni senza identità utente: contesto, fuori dalla cascata e dai rate">aggregati esterni senza identità</span>
+      ${badge}
+    </div>`;
+}
+
+// Icone della card funnel. Separate da LUCIDE_ICONS perché quella mappa alimenta il picker delle
+// chip (`Object.keys(LUCIDE_ICONS)`) e queste non sono scelte dall'utente: sono struttura. Stesso
+// precedente dell'ingranaggio inline più sotto. SVG Lucide raw, stroke 2, viewBox 24 — la
+// dimensione la decide il CSS, così la stessa icona serve label da 9.5px e da 19px.
+// `users` e `flag` sono ripresi da LUCIDE_ICONS invece di essere riscritti.
+const FUNNEL_ICONS = {
+  users:   LUCIDE_ICONS.users,
+  flag:    LUCIDE_ICONS.flag,
+  clock:   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  drop:    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 17 13.5 8.5 8.5 13.5 2 7"/><polyline points="16 17 22 17 22 11"/></svg>',
+  hourglass: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',
+};
+const fIcon = (name, cls = '') => `<span class="fun-ico ${cls}" aria-hidden="true">${FUNNEL_ICONS[name] || ''}</span>`;
+
+// Durata leggibile a partire da secondi. Mai secondi grezzi sopra il minuto, mai più di due
+// unità, unità inferiore omessa quando è zero (3600 → "1h", non "1h 0m").
+// `—` e `0s` sono due cose diverse: il primo è "non misurabile" (nessuno ha raggiunto lo step,
+// oppure non c'è uno step precedente), il secondo è "istantaneo" — un tempo osservato di zero.
+function fmtDur(sec) {
+  if (sec === null || sec === undefined || !Number.isFinite(Number(sec))) return '—';
+  const t = Math.round(Number(sec));
+  if (t < 60)     return `${t}s`;
+  if (t < 3600)   { const m = Math.floor(t / 60),    s = t % 60;          return s ? `${m}m ${s}s` : `${m}m`; }
+  if (t < 172800) { const h = Math.floor(t / 3600),  m = Math.floor((t % 3600) / 60);  return m ? `${h}h ${m}m` : `${h}h`; }
+  const g = Math.floor(t / 86400), h = Math.floor((t % 86400) / 3600);
+  return h ? `${g}g ${h}h` : `${g}g`;
+}
+
+function eventFunnelViz() {
+  const cfg  = state.eventFunnelConfig || [];
+  const data = (state.eventFunnel && state.eventFunnel.steps) || [];
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato.</div>`;
+  const isAbs = state.eventFunnelMode === 'absolute';
+  // allinea i risultati per posizione flat (la RPC ritorna idx = posizione nello p_steps flatten)
+  const numById = {};
+  const rowById = {};
+  data.forEach(s => { numById[s.idx] = Number(s.numero ?? 0); rowById[s.idx] = s; });
+  const flatMap = state.eventFunnelFlatMap || { parent: [], child: [] };
+  const nums = cfg.map((_, i) => {
+    const flat = flatMap.parent?.[i];
+    return (flat != null) ? (numById[flat] ?? 0) : 0;
+  });
+  // Riga RPC completa per step, da cui leggere le misure di tempo (t_p50_sec, t_p90_sec,
+  // t_cum_p50_sec, t_cum_p90_sec). In modalità volumi arrivano tutte null: senza cascata non
+  // esiste uno step precedente da cui misurare, e le colonne sono nascoste via CSS.
+  const rows_ = cfg.map((_, i) => {
+    const flat = flatMap.parent?.[i];
+    return (flat != null) ? (rowById[flat] || null) : null;
+  });
+  // Tooltip delle celle di tempo: dichiarano il p90, il fatto che la misura è sui soli
+  // sopravvissuti dello step e il troncamento oltre la finestra di osservazione.
+  const tipDelta = (r, n) => r == null || r.t_p50_sec == null ? 'Nessun tempo misurabile per questo step'
+    : `Tempo mediano dallo step precedente. 9 utenti su 10 entro ${fmtDur(r.t_p90_sec)}. `
+    + `Misurato sui ${n} che raggiungono lo step, non sull'intera coorte. `
+    + `I tempi sono osservati fino a 90 giorni: oltre, il valore alto è troncato.`;
+  const tipCum = (r, n, head) => r == null || r.t_cum_p50_sec == null ? 'Nessun tempo misurabile per questo step'
+    : `Tempo mediano da ${head}. 9 utenti su 10 entro ${fmtDur(r.t_cum_p90_sec)}. `
+    + `Misurato sui ${n} che arrivano fin qui: può scendere rispetto allo step precedente, `
+    + `perché chi prosegue è più veloce di chi si è fermato prima.`;
+  // Step install = contesto (footer), esclusi dalla cascata e dai rate. La catena
+  // vs prec / vs #1 corre solo sugli step reali: realPrev[i] = indice del precedente step
+  // reale, headIdx = primo step reale del funnel.
+  const isCtx = cfg.map(row => isInstallEvent(row.event));
+  const realIdxs = cfg.map((_, i) => i).filter(i => !isCtx[i]);
+  const headIdx = realIdxs.length ? realIdxs[0] : null;
+  const realPrev = {};
+  realIdxs.forEach((idx, k) => { realPrev[idx] = k > 0 ? realIdxs[k - 1] : null; });
+  // Base matura (`denom_base` della RPC): valorizzata solo sugli step di sopravvivenza — quelli
+  // che chiedono "sei ancora vivo dopo N ore?". Lì il denominatore della riga NON è lo step
+  // precedente ma il sottoinsieme che ha già avuto il tempo di rispondere alla domanda: chi è
+  // entrato nella coorte tre giorni fa non è perso, è ancora in volo. `0` è un valore pieno
+  // ("nessuno ancora giudicabile") e la riga si legge "n.d."; `null` = step normale.
+  const matureBase = (i) => {
+    const d = rows_[i]?.denom_base;
+    return (d === null || d === undefined) ? null : Number(d);
+  };
+  // Il denominatore effettivo della riga i: base matura se lo step ne ha una, altrimenti lo
+  // step reale precedente. Unico punto da cui passano quota, tenuta, barra fantasma e perdita,
+  // così le quattro letture non possono divergere.
+  const baseOf = (i) => {
+    const mb = matureBase(i);
+    if (mb !== null) return mb;
+    const p = realPrev[i];
+    return p !== null ? nums[p] : null;
+  };
+  const maxN = Math.max(...realIdxs.map(i => nums[i]), 1);
+  const headN = headIdx !== null ? nums[headIdx] : 0;
+  const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : 'step 1';
+  // Denominatore barre: coorte → testa (= max per monotonia), volumi → max sugli step reali.
+  const denom = isAbs ? maxN : Math.max(headN, 1);
+  const fmtP = p => p === null ? '—' : p.toFixed(1) + '%';
+
+  // Drop peggiore (solo coorte): lo step che perde più persone in assoluto. Non il vs-prec
+  // minimo: quello premia gli step in fondo, dove una manciata di persone su una base già
+  // ridotta produce percentuali enormi che non pesano nulla sulla coorte.
+  let worstIdx = -1;
+  if (!isAbs) {
+    let worstLost = 0;
+    realIdxs.forEach(i => {
+      const base = baseOf(i);
+      if (realPrev[i] === null || base === null || base <= 0) return;
+      const lost = base - nums[i];
+      if (lost > worstLost) { worstLost = lost; worstIdx = i; }
+    });
+  }
+
+  // Sintesi: coorte / conversione end-to-end / drop peggiore. In volumi, solo la nota semantica.
+  let statRow = '';
+  if (isAbs) {
+    statRow = `<div class="fun-insight">Conteggi indipendenti per step — uno step può superare il precedente.</div>`;
+  } else if (headIdx !== null) {
+    const cohortN = state.eventFunnel?.cohort_size ?? headN;
+    const lastIdx = realIdxs[realIdxs.length - 1];
+    // Se l'ultimo step è di sopravvivenza, "arriva in fondo" si legge sulla base matura: sulla
+    // coorte intera direbbe che l'80% è caduto, quando in realtà non è ancora stato interrogato.
+    const endBase = matureBase(lastIdx) !== null ? matureBase(lastIdx) : headN;
+    const endSuffix = matureBase(lastIdx) !== null ? `${nums[lastIdx]} su ${endBase} maturi` : `${nums[lastIdx]} su ${headN}`;
+    const endStat = (realIdxs.length > 1 && endBase > 0)
+      ? `<div class="stat"><span class="lbl">${fIcon('flag')}Arriva in fondo</span><span class="val">${(nums[lastIdx] / endBase * 100).toFixed(1)}%<small>${endSuffix}</small></span></div>`
+      : '';
+    // Il drop peggiore in percentuale, con accanto quante persone sono: su coorti piccole −60%
+    // e −52.6% sono quasi lo stesso numero, ma tre persone e dieci persone no.
+    const worstStat = worstIdx >= 0
+      ? `<div class="stat"><span class="lbl">${fIcon('drop')}Drop peggiore</span><span class="val bad">−${((baseOf(worstIdx) - nums[worstIdx]) / headN * 100).toFixed(1)}%<small>${baseOf(worstIdx) - nums[worstIdx]} persone · ${esc(eventStepLabel(cfg[worstIdx]) || '')}</small></span></div>`
+      : '';
+    // Quanto ci mette chi arriva in fondo: il cumulato mediano dell'ultimo step reale.
+    // È sui soli arrivati, quindi con pochi sopravvissuti il numero è indicativo — il conteggio
+    // accanto serve a dire quanto pesarlo.
+    const endTime = rows_[lastIdx]?.t_cum_p50_sec;
+    const timeStat = (realIdxs.length > 1 && endTime != null)
+      ? `<div class="stat"><span class="lbl">${fIcon('clock')}Ci mette</span><span class="val" title="${esc(tipCum(rows_[lastIdx], nums[lastIdx], headLabel))}">${fmtDur(endTime)}<small>mediana su ${nums[lastIdx]}</small></span></div>`
+      : '';
+    // Il passaggio più lungo risponde a "dove perdono tempo", che è la controparte esatta del
+    // drop peggiore ("dove perdono persone"). Cercato solo sugli step di spina oltre il primo:
+    // la testa non ha un passaggio, le varianti non sono passaggi.
+    let slowIdx = -1, slowSec = -1;
+    realIdxs.forEach(i => {
+      const t = rows_[i]?.t_p50_sec;
+      if (i === headIdx || t == null) return;
+      if (t > slowSec) { slowSec = t; slowIdx = i; }
+    });
+    const slowStat = slowIdx >= 0
+      ? `<div class="stat"><span class="lbl">${fIcon('hourglass')}Passaggio più lungo</span><span class="val slow" title="${esc(tipDelta(rows_[slowIdx], nums[slowIdx]))}">${fmtDur(slowSec)}<small>verso ${esc(eventStepLabel(cfg[slowIdx]) || '')}</small></span></div>`
+      : '';
+    statRow = `
+      <div class="stat-row">
+        <div class="stat"><span class="lbl">${fIcon('users')}Coorte</span><span class="val">${cohortN}</span></div>
+        ${endStat}
+        ${timeStat}
+        ${worstStat}
+        ${slowStat}
+      </div>`;
+  }
+
+  const header = `
+    <div class="fun-cols">
+      <div class="col-label">Step</div>
+      <div class="col-bar"></div>
+      <div class="col-who" title="${isAbs ? `Quante identità hanno emesso l'evento, e il rapporto sul primo step (${esc(headLabel)})` : `Quante persone arrivano fin qui, in valore assoluto e come quota di ${esc(headLabel)} (${headN})`}"><span>${fIcon('users')}persone</span><span>del totale</span></div>
+      <div class="col-when" title="Tempo mediano per arrivare qui dallo step precedente, e tempo mediano trascorso da ${esc(headLabel)}"><span>${fIcon('clock')}passaggio</span><span>da inizio</span></div>
+    </div>`;
+
+  const rows = cfg.map((row, i) => {
+    if (isCtx[i]) return ''; // pseudo-step install: mostrato nel footer contesto, non in cascata
+    const n     = nums[i];
+    const label = eventStepLabel(row) || ('step ' + (i + 1));
+    const prevIdx = realPrev[i];
+    const mBase = matureBase(i);          // base matura, solo sugli step di sopravvivenza
+    const vsN   = prevIdx !== null ? baseOf(i) : null;
+    const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+    // Sugli step di sopravvivenza la quota si legge sulla base matura, non sulla coorte: gli
+    // immaturi non hanno ancora avuto modo di rispondere e gonfierebbero il denominatore.
+    const startPct = mBase !== null
+      ? (mBase > 0 ? (n / mBase * 100) : null)
+      : (i !== headIdx && headN > 0 ? (n / headN * 100) : null);
+    // Lo step di testa È il totale: la sua quota è 100%, non "non applicabile". Il trattino aveva
+    // senso quando la colonna si chiamava "vs #1" (un confronto con se stesso non esiste), non
+    // ora che dichiara la quota sulla coorte.
+    const sharePct = (i === headIdx && headN > 0) ? 100 : startPct;
+    const isWorst = i === worstIdx;
+    const w  = Math.min(n / denom * 100, 100);
+    const gw = vsN !== null ? Math.min(vsN / denom * 100, 100) : 0;
+
+    const children = Array.isArray(row.children) ? row.children : [];
+    const hasChildren = children.length > 0;
+    const expanded = !!state.eventFunnelExpanded[i];
+    const chevron = hasChildren
+      ? `<button class="event-funnel-chevron chev" data-row="${i}" title="${expanded ? 'Riduci varianti' : 'Espandi varianti'}">${expanded ? '▾' : '▸'}</button>`
+      : '';
+    const countBadge = hasChildren
+      ? ` <span class="variants-tag">· ${children.length} variant${children.length > 1 ? 'i' : 'e'}</span>`
+      : '';
+    // Step multi-evento: si stampano tutti i nomi separati da `|`, così si legge a colpo d'occhio
+    // che lo step ha due strade valide e il conteggio non è quello di un evento solo.
+    // Sugli step di sopravvivenza il nome dell'evento è un segnaposto (la RPC guarda qualunque
+    // evento): stamparlo direbbe una cosa falsa, quindi si scrive la regola vera.
+    // Su quelli a occorrenze multiple si dichiara quante ne servono, altrimenti tre righe
+    // identiche `workout_complete` sembrerebbero lo stesso conteggio ripetuto.
+    const minCountOf = (r) => { const v = Number(r && r.min_count); return Number.isFinite(v) && v > 1 ? Math.floor(v) : null; };
+    const activeAfterOf = (r) => { const v = Number(r && r.active_after_hours); return Number.isFinite(v) && v > 0 ? Math.floor(v) : null; };
+    const rowActiveAfter = activeAfterOf(row);
+    const rowMinCount = minCountOf(row);
+    const evtLine = rowActiveAfter !== null
+      ? `qualsiasi evento oltre ${fmtDur(rowActiveAfter * 3600)} dall'ingresso in coorte`
+      : `${esc(rowAllEvents(row).join(' | '))}${rowMinCount !== null ? ` · ${rowMinCount}ª volta` : ''}${row.filters ? ' · ' + esc(serializeFilters(row.filters)) : ''}`;
+
+    // Barra: track pieno = 100% del denominatore · ghost tratteggiato = livello dello step
+    // precedente (la parte tratteggiata È il drop) · fill = step corrente.
+    //
+    // La perdita è scritta DENTRO la barra invece che in una colonna: il tratteggio è già largo
+    // esattamente quanto le persone che non sono passate, quindi la cifra sta sopra il buco che
+    // descrive e l'imbuto resta una colonna sola di barre che si accorciano, letta senza
+    // interruzioni. L'etichetta è ancorata a destra del track — posizione fissa, così le perdite
+    // formano una colonna dritta invece di spostarsi a ogni riga seguendo la fine del riempimento.
+    // La percentuale scritta qui è SEMPRE sulla coorte (headN), mai sullo step precedente:
+    // "−31%" deve voler dire "trentuno persone su cento di quelle entrate", altrimenti in
+    // fondo all'imbuto perdere tre persone su dieci sopravvissute grida più di perderne
+    // trenta all'ingresso. Come effetto secondario la cifra torna a coincidere con ciò che si
+    // vede: in modalità coorte il denominatore delle barre È headN, quindi il tratteggio occupa
+    // esattamente quella frazione del track, e le perdite di tutti gli step sommano al 100% −
+    // quota finale.
+    //
+    // Sotto, in corpo minore, la stessa perdita letta sullo step precedente — la tenuta del
+    // singolo passaggio, che dice se lo schermo funziona per chi ci arriva ed è l'unica lettura
+    // possibile quando la coorte è già dimezzata. Porta con sé la propria base ("di 71") perché
+    // una percentuale nuda accanto a un'altra si legge come la stessa cosa scritta due volte.
+    //
+    // Sugli step di sopravvivenza la perdita si misura sulla base matura: contare fra i persi
+    // chi non ha ancora compiuto la settimana disegnerebbe un crollo che è solo tempo non
+    // ancora trascorso. Con base 0 non c'è perdita da mostrare — non si è ancora misurato niente.
+    const lostN   = prevIdx !== null && vsN !== null ? vsN - n : null;
+    const lostPct = lostN !== null && headN > 0 ? (lostN / headN * 100) : null;
+    const showLoss = !isAbs && lostN !== null && lostN > 0;
+    const lossTip = showLoss
+      ? (mBase !== null
+          ? `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${mBase} già ${mBase === 1 ? 'giudicabile' : 'giudicabili'} non ${lostN === 1 ? 'risulta' : 'risultano'} ${lostN === 1 ? 'attiva' : 'attive'} — `
+            + `${fmtP(convPct !== null ? 100 - convPct : null)} della base matura. `
+            + `Chi è entrato in coorte troppo di recente non è qui dentro: non è perso, non è ancora misurabile.`
+          : `${lostN} ${lostN === 1 ? 'persona' : 'persone'} su ${headN} di ${headLabel} ${lostN === 1 ? 'si ferma' : 'si fermano'} prima di "${label}"`
+            + ` — ${fmtP(lostPct)} della coorte, ${fmtP(convPct !== null ? 100 - convPct : null)} di chi era arrivato allo step precedente (${vsN})`)
+      : '';
+    // Sul primo passaggio le due letture sono lo stesso numero — lo step precedente È la coorte:
+    // scriverlo due volte insegnerebbe a ignorare la riga piccola proprio dove poi conta.
+    const showRel = showLoss && prevIdx !== headIdx;
+    const lossTag = showLoss
+      ? `<div class="loss${isWorst ? ' worst' : ''}" title="${esc(lossTip)}">
+           <span class="a">${fIcon('drop')}−${lostPct.toFixed(1)}%<span class="cnt">−${lostN}</span></span>
+           ${showRel ? `<span class="b">−${(100 - convPct).toFixed(1)}% di ${vsN}</span>` : ''}
+         </div>`
+      : '';
+
+    const parentRow = `
+      <div class="fun-row">
+        <div class="col-label"${rowOrEvents(row).length ? ` title="Step multi-evento (OR): conta chi ha emesso almeno uno fra ${esc(rowAllEvents(row).join(', '))}"` : ''}>${chevron}${esc(label)}${countBadge}<span class="evt">${evtLine}</span></div>
+        <div class="col-bar"><div class="track">
+          ${!isAbs && prevIdx !== null ? `<div class="ghost ${isWorst ? 'worst' : ''}" style="width:${gw}%"></div>` : ''}
+          <div class="fill" style="width:${w}%"></div>
+          ${lossTag}
+        </div></div>
+        <div class="col-who" title="${mBase !== null
+            ? esc(mBase > 0
+                ? `${n} su ${mBase}: la quota è sui soli maturi, cioè chi è entrato in coorte da abbastanza tempo da poter essere attivo oltre la soglia. Gli altri non sono persi, devono ancora arrivarci.`
+                : `Nessuno della coorte ha ancora superato la soglia: la riga non è misurabile su questo periodo, non è uno zero di performance.`)
+            : `rispetto a ${esc(headLabel)} (${headN})`}">
+          <span class="a">${n}</span><span class="b ${sharePct === null ? 'dash' : ''}">${fmtP(sharePct)}${mBase !== null && mBase > 0 ? `<small> su ${mBase} maturi</small>` : ''}</span>
+        </div>
+        <div class="col-when">
+          <span class="a ${rows_[i]?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(rows_[i], n))}">${fmtDur(rows_[i]?.t_p50_sec)}</span>
+          <span class="b ${rows_[i]?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(rows_[i], n, headLabel))}">${fmtDur(rows_[i]?.t_cum_p50_sec)}</span>
+        </div>
+      </div>`;
+
+    if (!hasChildren || !expanded) return parentRow;
+
+    // Righe children indentate. Le varianti non sono un passaggio della cascata — sono una fetta
+    // del parent — quindi non hanno una perdita da mostrare nella barra: la loro quota sul parent
+    // vive nel title. `del totale` = n_child/headN. La barra è sulla stessa scala del parent così
+    // si legge come una fetta di quello, non come uno step alla pari.
+    const childRows = children.map((c, ci) => {
+      const cFlat = flatMap.child?.[i]?.[ci];
+      const cn = (cFlat != null) ? (numById[cFlat] ?? 0) : 0;
+      const cLabel = eventStepLabel(c) || ('variante ' + (ci + 1));
+      const vsParentPct = n > 0 ? (cn / n * 100) : null;
+      const vsHeadPct = headN > 0 ? (cn / headN * 100) : null;
+      const cw = Math.min(cn / denom * 100, 100);
+      const cEvt = `${esc(rowAllEvents(c).join(' | '))}${c.filters ? ' · ' + esc(serializeFilters(c.filters)) : ''}`;
+      // Il tempo della variante è ancorato allo step precedente al parent, non al parent: così
+      // sta sulla stessa scala della riga sopra ed è confrontabile con essa. Ancorarlo al parent
+      // darebbe quasi sempre ~0, perché i due eventi sono spesso emessi nello stesso istante.
+      const cRow = (cFlat != null) ? (rowById[cFlat] || null) : null;
+      return `
+        <div class="child-row">
+          <div class="col-label"><span class="arr">↳</span>${esc(cLabel)}<span class="evt">${cEvt}</span></div>
+          <div class="col-bar"><div class="child-track"><div class="child-fill" style="width:${cw}%"></div></div></div>
+          <div class="col-who" title="${fmtP(vsParentPct)} del parent (${n})">
+            <span class="a">${cn}</span><span class="b">${fmtP(vsHeadPct)}</span>
+          </div>
+          <div class="col-when">
+            <span class="a ${cRow?.t_p50_sec == null ? 'dash' : ''}" title="${esc(tipDelta(cRow, cn))}">${fmtDur(cRow?.t_p50_sec)}</span>
+            <span class="b ${cRow?.t_cum_p50_sec == null ? 'dash' : ''}" title="${esc(tipCum(cRow, cn, headLabel))}">${fmtDur(cRow?.t_cum_p50_sec)}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    return parentRow + childRows;
+  }).join('');
+
+  const chips = installContextChips(state.eventFunnel?.installContext, state.funnelFrom);
+
+  return statRow + `<div class="fun-table">${header}${rows}</div>` + chips;
+}
+
+// Persiste la config del funnel a eventi. Se è attivo un funnel salvato di tipo 'event', riscrive i suoi
+// step nel DB (come persistFunnelConfig per i catalog). Mantiene aggiornata la copia in memoria.
+async function persistEventFunnelConfig() {
+  const i = state.activeFunnelPreset;
+  if (i === null || i === undefined) return;
+  const preset = state.savedFunnels[i];
+  if (!preset || !preset.id || (preset.tipo || 'catalog') !== 'event') return;
+  const steps = JSON.parse(JSON.stringify(state.eventFunnelConfig));
+  preset.config = steps; preset.steps = steps; preset.provider = state.eventFunnelProvider;
+  const upd = await sb.from('funnel_definitions')
+    .update({ steps, provider: state.eventFunnelProvider, updated_at: new Date().toISOString() })
+    .eq('id', preset.id);
+  if (upd.error) console.error('persist event funnel', upd.error);
+}
+
+// Riordino drag&drop degli step del funnel a eventi (come moveFunnelRow per il Default).
+function moveEventFunnelRow(from, to) {
+  if (!reorderFunnelCfg(state.eventFunnelConfig, from, to)) return;
+  persistEventFunnelConfig();
+  render();
+}
+
+// ── CONFRONTO SPRINT — FUNNEL ONBOARDING (eventi) ─────────────────────────────────────
+// Parallelo a sprintFunnelSection ma sul funnel a eventi: applica gli STESSI step + segmento a
+// ogni sprint selezionato (kpi_funnel_v2 per il periodo di ciascuno) e li mette a confronto.
+function sprintEventFunnelSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintEventOpen;
+  const badge = state.sprintEventSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintEventSel.length} sel.</span>` : '';
+  const headerEl = `
+    <div id="sprint-event-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+  if (!isOpen) return `<div class="card" style="margin-top:16px">${headerEl}</div>`;
+
+  const chips = state.sprints.map((s, i) => {
+    const on = state.sprintEventSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-event-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>${on ? '✓ ' : ''}${s.nome}</button>`;
+  }).join('');
+
+  const hasData = Object.keys(state.sprintEventData).length > 0;
+  const cmpBody = state.sprintEventLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintEventError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${esc(state.sprintEventError)}</div>`
+    : !hasData ? ''
+    : sprintEventFunnelTable();
+
+  return `
+    <div class="card" style="margin-top:16px">
+      ${headerEl}
+      <div style="margin-top:18px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">Stesso funnel onboarding applicato a ogni sprint selezionato.</div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>
+        <button id="sprint-event-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px" ${!state.sprintEventSel.length ? 'disabled' : ''}>Calcola confronto</button>
+        ${hasData ? pctStartToggle('sprint-event-pctstart') : ''}
+        ${cmpBody ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${cmpBody}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// ── «CHI È ESCLUSO» — pannello laterale ──────────────────────────────────────
+// Era la card «Parametri» in fondo alla pagina. Ora si apre dalla pillola «N esclusi». Mostra SOLO dati
+// reali (kpi_funnel_v2 / kpi_activation):
+//   1. Interruttori di inclusione (emulatori / account di prova / bloccati / bot) → ricalcolo
+//      immediato del funnel. Accanto a ognuno quante persone riguarda.
+//      Su Attivazione c'è solo il toggle Bot: gli altri lì sono esclusi sempre.
+//   2. Lista nominale degli esclusi (RPC kpi_excluded_users_list), filtrabile per motivo.
+//   3. Periodo effettivamente calcolato e coorte.
+function funnelParamsDrawer() {
+  if (!state.funnelParamsOpen || state.funnelMode === 'catalog') return '';
+  const isActivation = state.funnelMode === 'activation';
+  const fn = state.eventFunnel;
+  const counts = (fn && fn.excluded_counts) || {};
+  // Conteggi del calcolo per primi (del periodo); l'elenco è tagliato a 1000 righe e non è del periodo.
+  const nOf = r => counts[r] != null ? counts[r]
+    : state.excludedUsers ? state.excludedUsers.filter(u => (u.reason || '').split(',').includes(r)).length : '–';
+  const nAll = fn && fn.excluded_counts
+    ? ['emulator', 'test', 'blocked', 'bot'].reduce((t, r) => t + (Number(counts[r]) || 0), 0) : (state.excludedUsers || []).length;
+
+  const act = state.activation;
+  const cohortNow = isActivation
+    ? (act?.funnel?.cohort ?? null)
+    : (fn && fn.cohort_size != null ? fn.cohort_size : null);
+  const base = state.funnelCohortBase;
+  const nBotsAct = act?.bots_excluded || 0;
+  const deltaStr = isActivation
+    ? (nBotsAct ? `<span style="color:var(--muted)">${state.funnelIncludeBots ? `di cui ${nBotsAct} bot` : `${nBotsAct} bot esclusi`}</span>` : '')
+    : (cohortNow != null && base != null && cohortNow !== base)
+    ? `<span style="color:${cohortNow > base ? 'var(--mattia)' : 'var(--red)'};font-weight:700">${cohortNow > base ? '+' : ''}${cohortNow - base}</span>` : '';
+
+  const toggles = [
+    { key: 'bots',      on: state.funnelIncludeBots,      label: 'Bot',              n: nOf('bot') },
+    { key: 'test',      on: state.funnelIncludeTest,      label: 'Account di prova', n: nOf('test') },
+    { key: 'emulators', on: state.funnelIncludeEmulators, label: 'Emulatori',        n: nOf('emulator') },
+    { key: 'blocked',   on: state.funnelIncludeBlocked,   label: 'Bloccati',         n: nOf('blocked') },
+  ].filter(t => !isActivation || t.key === 'bots');
+  const rowsTg = toggles.map(t => `
+    <div class="fn-tg">
+      <div class="fn-tg-l">${t.label} <span>${t.n}</span></div>
+      <button class="fn-tgb funnel-param-chip${t.on ? ' on' : ''}" data-param="${t.key}" aria-pressed="${t.on}">${t.on ? 'inclusi' : 'esclusi'}</button>
+    </div>`).join('');
+
+  const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+  const win = sprintWindowText(selSprint, state.funnelFrom, state.funnelTo);
+
+  const rows = state.excludedUsers || [];
+  const filt = state.excludedFilter;
+  const shown = filt ? rows.filter(r => (r.reason || '').split(',').includes(filt)) : rows;
+  const reasonBadge = reason => (reason || '').split(',').map(r => {
+    const c = r === 'blocked' ? '#f87171' : r === 'test' ? '#fbbf24' : r === 'bot' ? '#a78bfa' : '#22d3ee';
+    const l = r === 'blocked' ? 'bloccato' : r === 'test' ? 'prova' : r === 'bot' ? 'bot' : 'emulatore';
+    return `<span style="font-size:11px;padding:1px 8px;border-radius:8px;background:${c}22;color:${c};font-weight:700;margin-left:4px;white-space:nowrap">${l}</span>`;
+  }).join('');
+  const filtChips = [null, 'blocked', 'test', 'emulator', 'bot'].map(f => {
+    const lab = f === null ? `Tutti ${nAll}` : f === 'blocked' ? `Bloccati ${nOf('blocked')}` : f === 'test' ? `Prova ${nOf('test')}` : f === 'bot' ? `Bot ${nOf('bot')}` : `Emulatori ${nOf('emulator')}`;
+    return `<button class="excl-filter fn-fchip${filt === f ? ' on' : ''}" data-filter="${f || ''}">${lab}</button>`;
+  }).join('');
+  const listBody = state.excludedLoading
+    ? `<div class="fn-note">Carico la lista…</div>`
+    : state.excludedError
+    ? `<div class="fn-note" style="color:var(--red)">${esc(state.excludedError)}</div>`
+    : !rows.length
+    ? `<div class="fn-note">Nessun utente escluso.</div>`
+    : shown.map(r => `
+        <div class="fn-urow">
+          <div class="fn-uname">${esc(r.name || '—')} <span>${esc(r.email || '')}</span></div>
+          <div class="fn-umeta">${reasonBadge(r.reason)}<span>${r.created_at ? r.created_at.slice(0, 10) : '—'} · ${r.events_count ?? 0} eventi · ${r.workouts_count ?? 0} workout</span></div>
+        </div>`).join('');
+
+  return `
+    <aside class="fn-drawer" role="dialog" aria-label="Chi è escluso" id="fn-drawer">
+      <div class="fn-dhead">
+        <div class="fn-dtitle">Chi è escluso</div>
+        <button class="st-pill st-pill-sel" id="funnel-params-close">Chiudi</button>
+      </div>
+      <div class="fn-dsub">Periodo calcolato: ${esc(win.text)}${cohortNow != null ? ` · ${cohortNow} persone contate ${deltaStr}` : ''}</div>
+      ${rowsTg}
+      ${isActivation ? `<div class="fn-note">Emulatori, account di prova e bloccati qui sono esclusi sempre.</div>` : ''}
+      <div class="fn-dlabel">Elenco</div>
+      <div class="fn-fchips">${filtChips}</div>
+      <div class="fn-ulist">${listBody}</div>
+    </aside>`;
+}
+
+async function fetchSprintEventFunnel() {
+  if (!state.sprintEventSel.length) return;
+  const steps = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
+  if (!steps.length) { state.sprintEventError = 'Nessuno step nel funnel'; render(); return; }
+  state.sprintEventLoading = true;
+  state.sprintEventError = null;
+  state.sprintEventData = {};
+  render();
+  try {
+    // Stesso schema di fetchEventFunnel: computeEventFunnel gestisce l'override install_* client-side.
+    // ⚠️ Serializzatore separato da buildFlatStep, e già oggi non porta `filters` né i children:
+    // il confronto sprint mostra la sola spina con i filtri vecchio stile `source`. Gli eventi in
+    // OR invece DEVONO esserci, altrimenti lo stesso funnel darebbe due numeri diversi fra la viz
+    // e il confronto — un drift silenzioso proprio sugli step che ne hanno più bisogno.
+    // min_count/active_after_hours seguono la stessa logica degli OR: senza, "Secondo workout"
+    // conterebbe come il primo e il confronto sprint direbbe il contrario della viz.
+    const p_steps  = steps.map(r => {
+      const p = { event: r.event.trim(), source: (r.source || '').trim() || undefined };
+      const ors = rowOrEvents(r);
+      if (ors.length) p.events = [p.event, ...ors];
+      const minCount = Number(r.min_count);
+      if (Number.isFinite(minCount) && minCount > 1) p.min_count = Math.floor(minCount);
+      const activeAfter = Number(r.active_after_hours);
+      if (Number.isFinite(activeAfter) && activeAfter > 0) p.active_after_hours = Math.floor(activeAfter);
+      return p;
+    });
+    const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
+    const results  = await Promise.all(selected.map(s =>
+      computeEventFunnel(p_steps, {
+        inizio:   s.inizio,
+        fine:     s.fine,
+        provider: state.eventFunnelProvider || null,
+        source:   state.eventFunnelSource || 'all',
+        p_start:  sprintStartTs(s),
+        p_end:    sprintEndTs(s),
+        includeEmulators: state.funnelIncludeEmulators,
+        includeTest:      state.funnelIncludeTest,
+        includeBlocked:   state.funnelIncludeBlocked,
+        includeBots:      state.funnelIncludeBots,
+      }).then(data => ({ id: s.id, data }))
+       .catch(err  => ({ id: s.id, error: err }))
+    ));
+    const map = {};
+    for (const r of results) { if (r.error) throw r.error; map[r.id] = r.data; }
+    state.sprintEventData = map;
+  } catch (e) { state.sprintEventError = e.message || 'Errore'; }
+  state.sprintEventLoading = false;
+  render();
+}
+
+// Tabella confronto: righe = step del funnel onboarding, colonne = sprint selezionati.
+// Gli pseudo-step install sono righe di contesto (solo numero aggregato, niente %); la catena
+// conv corre solo sugli step reali, in cascata temporale come nel funnel principale.
+function sprintEventFunnelTable() {
+  const selected = state.sprints.filter(s => state.sprintEventSel.includes(s.id));
+  // Stessa lista filtrata usata da fetchSprintEventFunnel per p_steps: gli idx del result
+  // sono posizioni in QUESTA lista (le righe config senza evento non vengono inviate).
+  const cfg = (state.eventFunnelConfig || []).filter(r => r.event && r.event.trim());
+  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+  // numeri per sprint: mappa idx→numero
+  const numsOf = {};
+  // Base matura per sprint (denom_base): sugli step di sopravvivenza il denominatore della
+  // conversione è quello, non lo step precedente — come nella viz principale, altrimenti lo
+  // stesso funnel darebbe due percentuali diverse nelle due schermate.
+  const baseOf_ = {};
+  selected.forEach(s => {
+    const steps = (state.sprintEventData[s.id] && state.sprintEventData[s.id].steps) || [];
+    const m = {}, b = {};
+    steps.forEach(st => {
+      m[st.idx] = Number(st.numero ?? 0);
+      if (st.denom_base !== null && st.denom_base !== undefined) b[st.idx] = Number(st.denom_base);
+    });
+    numsOf[s.id] = m;
+    baseOf_[s.id] = b;
+  });
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span><span>${esc(s.nome)}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
+    </th>`).join('');
+
+  // Catena reale: install esclusi da conv% e da "% dall'inizio".
+  const isCtx = cfg.map(row => isInstallEvent(row.event));
+  const realIdxs = cfg.map((_, i) => i).filter(i => !isCtx[i]);
+  const headIdx = realIdxs.length ? realIdxs[0] : null;
+  const realPrev = {};
+  realIdxs.forEach((idx, k) => { realPrev[idx] = k > 0 ? realIdxs[k - 1] : null; });
+  const headLabel = headIdx !== null ? (eventStepLabel(cfg[headIdx]) || 'step 1') : '';
+
+  const rows = cfg.map((row, ri) => {
+    const label = eventStepLabel(row) || ('step ' + (ri + 1));
+    const nums = selected.map(s => numsOf[s.id][ri] ?? 0);
+    const maxN = Math.max(...nums, 0);
+
+    if (isCtx[ri]) {
+      // Riga contesto install: solo numero aggregato, nessuna conversione.
+      const cells = selected.map((s, si) => {
+        const n = numsOf[s.id][ri] ?? 0;
+        const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
+        return `<td style="padding:6px 16px;text-align:right;opacity:.75">
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+            <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+              <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px;opacity:.5"></div>
+            </div>
+            <span style="font-family:var(--mono);font-size:15px;font-weight:500;min-width:30px;color:var(--muted)">${n}</span>
+          </div>
+          <div style="font-size:9px;color:var(--muted);margin-top:1px">aggregato · contesto</div>
+        </td>`;
+      }).join('');
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="font-size:12px;color:var(--muted);padding:7px 16px">${esc(label)} <span style="font-size:9px;color:#5a5a80">· fuori cascata</span></td>${cells}</tr>`;
+    }
+
+    // Vincitore = miglior conversione (convPct vs step reale precedente), NON il numero assoluto.
+    // Al primo step reale (convPct null per tutti) nessuno vince: il top-of-funnel misura
+    // traffico, non performance. Fallback su null → nessuna cella evidenziata su quello step.
+    const convPcts = selected.map(s => {
+      const mb = baseOf_[s.id][ri];
+      const vsN = mb !== undefined
+        ? mb
+        : (realPrev[ri] !== null ? (numsOf[s.id][realPrev[ri]] ?? 0) : null);
+      const n = numsOf[s.id][ri] ?? 0;
+      return vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
+    const cells = selected.map((s, si) => {
+      const n = numsOf[s.id][ri] ?? 0;
+      const convPct = convPcts[si];
+      const convStr = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+      const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
+      const headN = headIdx !== null ? (numsOf[s.id][headIdx] ?? 0) : 0;
+      const startPct = state.sprintFunnelPctStart && headN > 0 && ri !== headIdx ? (n / headN * 100) : null;
+      const isBest = maxConvPct !== null && convPct === maxConvPct;
+      const barW = maxN > 0 ? Math.round(n / maxN * 100) : 0;
+      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${n}</span>
+        </div>
+        ${pctCellLine(
+          convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : null,
+          startPct, headLabel, convPct)}
+      </td>`;
+    }).join('');
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${esc(label)}</td>${cells}</tr>`;
+  }).join('');
+
+  return `
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:10px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Step</th>${headers}
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// Pannello "Assegna a sprint": scrive il funnel CORRENTE (state.funnelConfig) nella colonna
+// funnel_config degli sprint selezionati. Utile per applicare lo stesso funnel a più sprint in un clic.
+function funnelAssignPanel() {
+  if (!state.funnelAssignOpen || !state.sprints.length) return '';
+  const cur = JSON.stringify(state.funnelConfig);
+  const chips = state.sprints.map((s, i) => {
+    const on   = state.funnelAssignSel.includes(s.id);
+    const same = JSON.stringify(sprintFunnelCfg(s)) === cur;
+    const custom = Array.isArray(s.funnel_config) && s.funnel_config.length;
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="funnel-assign-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+      ${same ? '<span style="font-size:9px;color:var(--mattia);font-weight:700">· già uguale</span>'
+             : custom ? '<span style="font-size:9px;color:var(--amber);font-weight:700">· 📌 custom</span>'
+                      : '<span style="font-size:9px;color:var(--muted)">· default</span>'}
+    </button>`;
+  }).join('');
+  const n = state.funnelAssignSel.length;
+  return `
+    <div class="card" style="margin-bottom:20px;border:1px solid var(--accent)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:0">📌 Assegna il funnel corrente a…</div>
+        <button id="funnel-assign-close" class="btn btn-ghost" style="font-size:12px;padding:4px 10px;color:var(--muted)">×</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;line-height:1.5">
+        Copia l'ordinamento di step attualmente nel builder negli sprint selezionati (sovrascrive il loro funnel). Poi li puoi affinare singolarmente nella pagina Sprint.
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px">${chips}</div>
+      <button id="funnel-assign-save" class="btn btn-primary" style="font-size:12px;padding:6px 16px" ${n && !state.funnelAssignSaving ? '' : 'disabled'}>
+        ${state.funnelAssignSaving ? 'Salvataggio…' : `Salva su ${n} sprint`}
+      </button>
+    </div>`;
+}
+
+function metaFunnelSection() {
+  if (!state.funnel || !state.metaToken) return '';
+  const fmt2 = n => parseFloat(n).toFixed(2);
+  const onboardingCount = Number(state.funnel[3]?.numero ?? 0);
+  const workoutCount    = Number(state.funnel[4]?.numero ?? 0);
+  const periodMatch = state.metaFunnelData && state.metaFunnelPeriod === (state.funnelFrom + ' → ' + state.funnelTo);
+
+  const sep = 'margin-top:20px;padding-top:16px;border-top:1px solid rgba(167,139,250,0.25)';
+  const header = '<div style="margin-bottom:14px">' +
+    '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--muted);text-transform:uppercase">Meta ADS</div>' +
+    '</div>';
+
+  if (state.metaFunnelLoading) return '<div style="' + sep + '">' + header + '<div style="font-size:12px;color:var(--muted)">Caricamento dati Meta…</div></div>';
+  if (state.metaFunnelError) return '<div style="' + sep + '">' + header + '<div style="font-size:12px;color:var(--red)">⚠ ' + state.metaFunnelError + '</div></div>';
+  if (!periodMatch) return '';
+
+  const md = state.metaFunnelData;
+  const spend = parseFloat(md.spend || 0);
+  const cac   = onboardingCount > 0 ? spend / onboardingCount : null;
+  const cpau  = workoutCount    > 0 ? spend / workoutCount    : null;
+  const kpi = (label, value, sub, color) =>
+    '<div style="flex:1;min-width:140px">' +
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">' + label + '</div>' +
+    '<div style="font-size:22px;font-weight:700;color:' + color + '">€ ' + value + '</div>' +
+    (sub ? '<div style="font-size:11px;color:var(--muted);margin-top:3px">' + sub + '</div>' : '') +
+    '</div>';
+
+  const kpis = '<div style="display:flex;gap:32px;flex-wrap:wrap">' +
+    kpi('Costi Meta ADS', fmt2(spend), null, 'var(--red)') +
+    kpi('CAC', cac != null ? fmt2(cac) : '—', cac != null ? onboardingCount + ' onboarding completati' : null, 'var(--amber)') +
+    kpi('CPAU', cpau != null ? fmt2(cpau) : '—', cpau != null ? workoutCount + ' utenti con ≥1 workout' : null, 'var(--purple)') +
+    '</div>';
+
+  return '<div style="' + sep + '">' + header + kpis + '</div>';
+}
+
+function funnelEditRow(row, i) {
+  const stepOpts = FUNNEL_LABELS.map((l, idx) =>
+    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${l}</option>`
+  ).join('');
+
+  const vsOpts = `<option value="">—</option>` +
+    state.funnelConfig.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${FUNNEL_LABELS[r.stepIdx]}</option>`
+    ).join('');
+
+  return `
+    <div class="funnel-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+      <span class="funnel-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select funnel-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select funnel-vs-sel"   data-row="${i}" style="width:200px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost funnel-remove" data-row="${i}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+// Riordina in place una riga di una config funnel da `from` a `to`, rimappando i riferimenti vsIdx
+// (che puntano alla POSIZIONE di una riga precedente). Un riferimento che finirebbe dopo la propria
+// riga diventa non valido → lo azzeriamo (la viz mostrerebbe '—' comunque). Usato sia dal funnel
+// principale sia dall'editor per-sprint.
+function reorderFunnelCfg(cfg, from, to) {
+  if (from === to || from < 0 || to < 0 || from >= cfg.length || to >= cfg.length) return false;
+  cfg.forEach((r, idx) => { r._oid = idx; });          // tag posizione originale
+  const [moved] = cfg.splice(from, 1);
+  cfg.splice(to, 0, moved);
+  const newPos = {};
+  cfg.forEach((r, idx) => { newPos[r._oid] = idx; });   // vecchia posizione → nuova
+  cfg.forEach((r, idx) => {
+    if (r.vsIdx !== null && r.vsIdx !== undefined) {
+      const t = newPos[r.vsIdx];
+      r.vsIdx = (t !== undefined && t < idx) ? t : null;
+    }
+    delete r._oid;
+  });
+  return true;
+}
+
+function moveFunnelRow(from, to) {
+  if (!reorderFunnelCfg(state.funnelConfig, from, to)) return;
+  persistFunnelConfig();
+  render();
+}
+
+// Persiste la config di lavoro del builder. Salva SEMPRE la copia di lavoro in localStorage (come prima),
+// e se è attivo un funnel SALVATO (activeFunnelPreset ≠ null) riscrive gli step su QUEL funnel nel DB.
+// Così "modifica → chiudi → cambia funnel → torna" ritrova le modifiche (prima restavano solo nella
+// copia temporanea e il preset ricaricava la sua fotografia originale). Aggiorna anche la copia in
+// memoria (savedFunnels[i]) senza refetch, così l'indice attivo resta valido.
+async function persistFunnelConfig() {
+  saveSetting('funnel_cfg', state.funnelConfig);
+  const i = state.activeFunnelPreset;
+  if (i === null || i === undefined) return;
+  const preset = state.savedFunnels[i];
+  if (!preset || !preset.id) return;
+  const steps = JSON.parse(JSON.stringify(state.funnelConfig));
+  preset.config = steps; preset.steps = steps;
+  const upd = await sb.from('funnel_definitions')
+    .update({ steps, updated_at: new Date().toISOString() })
+    .eq('id', preset.id);
+  if (upd.error) console.error('persist funnel def', upd.error);
+}
+
+// Config funnel effettiva di uno sprint: la sua personalizzazione se presente, altrimenti il default.
+function sprintFunnelCfg(sprint) {
+  return (sprint && Array.isArray(sprint.funnel_config) && sprint.funnel_config.length)
+    ? sprint.funnel_config
+    : DEF_FUN_CFG;
+}
+
+// Riga dell'editor funnel per-sprint (pagina Sprint). Opera su state.sprintFunnelEdit, classi dedicate.
+function sprintCfgEditRow(row, i) {
+  const cfg = state.sprintFunnelEdit || [];
+  const stepOpts = FUNNEL_LABELS.map((l, idx) =>
+    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${l}</option>`).join('');
+  const vsOpts = `<option value="">—</option>` +
+    cfg.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${FUNNEL_LABELS[r.stepIdx]}</option>`).join('');
+  return `
+    <div class="sprint-cfg-row" data-row="${i}" style="display:flex;align-items:center;gap:8px">
+      <span class="sprint-cfg-drag" draggable="true" data-row="${i}" title="Trascina per riordinare"
+        style="cursor:grab;color:var(--muted);font-size:14px;line-height:1;flex-shrink:0;user-select:none;padding:0 2px">⠿</span>
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select sprint-cfg-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select sprint-cfg-vs-sel"   data-row="${i}" style="width:200px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost sprint-cfg-remove" data-row="${i}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+function moveSprintCfgRow(from, to) {
+  if (!state.sprintFunnelEdit) return;
+  if (!reorderFunnelCfg(state.sprintFunnelEdit, from, to)) return;
+  render();
+}
+
+// Scrive il funnel corrente del builder negli sprint selezionati nel pannello "Assegna a sprint".
+// Chiamata direttamente, o dal modal di conferma se qualche sprint era già personalizzato.
+async function doFunnelAssignSave() {
+  state.funnelAssignSaving = true;
+  render();
+  const cfg = JSON.parse(JSON.stringify(state.funnelConfig));
+  try {
+    const results = await Promise.all(state.funnelAssignSel.map(id =>
+      sb.from('sprints').update({ funnel_config: cfg }).eq('id', id)));
+    const err = results.find(r => r.error);
+    if (err) throw err.error;
+    state.funnelAssignSaving = false;
+    state.funnelAssignOpen   = false;
+    state.funnelAssignSel    = [];
+    state.sprintFunnelData   = {}; // il confronto va ricalcolato/ridisegnato con le nuove config
+    await fetchSprints();
+  } catch (e) {
+    state.funnelAssignSaving = false;
+    console.error('funnel-assign-save', e);
+    alert('Errore salvataggio: ' + (e.message || e));
+    render();
+  }
+}
+
+// Salva la working copy dell'editor per-sprint su sprints.funnel_config.
+// Chiamata direttamente, o dal modal di conferma se lo sprint era già personalizzato.
+async function doSprintCfgSave() {
+  state.sprintFunnelSaving = true;
+  render();
+  const id  = state.sprintFunnelEditId;
+  const cfg = JSON.parse(JSON.stringify(state.sprintFunnelEdit));
+  try {
+    const res = await sb.from('sprints').update({ funnel_config: cfg }).eq('id', id);
+    if (res.error) throw res.error;
+    state.sprintFunnelSaving = false;
+    state.sprintFunnelEditId = null;
+    state.sprintFunnelEdit   = null;
+    state.sprintFunnelData   = {}; // confronto da ricalcolare
+    await fetchSprints();
+  } catch (e) {
+    state.sprintFunnelSaving = false;
+    console.error('sprint-cfg-save', e);
+    alert('Errore salvataggio: ' + (e.message || e));
+    render();
+  }
+}
+
+function funnelViz() {
+  const cfg    = state.funnelConfig;
+  const funnel = state.funnel;
+  if (!funnel || !cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato.</div>`;
+
+  // numero === null = dato non disponibile per il periodo (es. installs Google Play non ancora
+  // importati per quelle date), distinto da 0 reale. La fonte è la tabella google_play_installs:
+  // se non ha righe nel range la RPC kpi_funnel restituisce null, e qui mostriamo "n.d." invece di "0".
+  const rawNums = cfg.map(r => funnel[r.stepIdx]?.numero);
+  const numbers = rawNums.map(v => Number(v ?? 0));
+  const maxN    = Math.max(...numbers, 1);
+  // Testa del funnel per la "% vs #1": il primo step con dato disponibile. Se il primo è n.d.
+  // (es. installs Play non ancora importati) cadiamo sul primo utile per non lasciare la colonna vuota.
+  const headIdx = rawNums.findIndex(v => v !== null && v !== undefined);
+  const headN   = headIdx >= 0 ? numbers[headIdx] : 0;
+  const headLabel = headIdx >= 0 ? (FUNNEL_LABELS[cfg[headIdx].stepIdx] || 'step 1') : 'step 1';
+
+  const header = `
+    <div class="fr-row" style="display:flex;align-items:center;gap:14px;padding:0 0 6px 0;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">
+      <div class="fr-label" style="width:210px;flex-shrink:0"></div>
+      <div class="fr-bar" style="flex:1"></div>
+      <div style="width:44px;text-align:right;flex-shrink:0">n</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto allo step di riferimento (vsIdx)">vs prec</div>
+      <div style="width:56px;text-align:right;flex-shrink:0" title="Conversione rispetto al primo step del funnel (${esc(headLabel)})">vs #1</div>
+    </div>`;
+
+  const rows = cfg.map((row, i) => {
+    const n        = numbers[i];
+    const noData   = rawNums[i] === null || rawNums[i] === undefined;
+    const vsN      = (row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < i && !(rawNums[row.vsIdx] === null || rawNums[row.vsIdx] === undefined)) ? numbers[row.vsIdx] : null;
+    const convPct  = vsN !== null && vsN > 0 ? (n / vsN * 100) : null;
+    const conv     = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+    const startPct = !noData && headIdx >= 0 && i > headIdx && headN > 0 ? (n / headN * 100) : null;
+    const startStr = startPct !== null ? startPct.toFixed(1) + '%' : '—';
+    const label    = FUNNEL_LABELS[row.stepIdx];
+    const pct      = (n / maxN) * 100;
+    const isLow    = convPct !== null && convPct < 20;
+    const isGood   = convPct !== null && convPct >= 50;
+    const barColor  = i === 0 ? '#7070a0' : isLow ? '#f87171' : isGood ? '#4ade80' : '#a78bfa';
+    const convColor = conv === '—' ? 'var(--muted)' : isLow ? 'var(--red)' : isGood ? 'var(--mattia)' : 'var(--purple)';
+    const startColor = startPct === null ? 'var(--muted)'
+      : startPct < 20 ? 'var(--red)'
+      : startPct >= 50 ? 'var(--mattia)'
+      : 'var(--muted)';
+
+    return `
+      <div class="fr-row" style="display:flex;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--border)">
+        <div class="fr-label" style="width:210px;font-size:12px;color:var(--muted);flex-shrink:0;line-height:1.4">${label}</div>
+        <div class="fr-bar" style="flex:1;background:var(--surface2);border-radius:3px;height:22px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${barColor};opacity:.75;border-radius:3px"></div>
+        </div>
+        <div style="width:44px;text-align:right;font-family:var(--mono);font-weight:600;font-size:15px;flex-shrink:0${noData ? ';color:var(--muted)' : ''}" ${noData ? 'title="Dato non disponibile per questo periodo (tabella google_play_installs non aggiornata)"' : ''}>${noData ? 'n.d.' : n}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:600;color:${convColor};flex-shrink:0">${conv}</div>
+        <div style="width:56px;text-align:right;font-size:12px;font-weight:500;color:${startColor};flex-shrink:0" title="rispetto a ${esc(headLabel)} (${headN})">${startStr}</div>
+      </div>`;
+  }).join('');
+
+  return header + rows;
+}
+
+// ── RETENTION ────────────────────────────────────────────────────────
+
+// La pagina Retention ospita DUE viste che rispondono a due domande diverse:
+//  · Per settimana → "chi continua ad allenarsi" (coorte = primo avvio)
+//  · Per giorno    → "quando far scadere la prova" (coorte = primo avvio, curva di sopravvivenza)
+// Il toggle cambia solo state.retView: non tocca mai i filtri dell'altra vista.
+function pageRetention() {
+  const tab = (id, label, on) =>
+    `<button id="${id}" class="filter-btn ${on ? 'active' : ''}" style="padding:6px 14px;font-size:12px">${label}</button>`;
+  return `
+    <div style="display:flex;gap:6px;margin-bottom:16px">
+      ${tab('ret-view-week', 'Per settimana', state.retView !== 'day')}
+      ${tab('ret-view-day',  'Per giorno',    state.retView === 'day')}
+    </div>
+    ${state.retView === 'day' ? pageRetentionDaily() : pageRetentionWeekly()}`;
+}
+
+function pageRetentionWeekly() {
+  const retainedOpts = Array.from({ length: 10 }, (_, i) => i + 1).map(n =>
+    `<option value="${n}" ${state.retMin === n ? 'selected' : ''}>≥${n} workout / sett.</option>`
+  ).join('');
+
+  const eligibleOpts = [1,2,3,4,5].map(n =>
+    `<option value="${n}" ${state.retMinW0 === n ? 'selected' : ''}>≥${n} workout in W0</option>`
+  ).join('');
+
+  const weeksOpts = [2,4,6,8,12,26,52].map(w =>
+    `<option value="${w}" ${state.retWeeks === w ? 'selected' : ''}>${w} settimane</option>`
+  ).join('');
+
+  const body = state.retLoading
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon pulse">🔄</div><div class="empty-text" style="color:var(--muted)">Calcolo retention...</div></div>`
+    : state.retError
+    ? `<div style="padding:20px;color:var(--red);font-size:13px">⚠️ ${state.retError}</div>`
+    : !state.retention
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon">🔄</div><div class="empty-text" style="color:var(--muted)">Seleziona le opzioni e clicca Calcola.</div></div>`
+    : retentionBody();
+
+  return `
+    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      ${state.sprints.length ? `
+      <span class="filter-label">Sprint</span>
+      <select id="ret-sprint-sel" class="form-select" style="font-size:12px;padding:5px 10px;width:150px">
+        <option value="" ${!state.retSprintId ? 'selected' : ''}>— Periodo libero —</option>
+        ${state.sprints.map(s => `<option value="${s.id}" ${state.retSprintId === s.id ? 'selected' : ''}>${s.nome}${(s.inizio_ora || s.fine_ora) ? ' ⏱' : ''}</option>`).join('')}
+      </select>
+      <div class="filter-sep"></div>` : ''}
+      <span class="filter-label">Iscrizione</span>
+      <input type="date" id="ret-from" class="form-input" value="${state.retFrom}"
+        style="width:145px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="ret-to" class="form-input" value="${state.retTo}"
+        style="width:145px;padding:5px 10px;font-size:12px">
+      <div class="filter-sep"></div>
+      <span class="filter-label">Analizza</span>
+      <select id="ret-weeks" class="form-select" style="font-size:12px;padding:5px 10px;width:130px">${weeksOpts}</select>
+      <div class="filter-sep"></div>
+      <span class="filter-label">Eligible</span>
+      <select id="ret-min-w0" class="form-select" style="font-size:12px;padding:5px 10px;width:180px">${eligibleOpts}</select>
+      <div class="filter-sep"></div>
+      <span class="filter-label">Retained se</span>
+      <select id="ret-min" class="form-select" style="font-size:12px;padding:5px 10px;width:170px">${retainedOpts}</select>
+      <button id="ret-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
+    </div>
+    ${body}
+    ${sprintRetSection()}`;
+}
+
+// ── RETENTION · vista giornaliera (survival) ─────────────────────────
+//
+// Asse dei giorni: D0..D10 uno per uno (lì si decide la durata della prova), poi la coda
+// a salti. Le x del grafico sono spaziate per INDICE, non per valore del giorno, così la
+// coda non schiaccia la parte densa dove sta la decisione.
+const RETD_DAYS = [0,1,2,3,4,5,6,7,8,9,10,14,21,30];
+const RETD_TRIAL_DAY = 7;   // durata prova attuale, marcata sui grafici
+
+// Chiave del dataset "primario" (stats, tabella di dettaglio, barre dei persi):
+// il primo sprint selezionato, o il periodo libero se non ce n'è nessuno.
+function retDPrimaryKey() {
+  return state.retDSprintSel.length ? state.retDSprintSel[0] : 'free';
+}
+
+function retDSprintName(id) {
+  const s = (state.retDSprints || []).find(x => x.sprint_id === id);
+  return s ? s.nome : '—';
+}
+
+function retDDay(payload, d) {
+  if (!payload || !payload.days) return null;
+  return payload.days.find(x => Number(x.day) === d) || null;
+}
+
+// "—" quando il dato non è ancora osservabile. Mai 0%: uno zero si legge "sono andati via
+// tutti", il trattino si legge "non lo sappiamo ancora".
+function retDCell(v, suffix) {
+  return (v === null || v === undefined)
+    ? `<span style="color:var(--border2)">—</span>`
+    : `${v}${suffix || ''}`;
+}
+
+function pageRetentionDaily() {
+  const body = state.retDLoading
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon pulse">🔄</div><div class="empty-text" style="color:var(--muted)">Calcolo retention giornaliera...</div></div>`
+    : state.retDError
+    ? `<div style="padding:20px;color:var(--red);font-size:13px">⚠️ ${state.retDError}</div>`
+    : !Object.keys(state.retDData || {}).length
+    ? `<div class="empty" style="padding:48px"><div class="empty-icon">📉</div><div class="empty-text" style="color:var(--muted)">Scegli il periodo e clicca Calcola.</div></div>`
+    : retDailyBody();
+
+  return `${retDailyBar()}${body}`;
+}
+
+function retDailyBar() {
+  const { from: dToday, to: tToday } = eventFunnelPresetRange('today');
+  const { from: dWeek,  to: tWeek  } = eventFunnelPresetRange('week');
+  const { from: dMonth, to: tMonth } = eventFunnelPresetRange('month');
+  const noSprint = !state.retDSprintSel.length;
+  const on = (f, t) => noSprint && state.retDFrom === f && state.retDTo === t;
+  const preset = (id, label, active) =>
+    `<button id="${id}" class="filter-btn ${active ? 'active' : ''}" style="padding:5px 12px;font-size:12px">${label}</button>`;
+
+  return `
+    <div class="filter-bar" style="margin-bottom:20px;flex-wrap:wrap;gap:10px">
+      <span class="filter-label">Iscritti</span>
+      ${preset('retd-preset-today', 'Oggi',      on(dToday, tToday))}
+      ${preset('retd-preset-week',  'Settimana', on(dWeek,  tWeek))}
+      ${preset('retd-preset-month', 'Mese',      on(dMonth, tMonth))}
+      <div class="filter-sep"></div>
+      ${retDailySprintMenu()}
+      <div class="filter-sep"></div>
+      <input type="date" id="retd-from" class="form-input" value="${state.retDFrom}"
+        style="width:140px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="retd-to" class="form-input" value="${state.retDTo}"
+        style="width:140px;padding:5px 10px;font-size:12px">
+      <button id="retd-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
+    </div>`;
+}
+
+// Menu sprint a tendina: scala a N sprint. Ordine dal più recente (con 100 sprint quello
+// che cerchi è quasi sempre in cima), ogni riga con le date e la coorte — il numero da
+// solo non identifica più niente quando gli sprint sono tanti.
+function retDailySprintMenu() {
+  const rows = state.retDSprints || [];
+  const sel  = state.retDSprintSel;
+  const label = sel.length
+    ? `${retDSprintName(sel[0])}${sel.length > 1 ? ` +${sel.length - 1}` : ''}`
+    : 'Periodo libero';
+
+  const items = rows.map(r => {
+    const i  = sel.indexOf(r.sprint_id);
+    const c  = i >= 0 ? SPRINT_COLORS[i % SPRINT_COLORS.length] : 'transparent';
+    const br = i >= 0 ? c : 'var(--border2)';
+    const live = Number(r.max_day) < 0
+      ? `<span style="color:var(--amber);font-size:10px">in corso</span>`
+      : `<span style="color:var(--muted)">${r.cohort_size}</span>`;
+    return `
+      <div class="retd-row" data-retd-sprint="${r.sprint_id}">
+        <span style="width:9px;height:9px;border-radius:50%;background:${c};box-shadow:inset 0 0 0 1px ${br};flex:none"></span>
+        <span style="color:var(--text);min-width:64px">${r.nome}</span>
+        <span style="color:var(--muted);flex:1">${r.inizio} → ${r.fine}</span>
+        ${live}
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="retd-menu">
+      <button id="retd-menu-btn" class="form-select" style="font-size:12px;padding:5px 10px;min-width:170px;text-align:left;cursor:pointer">
+        ${label} <span style="color:var(--muted);font-size:10px">▾</span>
+      </button>
+      ${state.retDDropdown ? `
+        <div class="retd-panel">
+          <div class="retd-quick">
+            <button data-retd-last="3">Ultimi 3</button>
+            <button data-retd-last="5">Ultimi 5</button>
+            <button data-retd-last="0">Nessuno</button>
+          </div>
+          <div class="retd-list">${items || '<div style="padding:12px;color:var(--muted);font-size:12px">Nessuno sprint.</div>'}</div>
+        </div>` : ''}
+    </div>`;
+}
+
+function retDailyBody() {
+  const key  = retDPrimaryKey();
+  const data = state.retDData[key];
+  if (!data) return `<div style="color:var(--muted);font-size:13px">Nessun dato.</div>`;
+
+  const title = key === 'free'
+    ? `${data.from} → ${data.to}`
+    : `${retDSprintName(key)} · ${data.from} → ${data.to}`;
+
+  return `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.8">
+      Utenti iscritti in <strong style="color:var(--text)">${title}</strong> ·
+      <strong style="color:var(--text)">${data.cohort_size}</strong> in coorte ·
+      seguiti oltre la finestra · esclusi account interni, test ed emulatori
+    </div>
+    ${retDailyStats(data)}
+    ${retDailyDecide(data)}
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title">Utenti ancora attivi</div>
+      ${retDailySurvivalChart()}
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title">Utenti persi, giorno per giorno</div>
+      ${retDailyLostBars(data)}
+    </div>
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-title">Dettaglio per giorno</div>
+      ${retDailyTable(data)}
+    </div>
+    ${retDailyCompare()}`;
+}
+
+function retDailyStats(data) {
+  const d1 = retDDay(data, 1);
+  const d7 = retDDay(data, RETD_TRIAL_DAY);
+  const lost24 = d1 && d1.lost !== null && data.cohort_size
+    ? (d1.lost / data.cohort_size * 100).toFixed(1) + '%' : null;
+  // Il giorno con più utenti persi: è lì che il prodotto li perde davvero.
+  const peak = (data.days || [])
+    .filter(x => x.lost !== null && x.lost !== undefined)
+    .sort((a, b) => b.lost - a.lost)[0];
+
+  const box = (label, value, note, color) => `
+    <div class="card" style="flex:1;min-width:170px;margin:0">
+      <div style="font-size:12px;color:${color || 'var(--muted)'};margin-bottom:4px">${label}</div>
+      <div class="metric-val" style="font-size:24px;color:${color || 'var(--text)'}">${value}</div>
+      <div style="font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px">${note}</div>
+    </div>`;
+
+  return `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
+      ${box('Persi nelle prime 24 ore', lost24 || '—',
+            d1 && d1.lost !== null ? `${d1.lost} di ${data.cohort_size}` : 'non osservabile', 'var(--red)')}
+      ${box('Giorno del crollo', peak ? 'D' + peak.day : '—',
+            peak ? `${peak.lost} utenti persi` : 'non osservabile')}
+      ${box(`Ancora attivi a D${RETD_TRIAL_DAY}`,
+            d7 && d7.pct !== null ? d7.pct + '%' : '—',
+            d7 && d7.alive !== null ? `${d7.alive} di ${data.cohort_size} · fine prova attuale` : 'non osservabile',
+            'var(--amber)')}
+      ${box('Ultimo accesso mediano',
+            data.median_last_day === null || data.median_last_day === undefined
+              ? '—' : 'giorno ' + Math.round(data.median_last_day),
+            'metà della coorte non va oltre')}
+    </div>`;
+}
+
+// Quante persone vedrebbero il paywall se la prova scadesse al giorno N. È la domanda
+// che la vista esiste per rispondere: una prova più lunga convince chi resta, ma la
+// mostra a molte meno persone.
+function retDailyDecide(data) {
+  const opts = [2, 3, 7, 14].map(n => {
+    const d   = retDDay(data, n);
+    const cur = n === RETD_TRIAL_DAY;
+    const val = d && d.alive !== null && d.alive !== undefined ? d.alive : null;
+    return `
+      <div style="flex:1;min-width:132px;background:var(--surface2);border:1px solid ${cur ? 'var(--amber)' : 'var(--border)'};border-radius:8px;padding:12px 14px">
+        <div style="font-size:12px;color:${cur ? 'var(--amber)' : 'var(--muted)'};margin-bottom:2px">Prova di ${n} giorni</div>
+        <div class="metric-val" style="font-size:20px;color:${val === null ? 'var(--muted)' : 'var(--text)'}">${val === null ? '—' : val}</div>
+        <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">
+          ${val === null ? 'coorte non matura' : (d.pct + '%') + (cur ? ' · oggi' : '')}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="card" style="margin-bottom:18px;border-left:3px solid var(--amber)">
+      <div class="card-title">Quante persone arriverebbero al paywall di fine prova</div>
+      <div style="font-size:12px;color:var(--muted);margin:-6px 0 14px;max-width:68ch">
+        Utenti ancora attivi il giorno in cui la prova scadrebbe. Misura la presenza,
+        non la disponibilità a pagare: non esiste ancora storia di un paywall a fine prova.
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${opts}</div>
+    </div>`;
+}
+
+// Curve di sopravvivenza sovrapposte, una per sprint selezionato. Ogni curva si TRONCA
+// dove finisce l'osservabile per quello sprint (observable = 0): mai prolungata a zero,
+// che si leggerebbe come "sono andati via tutti".
+function retDailySurvivalChart() {
+  const W = 800, H = 210, PAD_T = 16, PAD_B = 26, PAD_L = 32, PAD_R = 12;
+  const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B;
+  const n = RETD_DAYS.length;
+  const xOf = i => PAD_L + (i / (n - 1)) * chartW;
+  const yOf = p => PAD_T + chartH - (p / 100) * chartH;
+
+  const refs = [0, 25, 50, 75, 100].map(p =>
+    `<line x1="${PAD_L}" y1="${yOf(p)}" x2="${W - PAD_R}" y2="${yOf(p)}" stroke="#252535" stroke-width="1"/>
+     <text x="${PAD_L - 4}" y="${yOf(p) + 3}" text-anchor="end" font-size="8" fill="#5a5a80">${p}%</text>`
+  ).join('');
+
+  const keys = state.retDSprintSel.length ? state.retDSprintSel : ['free'];
+  const series = keys.map((k, si) => {
+    const data = state.retDData[k];
+    if (!data) return '';
+    const color = SPRINT_COLORS[si % SPRINT_COLORS.length];
+    const dash  = SPRINT_DASHES[si % SPRINT_DASHES.length];
+    const pts = RETD_DAYS.map((d, i) => {
+      const row = retDDay(data, d);
+      return (row && row.pct !== null && row.pct !== undefined)
+        ? { x: xOf(i), y: yOf(Number(row.pct)) } : null;
+    }).filter(Boolean);
+    if (!pts.length) return '';
+    const line = pts.map(p => `${p.x},${p.y}`).join(' ');
+    const end  = pts[pts.length - 1];
+    return `
+      <polyline fill="none" stroke="${color}" stroke-width="2"
+        ${dash !== 'none' ? `stroke-dasharray="${dash}"` : ''} points="${line}"/>
+      <circle cx="${end.x}" cy="${end.y}" r="3.5" fill="${color}"/>`;
+  }).join('');
+
+  const trialX = xOf(RETD_DAYS.indexOf(RETD_TRIAL_DAY));
+  const labels = RETD_DAYS.map((d, i) =>
+    `<text x="${xOf(i)}" y="${H - 8}" text-anchor="middle" font-size="8"
+       fill="${d === RETD_TRIAL_DAY ? '#fbbf24' : '#5a5a80'}">D${d}</text>`).join('');
+
+  const legend = (state.retDSprintSel.length ? state.retDSprintSel : ['free']).map((k, si) => {
+    const name = k === 'free' ? 'Periodo libero' : retDSprintName(k);
+    return `<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
+      <i style="width:14px;height:2px;background:${SPRINT_COLORS[si % SPRINT_COLORS.length]};display:inline-block"></i>${name}</span>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">${legend}</div>
+    <div style="overflow-x:auto">
+      <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;min-width:560px;height:auto">
+        ${refs}
+        <line x1="${trialX}" y1="${PAD_T}" x2="${trialX}" y2="${PAD_T + chartH}"
+          stroke="#fbbf24" stroke-width="1" stroke-dasharray="3 4" opacity=".75"/>
+        <text x="${trialX + 4}" y="${PAD_T + 10}" font-size="8" fill="#fbbf24">fine prova</text>
+        ${series}
+        ${labels}
+      </svg>
+    </div>`;
+}
+
+// Barre dei persi per giorno, stesso asse X del grafico sopra (stesso PAD_L/PAD_R e
+// stesso spacing per indice) così le due letture si sovrappongono verticalmente.
+function retDailyLostBars(data) {
+  const W = 800, H = 110, PAD_T = 14, PAD_B = 22, PAD_L = 32, PAD_R = 12;
+  const chartW = W - PAD_L - PAD_R, chartH = H - PAD_T - PAD_B;
+  const n = RETD_DAYS.length;
+  const xOf = i => PAD_L + (i / (n - 1)) * chartW;
+  const vals = RETD_DAYS.map(d => {
+    const r = retDDay(data, d);
+    return (r && r.lost !== null && r.lost !== undefined) ? Number(r.lost) : null;
+  });
+  const max = Math.max(1, ...vals.filter(v => v !== null));
+  const bw  = Math.min(26, chartW / n * 0.62);
+
+  const bars = vals.map((v, i) => {
+    if (v === null) return '';
+    const h = (v / max) * chartH;
+    return `<rect x="${xOf(i) - bw / 2}" y="${PAD_T + chartH - h}" width="${bw}" height="${h}" rx="2" fill="#f87171"/>
+            ${v === max ? `<text x="${xOf(i)}" y="${PAD_T + chartH - h - 4}" text-anchor="middle" font-size="8" fill="#f87171">${v}</text>` : ''}`;
+  }).join('');
+
+  const labels = RETD_DAYS.map((d, i) =>
+    `<text x="${xOf(i)}" y="${H - 6}" text-anchor="middle" font-size="8"
+       fill="${d === RETD_TRIAL_DAY ? '#fbbf24' : '#5a5a80'}">D${d}</text>`).join('');
+
+  return `
+    <div style="overflow-x:auto">
+      <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;min-width:560px;height:auto">
+        <line x1="${PAD_L}" y1="${PAD_T + chartH}" x2="${W - PAD_R}" y2="${PAD_T + chartH}" stroke="#333345" stroke-width="1"/>
+        ${bars}${labels}
+      </svg>
+    </div>`;
+}
+
+function retDailyTable(data) {
+  const rows = (data.days || []).map(r => {
+    const isTrial = Number(r.day) === RETD_TRIAL_DAY;
+    const pct = r.pct === null || r.pct === undefined ? null : Number(r.pct);
+    const color = pct === null ? 'var(--muted)'
+      : pct >= 40 ? 'var(--mattia)' : pct >= 20 ? 'var(--amber)' : 'var(--red)';
+    return `<tr${isTrial ? ' style="background:rgba(251,191,36,.06)"' : ''}>
+      <td style="color:var(--muted);font-size:12px">D${r.day}${Number(r.day) === 0 ? ' · primo avvio' : ''}</td>
+      <td class="metric-val" style="font-size:13px">${retDCell(r.alive)}</td>
+      <td style="font-weight:700;color:${color}">${retDCell(pct, '%')}</td>
+      <td style="font-size:12px;color:var(--red)">${retDCell(r.lost)}</td>
+      <td style="font-size:12px;color:var(--muted)">${r.observable}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <table class="data-table" style="margin-top:10px">
+      <thead><tr>
+        <th>Giorno</th><th>Attivi</th><th>vs D0</th><th>Persi</th><th>Osservabili</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:12px;max-width:74ch;line-height:1.7">
+      <strong>Osservabili</strong> = utenti che hanno già vissuto per intero quel giorno.
+      Le percentuali sono calcolate su questa colonna, non sulla coorte intera. Dove la
+      colonna si azzera la riga resta vuota: un <span style="color:var(--border2)">—</span>
+      significa "non lo sappiamo ancora", uno <code>0%</code> avrebbe significato
+      "sono andati via tutti".
+    </div>`;
+}
+
+function retDailyCompare() {
+  const keys = state.retDSprintSel;
+  if (keys.length < 2) return '';
+
+  const rows = keys.map(k => {
+    const data = state.retDData[k];
+    if (!data) return '';
+    const meta = (state.retDSprints || []).find(x => x.sprint_id === k) || {};
+    const fo   = Number(meta.first_opens || 0);
+    // Qualifica priva di senso quando i primi avvii sono meno degli iscritti: per gli
+    // sprint vecchi anonymous_sessions non copre gli utenti pre-sistema-sessioni, e un
+    // rapporto sopra il 100% è un dato rotto, non un risultato.
+    const reg  = Number(meta.cohort_size || 0);
+    const qual = fo > 0 && fo >= reg
+      ? (reg / fo * 100).toFixed(1) + '%'
+      : '<span style="color:var(--border2)">—</span>';
+    const cell = d => {
+      const r = retDDay(data, d);
+      return retDCell(r && r.pct !== null && r.pct !== undefined ? r.pct : null, '%');
+    };
+    return `<tr>
+      <td style="color:var(--text);font-size:12px">${meta.nome || '—'}</td>
+      <td style="font-size:12px;color:var(--muted)">${data.from} → ${data.to}</td>
+      <td class="metric-val" style="font-size:13px">${fo || '—'}</td>
+      <td class="metric-val" style="font-size:13px">${reg}</td>
+      <td style="font-size:12px;color:var(--muted)">${qual}</td>
+      <td>${cell(1)}</td><td>${cell(3)}</td><td>${cell(7)}</td><td>${cell(14)}</td>
+      <td style="font-size:12px;color:var(--muted)">${
+        data.median_last_day === null || data.median_last_day === undefined
+          ? '—' : 'giorno ' + Math.round(data.median_last_day)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="card">
+      <div class="card-title">Confronto sprint</div>
+      <table class="data-table" style="margin-top:10px">
+        <thead><tr>
+          <th>Sprint</th><th>Periodo</th><th>Primi avvii</th><th>Iscritti</th>
+          <th>Qualifica</th><th>D1</th><th>D3</th><th>D7</th><th>D14</th><th>Ultimo accesso</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="font-size:11.5px;color:var(--muted);margin-top:12px;max-width:74ch;line-height:1.7">
+        <strong>Qualifica</strong> = iscritti su primi avvii. Serve a leggere le colonne D1-D14
+        sapendo quanto è selezionata la base: quando il signup si sposterà in fondo
+        all'onboarding, la coorte partirà più filtrata e le percentuali saliranno anche
+        senza che la retention sia migliorata.
+      </div>
+    </div>`;
+}
+
+function retentionBody() {
+  const rows = state.retention;
+  if (!rows || !rows.length) return `<div style="color:var(--muted);font-size:13px">Nessun dato.</div>`;
+
+  const cohortSize   = rows[0]?.eligible ?? 0;
+  const eligibleDesc = `≥${state.retMinW0} workout in W0`;
+
+  const retSel = state.sprints.find(s => s.id === state.retSprintId);
+  const retWin = sprintWindowText(retSel, state.retFrom, state.retTo);
+
+  return `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:20px;line-height:1.8">
+      <strong style="color:var(--text)">${cohortSize} utenti</strong> ·
+      iscritti in ${retWin.text} ·
+      eligible: ${eligibleDesc} ·
+      retained: ≥${state.retMin} workout/sett. ·
+      esclusi account interni
+    </div>
+
+    <div class="card" style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+        <div class="card-title" style="margin-bottom:0">Curva di retention</div>
+        <div style="display:flex;gap:6px">
+          <button class="filter-btn ${state.retChart==='bar'?'active':''}" data-ret-chart="bar">Barre</button>
+          <button class="filter-btn ${state.retChart==='line'?'active':''}" data-ret-chart="line">Linea</button>
+        </div>
+      </div>
+      ${retentionCurve(rows)}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Retention settimanale</div>
+      ${retentionTable(rows)}
+    </div>`;
+}
+
+function retentionTable(rows) {
+  const w0eligible = rows[0]?.eligible ?? 1;
+  return `
+    <table class="data-table" style="margin-top:10px">
+      <thead>
+        <tr>
+          <th>Settimana</th>
+          <th>Eligible</th>
+          <th>Retained</th>
+          <th>Tasso</th>
+          <th>vs W0</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const pct   = Number(r.retention_pct);
+          const vsW0  = w0eligible > 0 ? Math.round(r.retained / w0eligible * 100) : 0;
+          const color = pct >= 40 ? 'var(--mattia)' : pct >= 20 ? 'var(--amber)' : pct > 0 ? 'var(--red)' : 'var(--muted)';
+          const label = r.week === 0 ? 'W0 (base)' : `W${r.week}`;
+          return `<tr>
+            <td style="color:var(--muted);font-size:12px">${label}</td>
+            <td class="metric-val" style="font-size:13px">${r.eligible}</td>
+            <td class="metric-val" style="font-size:13px">${r.retained}</td>
+            <td style="font-weight:700;color:${color}">${pct}%</td>
+            <td style="font-size:12px;color:var(--muted)">${vsW0}%</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function retentionCurve(rows) {
+  return state.retChart === 'line' ? retentionLine(rows) : retentionBars(rows);
+}
+
+function retentionBars(rows) {
+  const n     = rows.length;
+  const dense = n > 16;
+  const gap   = dense ? 3 : 6;
+  const bars  = rows.map((r, i) => {
+    const pct    = Number(r.retention_pct);
+    const h      = Math.max((pct / 100) * 100, pct > 0 ? 2 : 0);
+    const color  = pct >= 40 ? '#4ade80' : pct >= 20 ? '#fbbf24' : pct > 0 ? '#f87171' : '#2a2a3a';
+    const showLbl = !dense || i === 0 || i === n - 1 || i % 4 === 0;
+    const label  = r.week === 0 ? 'W0' : `W${r.week}`;
+    return `
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0">
+        <div style="font-size:9px;color:var(--muted);font-family:var(--mono);white-space:nowrap">${showLbl ? pct+'%' : ''}</div>
+        <div style="flex:1;width:100%;display:flex;align-items:flex-end">
+          <div style="width:100%;height:${h}%;background:${color};border-radius:2px 2px 0 0;opacity:.85;min-height:${pct>0?'3px':'0'}"></div>
+        </div>
+        <div style="font-size:9px;color:var(--muted);white-space:nowrap">${showLbl ? label : ''}</div>
+      </div>`;
+  }).join('');
+  return `<div style="display:flex;align-items:stretch;gap:${gap}px;height:180px;padding-top:4px">${bars}</div>`;
+}
+
+function retentionLine(rows) {
+  const W = 800, H = 160, PAD_T = 24, PAD_B = 26, PAD_L = 28, PAD_R = 10;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+  const n      = rows.length;
+  const dense  = n > 16;
+
+  const pts = rows.map((r, i) => ({
+    x:   PAD_L + (n === 1 ? chartW / 2 : i / (n - 1) * chartW),
+    y:   PAD_T + chartH - (Number(r.retention_pct) / 100 * chartH),
+    pct: Number(r.retention_pct),
+    lbl: r.week === 0 ? 'W0' : `W${r.week}`,
+    show: !dense || i === 0 || i === n - 1 || i % 4 === 0,
+  }));
+
+  const refs = [25, 50, 75, 100].map(p => {
+    const y = PAD_T + chartH - (p / 100 * chartH);
+    return `<line x1="${PAD_L}" y1="${y}" x2="${W - PAD_R}" y2="${y}" stroke="#252535" stroke-width="1"/>
+            <text x="${PAD_L - 4}" y="${y + 3}" text-anchor="end" font-size="8" fill="#5a5a80">${p}%</text>`;
+  }).join('');
+
+  const area = `${pts[0].x},${PAD_T + chartH} ` +
+    pts.map(p => `${p.x},${p.y}`).join(' ') +
+    ` ${pts[pts.length - 1].x},${PAD_T + chartH}`;
+  const line = pts.map(p => `${p.x},${p.y}`).join(' ');
+  const color = '#a78bfa';
+
+  const dots = pts.map(p => {
+    const c = p.pct >= 40 ? '#4ade80' : p.pct >= 20 ? '#fbbf24' : p.pct > 0 ? '#f87171' : '#3a3a52';
+    const r = dense ? 3 : 4;
+    return `
+      <circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${c}" stroke="#111118" stroke-width="1.5"/>
+      ${p.show ? `<text x="${p.x}" y="${p.y - r - 4}" text-anchor="middle" font-size="8" fill="${c}">${p.pct}%</text>` : ''}
+      ${p.show ? `<text x="${p.x}" y="${H - 4}" text-anchor="middle" font-size="8" fill="#5a5a80">${p.lbl}</text>` : ''}`;
+  }).join('');
+
+  return `
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:170px" xmlns="http://www.w3.org/2000/svg">
+      ${refs}
+      <polygon points="${area}" fill="${color}" opacity="0.07"/>
+      <polyline points="${line}" stroke="${color}" stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+    </svg>`;
+}
+
+// ── METRICHE ──────────────────────────────────────────────────────────
+
+function pageMetriche() {
+  const { users, sessions, engagement } = state.data;
+  const d = state.chart;
+
+  const funnelSection = state.funnel
+    ? state.funnel.map(s => mRow(s.step, s.numero, s.conv !== '—' ? `conv. ${s.conv}` : '')).join('')
+    : `<tr><td colspan="3" style="font-size:12px;color:var(--muted);padding:12px 14px;font-style:italic">
+        Vai su Funnel → Calcola per caricare i dati del funnel
+      </td></tr>`;
+
+  return `
+    <div class="grid-2" style="margin-bottom:24px">
+      <div class="card">
+        <div class="card-title">Utenti Attivi — 14 giorni</div>
+        ${barChart(d, 'active_users', '#60a5fa')}
+      </div>
+      <div class="card">
+        <div class="card-title">Nuovi Utenti — 14 giorni</div>
+        ${barChart(d, 'new_users', '#a78bfa')}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Tutte le metriche</div>
+      <div class="table-wrap" style="margin-top:12px">
+        <table class="data-table">
+          <thead><tr><th>Metrica</th><th>Valore</th><th>Note</th></tr></thead>
+          <tbody>
+            ${section('Utenti')}
+            ${mRow('Registrati',          users.total,                    '')}
+            ${mRow('Nuovi (7 giorni)',     users.new_7d,                   'beta test in corso')}
+            ${mRow('Nuovi (30 giorni)',    users.new_30d,                  '')}
+            ${mRow('Onboardati',          users.onboarded,                `${Math.round(users.onboarded/users.total*100)}% del totale`)}
+            ${mRow('Premium paganti',      users.premium,                  `${users.premium_pct}% conversion rate · esclusi account interni`)}
+            ${mRow('Free trial attivi',   users.trial,                    'abbonamento trial in corso')}
+            ${section('Engagement')}
+            ${mRow('DAU (oggi)',          engagement.dau,                 'utenti unici con workout oggi')}
+            ${mRow('WAU (7g)',           engagement.wau,                 '')}
+            ${mRow('MAU (30g)',          engagement.mau,                 '')}
+            ${mRow('Streak attive',       engagement.active_streaks,      'ieri o oggi')}
+            ${section('Workout')}
+            ${mRow('Totali',              sessions.total,                 '')}
+            ${mRow('Ultimi 7 giorni',     sessions.sessions_7d,           '')}
+            ${mRow('Ultimi 30 giorni',    sessions.sessions_30d,          '')}
+            ${mRow('Durata media',        sessions.avg_duration_min + ' min', 'workout completati')}
+            ${mRow('Completion rate',     sessions.completion_pct + '%',  '')}
+            ${section(`Funnel (${state.funnelFrom} → ${state.funnelTo})`)}
+            ${funnelSection}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function section(title) {
+  return `<tr><td colspan="3" style="font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);padding:16px 14px 6px;font-weight:600">${title}</td></tr>`;
+}
+
+// ── PREMIUM ───────────────────────────────────────────────────────────
+
+const PREMIUM_SOURCE_LABELS = {
+  'shop_ai_coach':          'AI Coach (Shop)',
+  'ai_chat_quota_exhausted':'AI Coach (quota)',
+  'roadmap_premium_locked': 'Roadmap bloccato',
+  'post_workout':           'Post allenamento',
+  'onboarding_premium_step':'Onboarding',
+  'keys_popup_premium':     'Popup chiavi',
+  'coach_hub_entry':        'Coach hub',
+  'coach_hub_free_preview': 'Coach hub (anteprima)',
+  'coach_hub_chat_memory':  'Coach hub (memoria chat)',
+  'change_goal_premium':    'Cambio obiettivo',
+  'shop_vault_locked':      'Vault shop bloccato',
+  'home_premium_badge':     'Badge Premium home',
+  'onboarding_end':         'Fine onboarding',
+  'app_cold_start':         'Apertura app',
+  'app_resume':             'Rientro nell\'app',
+  'ai_premium_feature_locked':'Feature AI bloccata',
+  'unknown':                'Sconosciuto',
+};
+
+function premiumNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function premiumPct(part, total, digits = 1) {
+  return total > 0 ? (part / total * 100).toFixed(digits) + '%' : '0.0%';
+}
+
+function premiumPick(row, keys, fallback = null) {
+  for (const key of keys) {
+    if (row && row[key] !== undefined && row[key] !== null && row[key] !== '') return row[key];
+  }
+  return fallback;
+}
+
+function premiumFormatDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString('it-IT', { day:'2-digit', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+function premiumPlanLabel(productId) {
+  if (!productId) return 'Non tracciato';
+  if (String(productId).includes('year')) return 'Annuale';
+  if (String(productId).includes('month')) return 'Mensile';
+  return String(productId);
+}
+
+function premiumSourceLabel(source) {
+  return PREMIUM_SOURCE_LABELS[source] || source || 'Sconosciuto';
+}
+
+function premiumErrorSummary(p) {
+  const billingErr = premiumNum(p.billing_err ?? p.billing_errors);
+  const purchaseErr = premiumNum(p.purchase_err ?? p.purchase_errors);
+  const explicit = premiumPick(p, ['errore', 'error', 'error_message', 'msg', 'last_error', 'problema'], '');
+  if (explicit) return String(explicit);
+  if (billingErr && purchaseErr) return `${billingErr} errori billing, ${purchaseErr} errori acquisto`;
+  if (billingErr) return `${billingErr} errori billing`;
+  if (purchaseErr) return `${purchaseErr} errori acquisto`;
+  return '';
+}
+
+function premiumPurchaserModel(p) {
+  const attempts = premiumNum(p.tentativi ?? p.purchase_attempts ?? p.attempts);
+  const activations = premiumNum(p.attivazioni ?? p.activations ?? p.premium_activated);
+  const successAt = premiumPick(p, ['data_successo', 'success_at', 'activated_at', 'last_activation', 'ultimo_successo']);
+  const firstAttempt = premiumPick(p, ['primo_tentativo', 'first_attempt', 'first_attempt_at', 'created_at']);
+  const lastAttempt = premiumPick(p, ['ultimo_tentativo', 'last_attempt', 'last_attempt_at', 'updated_at'], firstAttempt);
+  const errorText = premiumErrorSummary(p);
+  // Il vero successo è la conversione reale in play_purchases (trial o pagamento), NON view_PremiumActivated
+  // (un mount di schermata che si ripete). conv_state arriva dalla RPC: paid / trial / churned / none.
+  const convState = premiumPick(p, ['conv_state'], 'none');
+  const canceling = premiumPick(p, ['canceling'], false) === true;
+  const success = convState === 'paid' || convState === 'trial';
+  const status =
+      convState === 'paid'    ? (canceling ? 'Pagante · in disdetta' : 'Pagante')
+    : convState === 'trial'   ? 'In prova'
+    : convState === 'at_risk' ? 'A rischio (pagamento)'
+    : convState === 'churned' ? 'Scaduto / annullato'
+    : errorText               ? 'Problema da verificare'
+    :                           'Tentativo senza successo';
+  return {
+    raw: p,
+    name: premiumPick(p, ['nome', 'name', 'username'], ''),
+    email: premiumPick(p, ['email'], ''),
+    attempts,
+    convState,
+    canceling,
+    success,
+    status,
+    product: premiumPick(p, ['prodotto', 'product_id', 'product', 'plan']),
+    source: premiumPick(p, ['sorgente', 'source', 'entry_source'], 'unknown'),
+    firstAttempt,
+    lastAttempt,
+    successAt,
+    errorText,
+  };
+}
+
+// Testata + filtri della pagina Premium. Estratta perché deve comparire ANCHE
+// quando `kpi_premium` fallisce: senza di lei la pagina d'errore non aveva né il
+// selettore del periodo né il bottone per ricalcolare, e l'unica via d'uscita
+// era ricaricare il browser.
+function premiumHeaderBar() {
+  return `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap">
+      <div>
+        <div class="card-title" style="font-size:20px;margin-bottom:2px">Premium</div>
+        <div style="font-size:11px;color:var(--muted)">Account interni esclusi · dati reali utenti</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${state.sprints.length ? `
+        <span class="filter-label">Sprint</span>
+        <select id="premium-sprint-sel" class="form-input" style="width:150px;padding:5px 10px;font-size:12px">
+          <option value="" ${!state.premiumSprintId ? 'selected' : ''}>— Periodo libero —</option>
+          ${state.sprints.map(s => `<option value="${s.id}" ${state.premiumSprintId === s.id ? 'selected' : ''}>${s.nome}${(s.inizio_ora || s.fine_ora) ? ' ⏱' : ''}</option>`).join('')}
+        </select>` : ''}
+        <span class="filter-label">Periodo</span>
+        <input type="date" id="premium-from" class="form-input" value="${state.premiumFrom}"
+          style="width:145px;padding:5px 10px;font-size:12px">
+        <span style="color:var(--muted);font-size:13px">→</span>
+        <input type="date" id="premium-to" class="form-input" value="${state.premiumTo}"
+          style="width:145px;padding:5px 10px;font-size:12px">
+        <span class="filter-label">Genere</span>
+        <select id="premium-gender" class="form-input" style="width:110px;padding:5px 10px;font-size:12px">
+          <option value="all"    ${state.premiumGender === 'all'    ? 'selected' : ''}>Tutti</option>
+          <option value="male"   ${state.premiumGender === 'male'   ? 'selected' : ''}>Uomini</option>
+          <option value="female" ${state.premiumGender === 'female' ? 'selected' : ''}>Donne</option>
+        </select>
+        <button id="premium-apply" class="btn btn-primary" style="padding:6px 16px;font-size:12px">Calcola</button>
+        <button class="btn btn-ghost" id="premium-refresh" style="font-size:11px;padding:6px 12px">↻</button>
+      </div>
+    </div>
+    ${(() => {
+      const sel = state.sprints.find(s => s.id === state.premiumSprintId);
+      const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
+      return `<div style="font-size:11px;color:var(--muted);margin-bottom:16px">
+        ${win.text} ${state.premiumGender !== 'all' ? '· ' + (state.premiumGender === 'male' ? 'solo uomini' : 'solo donne') : ''}${premiumCacheNote()}
+      </div>`;
+    })()}`;
+}
+
+// Ora dell'ultimo calcolo, solo quando i numeri a schermo vengono dalla cache; «↻» chiede il ricalcolo.
+function premiumCacheNote() {
+  const c = state.premiumCache;
+  if (!c || !c.computedAt || !state.premiumData) return '';
+  return ' · ' + kcMark(c);
+}
+
+function pagePremium() {
+  if (state.premiumLoading && !state.premiumData) {
+    return `${premiumHeaderBar()}<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Caricamento dati premium...</div>`;
+  }
+  // ⚠️ `kpi_premium` è la RPC più pesante della dashboard e a volte il DB la
+  // annulla (misurato 13/08/2026: 2,7s ok · 1,8s ok · 1,8s ok · 3,9s annullata,
+  // a caso). Prima quel singolo inciampo sostituiva TUTTA la pagina con una riga
+  // rossa: sparivano anche il gate, il regalo e la linea della prova, che hanno
+  // una RPC ciascuna e quasi sempre ce l'hanno fatta. Ora la testata resta, il
+  // blocco che non ha letto lo dice, e il resto della pagina si vede.
+  if (state.premiumError && !state.premiumData) {
+    const box = state.premiumErrorTimeout
+      ? sezioneTimeoutBox(state.premiumError, 'fetchPremium()')
+      : `<div class="card" style="color:var(--red);padding:24px">${esc(state.premiumError)}</div>`;
+    return `
+      ${premiumHeaderBar()}
+      <div style="margin-bottom:16px">${box}</div>`;
+  }
+  if (!state.premiumData)   return `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Nessun dato</div>`;
+
+  const d = state.premiumData;
+  const f = d.funnel;
+  const rc = d.real_conv || {};
+  // denominatore CANONICO del funnel: paywall_shown (step0) copre il 100% delle varianti.
+  // fallback su view_paywall per compatibilità con risposte RPC vecchie (cache).
+  const shownTotal = premiumNum(f.paywall_shown_total ?? f.view_paywall_total);
+  const shownUsers = premiumNum(f.paywall_shown ?? f.view_paywall);
+  const shownToOpen = shownUsers > 0 ? (f.paywall_views / shownUsers * 100).toFixed(1) : '0.0';
+  const shownToBuy  = shownUsers > 0 ? (f.purchase_attempts / shownUsers * 100).toFixed(1) : '0.0';
+  const avgShown = shownUsers > 0 ? (shownTotal / shownUsers).toFixed(1) : null;
+  const totalBillingErr   = (d.billing_errors  || []).reduce((s, e) => s + e.n, 0);
+  const totalPurchaseErr  = (d.purchase_errors || []).reduce((s, e) => s + e.n, 0);
+  const hasRealErrors = totalBillingErr > 0 || totalPurchaseErr > 0;
+  const purchasers = (d.purchasers || []).map(premiumPurchaserModel);
+  const lastDays = rc.last_days;
+  const lastNote = lastDays === null || lastDays === undefined
+    ? 'nessuna conversione nel periodo'
+    : `ultima conversione ${rc.last_date} · ${lastDays} g fa`;
+  const lastColor = (rc.new_total > 0) ? '#4ade80' : (lastDays > 14 ? '#ef4444' : 'var(--muted)');
+
+  return `
+    ${premiumHeaderBar()}
+    ${state.premiumError ? `<div style="margin-bottom:14px;font-size:11px;color:#fbbf24;background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:8px 11px">
+      ⚠️ L'ultimo ricalcolo non è andato a buon fine: <strong>questi numeri sono quelli di prima</strong>. ${esc(state.premiumError)}
+    </div>` : ''}
+
+    <!-- NORTH STAR: prima i soldi, poi l'esposizione, poi l'intenzione -->
+    <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">I numeri che contano</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:18px">
+      ${premiumKpi('Abbonati paganti', d.active_premium, `${rc.active_monthly || 0} mens · ${rc.active_yearly || 0} ann`, d.active_premium > 0 ? '#4ade80' : 'var(--muted)', lastNote, 'abbonati_attivi', 'paying')}
+      ${premiumKpi('In prova ora', d.active_trials, null, d.active_trials > 0 ? '#22d3ee' : 'var(--muted)', 'prova gratuita 7gg attiva adesso · da play_purchases (is_trial)', 'in_prova_ora', 'trialing')}
+      ${(() => {
+        const ar = d.at_risk || { grace: 0, on_hold: 0 };
+        const arTot = (ar.grace || 0) + (ar.on_hold || 0);
+        return premiumKpi('A rischio', arTot, arTot > 0 ? `${ar.grace || 0} grace · ${ar.on_hold || 0} hold` : null, arTot > 0 ? '#f59e0b' : 'var(--muted)', 'pagamento fallito ma accesso ancora attivo (grace) o sospeso (hold) · NON contati tra i paganti', null, 'at_risk');
+      })()}
+      ${(() => {
+        const canc = d.canceling || 0;
+        const cancP = d.canceled_period || 0;
+        return premiumKpi('In disdetta', canc, cancP > 0 ? `${cancP} disdett${cancP === 1 ? 'a' : 'e'} nel periodo` : null, canc > 0 ? '#f472b6' : 'var(--muted)', 'paganti attivi che hanno già annullato il rinnovo · restano fino a scadenza poi escono (churn in arrivo)', null, 'canceling');
+      })()}
+      ${premiumKpi('MRR stimato', '€ ' + (rc.mrr ?? 0), null, (rc.mrr > 0) ? '#4ade80' : 'var(--muted)', 'ricavo mensile ricorrente · mensili×9,90 + annuali×2,50', 'mrr_stimato')}
+      ${premiumKpi('Paywall mostrati', shownTotal, `${shownUsers} utent${shownUsers === 1 ? 'e' : 'i'}`, '#818cf8', 'tutte le varianti · step 0', 'paywall_mostrati')}
+      ${premiumKpi('Frequenza paywall', avgShown ? avgShown + '×' : '—', null, avgShown ? '#818cf8' : 'var(--muted)', 'volte in media che ogni utente vede il paywall · alto = mostrato troppo spesso', 'frequenza_paywall')}
+      ${premiumKpi('Paywall aperto', f.paywall_views_total, `${f.paywall_views} utent${f.paywall_views === 1 ? 'e' : 'i'}`, '#a78bfa', shownUsers > 0 ? shownToOpen + '% apre volontariamente' : 'apertura volontaria (paywall_open)')}
+      ${premiumKpi('Tentato acquisto', f.purchase_attempts, `person${f.purchase_attempts === 1 ? 'a' : 'e'} diverse · ${f.purchase_attempts_total ?? f.purchase_attempts} tentativ${(f.purchase_attempts_total ?? f.purchase_attempts) === 1 ? 'o' : 'i'}`, f.purchase_attempts > 0 ? '#f59e0b' : 'var(--muted)', shownUsers > 0 ? shownToBuy + '% delle persone che vedono il paywall' : null)}
+    </div>
+
+    <!-- Il «Funnel di conversione» (con il suo confronto sprint) è stato tolto il 26/09/2026:
+         Mattia non lo usava più. Le funzioni premiumFunnel* e sprintPremiumFunnel* restano nel
+         file ma nessuno le disegna; i loro handler sono tutti con ?. e non trovano niente. -->
+
+    <!-- Tentativi di acquisto per sprint, in percentuale su chi ha visto il paywall -->
+    ${premiumAttemptsChartCard()}
+
+    <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
+    ${premiumCreativesAuditCard()}
+
+    <!-- Chi ha pagato davvero nel periodo, e da quale proposta arriva -->
+    ${premiumPaywallPurchasesCard()}
+
+    <!-- Chi ha tentato / acquistato -->
+    ${premiumPurchasersDetailCard(purchasers)}
+
+    <!-- Diagnostica: errori, log grezzo, account esclusi (collassata) -->
+    ${premiumDiagnostics(d, hasRealErrors)}
+  `;
+}
+
+function premiumKpi(label, value, sub, color, note, infoKey, bucket) {
+  const infoBtn = infoKey
+    ? `<button onclick="showKpiInfo(event,'${esc(infoKey)}')" style="background:none;border:none;cursor:pointer;color:#4a4a6a;font-size:11px;padding:0 0 0 4px;line-height:1;vertical-align:middle" title="Come si calcola?">ℹ</button>`
+    : '';
+  const clickAttr = bucket ? ` data-premium-bucket="${esc(bucket)}" title="Clicca per la lista utenti"` : '';
+  const clickStyle = bucket ? 'cursor:pointer;' : '';
+  const clickHint = bucket ? `<div style="font-size:10px;color:#5a5a7a;margin-top:6px">clicca per la lista ›</div>` : '';
+  return `
+    <div class="card"${clickAttr} style="padding:16px 18px;${clickStyle}">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">${label}${infoBtn}</div>
+      <div style="font-size:30px;font-weight:800;color:${color};line-height:1">${value}</div>
+      ${sub  ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${sub}</div>` : ''}
+      ${note ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;padding-top:6px;border-top:1px solid #2a2a3d">${note}</div>` : ''}
+      ${clickHint}
+    </div>`;
+}
+
+// ── GATE DI FINE PROVA ────────────────────────────────────────────────
+// Sezione a sé, e non una riga in "Creatività paywall", per tre motivi che la
+// tabella non sa rappresentare: davanti c'è un film di battute che avanzano a
+// tocco, dopo l'offerta il percorso si BIFORCA (chi sceglie il gratuito passa da
+// una seconda schermata), e l'esito vero non sta negli eventi ma in una colonna
+// (`users.trial_choice`). Il percorso però si legge con la STESSA grammatica delle
+// creatività — box in fila, tocchi come numero grande, calo % sulla freccia — così
+// chi guarda la pagina non deve imparare due modi di leggere la stessa cosa. I box
+// del film portano `premium-step-box`, quindi il click che apre la lista di chi ci
+// è arrivato è già cablato e vale anche qui.
+
+// Un timeout del DB non è una funzionalità mancante, ed è l'errore più frequente
+// da agosto 2026 (traffico ×10, tetto di 8s per statement). Prima finiva nello
+// stesso riquadro di "la RPC non è ancora applicata": si leggeva "il gate non è
+// rilasciato" mentre in realtà i numeri esistevano e la query era stata annullata.
+// Qui la sezione lo dice per quello che è e offre il bottone per rileggere.
+function sezioneTimeoutBox(msg, retryCall) {
+  return `
+    <div style="background:#2b210f;border:1px solid #5a4318;border-radius:8px;padding:10px 12px;font-size:11px;color:#fbbf24;line-height:1.5">
+      ⏳ <strong>Il database non ha fatto in tempo a rispondere.</strong>
+      I dati ci sono: la query è stata annullata dopo 8 secondi, cosa che capita alla prima apertura
+      con la cache fredda.<br>
+      <button onclick="${retryCall}" style="margin-top:7px;background:#3a2d10;border:1px solid #5a4318;color:#fbbf24;
+        border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer">↻ Rileggi questa sezione</button>
+      <span style="color:#8b7a4a;margin-left:8px">${esc(msg)}</span>
+    </div>`;
+}
+
+// ── CATALOGO DELLE CREATIVITÀ PAYWALL ────────────────────────────────────────
+// Una riga per creatività, il percorso disegnato a caselle e le colonne dei gesti d'acquisto a
+// destra. È l'unica lettura per creatività rimasta in pagina, e porta tre cose che una tabella
+// di soli numeri non può dare:
+//  · il NOME di ogni schermata al posto del ruolo tecnico (`Pasto`, `Chat`, `I prezzi` invece di
+//    `features`, `plans`): sapere dove si fermano serve a poco se non si sa cosa stavano guardando;
+//  · lo stato: il codice la monta ancora, oppure è rimasta solo nell'anteprima Dev? Quando il
+//    codice e i dati non vanno d'accordo la riga si accende d'ambra;
+//  · la scheda, che si apre dal nome: quando compare, in che punto dell'app, come se ne esce.
+//
+// I numeri sono UTENTI DISTINTI: una persona che rivede la
+// stessa schermata vale uno. Le caselle si cliccano e danno la lista di chi si è fermato lì.
+//
+// Il registro è scritto a mano perché descrive INTENZIONI (dove dovrebbe uscire, cosa racconta),
+// che nel database non ci sono. I numeri arrivano tutti da kpi_paywall_creatives_audit.
+//
+// `rotation`: 'live' = il codice la monta oggi in un punto raggiungibile · 'dormant' = il
+// componente c'è ed è raggiungibile solo da un ramo che non si pesca più · 'retired' = resta
+// solo l'anteprima /dev/premium, in app non la monta nessuno.
+// Versione degli scatti: finisce in coda a ogni URL di /internal/paywalls/.
+// Serve perche i file si chiamano <variant>-<indice>.png e vengono RISCRITTI quando si
+// riscatta: lo stesso nome ha contenuti diversi nel tempo, e il browser continua a
+// mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
+// «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
+// precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
+const PAYWALL_SHOT_V = '20261010a';
+
+const CREATIVE_REGISTRY = [
+  {
+    variant: 'onboarding_start',
+    name: 'Paywall di partenza',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (voce «Paywall di partenza · senza prova (in pausa)»). Fino al 25/09/2026: pagina intera (/inizia), non un overlay, prima della Home.',
+    when: 'IN PAUSA dal 26/09/2026. Dal 18 al 25/09/2026 era la schermata di /inizia, subito dopo l\'ultima domanda dell\'onboarding, e la vedeva una volta sola chi installava. Il 26/09 Mattia l\'ha sostituita con la versione con la prova (onboarding_trial): non è cancellata, resta in /dev, e i suoi eventi restano righe a sé — leggi questa riga come i numeri di quelle otto giornate.',
+    exit: 'La × in alto a sinistra, o il tasto indietro di Android. Nessun bottone «continua gratis»: lo sprint 7 ce l\'aveva e ha fatto l\'1,0%.',
+    what: 'Una pagina sola che si scorre, sul modello di Bend: titolo grande, il prezzo piccolo sotto, il grafico dei risultati che si disegna, otto benefici, le recensioni che scorrono da sole, il numero degli allenamenti, la chiusura, e i due piani incollati in basso. Fondo verde coi colori misurati sullo screenshot di Bend. Come loro NON offre la prova gratuita: si sceglie un piano e si paga. Il piano è il bottone — primo tocco sceglie, secondo apre il pagamento di Google.',
+    note: 'Le sei citazioni sono frasi VERE prese dalle chat col coach, non recensioni votate: le stelle accanto sono un segnale di voto che quelle frasi non hanno, e vanno autorizzate o riscritte prima di restare. I numeri della community (3.130 scaricamenti, 4.364 allenamenti) sono una fotografia al 18/09/2026, non una lettura viva: invecchiano.',
+    file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
+    variant: 'app_open',
+    name: 'Paywall apertura app',
+    rotation: 'live',
+    where: 'Overlay a pieno campo sopra qualunque schermata, non una rotta: l\'app si apre e lui c\'è già.',
+    when: 'A OGNI accesso, dal 20/09/2026: sia quando l\'app parte da zero, sia quando torna in primo piano dopo essere stata in background — anche dopo pochi secondi. Nessuna soglia di tempo, nessun tetto giornaliero. Non si mostra a chi è premium, a chi non ha finito l\'onboarding, né nella sessione in cui l\'onboarding è appena finito (lì ha già girato il paywall di partenza).',
+    exit: 'La × in alto a sinistra, o il tasto indietro di Android: entrambe portano in Home e finisce lì. A differenza del paywall di partenza NON passa la palla all\'offerta di benvenuto — la richiesta tornerà da sé alla prossima apertura.',
+    what: 'La stessa schermata del paywall di partenza, con due titoli suoi: «Prenditi cura del tuo corpo.» e «Bastano 5 minuti al giorno per stare meglio.». Tutto il resto — il grafico, i benefici, le recensioni, i numeri, i due piani incollati in basso — è identico. A schermo la prova gratuita non è nominata da nessuna parte: c\'è solo il prezzo. Chi la ottiene la scopre sul foglio di Google, dopo il tocco.',
+    cta: 'Non c\'è una CTA separata: il bottone È la carta del piano, e UN SOLO tocco apre il pagamento di Google — niente primo tocco che sceglie e secondo che conferma. «Annuale»: il listino dichiarato sbarrato (59,99 €, solo in euro — fuori dall\'euro la riga torna a «29,99 € in un anno») accanto al totale d\'impegno 29,99 €, «2,50 €/mese» a destra, etichetta «Il più scelto», chevron ›. «Mensile»: «Senza impegno», «9,90 €/mese». Sotto, «Ripristina acquisti». Conseguenza sugli eventi, voluta: da questa superficie `paywall_plan_select` non esce MAI, e il tocco si legge da `paywall_cta_tap.product_id` — il campo `cta_copy` riporta la chiave della carta toccata (`plans_v2.annual.label`), non un testo di CTA.',
+    prova: 'Il tocco sull\'annuale compra l\'offerta `freetrial-7d`: 7 giorni a 0 € e POI 29,99 €/anno. Non compra `discount-19` (19,99 € il primo anno), perché la regola di scelta preferisce sempre l\'offerta con la prova — e il 29,99 sbarrato sulla carta è il prezzo ricorrente di quell\'offerta, non del listino pieno. La prova arriva quasi a tutti: il 21/09/2026 avevano `freetrial-7d` nel catalogo del proprio telefono 156 utenti su 161 (evento `paywall_product_updated`, campo `has_trial_offer` — è il catalogo come lo vede quel dispositivo, non Play Console). Non la vede chi l\'ha già consumata: Google la concede una volta per account e sparisce dal catalogo nell\'istante in cui parte, quindi un ex abbonato che apre questo paywall va su addebito immediato mentre la schermata gli mostra gli stessi identici prezzi. Dal 15/09/2026 gli utenti senza prova nel catalogo sono 13: cinque hanno già un acquisto a loro nome, per gli altri otto non abbiamo dati per dire perché. Prima conversione venduta da questa creatività: 21/09/2026, ed è una prova.',
+    note: 'Due source sotto una sola variant: app_cold_start (l\'app è partita) e app_resume (l\'utente è rientrato). Sono pubblici molto diversi sotto la stessa creatività, e vanno letti separati prima di decidere se il rientro va lasciato o tolto. La creatività è oggi quasi identica a onboarding_start ma è tenuta separata apposta, perché divergerà: mescolarle darebbe una media che non descrive nessuna delle due. Da guardare con lo stesso KPI di guardia del paywall di partenza — primo allenamento entro 48h — perché sta sulla stessa strada, e ci sta a ogni apertura.',
+    file: 'app/src/pages/AppOpenPaywall/AppOpenPaywall.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
+    variant: 'onboarding_trial',
+    name: 'Paywall di partenza · con la prova',
+    rotation: 'live',
+    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home. Anche in anteprima /dev (voce «Paywall di partenza · con la prova (in pausa)»).',
+    when: 'Dal 26/09/2026, al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding: la vede una volta sola chi installa. Il 10/10/2026 Mattia l\'ha sostituita nel codice con la v2 (onboarding_trial_v2), che cambia solo titolo, sottotitolo e titolino: in app la v2 arriva con la prima release che la contiene, e per qualche giorno le due convivono (chi non aggiorna vede ancora questa). Quando non arrivano più eventi, questa scheda passa a «retired» con la data vera. Non è cancellata: resta in /dev, e i suoi eventi restano righe a sé.',
+    exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nel paywall di partenza.',
+    what: 'La schermata del paywall di partenza, identica in tutto — titolo coi minuti scelti, grafico che si disegna, benefici per obiettivo, recensioni che scorrono, chiusura sul numero degli allenamenti, le stesse due schede dei piani, «Ripristina acquisti». Cambia solo la scheda dell\'annuale: in cima una fascia oro «7 giorni gratis» col pacchettino, a destra in grande «0 € oggi», da solo, al posto del prezzo, e sotto il nome, in piccolo, il listino sbarrato e il totale: «59,99 € 29,99 € l\'anno» (il barrato solo in euro, come sulla scheda del paywall di partenza). La rata «poi 2,50 €/mese», che c\'era, l\'ha tolta Mattia il 25/09/2026: quattro cifre in una scheda erano troppe. Niente «Il più scelto»: la fascia fa da etichetta. Il mensile è quello di sempre, senza prova. Prima versione dello stesso giorno (bottone unico «Prova 7 giorni gratis» al posto delle due schede) scartata da Mattia: cambia solo la parte dei prezzi.',
+    cta: 'Come nel paywall di partenza il bottone È la scheda, e un tocco apre il pagamento di Google. La scheda dell\'annuale compra l\'offerta `freetrial-7d` NOMINATA, passata identica al catalogo e all\'acquisto: i giorni e le cifre scritti sono quelli dell\'offerta che il tocco paga. Il mensile, dove quel nome non esiste, compra il suo piano di sempre. Se il catalogo di quel telefono non ha la prova — account che l\'ha già consumata, o offerta spenta su Console — la scheda dell\'annuale torna identica a quella del paywall di partenza e la schermata non nomina la prova. `cta_copy`: `onboarding_start.trial.band` sul tocco della scheda con la prova, le chiavi di sempre (`plans_v2.annual.label` / `plans_v2.monthly.label`) negli altri casi. ⚠️ Limite noto: senza la prova il ripiego è la scala generica di `pickPreferredOffer` — oggi il piano base 29,99 €/anno, ma se un giorno comparissero le rate o `discount-19` senza la prova, la scheda venderebbe quelle.',
+    note: 'Creatività separata da `onboarding_start` per scelta esplicita di Mattia: le due vanno lette come due righe, mai sommate. Stesso KPI di guardia del paywall di partenza — primo allenamento entro 48h — quando entrerà in rotazione.',
+    file: 'app/src/pages/OnboardingTrialPaywall/OnboardingTrialPaywall.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, e in basso le due schede — l\'annuale con «7 giorni gratis» e «0 € oggi»' },
+    ],
+  },
+  {
+    variant: 'onboarding_trial_v2',
+    name: 'Paywall di partenza · prova v2',
+    rotation: 'live',
+    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home. Anche in anteprima /dev (due voci: donna/dimagrire/principiante e uomo/tonificare/intermedio).',
+    when: 'Dalla prima release che la contiene (codice pronto il 10/10/2026), al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding: la vede una volta sola chi installa. Prende il posto di onboarding_trial: per confrontarle, le due righe vanno lette per data, mai sommate, tenendo conto dei giorni in cui convivono. Il 29/10/2026 Mattia l\'ha sostituita con la N44 (onboarding_trial_n44, in app dalla 1.8.7); il 31/10 ha sospeso la N44 e rimesso questa su /inizia, in app dalla prima release che contiene il ritorno. Nei giorni di mezzo le due righe convivono: si leggono per data, mai sommate.',
+    exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nella v1.',
+    what: 'La schermata di onboarding_trial al pixel — grafico, benefici per obiettivo, recensioni, chiusura, scheda dell\'annuale con «7 giorni gratis» e «0 € oggi» — dove cambiano SOLO tre testi, scritti su chi guarda. Titolo sul livello: principiante «Un percorso pensato per chi ricomincia.», intermedio e avanzato «Un percorso pensato per chi vuole di più.». Sottotitolo su obiettivo e genere: «Sarai seguita/seguito dal coach a ogni allenamento, e ti aiuterà a…» + sgonfiare la pancia e sentirti più leggera/o (dimagrire), avere un corpo più tonico e più forte (tonificare), sciogliere il corpo e muoverti con più facilità (mobilità), sciogliere le tensioni e rinforzare la schiena (mal di schiena), restare forte e autonoma/o negli anni (longevità). Titolino dei benefici: «Stare bene con soli N minuti al giorno.», coi minuti scelti — il vecchio titolo grande, sceso sopra la lista. Il sottotitolo non nomina più il prezzo.',
+    cta: 'Identica alla v1: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy` uguale (`onboarding_start.trial.band` sulla scheda con la prova).',
+    note: 'Ripieghi: livello ignoto → «per chi ricomincia» (il livello più scelto); genere ignoto → maschile, come in tutto l\'onboarding; obiettivo ignoto → «ti aiuterà ad arrivare al tuo obiettivo». Livello e genere arrivano con lo stato di fine onboarding, e dal profilo se mancano. Copy nato il 10/10/2026 da tre ricerche e cinque copywriter, poi la proposta di Mattia rifinita insieme. Stesso KPI di guardia — primo allenamento entro 48h.',
+    file: 'app/src/pages/OnboardingTrialPaywallV2/OnboardingTrialPaywallV2.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'come la v1, con i tre testi scritti su livello, obiettivo e genere (nello scatto: donna, dimagrire, principiante, 10 minuti)' },
+    ],
+  },
+  {
+    variant: 'onboarding_trial_n44',
+    name: 'Paywall di fine onboarding · N44',
+    rotation: 'live',
+    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home. Anche in anteprima /dev (due voci: donna/dimagrire/10 min e uomo/mal di schiena/15 min), dove non emette eventi.',
+    when: 'Su /inizia dalla 1.8.7 (codice del 29/10/2026), al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding: la vede una volta sola chi installa. Prende il posto di onboarding_trial_v2: per confrontarle le due righe vanno lette per data, mai sommate, tenendo conto dei giorni in cui convivono. Il 31/10/2026 Mattia l\'ha sospesa e /inizia torna alla v2 dalla prima release che contiene il ritorno: da lì gli eventi si spengono e la scheda passa a «retired» con la data vera. Resta in /dev, inattiva, e i suoi dati restano una riga a sé.',
+    exit: 'La × in alto a sinistra, che NON c\'è finché non si scorre: compare al primo scroll e poi resta. Il tasto indietro di Android chiude sempre. Nessun «continua gratis».',
+    what: 'Pagina verde che si scorre, nell\'ordine: «Sblocca il potenziale del tuo corpo.» con «Con Hypemove+ hai tutto quello che ti serve:» e quattro icone crema (Il tuo piano, Coach AI, Community, Nutrizione); «Ecco cosa ottieni con N minuti al giorno.» con cinque benefici per obiettivo; «Cosa dicono di noi», sei messaggi al coach da scorrere di lato; «Come funziona la prova gratuita.» in tre passi; la chiusura con Movy e il numero degli allenamenti. In basso, fisso, un foglio crema a tutta larghezza: «7 giorni gratis», «poi <totale> l\'anno», pulsante arancione «Inizia la prova per 0,00 €» (lo zero nel formato del prezzo dello store), «Disdici entro 7 giorni e non paghi niente.». Pillola «Scorri» sopra il foglio, come nel paywall v2.',
+    cta: 'Tutta la scheda crema è il pulsante: compra l\'annuale con l\'offerta `freetrial-7d` nominata, passata identica al catalogo e all\'acquisto. Al tocco schermo scuro con Movy e il calendario del giorno entro cui disdire. Senza prova sul telefono la scheda dice il prezzo dell\'anno e «Inizia ora». `cta_copy`: `paywall_n44.bar.cta` con la prova, `paywall_n44.bar.cta_plain` senza.',
+    note: 'Profondità di lettura: ogni sezione, la prima volta che è per metà sullo schermo, esce come paywall_step_view con step «features», index 1–5 e feature = inside · benefits · reviews · how · closing. Il numero della chiusura («+2000») è scelto a mano da Mattia e tenuto anche in produzione per sua scelta.',
+    file: 'app/src/pages/OnboardingTrialPaywallN44/OnboardingTrialPaywallN44.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'l\'apertura: «Sblocca il potenziale del tuo corpo» con le quattro icone, sotto i benefici; in basso il foglio crema «Inizia la prova per 0,00 €»' },
+      { idx: 1, t: 'Hypemove+', d: 'la sezione «Sblocca il potenziale del tuo corpo» con le quattro icone, per metà sullo schermo' },
+      { idx: 2, t: 'Benefici', d: '«Ecco cosa ottieni con N minuti al giorno» e i cinque benefici, per metà sullo schermo' },
+      { idx: 3, t: 'Recensioni', d: '«Cosa dicono di noi», il carosello dei messaggi, per metà sullo schermo' },
+      { idx: 4, t: 'Come funziona', d: '«Come funziona la prova gratuita», i tre passi (solo con la prova), per metà sullo schermo' },
+      { idx: 5, t: 'Chiusura', d: 'Movy, il «+2000» e «Il prossimo allenamento è il tuo», per metà sullo schermo' },
+    ],
+  },
+  {
+    variant: 'welcome_offer',
+    name: 'Offerta di benvenuto',
+    rotation: 'live',
+    where: 'Due pezzi in due posti: un foglietto che sale in Home, e dietro il suo unico tocco la pagina intera `/offerta`. È una rotta e non un overlay per il tasto indietro di Android: da un overlay porterebbe fuori dall\'app.',
+    when: 'Dal 20/09/2026, UNA VOLTA SOLA nella vita dell\'installazione, solo a chi ha appena chiuso con la × il paywall di partenza. Tre guardie: il passaggio di consegne da `/inizia`, il «mai più» su localStorage scritto nell\'istante in cui compare, e l\'offerta `discount-19` presente DAVVERO nel catalogo di quel telefono — che oggi vuol dire solo Italia.',
+    exit: 'Dal foglietto si esce facendolo scendere, e finisce lì: non torna più, la chiave resta scritta anche dopo il rifiuto. Dalla schermata: la × in alto a destra o il tasto indietro, entrambi tracciati, entrambi riportano in Home. Nessuna micro-survey «Perché no?»: `onboarding_end` è uscito dalle sorgenti della survey lo stesso giorno, perché a trenta secondi da una controproposta quella domanda anticipa l\'obiezione invece di raccoglierla.',
+    what: 'Un prodotto solo e nessun confronto — chi è qui ha appena guardato due piani affiancati e ha detto di no. Il riquadro del risparmio, 59,99 € sbarrato → 19,99 €/anno, la riga «Poi 29,99 €/anno, e disdici quando vuoi» che Play pretende su ogni offerta introduttiva, «Te la proponiamo una volta sola», e in fondo il piano annuale col suo equivalente al mese. Il foglietto invece NON mostra il prezzo: dice che c\'è un regalo e lascia decidere.',
+    note: '⚠️ Il barrato 59,99 € è l\'unica cifra che non esce dal catalogo: su Play il piano base annuale è 29,99 € e non esiste nessun prezzo superiore da cui scontare. È una decisione presa col rischio dichiarato e chiusa in un file solo (`annualListPrice.ts`). Le due cifre che si pagano davvero — primo anno e rinnovo — escono dalle due fasi di `discount-19` come le vede quel telefono. · Prima giornata di vita (21/09/2026): 56 hanno visto il foglietto, 30 l\'hanno aperto, 30 hanno visto il prezzo, 1 è arrivata alla cassa di Google e ha annullato. Zero acquisti. L\'account usato per il collaudo non è idoneo all\'offerta — l\'idoneità la decide Play sull\'account Google — ma gli utenti veri in Italia sì, quindi la riga si popola da sé. · ⚠️ Il foglietto RISALE: dopo che lo si fa scendere l\'effect di `WelcomeOfferSheet` riparte e lo rimette davanti finché non si esce dalla Home — 164 comparse per 56 persone il primo giorno. Le 56 sono persone, le 164 no.',
+    file: 'app/src/pages/WelcomeOffer/WelcomeOffer.tsx',
+    screens: [
+      { idx: 0, t: 'La schermata dell\'offerta', d: 'il risparmio, 59,99 sbarrato → 19,99, il rinnovo dichiarato, il piano annuale · è lo step 0 del paywall, l\'unico che emette `paywall_step_view`' },
+      { idx: -1, t: 'Il foglietto che la annuncia', d: 'sale in Home e la precede: «Ancora un\'ultima cosa», il regalo, «Apri adesso», e il prezzo non lo dice. Non emette `paywall_step_view` — ha tre eventi suoi (`welcome_offer_sheet_*`) — ma è una schermata della creatività a tutti gli effetti: `kpi_paywall_passi_esterni()` la traduce nell\'indice -1, cioè il passo PRIMA del passo zero. È il denominatore vero: le percentuali di questa riga si contano su chi ha visto il foglietto, non su chi è già arrivato al prezzo' },
+    ],
+  },
+  {
+    variant: 'coach_slides',
+    name: 'Primo allenamento · 3 slide',
+    rotation: 'live',
+    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, prima del ritorno in Home. Porta la sua chrome: i tre segmenti in cima e la × solo sull\'ultima slide.',
+    when: 'Alla fine del PRIMO allenamento in assoluto (conteggio allenamenti completati = 1), a utente non premium e non in prova. Dal 15/09/2026 prende il posto del Giorno Zero, che qui non esce più.',
+    exit: 'Sulle prime due slide NON c\'è nessuna ×: l\'unica uscita è «Avanti». La × compare sulla terza, quella dei prezzi. Il tasto indietro del telefono torna alla slide precedente e chiude solo dalla prima.',
+    what: 'Tre slide bianche al posto di uno spot da 24 secondi. Le prime due sono due dimostrazioni dentro un telefono disegnato: la chat del coach che risponde coi numeri e apre il grafico del peso, e la foto di un piatto che diventa calorie, macro e punteggio. La terza è la scena dei prezzi dello spot, parola per parola, con la timeline della prova al posto di un elenco di vantaggi — perché quella schermata non era il problema (il 95% di chi vedeva lo spot ci arrivava) e perché la domanda che blocca questo pubblico è «e poi mi ritrovo un addebito?», non «cosa fa l\'app».',
+    file: 'app/src/components/PremiumProposals/CoachSlidesPaywall/CoachSlidesFlow.tsx',
+    soft: ['open'],
+    screens: [
+      { idx: 0, t: 'Il coach', d: '«Ehi coach, come sto andando?» → la risposta coi numeri e il grafico del peso che scende verso l\'obiettivo' },
+      { idx: 1, t: 'Il contacalorie', d: 'il piatto inquadrato, lo scatto, la scansione, e la scheda del pasto che sale' },
+      { idx: 2, t: 'I prezzi', d: 'la promessa della prova, la timeline a tre tappe, i due piani e la CTA' },
+    ],
+    note: 'La riga dell\'obiettivo nel grafico (55 kg) è l\'unico elemento senza una fonte dati vera: il peso OBIETTIVO oggi non si salva da nessuna parte, si salva solo quello corrente. Finché non c\'è, il grafico è una dimostrazione dichiarata, non i dati di chi guarda.',
+  },
+  {
+    variant: 'paywall_giorno_zero',
+    name: 'Giorno Zero',
+    rotation: 'retired',
+    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, prima del ritorno in Home.',
+    when: 'RIMOSSA il 13/09/2026: era un doppione dello spot (l\'atto 2 montava lo stesso CoachSpotFlow), e il codice di questa variant non esiste più. La sequenza chat+spot è rimasta ancora due giorni firmandosi come Coach Spot; dal 15/09/2026 al primo allenamento esce la proposta a tre slide. Fino al 13/09 usciva alla fine del PRIMO allenamento in assoluto. Resta qui perché i suoi eventi sono ancora nei dati storici.',
+    exit: 'Durante la chat si può uscire con la × dell\'overlay; nello spot la × resta bloccata fino alla scena dell\'offerta (~17 secondi).',
+    what: 'La proposta più curata che abbiamo: prima l\'utente PROVA il coach (chat vera, risposte pronte, nessuna vendita), poi parte lo spot che aggancia quello che è appena successo e finisce sui prezzi. È in due atti sulla stessa apertura, e il secondo atto è il Coach Spot: per questo nei dati compaiono due variant per una proposta sola.',
+    file: 'app/src/components/PremiumProposals/PaywallGiornoZero/PaywallGiornoZeroFlow.tsx',
+    screens: [
+      { idx: 0, t: 'La chat col coach', d: 'Il coach scrive, l\'utente risponde toccando le risposte pronte. Alla fine, «continua».' },
+      { idx: 1, t: 'Lo spot (5 scene)', d: 'Da qui in poi il racconto è quello del Coach Spot, sulla stessa apertura.' },
+    ],
+    note: 'Il percorso completo dei due atti, passo per passo, è nella sezione qui sopra.',
+  },
+  {
+    variant: 'coach_spot',
+    name: 'Coach Spot',
+    rotation: 'dormant',
+    where: 'Dentro il Giorno Zero, sulla stessa schermata piena: la chat lascia il posto allo spot senza cambio di pagina. Oggi si vede solo dall\'anteprima /dev/premium.',
+    when: 'FUORI ROTAZIONE dal 15/09/2026: usciva come secondo atto del Giorno Zero, che a sua volta non si pesca più. Resta montabile a mano da /dev/premium per confronto. Fino al 31/08/2026 usciva anche da sola, al 5° allenamento.',
+    exit: 'La × compare solo sull\'ultima scena, quella dei prezzi: prima non c\'è niente da rifiutare.',
+    what: 'Lo spot lungo del coach: 5 scene doppiate, la × bloccata per ~17 secondi, e i piani che salgono DENTRO l\'ultima scena invece di essere una schermata a parte (il 90-98% moriva sul cambio schermata). È qui che avvengono l\'acquisto e la micro-survey del rifiuto, anche quando l\'apertura è del Giorno Zero.',
+    file: 'app/src/components/PremiumProposals/CoachSpotPaywall/CoachSpotFlow.tsx',
+    soft: ['open'],
+    screens: [
+      { idx: 0, t: 'Saluto', d: '«Ciao, sono il tuo coach»' },
+      { idx: 1, t: 'Pasto', d: 'la foto del piatto che diventa un numero di calorie' },
+      { idx: 2, t: 'Chat', d: '«sono stanco» → allungamento + elastico' },
+      { idx: 3, t: '«Ci sono»', d: 'allagamento arancio, si sblocca la ×' },
+      { idx: 4, t: 'I prezzi', d: 'offerta e acquisto nella stessa scena' },
+    ],
+  },
+  {
+    variant: 'ad_paywall',
+    name: 'Annuncio + prezzi',
+    rotation: 'live',
+    where: 'Ultima slide del flusso di fine allenamento, subito dopo l\'interstitial AdMob a schermo pieno.',
+    when: 'Alla fine di ogni allenamento dal 2° in poi, a utente non premium e non in prova. Prima parte l\'interstitial AdMob a schermo pieno, poi — chiuso l\'annuncio, o se l\'annuncio non parte — compare la schermata dei prezzi.',
+    exit: 'La × in alto, oppure «continua gratis» in fondo: sono due gesti diversi e la dashboard li distingue.',
+    what: 'Un interstitial AdMob a schermo intero (l\'annuncio vero, quello che paga), poi UNA sola schermata che vende e fa pagare. Niente hero illustrata e niente secondo passaggio prima dei prezzi: dopo un annuncio a schermo pieno un altro racconto è un ostacolo. È la proposta che la stessa persona rivede decine di volte, quindi le aperture sono molte più degli utenti.',
+    file: 'app/src/components/PremiumProposals/AdPaywall/AdThenPaywallFlow.tsx',
+    screens: [
+      { t: 'L\'annuncio', d: 'interstitial AdMob a schermo pieno · non è una schermata nostra, quindi non ha una casella: l\'esito (mostrato/saltato/fallito) sta nella scheda' },
+      { idx: 0, t: 'I prezzi', d: 'titolo, i due piani, la CTA. Chi esce può toccare «continua gratis» invece della ×' },
+    ],
+  },
+  {
+    variant: 'daily_limit_sheet',
+    name: 'Limite giornaliero · prima versione',
+    rotation: 'retired',
+    where: 'Bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
+    when: 'RITIRATA dal codice il 04/10/2026, sostituita da «Limite giornaliero · gratuito completato» (daily_limit_done) sullo stesso muro. Chi ha una build precedente continua a vederla finché non aggiorna l\'app: dopo il rilascio i suoi numeri vengono solo da lì, e calano man mano che la gente aggiorna. Dal 18/09 al 03/10, in due settimane l\'hanno vista 113 persone, nessuna ha comprato, e più di metà delle aperture arrivava a meno di 30 secondi dalla precedente. Dal 18/09/2026, quando un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono, perché la sheet dice «si sblocca a mezzanotte» e la persona guarda l\'orologio che ha in mano. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo — si passa. Dal 20/09 anche dal tasto della Home, che è da dove la gente parte davvero: prima il muro arrivava una schermata dopo.',
+    exit: '«No grazie» è l\'uscita dichiarata, l\'unica che si conta come rifiuto esplicito (`continue_free`). Non c\'è nessuna ×: swipe, tocco fuori e tasto indietro restano e si registrano come `x_button`. A pagamento aperto non si chiude.',
+    what: 'Un muro e una sola offerta, comprabile in un tocco senza passare dalla pagina dei piani — chi è qui stava per allenarsi e si è trovato fermato, e mettergli un confronto fra due tessere tra l\'intenzione e il pagamento è il modo di perderlo. Orologio col triangolo, «Limite giornaliero raggiunto», «Il prossimo allenamento si sblocca a mezzanotte», la riga del prezzo dell\'annuale con lo sconto sul mensile fra parentesi, il pulsante che compra, «No grazie». Il mensile non è nominato, quindi da qui non è comprabile.',
+    note: 'L\'offerta nominata era `freetrial-7d`. Spenta su Play Console al 18/09/2026 e poi riattivata: il 25/09/2026 arrivava sull\'annuale a circa 88 telefoni su 100 (evento `paywall_product_updated`, `has_trial_offer`), quindi quasi tutti vedevano «Prova illimitato a 0 €». Chi non la riceveva — account che l\'aveva già consumata — vedeva «Sblocca allenamenti illimitati»: la sheet ripiegava sul listino e smetteva DA SOLA di nominare la prova. La percentuale di sconto era calcolata sui prezzi vivi, mai a mano.',
+    file: 'ab204671:app/src/components/PremiumProposals/DailyLimitPaywall/DailyLimitSheet.tsx (ultima versione; oggi quel file disegna la creatività nuova)',
+    screens: [
+      { idx: 0, t: 'La sheet', d: 'il muro, l\'orario di sblocco, il prezzo dell\'annuale con lo sconto, il pulsante che compra e «No grazie»' },
+    ],
+  },
+  {
+    variant: 'daily_limit_done',
+    name: 'Limite giornaliero · gratuito completato',
+    rotation: 'live',
+    where: 'Bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
+    when: 'Dalla build che esce dopo il 04/10/2026 (chi non ha ancora aggiornato vede la prima versione), stesso muro: un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo, conteggio rimasto a ieri — si passa.',
+    exit: 'Nessun tasto di rifiuto e nessuna × («Aspetto domani» è stato tolto il 04/10/2026, prima del rilascio): si chiude toccando fuori o con lo swipe, che si registrano come `x_button`, o col tasto indietro di Android, che arriva come `back_hardware` (con la prima versione era l\'83% delle chiusure). «Perché no?» può comparire dopo `x_button`, non dopo `back_hardware`; mai al primo paywall rifiutato e al massimo una volta ogni 7 giorni. A pagamento aperto non si chiude.',
+    what: 'Spunta verde al posto dell\'orologio con l\'avviso, «Allenamento gratuito di oggi completato», «Il prossimo si rigenera tra 9 h 42 min» con un conto alla rovescia VIVO fino alla mezzanotte del telefono, il pulsante verde a due righe «Allenati senza limiti» + «7 giorni gratis», sotto «Oggi non paghi niente. Poi <prezzo annuale> l\'anno, disdici quando vuoi da Google Play». Nessun secondo bottone accanto al pulsante. Niente percentuale di sconto. La riga sotto il pulsante è lì per il foglio di Google: con la versione precedente 12 persone su 12 lo chiudevano senza attivare la prova.',
+    note: 'Prezzo e giorni sempre dal catalogo vivo, offerta `freetrial-7d`. Chi la prova l\'ha già consumata legge «Allenati senza limiti» + «<prezzo annuale> l\'anno» e sotto solo «Disdici quando vuoi da Google Play»; senza prezzo dallo store resta la prima riga del pulsante. Il `cta_copy` degli acquisti dice quale seconda riga si è letta (`cta_sub_trial` / `cta_sub_price`). I dati NON si sommano a quelli della versione precedente.',
+    file: 'app/src/components/PremiumProposals/DailyLimitPaywall/DailyLimitFlow.tsx',
+    screens: [
+      { idx: 0, t: 'La sheet', d: 'la spunta, il conto alla rovescia, il pulsante a due righe e la riga «oggi non paghi niente»' },
+    ],
+  },
+  {
+    variant: 'trial_end_gate',
+    name: 'Gate di fine prova',
+    rotation: 'live',
+    where: 'Pagina intera dedicata (/fine-prova), non un overlay: ci si entra prima della Home e non si può aggirare.',
+    when: 'Al primo avvio dell\'app dopo la scadenza dei 7 giorni regalati. È una pagina intera (/fine-prova), non un overlay, e l\'app ci porta dentro da sola prima della Home.',
+    exit: 'Non si chiude: si esce scegliendo. O si paga, o si sceglie il gratuito e si passa dalla schermata che dice cosa si perde.',
+    what: '«Il film della settimana»: battute che avanzano SOLO a tocco, costruite sui numeri veri della sua settimana — una battuta senza sostanza non viene proprio montata, perché «ti sei allenata 0 volte» è peggio del silenzio quando stai per chiedere dei soldi. Poi l\'offerta, e se sceglie il gratuito una schermata che dice in faccia cosa si chiude.',
+    file: 'app/src/pages/TrialEndGate/TrialEndGate.tsx',
+    screens: [
+      { idx: 0, t: 'Il film · intro', d: 'la prima battuta' },
+      { idx: 1, t: 'I tuoi numeri', d: 'minuti, allenamenti, coach: le battute sulla sua settimana' },
+      { idx: 2, t: 'Ancora numeri', d: 'la battuta successiva, se ha sostanza' },
+      { idx: 3, t: 'L\'offerta', d: 'cosa continua ad avere, e la scelta' },
+      { idx: 4, t: 'Cosa cambia', d: 'solo per chi sceglie il gratuito' },
+    ],
+    note: 'L\'esito vero non sta negli eventi ma in `users.trial_choice`: dal gate si esce scegliendo, non chiudendo, ed è per questo che le chiusure sono poche.',
+  },
+  {
+    variant: 'coach_ai_memory',
+    name: 'Coach AI · memoria',
+    rotation: 'live',
+    where: 'Overlay a schermo pieno sopra l\'hub del coach o la chat.',
+    when: 'Quando un utente free tocca la memoria personale del coach o l\'anteprima gratuita nell\'hub, e quando la chat propone la memoria. Overlay sopra la schermata da cui è partito.',
+    exit: 'La × dell\'overlay, da qualsiasi delle tre schermate.',
+    what: 'Tre schermate: il core di memoria con le chip che ruotano, i vantaggi della memoria personale, i piani (che riusano il paywall vero con la skin arancione). Vende la cosa che più distingue il coach: si ricorda di te.',
+    file: 'app/src/components/PremiumProposals/CoachMemoryPaywall/CoachMemoryFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Hero memoria', d: 'core animato + chip che ruotano' },
+      { idx: 1, t: 'Vantaggi', d: 'cosa si ricorda di te e cosa ci fa' },
+      { idx: 2, t: 'I prezzi', d: 'la schermata piani standard, skin arancione' },
+    ],
+  },
+  {
+    variant: 'coach_ai_chat',
+    name: 'Coach AI · chat',
+    rotation: 'retired',
+    where: 'Overlay a schermo pieno sopra la chat del coach o il dettaglio dell\'allenamento. Oggi si vede solo dall\'anteprima /dev/premium.',
+    when: 'FUORI ROTAZIONE dal 26/09/2026: al suo posto, negli stessi punti, esce «Coach AI · demo». Fino ad allora usciva quando i crediti AI erano finiti e l\'utente provava comunque a usarli: scrivendo al coach in chat, toccando «Modifica» nel dettaglio dell\'allenamento, o dalla CTA della card upsell in chat. Resta qui perché i suoi eventi sono nei dati storici.',
+    exit: 'La × dell\'overlay.',
+    what: 'Hero con la chat che si anima, poi la lista di cosa fa il coach, poi i piani. Arriva nel momento in cui l\'utente ha appena sbattuto contro un muro: aveva una domanda e non può farla.',
+    file: 'app/src/components/PremiumProposals/CoachAiChatPaywall/CoachAiChatFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Hero chat', d: 'la conversazione che scorre da sola' },
+      { idx: 1, t: 'Feature', d: 'la lista di cosa sblocca' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard, skin arancione' },
+    ],
+  },
+  {
+    variant: 'workout_detail_quota_sheet',
+    name: 'Dettaglio · crediti finiti',
+    rotation: 'live',
+    where: 'Foglio che sale dal basso DENTRO il dettaglio dell\'allenamento, non un\'altra schermata: si ferma sopra la barra in fondo, così «Inizia allenamento» resta visibile e toccabile.',
+    when: 'Dalla build che esce dopo il 04/10/2026, quando un utente non premium ha finito i crediti AI e prova a cambiare l\'allenamento: tocca la pillola «Continua a personalizzarlo con Hypemove+», oppure riprova un\'opzione rapida, una carta o il campo col muro già acceso. Il primo tentativo accende solo la pillola; il foglio sale al tocco. Prima di questa build, dallo stesso punto usciva «Coach AI · demo» a schermo pieno.',
+    exit: '«Non ora» (`skip_button`), tocco fuori dal foglio (`x_button`), tasto indietro di Android (`back_hardware`). Toccare «Inizia allenamento» col foglio aperto lo chiude come `continue_free` e fa partire l\'allenamento.',
+    what: 'La mascotte che dice «Hai usato tutti i crediti gratuiti del coach», il titolo «Personalizza ogni allenamento, quando vuoi», tre punti (cambia esercizi, attrezzi, durata e zona del corpo · chat illimitata con il coach · tutto il resto di Hypemove+), annuale e mensile, il pulsante nero. Una schermata sola: chi arriva qui voleva cambiare l\'allenamento adesso.',
+    note: 'Prezzi e prova dal catalogo vivo: il pulsante dice «Prova N giorni a 0 €» solo a chi su Play ne ha diritto, altrimenti «Sblocca Annuale» come nello scatto. Creatività a sé: i suoi numeri non si sommano a quelli di «Coach AI · demo», che resta sulla chat del coach.',
+    file: 'app/src/components/PremiumProposals/WorkoutQuotaSheet/WorkoutQuotaSheet.tsx',
+    screens: [
+      { idx: 0, t: 'Il foglio', d: 'la mascotte coi crediti finiti, il titolo, i tre punti, i due piani e il pulsante' },
+    ],
+  },
+  {
+    variant: 'coach_ai_demo',
+    name: 'Coach AI · demo',
+    rotation: 'live',
+    where: 'Overlay a schermo pieno sopra la chat del coach o il dettaglio dell\'allenamento.',
+    when: 'Quando i crediti AI sono finiti e l\'utente prova comunque a usarli: scrivendo al coach in chat, toccando «Modifica» nel dettaglio dell\'allenamento, o dalla CTA della card upsell in chat. Dal 26/09/2026, al posto di «Coach AI · chat». Dalla build che esce dopo il 04/10/2026 il dettaglio mostra invece «Dettaglio · crediti finiti».',
+    exit: 'La × dell\'overlay su entrambe le schermate. Il tasto indietro dai prezzi torna alla dimostrazione, dalla dimostrazione chiude.',
+    what: 'La prima slide della proposta del primo allenamento — la chat del coach che risponde coi numeri e apre il grafico del peso, dentro il telefono disegnato — con un titolo suo, «Chiedi al tuo coach quello che vuoi», e poi subito i piani, disegnati come quelli del Contacalorie ma coi punti del coach: allenamenti illimitati, il coach in chat, l\'allenamento cambiato su misura. Il pulsante promette la prova solo a chi su Play ne ha diritto (7 giorni sull\'annuale). Due schermate e non tre: chi arriva qui ha appena sbattuto contro un muro (aveva una domanda e non può farla), e ogni schermata prima del prezzo è gente che se ne va. Il primo passo si chiama `hero` con feature `chat` come nella «Coach AI · chat», così i due gradini zero si confrontano.',
+    file: 'app/src/components/PremiumProposals/CoachAiDemoPaywall/CoachAiDemoFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Il coach', d: '«Ehi coach, come sto andando?» → la risposta coi numeri e il grafico del peso che scende verso l\'obiettivo' },
+      { idx: 1, t: 'I prezzi', d: 'la mascotte, «Passa a HypeMove+», tre punti sul coach e sugli allenamenti, le due tessere e il pulsante' },
+    ],
+    note: 'La riga dell\'obiettivo nel grafico (55 kg) non ha una fonte dati vera, come nella tre-slide da cui viene: è una dimostrazione dichiarata, non i dati di chi guarda. La schermata dei prezzi è cambiata il 27/09/2026: prima era quella standard (skin arancione), dal 27/09 è quella del Contacalorie coi testi del coach. Le build uscite prima di quella data mostrano ancora la standard.',
+  },
+  {
+    variant: 'coach_ai_visual',
+    name: 'Coach AI · visual (orb)',
+    rotation: 'live',
+    where: 'Overlay a schermo pieno sopra lo Shop o il popup delle chiavi.',
+    when: 'Dal tocco sulla card del Coach AI nello Shop, e dal popup delle chiavi quando propone il premium. Overlay sopra la schermata.',
+    exit: 'La × dell\'overlay.',
+    what: 'Gemella della «memoria», ma la prima schermata è l\'orb animato e la seconda è il confronto GRATIS vs HypeMove+ riga per riga.',
+    file: 'app/src/components/PremiumProposals/CoachAiVisualPaywall/CoachAiVisualFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Hero orb', d: 'l\'orb del coach che pulsa' },
+      { idx: 1, t: 'Confronto', d: 'tabella GRATIS vs HypeMove+' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard, skin arancione' },
+    ],
+  },
+  {
+    variant: 'coach_personalization',
+    name: 'Aumenta la personalizzazione',
+    rotation: 'retired',
+    where: 'Overlay a schermo pieno sopra l\'hub del coach.',
+    when: 'Quando un utente free tocca il tastino «Aumenta la personalizzazione» nell\'hub del coach. Overlay a tre slide, in produzione dal 12/09/2026.',
+    exit: 'La × dell\'overlay, o il tasto indietro del telefono.',
+    what: 'Tre slide disegnate per questa proposta: la mascotte con la promessa e i tre pilastri, due curve che corrono da settimana 1 a settimana 12, e i piani. Non monta il componente Paywall (nove schermate) ma ne riusa gli hook: prezzi, prova, acquisto e legale restano quelli veri.',
+    file: 'app/src/components/PremiumProposals/CoachCheckinPaywall/CoachCheckinFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Cosa ottieni', d: 'mascotte, promessa, tre pilastri' },
+      { idx: 1, t: 'Dove ti porta', d: 'due curve, settimana 1 → settimana 12' },
+      { idx: 2, t: 'I prezzi', d: 'disegno proprio, numeri del paywall vero' },
+    ],
+    note: 'Fuori dall\'hub dal 27/09/2026: sullo stesso tastino (source coach_checkin) c\'è «Il coach ti segue». Resta montabile solo da /dev. Le build uscite prima di quella data mostrano ancora questa.',
+  },
+  {
+    variant: 'coach_follow',
+    name: 'Il coach ti segue',
+    rotation: 'live',
+    where: 'Overlay a schermo pieno sopra l\'hub del coach.',
+    when: 'Quando un utente free tocca il tastino delle domande («Aumenta la personalizzazione») nell\'hub del coach. Dal 27/09/2026, al posto delle tre slide di «Aumenta la personalizzazione».',
+    exit: 'La × in alto a sinistra, o il tasto indietro del telefono.',
+    what: 'Una schermata sola. Il coach parla in quattro fumetti («Anna, oggi ti conosco solo al 30%» → «Fatti seguire da me e ti creo un piano pensato al 100% per te» → «Tu pensa solo ad allenarti» → «Al resto ci penso io e ti porto al 100% del tuo potenziale!»), la mascotte cambia posa e l\'anello sale dal punteggio vero al 100%. All\'ultimo fumetto compaiono tre tessere (un coach che ti segue, allenati senza limiti, esercizi adatti a te) e, per ultimi, l\'interruttore «Ottieni 7 giorni gratis» (spento), l\'annuale, il mensile e il pulsante. Spento si paga subito l\'annuale a listino (piano base, senza prova); acceso l\'annuale diventa la scheda «0 € oggi» e il mensile sparisce.',
+    file: 'app/src/components/PremiumProposals/CoachFollowPaywall/CoachFollowFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Il coach ti segue', d: 'quattro fumetti, anello fino al 100%, tre tessere, poi prova e piani' },
+    ],
+    note: 'I prezzi compaiono circa 8,5 secondi dopo l\'apertura (subito con le animazioni ridotte): chi chiude prima non ha visto il prezzo. Il cta_copy dice se il tocco era con la prova (label_trial) o senza (common:continue).',
+  },
+  {
+    variant: 'meal_scan',
+    name: 'Contacalorie',
+    rotation: 'live',
+    where: 'Overlay dentro il flusso della scansione del pasto, al posto della card del risultato.',
+    when: 'Quando l\'utente fotografa un piatto con i crediti AI già finiti: il paywall prende il posto del risultato che si aspettava.',
+    exit: 'La × dell\'overlay, e si torna alla fotocamera.',
+    what: 'Due schermate che parlano di CIBO, non di allenamenti: il telefono disegnato col gesto per intero — il piatto inquadrato, lo scatto, la scheda del pasto che sale — e subito i piani. Prima quel momento finiva nel funnel della chat, e chi stava contando le calorie si trovava a leggere di allenamenti da cinque minuti.',
+    file: 'app/src/components/PremiumProposals/MealScanPaywall/MealScanPaywallFlow.tsx',
+    screens: [
+      { idx: 0, t: 'La dimostrazione', d: 'il gesto per intero dentro il telefono disegnato' },
+      { idx: 1, t: 'I prezzi', d: 'disegno di questa proposta' },
+    ],
+    note: 'Dal 15/09/2026 le schermate sono DUE. In mezzo c\'era «Dove ti porta», il diario che si riempie: tolta perché chi arriva qui ha appena sbattuto contro i crediti finiti e l\'app la sta già usando — ogni schermata prima del prezzo è gente che se ne va. Negli sprint chiusi prima di quella data le caselle sono tre, ed è giusto così.',
+  },
+  {
+    variant: 'onboarding_funnel',
+    name: 'Funnel standard',
+    rotation: 'live',
+    where: 'Pagina intera (/paywall), con la sua navigazione a schermate.',
+    when: 'È la pagina /paywall, il ripiego storico: oggi ci arriva soprattutto chi da free apre il check-in settimanale del coach, che lo reindirizza qui prima di far vedere le domande. Ci arriva anche dal badge premium in Home, dalla roadmap bloccata e dal vault dello Shop.',
+    exit: 'La × o il tasto indietro; da ogni schermata si può anche scorrere avanti fino ai piani.',
+    what: 'Il funnel storico «feature-first»: parte dalla funzione legata al punto da cui è stato aperto (post-workout → niente pubblicità, shop → coach AI, roadmap → su misura), mostra due schermate feature, poi il confronto, poi il promemoria, poi i piani. È il componente che diverse altre creatività riusano come ultima schermata.',
+    file: 'app/src/pages/OnboardingPaywall/OnboardingPaywall.tsx',
+    screens: [
+      { idx: 0, t: 'Feature 1', d: 'la funzione correlata al punto da cui si è aperto' },
+      { idx: 1, t: 'Feature 2', d: 'la funzione successiva nell\'ordine canonico' },
+      { idx: 2, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { idx: 3, t: 'Promemoria', d: 'cosa succede se non fa niente' },
+      { idx: 4, t: 'I prezzi', d: 'la schermata piani vera' },
+    ],
+    note: 'Il source `coach_checkin` copre DUE gate diversi: la pagina del check-in (che manda qui) e il tastino dell\'hub (che apre «Aumenta la personalizzazione»). Confrontare le due creatività per source non funziona finché il nome è lo stesso.',
+  },
+  {
+    variant: 'change_goal_premium',
+    name: 'Cambio obiettivo',
+    rotation: 'live',
+    where: 'Gate sopra il cambio obiettivo, dentro il profilo.',
+    when: 'Quando un utente free prova a cambiare obiettivo dal profilo: il gate compare al posto della conferma, e chi prosegue finisce direttamente sui piani (skin arancione), saltando le schermate feature.',
+    exit: 'La × del gate: si torna al profilo senza aver cambiato obiettivo.',
+    what: 'Non è una creatività a sé: è il funnel standard aperto direttamente sulla schermata dei piani, con la skin arancione. Per questo ha gli step ma quasi nessuna impression: la superficie dichiara di NON essere un\'impression ed emette solo lo step.',
+    file: 'app/src/pages/OnboardingPaywall/OnboardingPaywall.tsx',
+    soft: ['view'],
+    screens: [
+      { idx: 0, t: 'Il gate', d: 'la schermata che spiega perché serve il premium' },
+      { idx: 4, t: 'I prezzi', d: 'si entra direttamente qui, skin arancione' },
+    ],
+  },
+  {
+    variant: 'subscription_page',
+    name: 'Pagina Abbonamento',
+    rotation: 'live',
+    where: 'Pagina «Abbonamento», aperta dal cartellino della prova.',
+    when: 'Quando l\'utente tocca il cartellino della prova nello stato «ghost» — cioè ha finito i 7 giorni, è tornato al gratuito, e va lui a cercare l\'abbonamento. È l\'unico ingresso volontario al premium.',
+    exit: 'Si chiude come una pagina qualsiasi, senza gate.',
+    what: 'L\'unica superficie premium che l\'utente apre DA SOLO. Non rispiega il prodotto (lo conosce già): dice cosa succede se riattiva e quanto costa. Niente vocabolario di prova gratuita, perché Play non concede un secondo trial sullo stesso account.',
+    file: 'app/src/components/PremiumProposals/SubscriptionPage/SubscriptionPage.tsx',
+    screens: [
+      { idx: 0, t: 'Abbonamento', d: 'cosa torna, quanto costa, i due piani' },
+    ],
+    note: 'Numeri piccolissimi per definizione: la vede solo chi ha finito la prova e torna a cercarla.',
+  },
+  {
+    variant: 'coach_ai_chart',
+    name: 'Coach AI · grafico',
+    rotation: 'dormant',
+    where: 'Overlay montato dall\'hero «programma pronto» di fine onboarding.',
+    when: 'Era la proposta post-workout col grafico. Oggi la monta solo l\'hero «programma pronto» di fine onboarding, che nel flusso attuale non si mostra più: per questo i numeri si fermano a fine agosto.',
+    exit: 'La × dell\'overlay.',
+    what: 'Gemella della «visual»: cambia solo la prima schermata, un grafico che si disegna da solo invece dell\'orb.',
+    file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/CoachAiChartFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Hero grafico', d: 'la curva che si disegna' },
+      { idx: 1, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
+  },
+  // Fine onboarding: una chiave sola in app, DUE creativita nei dati. Le separa la data
+  // (public.kpi_paywall_variant a due argomenti), perche il campo che le distingueva
+  // (`feature`: chart | program_ready) e' arrivato il 20/07, dopo che il passaggio era
+  // gia uscito dal flusso: e NULL su tutti e 270 gli eventi.
+  {
+    variant: 'onboarding_results_chart',
+    name: 'Fine onboarding · grafico',
+    rotation: 'retired',
+    where: 'Era un overlay alla fine dell\'onboarding, subito dopo il reveal del piano.',
+    when: 'Sprint 6, 1-2 luglio 2026: due giorni, poi tolta. I ritardatari fra il 3 e l\'8 luglio erano rimasti su build vecchie e hanno visto questa. Dall\'11 luglio la prima schermata cambia, ed e\' l\'altra creativita: «Fine onboarding · risultati».',
+    exit: 'La × dell\'overlay (quando esisteva).',
+    what: 'Il grafico che si disegna — «I tuoi risultati nel tempo», HypeMove+ contro allenarsi senza un piano — con la copy di fine onboarding: «Ottieni un piano ancora piu\' personalizzato…», CTA «Scopri HypeMove+». E\' il paywall che ha convertito piu\' di ogni altro che abbiamo mai messo in aria: 16 dei 96 che l\'hanno visto sono arrivati fino alla cassa di Google, il 16,7% (nella coorte dello Sprint 6, cioe\' contando chi ha aperto l\'app in quei due giorni, sono 13 su 71: 18,3%), contro l\'1,4-3,0% di ogni altro sprint. Ed e\' anche quello che ha fatto piu\' danni: primo allenamento vero entro 48h al 14,1% contro il 32-37% degli sprint senza paywall, e secondo allenamento entro 7 giorni al 7,0% contro il 17-21%. Chiesto nel momento di desiderio massimo, ma prima che l\'app avesse dato qualcosa.',
+    note: 'A separare le due creativita e\' il campo `step` degli eventi, che vale «chart» o «program_ready». Due falsi amici: `feature`, che sarebbe stato il posto giusto, e\' arrivato il 20/07 ed e\' nullo su tutti e 270 gli eventi; e `step_norm` normalizza entrambi a «hero». Solo il confronto e i prezzi, che non portano l\'hero da cui vengono, sono divisi per data. Chi ha visto questa e chi ha visto la gemella sono due gruppi senza nessuno in comune.',
+    file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/CoachAiChartFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Il grafico', d: 'la curva che si disegna fino a «Obiettivo raggiunto!»' },
+      { idx: 1, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'onboarding_results_program_ready',
+    name: 'Fine onboarding · risultati',
+    rotation: 'retired',
+    where: 'Stesso punto della gemella, ma nello Sprint 7 l\'onboarding finiva prima con un mini allenamento da 5 squat, premio streak e card, e solo dopo questo overlay.',
+    when: 'Sprint 7, 11-12 luglio 2026. Il commit di ProgramReadyHero e\' del 2/07 alle 18:48, la notte fra i due test: scritto alla fine dello Sprint 6 per essere provato nello Sprint 7. La build pero\' era gia\' fuori prima, e infatti il 3 luglio c\'e\' gia\' un utente che dichiara step=program_ready. Il passaggio e\' stato tolto il 12 luglio ed e\' la ragione per cui lo step «Vede il paywall (fine onboarding)» del funnel sprint vale zero.',
+    exit: '«Inizia con il piano base · Gratis», il secondo bottone: qui l\'uscita e\' dichiarata, non e\' una ×.',
+    what: 'La versione morbida: niente grafico che promette, ma «Il tuo programma di tonificazione e\' pronto» con la settimana-roadmap che si spunta, e l\'alternativa gratuita scritta sotto. Ha fatto esattamente il contrario della gemella: attivazione intatta (primo allenamento vero entro 48h al 30,0%, in linea col 32-37% degli sprint senza paywall) e conversione azzerata — 1,4%, sotto il 3,0% degli sprint in cui il paywall non c\'era proprio. Innocua e inutile. Ha pero\' pesato sull\'esplorazione: chat AI aperta dal 7,1%, contro il 24,4% dello Sprint 8 che aveva la stessa strumentazione.',
+    note: 'Questa variant l\'app non l\'ha mai emessa: negli eventi c\'e\' scritto onboarding_results_chart come nella gemella, e a separarle e\' il campo `step` («program_ready» contro «chart»). Cercarla nel codice non serve — il componente e\' ProgramReadyHero, montato da CoachAiChartFlow con hero=program-ready.',
+    file: 'app/src/components/PremiumProposals/CoachAiChartPaywall/ProgramReadyHero.tsx',
+    screens: [
+      { idx: 0, t: 'Programma pronto', d: '«Il tuo programma di tonificazione è pronto» e la roadmap che si spunta' },
+      { idx: 1, t: 'Confronto', d: 'GRATIS vs HypeMove+' },
+      { idx: 2, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'video_ad',
+    name: 'Video annuncio',
+    rotation: 'retired',
+    where: 'Era una slide del flusso di fine allenamento, a schermo intero.',
+    when: 'Era una delle sette proposte che ruotavano a fine allenamento, fino al riordino del 31/08/2026. Oggi la monta solo l\'anteprima /dev/premium: in app non la vede nessuno.',
+    exit: 'La × si sbloccava a video finito.',
+    what: 'Uno spot forzato (video interno, non AdMob) con la × che si sblocca a video finito, poi i piani.',
+    file: 'app/src/components/PremiumProposals/VideoAdPaywall/VideoAdFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Lo spot', d: 'video forzato, × bloccata fino alla fine' },
+      { idx: 1, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'progress_video',
+    name: 'Video progressi',
+    rotation: 'retired',
+    where: 'Era una slide del flusso di fine allenamento, a schermo intero.',
+    when: 'Era una delle sette proposte che ruotavano a fine allenamento, fino al riordino del 31/08/2026. Oggi la monta solo l\'anteprima /dev/premium.',
+    exit: 'La × si sbloccava a video finito.',
+    what: 'Spot cinematografico sui progressi, poi i piani.',
+    file: 'app/src/components/PremiumProposals/ProgressVideoPaywall/ProgressVideoFlow.tsx',
+    screens: [
+      { idx: 0, t: 'Lo spot', d: 'video cinematografico, × a fine video' },
+      { idx: 1, t: 'I prezzi', d: 'schermata piani standard' },
+    ],
+  },
+  {
+    variant: 'coach_call',
+    name: 'Coach Call (v1)',
+    rotation: 'retired',
+    where: 'Era una slide del flusso di fine allenamento: sheet a schermo intero con la voce del coach.',
+    when: 'Prima versione del concept «chiamata dal coach», nella rotazione post-workout fino a luglio 2026. Sostituita dalla v2.',
+    exit: 'La × della sheet.',
+    what: 'Stessa idea della v2 ma con lo script del pitch variabile per segmento (nome, numero di allenamenti). La v2 ha una voce registrata sola, uguale per tutti.',
+    file: 'app/src/components/PremiumProposals/CoachCallPaywall/CoachCallFlow.tsx',
+    screens: [],
+    // Il banco di posa non la sa fotografare: nel codice la v1 non c'è più, CoachCallFlow emette
+    // coach_call_v2 e basta. A dividerle è stato ebbd7421 (18/07/2026), un commit di solo
+    // tracking — «nessuna grafica ne' logica d'acquisto» — quindi la schermata della chiamata
+    // era proprio quella. Ma la voce unica è arrivata dopo (544b3088), e la foto della v2 quella
+    // la mostra già: si presta la gemella, dicendo che è prestata.
+    shotFrom: 'coach_call_v2',
+    shotNote: 'La foto è quella della v2: la v1 nel codice non esiste più e il banco di posa non può rifotografarla. La schermata della chiamata era la stessa — a dividerle fu un commit di solo tracking, il 18/07/2026 — ma lì lo script del pitch cambiava da persona a persona, e la voce unica della v2 è arrivata dopo. Se hai uno screenshot vero della v1, caricalo qui: quello vince su tutto.',
+  },
+  {
+    variant: 'coach_call_v2',
+    name: 'Coach Call (v2)',
+    rotation: 'retired',
+    where: 'Era una slide del flusso di fine allenamento: sheet a schermo intero con la voce del coach.',
+    when: 'Concept «chiamata dal coach», nella rotazione post-workout fino al riordino del 31/08/2026. Oggi la monta solo l\'anteprima /dev/premium.',
+    exit: 'La × della sheet.',
+    what: 'Il coach «chiama» con una voce registrata (script unico per tutti), e l\'acquisto avviene dentro la sheet stessa invece che su una schermata piani separata.',
+    file: 'app/src/components/PremiumProposals/CoachCallPaywall/CoachCallFlow.tsx',
+    screens: [
+      { idx: 0, t: 'La chiamata', d: 'voce registrata + trascrizione' },
+      { idx: 1, t: 'L\'offerta', d: 'cosa ottieni' },
+      { idx: 2, t: 'I prezzi', d: 'scelta e pagamento dentro la sheet' },
+    ],
+  },
+];
+
+const CREATIVE_ROTATION_META = {
+  live:    { label: 'in rotazione',        color: '#4ade80', bd: '#1f5a36', bg: '#0f2a1a' },
+  dormant: { label: 'ramo non pescato',    color: '#8b8ba7', bd: '#2a2a3d', bg: '#14141f' },
+  retired: { label: 'solo anteprima Dev',  color: '#6b6b85', bd: '#24243a', bg: '#111120' },
+};
+
+// I gesti d'acquisto, nell'ordine in cui succedono. Sono le colonne di destra: è lì che si
+// guarda per sapere se una creatività ha prodotto qualcosa o solo visualizzazioni.
+// `ev` = l'evento da interrogare quando si clicca il numero.
+const CREATIVE_ACT_COLS = [
+  { k: 'plan',      l: 'Piano toccato', c: '#a78bfa', t: 'paywall_plan_select · ha cambiato la selezione fra mensile e annuale (scatta solo sul CAMBIO)', ev: 'paywall_plan_select' },
+  { k: 'cta',       l: 'Bottone',       c: '#f59e0b', t: 'paywall_cta_tap · ha premuto il bottone che compra', ev: 'paywall_cta_tap' },
+  { k: 'attempt',   l: 'Pagamento',     c: '#f59e0b', t: 'paywall_purchase_attempt · si è aperto il foglio di pagamento Google', ev: 'paywall_purchase_attempt' },
+  { k: 'cancelled', l: 'Annullato',     c: '#8b8ba7', t: 'paywall_purchase_cancelled · ha aperto il pagamento e si è tirato indietro', ev: 'paywall_purchase_cancelled' },
+  { k: 'error',     l: 'Annullato',     c: '#ef4444', t: 'paywall_purchase_error · acquisto non concluso: chi tocca Acquista e non compra ha annullato', ev: 'paywall_purchase_error' },
+  { k: 'success',   l: 'Comprato',      c: '#4ade80', t: 'paywall_purchase_success · perdeva il nome della creatività quando Android uccideva l\'app durante il pagamento, e contava come acquisto la rivalidazione di un abbonamento vecchio: corretto il 27/09/2026, vale dal rilascio successivo', ev: 'paywall_purchase_success' },
+];
+
+// I gesti che si possono mettere in percentuale. Sono quelli delle colonne di destra più prova e
+// incasso, che vengono dai soldi e non dagli eventi: tutti si leggono contro la stessa base, cioè
+// quante persone quella creatività l'hanno vista davvero.
+// Le tre colonne dei soldi non dicono la stessa cosa: «Prova iniziata» è un conteggio che resta
+// (una prova partita è partita, comunque sia finita), «In prova» e «Pagante» sono lo stato di
+// OGGI di quegli abbonamenti. Per confrontare le creatività si guarda la prima.
+// `stato` = cosa filtra la lista che si apre cliccando il numero.
+const CREATIVE_RATE_COLS = [
+  ...CREATIVE_ACT_COLS.map(c => ({ k: c.k, l: c.l, c: c.c, from: 'marks' })),
+  { k: 'prove_iniziate', l: 'Prova iniziata', c: '#5b9bff', from: 'conv', stato: 'prova iniziata',
+    t: 'Prove partite da questa proposta nel periodo, anche se poi sono finite o diventate paganti · ultimo tocco prima del pagamento' },
+  { k: 'in_prova', l: 'In prova', c: '#22d3ee', from: 'conv', stato: 'in prova',
+    t: 'Stato di oggi: prove ancora in corso. Le prove scadute o disdette non ci sono più, quelle diventate paganti passano a Pagante · ultimo tocco prima del pagamento' },
+  { k: 'paganti',  l: 'Pagante',  c: '#4ade80', from: 'conv', stato: 'pagante',
+    t: 'Stato di oggi: chi paga adesso un abbonamento partito da questa proposta. Chi ha disdetto ed è scaduto non c\'è più · ultimo tocco prima del pagamento' },
+];
+// Le stesse, in colonna nella tabella: intestazione e celle escono da qui, così non si sfasano.
+const CREATIVE_CONV_COLS = CREATIVE_RATE_COLS.filter(c => c.from === 'conv');
+
+// La base delle percentuali: chi ha visto la PRIMA schermata, cioè il numero grande della prima
+// casella del percorso. Non `users`, che conta anche chi la proposta l'ha aperta senza che una
+// schermata gli sia mai comparsa — e che quindi una CTA non l'ha potuta nemmeno vedere.
+// Se le schermate non ci sono (eventi step assenti), si ripiega su `users`: meglio una base
+// larga di nessun numero.
+function creativeRateBase(live) {
+  const steps = (live && live.steps) || [];
+  const first = steps.length ? Number(steps[0].users || 0) : 0;
+  return first || Number((live && live.users) || 0);
+}
+
+function creativeRateValue(variant, live, key) {
+  const col = CREATIVE_RATE_COLS.find(c => c.k === key);
+  if (!col) return 0;
+  if (col.from === 'conv') {
+    const conv = ((state.purchases && state.purchases.per_variant) || {})[variant] || null;
+    return conv ? Number(conv[key] || 0) : 0;
+  }
+  return live && live.marks ? Number(live.marks[key] || 0) : 0;
+}
+
+// Una cifra sotto il 10%, intero sopra: con due decimali un «4,32%» finge una precisione che
+// quattordici persone non hanno.
+function creativeRateFmt(v, base) {
+  if (!base) return '';
+  const p = v / base * 100;
+  return (p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p))) + '%';
+}
+
+// Etichetta di una casella: il nome della schermata dal registro, se quell'indice lo ha; il
+// ruolo tecnico altrimenti (che è comunque meglio di niente, e segnala cosa manca nel registro).
+function creativeScreenLabel(reg, step) {
+  const s = (reg.screens || []).find(x => String(x.idx) === String(step.idx));
+  return s ? s.t : (step.step || '?');
+}
+
+// Il percorso a caselle, nella stessa grammatica della tabella sotto: numero grande = utenti
+// distinti, sotto il nome della schermata e la percentuale sulla prima, il calo sulla freccia.
+function creativeStepPath(reg, live) {
+  const steps = (live && live.steps || []);
+  if (!steps.length) {
+    return `<span style="color:var(--muted);font-size:11px">nessuna schermata mostrata nel periodo</span>`;
+  }
+  const first = Number(steps[0].users || 0);
+  return `<div style="display:flex;align-items:center;gap:2px;flex-wrap:nowrap">` + steps.map((s, i) => {
+    const users = Number(s.users || 0);
+    const prev  = i > 0 ? Number(steps[i - 1].users || 0) : null;
+    const drop  = (prev && prev > 0) ? Math.round((1 - users / prev) * 100) : null;
+    const pct   = first > 0 ? Math.round(users / first * 100) : 0;
+    const dropCol = drop === null ? '' : drop >= 50 ? '#ef4444' : drop >= 20 ? '#fbbf24' : '#4ade80';
+    const isLast  = i === steps.length - 1;
+    // `step` può contenere più nomi uniti (la stessa schermata rinominata fra due build): la
+    // lista utenti li interroga tutti, come fa la tabella sotto.
+    const allSteps = String(s.step || '').split(' + ').filter(Boolean).join(',');
+    const arrow = i > 0 ? `
+      <div style="display:flex;flex-direction:column;align-items:center;color:#3a3a55;padding:0 2px">
+        ${drop !== null ? `<span style="font-size:9px;font-weight:700;color:${dropCol};line-height:1;white-space:nowrap">-${drop}%</span>` : ''}
+        <span style="font-size:13px;line-height:1">→</span>
+      </div>` : '';
+    return arrow + `
+      <div class="premium-step-box" data-variant="${esc(reg.variant)}" data-step="${esc(allSteps.split(',')[0] || '')}" data-steps="${esc(allSteps)}" data-idx="${esc(s.idx)}"
+        title="${esc(creativeScreenLabel(reg, s) + ' — ruolo ' + (s.step || '?') + ' · clicca per la lista di chi è arrivato qui')}"
+        style="text-align:center;min-width:62px;background:#111120;border:1px solid ${isLast ? '#1f5a3699' : '#1f1f33'};border-radius:6px;padding:5px 7px;cursor:pointer">
+        <div style="font-weight:700;color:var(--fg);font-size:14px;line-height:1">${users}</div>
+        <div style="font-size:9px;color:var(--fg);white-space:nowrap;margin-top:3px;opacity:.85">${esc(creativeScreenLabel(reg, s))}</div>
+        <div style="font-size:8px;color:#5a5a7a;line-height:1.3">${pct}%</div>
+      </div>`;
+  }).join('') + `</div>`;
+}
+
+function creativeAuditRow(reg, live, win) {
+  const rot    = CREATIVE_ROTATION_META[reg.rotation] || CREATIVE_ROTATION_META.retired;
+  const users  = live ? Number(live.users || 0) : 0;
+  const lastAt = live && live.last_at ? new Date(live.last_at) : null;
+  // I giorni si contano dalla FINE del periodo scelto, non da oggi.
+  const giorni = lastAt ? Math.max(0, Math.floor((win.end - lastAt.getTime()) / 86400000)) : null;
+  // Il disaccordo fra codice e dati vale la pena vederlo solo mentre si guarda l'oggi: su uno
+  // sprint chiuso il `rotation` del registro descrive il codice di ADESSO, non quello di allora,
+  // e accendere d'ambra mezza tabella direbbe una cosa falsa sul passato.
+  const muta   = win.current && reg.rotation === 'live' && (giorni === null || giorni > 7);
+  const zombie = win.current && reg.rotation !== 'live' && giorni !== null && giorni <= 7;
+  const warn   = muta || zombie;
+  const srcs = (live && live.sources || []).slice(0, 3)
+    .map(s => `${esc(s.source)} <span style="color:#5a5a7a">${s.users}</span>`).join(' · ');
+
+  // Prova e incasso non vengono dagli eventi ma dai soldi, attribuiti per ultimo tocco: per
+  // questo stanno in colonne a parte. Il numero apre la lista, presa dalla tabella degli
+  // acquisti qui sotto. Un backend vecchio senza `prove_iniziate` dà «—», come ogni vuoto.
+  const conv = ((state.purchases && state.purchases.per_variant) || {})[reg.variant] || null;
+  const convCols = CREATIVE_CONV_COLS.map(x => {
+    const v = conv ? Number(conv[x.k] || 0) : 0;
+    const open = v > 0
+      ? ` class="creative-conv" data-variant="${esc(reg.variant)}" data-stato="${esc(x.stato)}" data-label="${esc(reg.name + ' · ' + x.l)}" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"`
+      : '';
+    return `<td title="${esc(x.t + (v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${v > 0 ? x.c : 'var(--muted)'}"><span${open}>${v || '—'}</span></td>`;
+  }).join('');
+
+  const cols = CREATIVE_ACT_COLS.map(c => {
+    const v = live && live.marks ? Number(live.marks[c.k] || 0) : 0;
+    const open = v > 0
+      ? ` class="creative-act" data-variant="${esc(reg.variant)}" data-event="${esc(c.ev)}" data-label="${esc(reg.name + ' · ' + c.l)}" data-desc="${esc(c.t)}" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px"`
+      : '';
+    return `<td title="${esc(c.t + (v > 0 ? ' · clicca per la lista' : ''))}" style="padding:10px 10px;text-align:center;vertical-align:middle;font-weight:700;color:${v > 0 ? c.c : 'var(--muted)'}"><span${open}>${v || '—'}</span></td>`;
+  }).join('');
+
+  // La colonna del tasso compare solo se un gesto è stato scelto col selettore qui sopra, e sta
+  // subito dopo il nome: è lì che si legge in verticale, confrontando creatività con creatività.
+  const rateSel = CREATIVE_RATE_COLS.find(c => c.k === state.creativeRateKey) || null;
+  const base = creativeRateBase(live);
+  const rateV = rateSel ? creativeRateValue(reg.variant, live, rateSel.k) : 0;
+  const rateS = rateSel ? creativeRateFmt(rateV, base) : '';
+  const rateCol = !rateSel ? '' : `
+    <td title="${esc(rateSel.l + ': ' + rateV + ' su ' + base + ' che hanno visto la prima schermata')}"
+        style="padding:10px 10px;text-align:center;vertical-align:middle">
+      <div style="font-weight:700;font-size:16px;color:${rateV > 0 ? rateSel.c : 'var(--muted)'};line-height:1">${rateS || '—'}</div>
+      ${base ? `<div style="font-size:9px;color:#5a5a7a;margin-top:3px;white-space:nowrap">${rateV} su ${base}</div>` : ''}
+    </td>`;
+
+  // Percorso chiuso: la colonna non sparisce, si stringe a «prima → ultima». Una colonna che
+  // scompare del tutto fa saltare l'occhio, e quel primo-ultimo è comunque il riassunto onesto.
+  const steps = (live && live.steps) || [];
+  const pathCell = state.creativePathOpen
+    ? `<td style="padding:8px 12px;vertical-align:middle">${creativeStepPath(reg, live)}</td>`
+    : `<td style="padding:8px 12px;vertical-align:middle;white-space:nowrap;font-family:var(--mono);font-size:10.5px;color:#5a5a7a">${
+        steps.length ? `${Number(steps[0].users || 0)}${steps.length > 1 ? ` → ${Number(steps[steps.length - 1].users || 0)}` : ''}` : '—'
+      }</td>`;
+
+  return `
+    <tr style="border-bottom:1px solid #111120;${warn ? 'background:#17130a' : ''}">
+      <td style="padding:10px 12px;vertical-align:top;border-left:2px solid ${warn ? '#5a4318' : 'transparent'}">
+        <div class="creative-open" data-variant="${esc(reg.variant)}" title="Apri la scheda: quando compare, in che punto dell'app, cosa mostra" style="cursor:pointer;display:flex;gap:10px">
+          <img src="/internal/paywalls/${esc(reg.shotFrom || reg.variant)}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png?v=${PAYWALL_SHOT_V}" alt="" loading="lazy"
+               onerror="this.style.display='none'"
+               ${reg.shotNote ? `title="${esc(reg.shotNote)}"` : ''}
+               style="width:42px;border-radius:6px;border:1px ${reg.shotFrom ? 'dashed #3a3a55' : 'solid #1f1f33'};flex-shrink:0;align-self:flex-start">
+        <div>
+          <div style="font-weight:600;color:var(--fg);white-space:nowrap;display:flex;align-items:center;gap:7px">
+            ${esc(reg.name)}
+            <span title="${esc(win.current ? 'stato del codice oggi' : 'stato del codice OGGI, non di quei giorni')}" style="font-size:8.5px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 5px">${win.current ? '' : 'oggi '}${rot.label}</span>
+          </div>
+          <div style="font-size:10px;color:#5a5a7a;font-family:var(--mono)">${esc(reg.variant)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:4px">${users || '—'} utent${users === 1 ? 'e' : 'i'}${srcs ? ` · <span style="font-family:var(--mono);font-size:9.5px">${srcs}</span>` : ''}</div>
+          ${muta   ? `<div style="font-size:9.5px;color:#fbbf24;margin-top:3px">⚠️ il codice la dà viva, ma nessuno la vede da ${giorni === null ? 'sempre' : giorni + ' giorni'}</div>` : ''}
+          ${zombie ? `<div style="font-size:9.5px;color:#fbbf24;margin-top:3px">⚠️ data per ritirata, ma esce ancora</div>` : ''}
+          <div style="font-size:9.5px;color:#60a5fa;margin-top:4px">guarda le schermate ›</div>
+        </div>
+        </div>
+      </td>
+      ${rateCol}
+      ${pathCell}
+      ${cols}${convCols}
+    </tr>`;
+}
+
+// Il selettore del tasso. Un gesto per volta e non otto colonne di percentuali: la domanda è
+// «quale ha convertito meglio», e si risponde leggendo UNA colonna dall'alto in basso.
+// Scegliere un gesto riordina anche le righe su quello — altrimenti il confronto resta a carico
+// dell'occhio, che è il lavoro che questa colonna dovrebbe togliere.
+function creativeRatePicker() {
+  const chip = (k, l, c) => {
+    const on = state.creativeRateKey === k;
+    return `<button class="creative-rate-chip" data-k="${esc(k)}" style="cursor:pointer;padding:3px 10px;font-size:10.5px;font-weight:600;border-radius:20px;border:1px solid;transition:all .15s;
+      ${on ? `background:${c}1f;border-color:${c};color:${c}` : 'background:var(--surface2);border-color:#2a2a3d;color:var(--muted)'}">${esc(l)}</button>`;
+  };
+  return `
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px">
+      <span style="font-size:10.5px;color:var(--muted)" title="Quante persone, su cento che hanno visto la prima schermata di quella creatività, sono arrivate a fare quel gesto. Sceglierne uno aggiunge la colonna di fianco al nome e ordina le righe su quella.">
+        Percentuale su chi l'ha vista:
+      </span>
+      ${chip('', 'nessuna', '#8b8ba7')}
+      ${CREATIVE_RATE_COLS.map(c => chip(c.k, c.l, c.c)).join('')}
+    </div>`;
+}
+
+function premiumCreativesAuditCard() {
+  const head = `
+    <div style="margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:3px">Creatività paywall · cosa ha visto la gente, in questo periodo</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        Solo i paywall usciti a qualcuno <strong style="color:var(--fg)">nel periodo selezionato qui sopra</strong>, coi numeri di quei giorni soltanto.<br>
+        Le caselle sono le schermate vere, col loro nome, e il numero è <strong style="color:var(--fg)">quante persone diverse</strong>
+        ci sono arrivate (chi rivede la stessa schermata vale uno) · clicca una casella o un numero a destra per la lista di chi c'è dentro ·
+        clicca il nome per la scheda: quando compare, dove, e cosa mostra ·
+        riga ambra = il codice e i dati non vanno d'accordo
+      </div>
+      ${creativeRatePicker()}
+    </div>`;
+
+  if (state.creativesAuditLoading && !state.creativesAudit) {
+    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Controllo le creatività…</div></div>`;
+  }
+  if (state.creativesAuditError && !state.creativesAudit) {
+    const box = state.creativesAuditErrorTimeout
+      ? sezioneTimeoutBox(state.creativesAuditError, 'fetchCreativesAudit()')
+      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.creativesAuditError)}</div>`;
+    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
+  }
+
+  const all = state.creativesAudit || [];
+  // `senza_attribuzione` non è una creatività: è il mucchio degli eventi che non dicono da
+  // quale paywall arrivano. Fuori dalla tabella, e in fondo con la sua spiegazione.
+  const orfani = all.find(r => r.variant === 'senza_attribuzione') || null;
+  const live = all.filter(r => r.variant !== 'senza_attribuzione');
+  const byVariant = {};
+  live.forEach(r => { byVariant[r.variant] = r; });
+
+  // Finestra scelta in alto nella pagina (sprint o periodo libero). Serve a due cose: contare
+  // i giorni di silenzio dalla sua fine, e sapere se stiamo guardando l'oggi o un periodo chiuso.
+  const selSprint = state.sprints.find(x => x.id === state.premiumSprintId);
+  const endStr = selSprint ? selSprint.fine : state.premiumTo;
+  const endTs  = endStr ? new Date(endStr + 'T23:59:59').getTime() : Date.now();
+  const win = { end: endTs, current: (Date.now() - endTs) < 2 * 86400000 };
+
+  // Ordine: prima quelle che il codice dà per vive, per utenti. La pagina deve aprire su quello
+  // che sta succedendo, non sull'archeologia.
+  // Si mostra SOLO quello che è uscito nel periodo scelto: una creatività senza utenti in quei
+  // giorni non è una riga vuota da leggere, è rumore — e per giunta rumore che invita a
+  // confrontare numeri di date diverse. Restano nominate in fondo, senza numeri.
+  const shown  = CREATIVE_REGISTRY.filter(r => Number((byVariant[r.variant] || {}).users || 0) > 0);
+  const hidden = CREATIVE_REGISTRY.filter(r => !Number((byVariant[r.variant] || {}).users || 0));
+  // Col tasso scelto l'ordine diventa quello, perché è la domanda che si sta facendo. Senza,
+  // resta per utenti come prima.
+  const rateSel = CREATIVE_RATE_COLS.find(c => c.k === state.creativeRateKey) || null;
+  const rateOf = (r) => {
+    const l = byVariant[r.variant];
+    const base = creativeRateBase(l);
+    return base ? creativeRateValue(r.variant, l, rateSel.k) / base : -1;
+  };
+  const rows = shown.sort((a, b) => rateSel
+    ? (rateOf(b) - rateOf(a)) || (Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0))
+    : Number((byVariant[b.variant] || {}).users || 0) - Number((byVariant[a.variant] || {}).users || 0));
+
+  // Varianti che i dati conoscono e il registro no: non devono sparire, sono la prova che
+  // qualcosa di nuovo (o di rinominato) sta uscendo in app.
+  const unknown = live.filter(r => !CREATIVE_REGISTRY.some(c => c.variant === r.variant));
+
+  if (!rows.length) {
+    return `<div class="card" style="margin-bottom:16px">${head}
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun paywall mostrato a nessuno in questo periodo.</div></div>`;
+  }
+
+  const headerCols = CREATIVE_ACT_COLS.map(c =>
+    `<th title="${esc(c.t)}" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap">${esc(c.l)}</th>`).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:${state.creativePathOpen ? 1120 : 880}px">
+          <thead>
+            <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Creatività</th>
+              ${rateSel ? `<th title="${esc(rateSel.l + ' su cento persone che hanno visto la prima schermata · le righe sono ordinate su questa colonna')}" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:${rateSel.c}">% ${esc(rateSel.l)} ↓</th>` : ''}
+              <th id="creative-path-toggle" title="${esc(state.creativePathOpen ? 'Chiudi il percorso: le colonne dei gesti entrano nello schermo senza scorrere di lato' : 'Riapri il percorso schermata per schermata')}"
+                  style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e;cursor:pointer;white-space:nowrap">
+                ${state.creativePathOpen
+                  ? `Cosa vede, schermata per schermata → dove si ferma <span style="color:#60a5fa;font-weight:600;margin-left:6px">◂ chiudi</span>`
+                  : `Percorso <span style="color:#60a5fa;font-weight:600;margin-left:6px">▸ apri</span>`}
+              </th>
+              ${headerCols}
+              ${CREATIVE_CONV_COLS.map(c =>
+                `<th title="${esc(c.t)}" style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e;white-space:nowrap;color:${c.c}">${esc(c.l)}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>${rows.map(r => creativeAuditRow(r, byVariant[r.variant], win)).join('')}</tbody>
+        </table>
+      </div>
+      ${orfani ? `
+        <div style="margin-top:14px;background:#2b210f;border:1px solid #5a4318;border-radius:9px;padding:11px 13px">
+          <div style="font-size:11px;font-weight:700;color:#fbbf24;margin-bottom:5px">
+            ⚠️ Azioni che non dicono da quale paywall arrivano
+          </div>
+          <div style="font-size:11px;color:#d9c48a;line-height:1.65">
+            ${orfani.users} utent${orfani.users === 1 ? "e" : "i"} nel periodo. Non sono di nessuna creatività: l'evento arriva senza il nome
+            della proposta, e fino al 13/09/2026 finiva silenziosamente dentro <strong>Funnel standard</strong> — che per questo
+            sembrava convertire meglio di tutti. Sono quasi tutti <code style="font-family:var(--mono)">paywall_purchase_success</code>, e le cause
+            erano due: Android che uccide l'app mentre l'utente paga sul foglio di Google (la ricevuta arriva in un processo che non
+            ricorda il paywall), e abbonamenti vecchi rivalidati dopo una reinstallazione, contati come acquisti nuovi.
+            Corretto in app il 27/09/2026, vale dal rilascio successivo: il paywall di partenza si salva sul telefono prima del pagamento, e
+            una rivalidazione non è più un «Comprato». Gli eventi già scritti restano così: per chi ha pagato davvero fanno fede
+            le colonne <strong>Prova iniziata</strong>, <strong>In prova</strong> e <strong>Pagante</strong>, che partono dai pagamenti.
+          </div>
+          <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:9px">
+            ${CREATIVE_ACT_COLS.map(c => {
+              const v = Number((orfani.marks || {})[c.k] || 0);
+              if (!v) return "";
+              return `<span class="creative-act" data-variant="senza_attribuzione" data-event="${esc(c.ev)}"
+                       data-label="Senza attribuzione · ${esc(c.l)}" data-desc="${esc(c.t)}"
+                       style="font-size:11.5px;color:#fbbf24;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">
+                       ${esc(c.l)}: <strong>${v}</strong></span>`;
+            }).join("")}
+          </div>
+        </div>` : ''}
+
+      ${hidden.length ? `
+        <div style="margin-top:12px;font-size:10.5px;color:#5a5a7a;line-height:1.6">
+          Non uscite a nessuno in questo periodo: ${hidden.map(h => `<span style="color:var(--muted)">${esc(h.name)}</span>`).join(' · ')}.
+        </div>` : ''}
+      ${unknown.length ? `
+        <div style="margin-top:12px;background:#2b210f;border:1px solid #5a4318;border-radius:9px;padding:10px 12px;font-size:11px;color:#d9c48a;line-height:1.6">
+          <strong style="color:#fbbf24">Creatività senza scheda:</strong>
+          ${unknown.map(u => `<code style="font-family:var(--mono)">${esc(u.variant)}</code> (${u.users} utenti)`).join(' · ')}.
+          Compaiono nei dati ma non sono nel catalogo: o sono nuove, o qualcuno ha cambiato il nome della variant.
+        </div>` : ''}
+    </div>`;
+}
+
+// Il ciclo di vita completo, per la scheda: qui uno zero dove dovrebbe esserci un numero è un
+// buco di tracciamento. `soft` = uno zero può essere legittimo, niente allarme.
+const CREATIVE_MARKS = [
+  { k: 'open',    l: 'apertura',   d: 'paywall_open · lo emette il punto che apre la proposta' },
+  { k: 'view',    l: 'impression', d: 'view_Paywall · la schermata è a video' },
+  { k: 'step',    l: 'step',       d: 'paywall_step_view · una riga per schermata mostrata' },
+  { k: 'close',   l: 'uscita',     d: 'paywall_close · come e da dove è uscito' },
+  { k: 'plan',    l: 'piano',      d: 'paywall_plan_select · scatta solo se CAMBIA piano, uno zero può essere vero', soft: true },
+  { k: 'cta',     l: 'CTA',        d: 'paywall_cta_tap · ha premuto il bottone che compra', soft: true },
+  { k: 'attempt', l: 'pagamento',  d: 'paywall_purchase_attempt · lo store ha preso in carico', soft: true },
+  { k: 'success', l: 'acquisto',   d: 'paywall_purchase_success · senza variant se Android uccideva l\'app durante il pagamento, e scattava anche su un abbonamento vecchio rivalidato: corretto il 27/09/2026, vale dal rilascio successivo', soft: true },
+];
+// ── LE FOTO CARICATE A MANO ──────────────────────────────────────────────────
+// Gli scatti automatici (banco di posa) fotografano i componenti in un browser con dati finti:
+// fedeli, ma non sono la PROVA. Chi apre l'app, verifica col dito quale proposta è uscita e fa
+// lo screenshot, ha in mano l'unica versione che toglie ogni dubbio — e quelle foto vanno messe
+// dove serve guardarle, cioè qui dentro.
+//
+// Stanno nel bucket `paywall-shots` (lettura pubblica: sono le stesse schermate che l'app mostra
+// a chiunque) con l'elenco e l'ordine in `internal_paywall_shots`, scrivibile solo dagli
+// operatori. L'ordine lo decide chi carica: `position` è il posto nella fila, non l'indice della
+// schermata.
+const SHOTS_BUCKET = 'paywall-shots';
+
+function shotPublicUrl(path) {
+  try { return sb.storage.from(SHOTS_BUCKET).getPublicUrl(path).data.publicUrl; }
+  catch { return ''; }
+}
+
+async function fetchPaywallShots(variant) {
+  state.shotsLoading = true; state.shotsError = null;
+  render();
+  try {
+    const { data, error } = await sb
+      .from('internal_paywall_shots')
+      .select('id, variant, path, position, caption, created_at')
+      .eq('variant', variant)
+      .order('position', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    state.shots[variant] = (data || []).map(r => ({ ...r, url: shotPublicUrl(r.path) }));
+  } catch (e) { state.shotsError = e.message || 'Errore caricamento foto'; }
+  state.shotsLoading = false;
+  render();
+}
+
+/**
+ * Carica i file scelti. Uno per volta e non in parallelo: sono screenshot di telefono da un paio
+ * di mega, e mandarne otto insieme da una rete lenta fa scadere il primo mentre parte l'ultimo.
+ * La posizione parte dalla coda, così l'ordine di scelta è quello che si vede.
+ */
+async function uploadPaywallShots(variant, files) {
+  const list = Array.from(files || []).filter(f => f.type.startsWith('image/'));
+  if (!list.length) return;
+  state.shotsUploading = list.length; state.shotsError = null;
+  render();
+  const already = state.shots[variant] || [];
+  let pos = already.length ? Math.max(...already.map(s => s.position || 0)) + 1 : 0;
+  try {
+    for (const file of list) {
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const path = `${variant}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const up = await sb.storage.from(SHOTS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+      if (up.error) throw up.error;
+      const ins = await sb.from('internal_paywall_shots').insert({ variant, path, position: pos++ });
+      if (ins.error) throw ins.error;
+      state.shotsUploading--;
+      render();
+    }
+  } catch (e) {
+    state.shotsError = e.message || 'Errore durante il caricamento';
+  }
+  state.shotsUploading = 0;
+  await fetchPaywallShots(variant);
+}
+
+/** Scambia una foto col vicino. Due UPDATE, e lo scambio si vede subito: la fila è corta. */
+async function movePaywallShot(variant, id, dir) {
+  const list = (state.shots[variant] || []).slice();
+  const i = list.findIndex(s => s.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const a = list[i], b = list[j];
+  [list[i], list[j]] = [list[j], list[i]];
+  state.shots[variant] = list;
+  render();
+  try {
+    // Le posizioni si riscrivono su TUTTA la fila, non solo sulle due scambiate: dopo qualche
+    // cancellazione i numeri hanno buchi, e scambiare solo due valori bucati non riordina niente.
+    await Promise.all(list.map((s, k) =>
+      sb.from('internal_paywall_shots').update({ position: k }).eq('id', s.id)));
+    list.forEach((s, k) => { s.position = k; });
+  } catch (e) {
+    state.shotsError = e.message || 'Errore nel riordino';
+    await fetchPaywallShots(variant);
+  }
+  render();
+}
+
+async function deletePaywallShot(variant, id, path) {
+  if (!confirm('Tolgo questa foto?')) return;
+  try {
+    const del = await sb.from('internal_paywall_shots').delete().eq('id', id);
+    if (del.error) throw del.error;
+    // Il file dopo la riga: se cade la rimozione dell'oggetto resta un file orfano nel bucket,
+    // che non si vede da nessuna parte. L'ordine opposto lascerebbe invece una riga che punta a
+    // un'immagine che non c'è, cioè un buco visibile nella scheda.
+    await sb.storage.from(SHOTS_BUCKET).remove([path]);
+  } catch (e) { state.shotsError = e.message || 'Errore nella rimozione'; }
+  await fetchPaywallShots(variant);
+}
+
+function paywallShotsStrip(variant) {
+  const list = state.shots[variant] || null;
+  const loading = state.shotsLoading && !list;
+  const cards = (list || []).map((s, i) => `
+    <div style="flex-shrink:0;width:132px">
+      <a href="${esc(s.url)}" target="_blank" rel="noopener" title="Apri a schermo intero" style="line-height:0;display:block">
+        <img src="${esc(s.url)}" alt="" loading="lazy"
+             style="width:132px;border-radius:9px;border:1px solid #2a2a3d;display:block;background:#111120">
+      </a>
+      <div style="display:flex;align-items:center;gap:4px;margin-top:5px">
+        <button class="shot-move" data-variant="${esc(variant)}" data-id="${esc(s.id)}" data-dir="-1"
+          title="Sposta a sinistra" ${i === 0 ? 'disabled' : ''}
+          style="flex:1;background:#14141f;border:1px solid #2a2a3d;color:${i === 0 ? '#33334a' : 'var(--muted)'};border-radius:6px;padding:2px 0;font-size:11px;cursor:${i === 0 ? 'default' : 'pointer'};font-family:inherit">◀</button>
+        <button class="shot-move" data-variant="${esc(variant)}" data-id="${esc(s.id)}" data-dir="1"
+          title="Sposta a destra" ${i === (list.length - 1) ? 'disabled' : ''}
+          style="flex:1;background:#14141f;border:1px solid #2a2a3d;color:${i === (list.length - 1) ? '#33334a' : 'var(--muted)'};border-radius:6px;padding:2px 0;font-size:11px;cursor:${i === (list.length - 1) ? 'default' : 'pointer'};font-family:inherit">▶</button>
+        <button class="shot-del" data-variant="${esc(variant)}" data-id="${esc(s.id)}" data-path="${esc(s.path)}"
+          title="Togli questa foto"
+          style="background:#1c1010;border:1px solid #4a2020;color:#ef4444;border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer;font-family:inherit">✕</button>
+      </div>
+      <div style="font-size:9px;color:#5a5a7a;text-align:center;margin-top:3px">${i + 1}</div>
+    </div>`).join('');
+
+  return `
+    <div style="margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
+        <div>
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a">Le tue foto di questo paywall</div>
+          <div style="font-size:10.5px;color:var(--muted);margin-top:2px">
+            quelle che fai tu dall'app, nell'ordine che decidi tu · restano qui per tutti
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${state.shotsUploading ? `<span style="font-size:11px;color:var(--muted)" class="pulse">carico ${state.shotsUploading}…</span>` : ''}
+          <button id="shot-add" data-variant="${esc(variant)}" style="background:var(--accent-lo);border:1px solid var(--accent);color:#a78bfa;
+            border-radius:8px;padding:5px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit">+ Aggiungi foto</button>
+        </div>
+      </div>
+      <input type="file" id="shot-file" accept="image/*" multiple style="display:none">
+      ${state.shotsError ? `<div style="font-size:11px;color:var(--red);margin-bottom:8px">${esc(state.shotsError)}</div>` : ''}
+      ${loading
+        ? `<div style="font-size:11px;color:var(--muted);padding:10px 0" class="pulse">Carico le foto…</div>`
+        : cards
+          ? `<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px">${cards}</div>`
+          : `<div style="font-size:11px;color:#5a5a7a;background:#111120;border:1px dashed #2a2a3d;border-radius:9px;padding:12px 14px;line-height:1.6">
+               Nessuna foto ancora. Apri l'app, arriva a questo paywall, fai gli screenshot e caricali qui con
+               <strong style="color:var(--muted)">+ Aggiungi foto</strong>: puoi sceglierne più d'uno in una volta e riordinarli con le frecce.
+               Sono la prova di cosa vede davvero l'utente — gli scatti automatici qui sotto vengono da un browser, non da un telefono.
+             </div>`}
+    </div>`;
+}
+
+// ── GLI ACQUISTI DEL PERIODO, E DA DOVE ARRIVANO ─────────────────────────────
+// «Rolando è in prova da ieri, ma dove ha comprato?» — nel catalogo non compariva da nessuna
+// parte, perché l'evento dell'acquisto non porta il nome della creatività. La risposta però
+// esiste: il tocco sulla CTA ce l'ha, e succede pochi secondi prima del pagamento. Questa
+// tabella parte dai SOLDI (play_purchases, la stessa fonte dei riquadri in cima) e a ogni
+// acquisto attacca l'ultimo gesto su un paywall che dichiari una creatività.
+//
+// La forza dell'attribuzione si dichiara, invece di nasconderla: «forte» = il gesto che apre il
+// pagamento (tentativo, CTA, scelta piano), «debole» = solo l'ultima schermata che aveva davanti.
+// Un numero attribuito per indizio e uno per prova non sono la stessa cosa, e chi legge deve
+// poterlo sapere senza aprire il database.
+const PURCHASE_STATE_COLOR = {
+  'in prova': '#22d3ee',
+  'pagante':  '#4ade80',
+  'a rischio':'#f59e0b',
+  'finito':   'var(--muted)',
+};
+
+async function fetchPaywallPurchases() {
+  state.purchasesLoading = true; state.purchasesError = null;
+  render();
+  try {
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    const { data, error } = await sb.rpc('kpi_paywall_purchases', {
+      inizio:  state.premiumFrom,
+      fine:    state.premiumTo,
+      p_start: selSprint ? sprintStartTs(selSprint) : null,
+      p_end:   selSprint ? sprintEndTs(selSprint) : null,
+    });
+    if (error) throw error;
+    state.purchases = data || { acquisti: [], per_variant: {} };
+  } catch (e) {
+    state.purchasesError = e.message || 'Errore caricamento acquisti';
+    state.purchasesErrorTimeout = isRpcTimeout(e);
+  }
+  state.purchasesLoading = false;
+  render();
+}
+
+/**
+ * Su quale account è stato fatto il gesto, quando non è quello collegato da Google all'acquisto:
+ * «comprato da <account> · <aggancio>», o «comprato da utente non loggato». Stringa vuota se è lo
+ * stesso account, o se il backend non manda ancora `aggancio`/`comprato_da`.
+ */
+function compratoDaText(r) {
+  if (!r) return '';
+  if (r.aggancio === 'sessione senza utente') return 'comprato da utente non loggato';
+  if (!r.comprato_da) return '';
+  return 'comprato da ' + r.comprato_da + (r.aggancio ? ' · ' + r.aggancio : '');
+}
+
+/** Nome umano di una creatività, dal catalogo; la chiave tecnica se non è in elenco. */
+function creativeName(variant) {
+  if (!variant) return '—';
+  if (variant === 'senza_attribuzione') return 'non attribuito';
+  const c = CREATIVE_REGISTRY.find(x => x.variant === variant);
+  return c ? c.name : variant;
+}
+
+function premiumPaywallPurchasesCard() {
+  const head = `
+    <div style="margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:3px">Gli acquisti del periodo · chi ha pagato, e da quale paywall</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        Si parte dai soldi — <code style="font-family:var(--mono)">play_purchases</code>, la stessa fonte dei riquadri in cima —
+        e a ogni acquisto si attacca l'ultimo gesto su un paywall che dichiari una creatività.
+        <strong style="color:var(--fg)">forte</strong> = il gesto che apre il pagamento (tentativo, CTA, scelta del piano) ·
+        <strong style="color:var(--fg)">debole</strong> = solo l'ultima schermata che aveva davanti, quindi un indizio ·
+        oltre le 24 ore non si attribuisce niente.
+        Il gesto si cerca anche sugli altri account dello stesso telefono e dello stesso abbonamento
+        (chi ha il token dell'acquisto nei propri eventi); se non c'è da nessuna parte, nella sessione senza login
+        che ha chiuso lo stesso acquisto. Quando il gesto non è dell'account collegato, sotto il nome c'è «comprato da …».
+      </div>
+    </div>`;
+
+  if (state.purchasesLoading && !state.purchases) {
+    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:22px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Cerco gli acquisti…</div></div>`;
+  }
+  if (state.purchasesError && !state.purchases) {
+    const box = state.purchasesErrorTimeout
+      ? sezioneTimeoutBox(state.purchasesError, 'fetchPaywallPurchases()')
+      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.purchasesError)}</div>`;
+    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
+  }
+
+  const rows = (state.purchases && state.purchases.acquisti) || [];
+  const orfani = rows.filter(r => r.orfano).length;
+  if (!rows.length) {
+    return `<div class="card" style="margin-bottom:16px">${head}
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessun acquisto in questo periodo.</div></div>`;
+  }
+
+  const body = rows.map(r => {
+    const col = PURCHASE_STATE_COLOR[r.stato] || 'var(--fg)';
+    // Il ritardo si legge meglio a parole: «2 min prima» convince, «6 ore prima» molto meno, e
+    // un numero negativo vuol dire che l'evento è arrivato DOPO la riga del pagamento.
+    const min = r.minuti_prima;
+    const quando = min === null || min === undefined ? '—'
+      : min > 90  ? `${Math.round(min / 60)} h prima`
+      : min >= 0  ? `${min} min prima`
+      : `${Math.abs(min)} min dopo`;
+    const forzaCol = r.forza === 'forte' ? '#4ade80' : r.forza === 'debole' ? '#f59e0b' : '#ef4444';
+    const compratoDa = compratoDaText(r);
+    return `
+      <tr style="border-bottom:1px solid #15151f">
+        <td style="padding:9px 12px;color:${r.orfano ? '#f59e0b' : 'var(--fg)'};white-space:nowrap">${esc(r.nome)}${compratoDa
+          ? `<div title="Il gesto sul paywall è stato fatto su un account diverso da quello a cui Google ha collegato l'acquisto" style="font-size:9.5px;color:#5a5a7a;margin-top:2px">${esc(compratoDa)}</div>`
+          : ''}</td>
+        <td style="padding:9px 12px">${r.email
+          ? `<a href="mailto:${esc(r.email)}" style="color:#a78bfa;text-decoration:none">${esc(r.email)}</a>`
+          : `<span style="color:#f59e0b;font-size:11px" title="La riga di play_purchases non porta user_id: Google ha confermato l'abbonamento ma il collegamento all'account non è mai arrivato. L'acquisto è vero, l'utente non si può ancora nominare.">acquisto senza account collegato</span>`}</td>
+        <td style="padding:9px 12px;color:var(--fg);white-space:nowrap">${esc(r.piano)}${r.prova_iniziata === true
+          ? ` <span title="L'abbonamento è partito con la settimana di prova gratuita" style="font-size:9.5px;color:#5b9bff;border:1px solid #5b9bff55;border-radius:4px;padding:0 5px;margin-left:4px">prova</span>`
+          : ''}</td>
+        <td style="padding:9px 12px;font-family:var(--mono);color:var(--fg);white-space:nowrap">${r.prezzo != null ? '€ ' + r.prezzo : '—'}</td>
+        <td style="padding:9px 12px;font-weight:700;color:${col};white-space:nowrap">${esc(r.stato)}</td>
+        <td style="padding:9px 12px;color:var(--muted);white-space:nowrap;font-size:11px">${esc(r.quando)}</td>
+        <td style="padding:9px 12px;color:var(--muted);white-space:nowrap;font-size:11px">${esc(r.scadenza || '—')}</td>
+        <td style="padding:9px 12px;white-space:nowrap">
+          <span style="color:var(--fg);font-weight:600">${esc(creativeName(r.variant))}</span>
+          ${r.variant ? `<div style="font-size:9.5px;color:#5a5a7a;font-family:var(--mono)">${esc(r.variant)}</div>` : ''}
+        </td>
+        <td style="padding:9px 12px;white-space:nowrap" title="${esc((r.evento || 'nessun evento con creatività nelle 24 ore prima') + ' · ' + quando)}">
+          <span style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:${forzaCol};border:1px solid ${forzaCol}55;border-radius:4px;padding:1px 6px">${esc(r.forza)}</span>
+          <div style="font-size:9.5px;color:#5a5a7a;margin-top:2px">${esc(quando)}</div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  // Un acquisto senza `user_id` è un abbonamento pagato di cui non sappiamo il proprietario:
+  // niente eventi da attribuire, e in app quella persona probabilmente NON ha il premium.
+  const notaOrfani = orfani ? `
+    <div style="background:#f59e0b12;border:1px solid #f59e0b40;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:11.5px;line-height:1.6;color:var(--fg)">
+      <strong style="color:#f59e0b">${orfani} acquist${orfani === 1 ? 'o' : 'i'} senza account collegato.</strong>
+      Google ha confermato l'abbonamento ma la riga di <code style="font-family:var(--mono)">play_purchases</code>
+      non porta <code style="font-family:var(--mono)">user_id</code>: l'incasso è vero, la persona no.
+      Senza utente l'attribuzione resta di solito «nessuna» (si trova solo se il gesto sta su un account che porta lo stesso
+      abbonamento, o in una sessione senza login) —
+      e va controllato a mano se in app ha davvero il premium.
+    </div>` : '';
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      ${notaOrfani}
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:900px">
+          <thead>
+            <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Nome</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Email</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Piano</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Prezzo</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Dove si trova ADESSO: in prova = settimana gratis in corso · pagante = incasso vero">Stato</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Quando</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Scadenza</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e">Da quale paywall</th>
+              <th style="text-align:left;padding:6px 12px;border-bottom:1px solid #1a1a2e" title="Quanto è solida l'attribuzione, e quanto tempo è passato fra il gesto e il pagamento">Attribuzione</th>
+            </tr>
+          </thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Scheda della singola creatività: quando compare, in che punto dell'app, come se ne esce, le
+// schermate una per una con quanti utenti le hanno viste, gli eventi e il file che la disegna.
+// Niente screenshot: sarebbero copie che invecchiano da sole: per vedere le schermate vere c'è
+// l'anteprima Dev, che monta i componenti veri.
+function creativeModal() {
+  if (!state.creativeModal) return '';
+  const reg = CREATIVE_REGISTRY.find(c => c.variant === state.creativeModal);
+  if (!reg) return '';
+  const live = (state.creativesAudit || []).find(r => r.variant === reg.variant) || null;
+  const rot = CREATIVE_ROTATION_META[reg.rotation] || CREATIVE_ROTATION_META.retired;
+  const lastAt = live && live.last_at ? new Date(live.last_at) : null;
+  const usersByIdx = {};
+  (live && live.steps || []).forEach(s => { usersByIdx[String(s.idx)] = Number(s.users || 0); });
+
+  const soft = k => reg.rotation !== 'live' || (reg.soft || []).includes(k);
+  const marksHtml = CREATIVE_MARKS.map(m => {
+    const v = live && live.marks ? Number(live.marks[m.k] || 0) : 0;
+    const col = v > 0 ? '#4ade80' : (m.soft || soft(m.k) || !live ? '#5a5a7a' : '#ef4444');
+    return `
+      <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:5px 0;border-bottom:1px solid #15151f">
+        <span style="color:var(--fg)">${esc(m.l)} <span style="color:#5a5a7a;font-size:10px">${esc(m.d)}</span></span>
+        <span style="font-family:var(--mono);font-weight:700;color:${col}">${v}</span>
+      </div>`;
+  }).join('');
+
+  const srcHtml = (live && live.sources || []).map(s => `
+    <div style="display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:4px 0;border-bottom:1px solid #15151f">
+      <span style="color:var(--fg);font-family:var(--mono);font-size:11px">${esc(s.source)}</span>
+      <span style="font-family:var(--mono);font-weight:700">${s.users}</span>
+    </div>`).join('');
+
+  // La foto prestata da un'altra creatività, quando la propria non è fotografabile (vedi
+  // `shotFrom` nel registro): si mostra a parte e dichiarata, mai mescolata alle sue schermate.
+  const borrowedShot = reg.shotFrom
+    ? `/internal/paywalls/${reg.shotFrom}-${(reg.screens && reg.screens[0] && reg.screens[0].idx) ?? 0}.png?v=${PAYWALL_SHOT_V}`
+    : '';
+
+  const screensHtml = (reg.screens || []).map((s, i) => {
+    const n = s.idx === undefined || s.idx === null ? null : usersByIdx[String(s.idx)];
+    const shot = `/internal/paywalls/${reg.variant}-${s.idx ?? i}.png?v=${PAYWALL_SHOT_V}`;
+    return `
+      <div style="display:flex;gap:14px;padding:12px 0;border-bottom:1px solid #15151f">
+        <a href="${shot}" target="_blank" rel="noopener" title="Apri a schermo intero" style="flex-shrink:0;line-height:0">
+          <img src="${shot}" alt="" loading="lazy" onerror="this.parentElement.style.display='none'"
+               style="width:118px;border-radius:9px;border:1px solid #1f1f33;display:block">
+        </a>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12.5px;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            ${s.idx === undefined || s.idx === null ? '' : `<span style="font-family:var(--mono);font-size:10px;color:#5a5a7a">step ${esc(s.idx)}</span>`}
+            ${esc(s.t)}
+            ${n !== null && n !== undefined ? `<span style="font-size:10px;color:#a78bfa;font-weight:700">${n} utenti</span>` : ''}
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5">${esc(s.d)}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div id="creative-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;width:100%;max-width:780px;
+        height:min(88vh,760px);display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:16px;font-weight:700;color:var(--fg);display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+              ${esc(reg.name)}
+              <span style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:${rot.color};border:1px solid ${rot.bd};background:${rot.bg};border-radius:4px;padding:1px 6px">${rot.label}</span>
+            </div>
+            <div style="font-size:11px;color:#5a5a7a;margin-top:3px;font-family:var(--mono)">variant = ${esc(reg.variant)}</div>
+          </div>
+          <button id="creative-close" style="background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;min-height:0;padding:18px 20px">
+          <div style="font-size:12.5px;color:var(--fg);line-height:1.65;margin-bottom:14px">${esc(reg.what)}</div>
+          <div style="background:#111120;border:1px solid #1f1f33;border-radius:10px;padding:12px 14px;margin-bottom:16px">
+            <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:3px">Quando compare</div>
+            <div style="font-size:12px;color:var(--fg);line-height:1.6">${esc(reg.when || reg.where)}</div>
+            <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:11px 0 3px">In che punto dell'app</div>
+            <div style="font-size:12px;color:var(--fg);line-height:1.6">${esc(reg.where)}</div>
+            ${reg.exit ? `
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:11px 0 3px">Come se ne esce</div>
+              <div style="font-size:12px;color:var(--fg);line-height:1.6">${esc(reg.exit)}</div>` : ''}
+            ${reg.cta ? `
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:11px 0 3px">Cosa si tocca</div>
+              <div style="font-size:12px;color:var(--fg);line-height:1.6">${esc(reg.cta)}</div>` : ''}
+            ${reg.prova ? `
+              <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:11px 0 3px">La prova gratuita</div>
+              <div style="font-size:12px;color:var(--fg);line-height:1.6">${esc(reg.prova)}</div>` : ''}
+            ${lastAt ? `<div style="font-size:10.5px;color:var(--muted);margin-top:11px;padding-top:9px;border-top:1px solid #1a1a2e">
+              Ultima volta vista da un utente: <strong style="color:var(--fg)">${lastAt.toLocaleString('it-IT')}</strong></div>` : ''}
+          </div>
+
+
+          ${paywallShotsStrip(reg.variant)}
+
+          ${reg.shotNote ? `
+            <div style="display:flex;gap:14px;align-items:flex-start;margin-top:16px;background:#111120;border:1px dashed #3a3a55;border-radius:10px;padding:12px 14px">
+              <a href="${borrowedShot}" target="_blank" rel="noopener" title="Apri a schermo intero" style="flex-shrink:0;line-height:0">
+                <img src="${borrowedShot}" alt="" loading="lazy" onerror="this.parentElement.style.display='none'"
+                     style="width:96px;border-radius:9px;border:1px solid #1f1f33;display:block">
+              </a>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:4px">Foto in prestito dalla gemella</div>
+                <div style="font-size:11.5px;color:var(--muted);line-height:1.6">${esc(reg.shotNote)}</div>
+              </div>
+            </div>` : ''}
+
+          ${screensHtml ? `
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin:16px 0 4px">Le schermate, una per una <span style="text-transform:none;letter-spacing:0;color:#5a5a7a">· scatti automatici dal banco di posa</span></div>
+            ${screensHtml}` : ''}
+
+          <div style="font-size:10px;color:#5a5a7a;margin-top:14px;line-height:1.6">
+            Le schermate qui sopra sono i componenti VERI dell'app, fotografati dal banco di posa
+            (<code style="font-family:var(--mono)">app/src/_gallery</code>): non sono mockup, e si riallineano da sole rilanciando
+            <code style="font-family:var(--mono)">node scripts/paywall-shots.mjs</code>. Dal vivo, col dito: menu Dev dell'app →
+            <code style="font-family:var(--mono)">/dev/premium</code>, che monta ogni proposta senza emettere eventi e senza far pagare niente.
+          </div>
+
+          <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:18px">
+            <div style="flex:1;min-width:260px">
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Eventi nel periodo · utenti unici</div>
+              ${marksHtml}
+              ${!live ? '' : live.pct_exposure === null || live.pct_exposure === undefined
+                // Nessun evento del protocollo paywall nel periodo: può succedere alle
+                // creatività che hanno una schermata fuori protocollo (il foglietto del
+                // regalo) uscita a qualcuno senza che nessuno l'abbia aperta. Non è un
+                // buco: non c'è nessun evento di cui chiedersi se porta l'exposure_id.
+                ? `<div style="font-size:10px;color:#5a5a7a;margin-top:7px">nessun evento del protocollo paywall in questo periodo — solo schermate che ne stanno fuori</div>`
+                : `<div style="font-size:10px;color:#5a5a7a;margin-top:7px">${live.pct_exposure}% degli eventi porta l'exposure_id${live.pct_exposure < 100 ? ' — per il resto il percorso non è ricostruibile (build vecchie)' : ''}</div>`}
+            </div>
+            <div style="flex:1;min-width:220px">
+              ${srcHtml ? `<div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Da dove è uscita</div>${srcHtml}` : ''}
+            </div>
+          </div>
+
+          ${reg.note ? `<div style="margin-top:16px;font-size:11px;color:#d9c48a;background:#1c1710;border:1px solid #5a4318;border-radius:9px;padding:10px 12px;line-height:1.6">${esc(reg.note)}</div>` : ''}
+
+          <div style="margin-top:14px;font-size:10.5px;color:#5a5a7a;line-height:1.6">
+            Il codice che la disegna: <code style="font-family:var(--mono);color:var(--muted)">${esc(reg.file)}</code>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── ETICHETTE DELLE CREATIVITÀ PAYWALL ─────────────────────
+// Nome leggibile di ogni variant: lo usano il catalogo, la sua scheda e la tabella degli acquisti.
+const CREATIVE_LABELS = {
+  onboarding_start: 'Paywall di partenza',
+  app_open: 'Paywall apertura app',
+  onboarding_trial: 'Paywall di partenza · con la prova',
+  onboarding_trial_v2: 'Paywall di partenza · prova v2',
+  onboarding_trial_n44: 'Paywall di fine onboarding · N44',
+  welcome_offer: 'Offerta di benvenuto',
+  daily_limit_sheet: 'Limite giornaliero · prima versione',
+  daily_limit_done: 'Limite giornaliero · gratuito completato',
+  // Le cinque qui sotto avevano la scheda nel registro ma non l'etichetta: nella
+  // tabella degli acquisti comparivano col nome tecnico della variant, perché
+  // `premiumCreativeLabel` ripiega sulla chiave. Trovate il 21/09/2026 dal guard
+  // `kpiCreativeRegistry.contract.l1`, che prima non esisteva. I nomi sono
+  // esattamente quelli delle rispettive schede: le due liste devono dire la
+  // stessa cosa, o la stessa creatività ha due nomi a seconda di dove la leggi.
+  subscription_page: 'Pagina Abbonamento',
+  ad_paywall: 'Annuncio + prezzi',
+  paywall_giorno_zero: 'Giorno Zero',
+  coach_personalization: 'Aumenta la personalizzazione',
+  coach_follow: 'Il coach ti segue',
+  meal_scan: 'Contacalorie',
+  coach_slides: 'Primo allenamento · 3 slide',
+  coach_spot: 'Coach Spot',
+  onboarding_funnel: 'Funnel standard',
+  coach_ai_chat:     'Coach AI · Chat',
+  coach_ai_demo:     'Coach AI · Demo',
+  workout_detail_quota_sheet: 'Dettaglio · crediti finiti',
+  coach_ai_memory:   'Coach AI · Memoria',
+  coach_ai_visual:   'Coach AI · Visual',
+  coach_ai_chart:    'Coach AI · Grafici',
+  progress_video:    'Video progressi',
+  video_ad:          'Video annuncio',
+  coach_call:        'Coach call',
+  coach_call_v2:     'Coach call v2',
+  change_goal_premium: 'Cambio obiettivo',
+  // Una chiave sola in app, due creatività nei dati: la data le separa (vedi kpi_paywall_variant).
+  onboarding_results_chart:         'Fine onboarding · grafico',
+  onboarding_results_program_ready: 'Fine onboarding · risultati',
+  // Il gate di fine prova non è un paywall come gli altri, ma esce come variant a sé.
+  trial_end_gate: 'Gate fine prova',
+};
+function premiumCreativeLabel(v) { return CREATIVE_LABELS[v] || v || '—'; }
+
+// Modal con la lista degli utenti che hanno raggiunto uno step di una creatività paywall.
+// Per ogni utente: giorno, ora, nome, email. Aperto cliccando su un box del percorso step.
+function stepUsersModal() {
+  if (!state.stepUsersModal) return '';
+  const { variant, step, label, desc } = state.stepUsersModal;
+  const d = state.stepUsersData;
+  const users = (d && d.users) || [];
+  const hasDet = users.some(u => u.dettaglio);
+
+  const body = state.stepUsersLoading
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px" class="pulse">Caricamento utenti…</div>`
+    : state.stepUsersError
+    ? `<div style="padding:24px;color:var(--red);font-size:13px">⚠️ ${esc(state.stepUsersError)}</div>`
+    : !users.length
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Nessun utente per questo step nel periodo selezionato.</div>`
+    : `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:#0f0f1a">
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Giorno</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Ora</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Nome</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Email</th>
+            ${hasDet ? `<th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Dettaglio</th>` : ''}
+            <th style="text-align:center;padding:8px 14px;border-bottom:1px solid #1e1e30">Viste</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${users.map(u => `
+            <tr style="border-bottom:1px solid #15151f">
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(u.giorno || '—')}</td>
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(u.ora || '—')}</td>
+              <td style="padding:9px 14px;color:var(--fg)">${esc(u.nome || '—')}${u.sotto
+                ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${esc(u.sotto)}</div>`
+                : ''}</td>
+              <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(u.email)}" style="color:#a78bfa;text-decoration:none">${esc(u.email || '—')}</a></td>
+              ${hasDet ? `<td style="padding:9px 14px;color:var(--fg);font-family:var(--mono);font-size:11px">${esc(u.dettaglio || '—')}</td>` : ''}
+              <td style="padding:9px 14px;text-align:center;color:${u.views > 1 ? 'var(--fg)' : 'var(--muted)'}">${u.views || 1}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  const count = d ? d.total_users : null;
+
+  return `
+    <div id="step-users-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:640px;height:min(80vh,620px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700;color:var(--fg)">
+              ${esc(label)} <span style="color:var(--muted);font-weight:400">·</span> step <span style="color:#a78bfa">${esc(step)}</span>
+            </div>
+            ${(() => {
+              const sel = state.sprints.find(s => s.id === state.premiumSprintId);
+              const win = sprintWindowText(sel, state.premiumFrom, state.premiumTo);
+              return `<div style="font-size:11px;color:var(--muted);margin-top:3px">
+                ${desc ? esc(desc) : 'utenti che hanno raggiunto questo step'}${count !== null ? ` · <strong style="color:var(--fg)">${count}</strong>` : ''} · ${win.text}
+              </div>`;
+            })()}
+          </div>
+          <button id="step-users-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+
+        <div style="flex:1;overflow-y:auto;min-height:0">
+          ${body}
+        </div>
+      </div>
+    </div>`;
+}
+
+// Modale lista utenti per i KPI cliccabili (Abbonati paganti / In prova / A rischio / In disdetta).
+// I dati arrivano già in state.premiumData.subscribers (nessuna fetch): filtriamo per bucket.
+const PREMIUM_BUCKET_META = {
+  paying:    { title: 'Abbonati paganti', color: '#4ade80', desc: 'pagamento incassato · accesso attivo' },
+  trialing:  { title: 'In prova ora',     color: '#22d3ee', desc: 'prova gratuita attiva adesso' },
+  at_risk:   { title: 'A rischio',        color: '#f59e0b', desc: 'pagamento fallito · grace period o account hold' },
+  canceling: { title: 'In disdetta',      color: '#f472b6', desc: 'pagante che ha già annullato il rinnovo · esce a scadenza' },
+};
+
+function premiumBucketModal() {
+  const key = state.premiumBucketModal;
+  if (!key) return '';
+  const meta = PREMIUM_BUCKET_META[key] || { title: key, color: '#818cf8', desc: '' };
+  const all = (state.premiumData && state.premiumData.subscribers) || [];
+  const rows = all.filter(s => s[key] === true);
+
+  const body = !rows.length
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Nessun utente in questa lista.</div>`
+    : `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:#0f0f1a">
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Nome</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Email</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Piano</th>
+            <th style="text-align:right;padding:8px 14px;border-bottom:1px solid #1e1e30">Prezzo</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Inizio</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Scadenza</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(s => `
+            <tr style="border-bottom:1px solid #15151f">
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.nome || '—')}${(s.canceling && key !== 'canceling') ? ' <span style="color:#f472b6;font-size:10px">· in disdetta</span>' : ''}</td>
+              <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(s.email)}" style="color:#a78bfa;text-decoration:none">${esc(s.email || '—')}</a></td>
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.piano || '—')}</td>
+              <td style="padding:9px 14px;text-align:right;color:var(--fg);white-space:nowrap">${s.prezzo != null ? '€ ' + Number(s.prezzo).toFixed(2).replace('.', ',') : '—'}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.inizio || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.scadenza || '—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  return `
+    <div id="premium-bucket-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:720px;height:min(80vh,620px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700;color:${meta.color}">${esc(meta.title)} <span style="color:var(--muted);font-weight:400">· ${rows.length}</span></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${esc(meta.desc)} · stato attuale</div>
+          </div>
+          <button id="premium-bucket-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:0">${body}</div>
+      </div>
+    </div>`;
+}
+
+// Modale "chi è nello step del funnel" (Premium pagante / Trial iniziato). Fetch dedicata per periodo.
+function funnelStepUsersModal() {
+  const m = state.funnelStepUsersModal;
+  if (!m) return '';
+  const rows = state.funnelStepUsersData || [];
+  const body = state.funnelStepUsersLoading
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px" class="pulse">Caricamento utenti…</div>`
+    : state.funnelStepUsersError
+    ? `<div style="padding:24px;color:var(--red);font-size:13px">⚠️ ${esc(state.funnelStepUsersError)}</div>`
+    : !rows.length
+    ? `<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Nessun utente per questo step in questo periodo.</div>`
+    : `
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead>
+          <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0;background:#0f0f1a">
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Nome</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Email</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Piano</th>
+            <th style="text-align:right;padding:8px 14px;border-bottom:1px solid #1e1e30">Prezzo</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Inizio</th>
+            <th style="text-align:left;padding:8px 14px;border-bottom:1px solid #1e1e30">Scadenza</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(s => `
+            <tr style="border-bottom:1px solid #15151f">
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.nome || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted)"><a href="mailto:${esc(s.email)}" style="color:#a78bfa;text-decoration:none">${esc(s.email || '—')}</a></td>
+              <td style="padding:9px 14px;color:var(--fg);white-space:nowrap">${esc(s.piano || '—')}</td>
+              <td style="padding:9px 14px;text-align:right;color:var(--fg);white-space:nowrap">${s.prezzo != null ? '€ ' + Number(s.prezzo).toFixed(2).replace('.', ',') : '—'}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.inizio || '—')}</td>
+              <td style="padding:9px 14px;color:var(--muted);white-space:nowrap">${esc(s.scadenza || '—')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+
+  return `
+    <div id="funnel-step-users-overlay" style="
+      position:fixed;inset:0;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);
+      display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+      <div style="
+        background:#0f0f1a;border:1px solid #2a2a3d;border-radius:16px;
+        width:100%;max-width:720px;height:min(80vh,620px);
+        display:flex;flex-direction:column;box-shadow:0 24px 80px rgba(0,0,0,0.7);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 20px;border-bottom:1px solid #1e1e30;flex-shrink:0">
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:700;color:var(--fg)">${esc(m.label)} <span style="color:var(--muted);font-weight:400">· ${rows.length}</span></div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${esc(m.sprintNome || '')} · ${esc(m.inizio)} → ${esc(m.fine)}</div>
+          </div>
+          <button id="funnel-step-users-close" style="
+            background:none;border:1px solid #2a2a3d;color:var(--muted);border-radius:8px;
+            padding:5px 12px;cursor:pointer;font-size:13px;font-family:inherit;flex-shrink:0">✕ Chiudi</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:0">${body}</div>
+      </div>
+    </div>`;
+}
+
+const FUNNEL_ALL_STEPS = [
+  { key: 'trial_shown',       label: 'Offerta trial mostrata',  color: '#0891b2', field: 'trial_shown_total',       usersField: 'trial_shown',  event: 'trial_offer_shown' },
+  { key: 'paywall_views',     label: 'Paywall aperto',          color: '#a78bfa', field: 'paywall_views_total',     usersField: 'paywall_views', showFreq: true, event: 'paywall_open' },
+  { key: 'view_paywall',      label: 'Paywall mostrati',        color: '#818cf8', field: 'view_paywall_total',      usersField: 'view_paywall', event: 'view_Paywall' },
+  { key: 'plan_select',       label: 'Confronta piani',         color: '#38bdf8', field: 'plan_select_total',       usersField: 'plan_select', event: 'paywall_plan_select' },
+  { key: 'purchase_attempts', label: 'Tentato acquisto',        color: '#f59e0b', field: 'purchase_attempts_total', usersField: 'purchase_attempts', event: 'paywall_purchase_attempt' },
+  { key: 'premium_activated', label: 'Premium attivato',        color: '#4ade80', field: 'premium_activated_total', usersField: 'premium_activated', event: 'view_PremiumActivated' },
+  { key: 'paywall_shown',     label: 'Paywall mostrato',        color: '#818cf8', field: 'paywall_shown_total',     usersField: 'paywall_shown', event: 'paywall_step_view · step 0' },
+  { key: 'reached_plans',     label: 'Arrivato ai piani',       color: '#38bdf8', field: 'reached_plans_total',     usersField: 'reached_plans', event: 'paywall_step_view · step plans' },
+  { key: 'purchased',         label: 'Conversione (trial/acq.)', color: '#4ade80', field: 'purchased_total',        usersField: 'purchased', usersPrimary: true, event: 'play_purchases · trial o acquisto' },
+  { key: 'trials_conv',       label: 'Utenti in prova',         color: '#22d3ee', field: 'trials_total',           usersField: 'trials', usersPrimary: true, event: 'play_purchases · trial attivo' },
+  { key: 'paid_conv',         label: 'Utenti paganti',          color: '#4ade80', field: 'paid_total',             usersField: 'paid',   usersPrimary: true, event: 'play_purchases · pagamento reale' },
+];
+
+function premiumFunnelEditRow(row, i) {
+  const stepOpts = FUNNEL_ALL_STEPS.map((s, idx) =>
+    `<option value="${idx}" ${row.stepIdx === idx ? 'selected' : ''}>${s.label}</option>`
+  ).join('');
+
+  const vsOpts = `<option value="">—</option>` +
+    state.premiumFunnelConfig.slice(0, i).map((r, j) =>
+      `<option value="${j}" ${row.vsIdx === j ? 'selected' : ''}>% vs ${FUNNEL_ALL_STEPS[r.stepIdx].label}</option>`
+    ).join('');
+
+  return `
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;color:var(--muted);width:20px;text-align:right;flex-shrink:0">${i + 1}.</span>
+      <select class="form-select premium-funnel-step-sel" data-row="${i}" style="flex:1;font-size:12px;padding:5px 8px">${stepOpts}</select>
+      <select class="form-select premium-funnel-vs-sel"   data-row="${i}" style="width:220px;font-size:12px;padding:5px 8px">${vsOpts}</select>
+      <button class="btn btn-ghost premium-funnel-remove" data-row="${i}"
+        style="padding:4px 10px;font-size:15px;line-height:1;color:var(--red);flex-shrink:0">×</button>
+    </div>`;
+}
+
+function premiumFunnelEditPanel() {
+  if (!state.editingPremiumFunnel) return '';
+  return `
+    <div class="card" style="margin-bottom:16px;border-color:var(--accent)">
+      <div class="card-title" style="margin-bottom:16px">Costruttore funnel Premium</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+        ${state.premiumFunnelConfig.map((row, i) => premiumFunnelEditRow(row, i)).join('')}
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="premium-funnel-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="premium-funnel-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
+        <button id="close-premium-funnel-edit" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto">Chiudi</button>
+      </div>
+    </div>`;
+}
+
+// Badge semantica funnel Premium (cutover 24/07/2026): dichiara esplicitamente cosa
+// legge il funnel — coorte di registrazione (sprint selezionato) o attività nel periodo
+// (range libero / periodo dashboard). Il range libero override sprint quando attivo.
+// Vedi _specs/analytics/cohort-semantics-cutover/.
+function premiumFunnelSemanticsBadge() {
+  const rangeActive = !!state.premiumFunnelRangeData;
+  const sprint = !rangeActive ? state.sprints.find(s => s.id === state.premiumSprintId) : null;
+  const [emoji, label, tip] = sprint
+    ? ['👥', `Coorte di registrazione — ${esc(sprint.nome)}`,
+       `Denominatore = utenti registrati nella finestra sprint (${sprint.inizio} → ${sprint.fine}). Numeratore = tutto quello che hanno fatto dal signup in avanti. Conversioni post-sprint attribuite alla coorte, non alla finestra evento.`]
+    : rangeActive
+      ? ['📅', 'Attività nel periodo (tutte le coorti)',
+         `Conta eventi/purchases avvenuti nella finestra ${state.premiumFunnelRangeFrom} → ${state.premiumFunnelRangeTo}, chiunque li abbia generati (anche utenti registrati prima). Utile per traffico, NON per confronti tra sprint.`]
+      : ['📅', 'Attività nel periodo (tutte le coorti)',
+         `Segue il periodo della dashboard sopra: conta eventi/purchases avvenuti nella finestra, chiunque li abbia generati. Per la coorte per-sprint, seleziona uno sprint sopra.`];
+  return `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px" title="${tip}">
+      <span style="font-size:14px">${emoji}</span>
+      <span style="font-size:12px;font-weight:600;color:var(--fg)">${label}</span>
+      <span style="font-size:10px;color:var(--muted);margin-left:auto">semantica funnel</span>
+    </div>`;
+}
+
+function premiumFunnelRangeBar() {
+  const active = !!state.premiumFunnelRangeData;
+  return `
+    <div class="filter-bar" style="margin-bottom:14px;flex-wrap:wrap;gap:6px;align-items:center">
+      <span class="filter-label">Periodo funnel</span>
+      <input type="date" id="premium-funnel-range-from" class="form-input" value="${state.premiumFunnelRangeFrom}"
+        style="width:135px;padding:5px 10px;font-size:12px">
+      <span style="color:var(--muted)">→</span>
+      <input type="date" id="premium-funnel-range-to" class="form-input" value="${state.premiumFunnelRangeTo}"
+        style="width:135px;padding:5px 10px;font-size:12px">
+      <button id="premium-funnel-range-apply" class="btn btn-primary" style="padding:5px 14px;font-size:12px">Applica</button>
+      ${active ? `<button id="premium-funnel-range-reset" class="btn btn-ghost" style="padding:5px 12px;font-size:12px;color:var(--muted)">↺ Periodo dashboard</button>` : ''}
+      ${state.premiumFunnelRangeLoading ? `<span style="font-size:11px;color:var(--muted)" class="pulse">Calcolo…</span>`
+        : active ? `<span style="font-size:11px;color:var(--purple)">periodo personalizzato attivo, indipendente da quello sopra</span>`
+        : `<span style="font-size:11px;color:var(--muted)">segue il periodo della dashboard sopra finché non applichi un range diverso qui</span>`}
+      ${state.premiumFunnelRangeError ? `<span style="font-size:11px;color:var(--red)">${esc(state.premiumFunnelRangeError)}</span>` : ''}
+    </div>`;
+}
+
+function premiumFunnelViz(f) {
+  const cfg = state.premiumFunnelConfig;
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:12px">Nessuno step configurato. Apri "Modifica funnel" per aggiungerne uno.</div>`;
+
+  const rows = cfg.map(row => {
+    const s = FUNNEL_ALL_STEPS[row.stepIdx];
+    return { s, n: f[s.field] ?? 0, users: f[s.usersField] ?? 0 };
+  });
+
+  // Numero grande = EVENTI (quante volte), utenti sotto in piccolo. Eccezione: gli step
+  // `usersPrimary` (Abbonato pagante) mostrano gli UTENTI in grande (lì gli eventi ≈ utenti).
+  // Il calo % di ogni transizione usa la metrica primaria dello step corrente, applicata a
+  // entrambi gli estremi (eventi↔eventi, utenti↔utenti) → niente confronti misti.
+  // Testa del funnel per la "% dall'inizio": usa la metrica primaria del PRIMO step (utenti se
+  // usersPrimary, altrimenti eventi), coerente con la scelta cell-by-cell (change % vs vsIdx).
+  const head0 = rows[0]?.s;
+  const headBig = head0 ? (head0.usersPrimary ? rows[0].users : rows[0].n) : 0;
+  const headLabel = head0?.label || 'step 1';
+  const html = cfg.map((row, i) => {
+    const { s, n, users } = rows[i];
+    const big      = s.usersPrimary ? users : n;
+    const bigUnit  = s.usersPrimary ? `utent${users === 1 ? 'e' : 'i'}` : 'volte';
+    const subLine  = s.usersPrimary
+      ? (n !== users ? `${n} eventi` : '')
+      : `${users} utent${users === 1 ? 'e' : 'i'}`;
+    const hasVs    = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i);
+    const curP     = s.usersPrimary ? users : n;
+    const vsP      = hasVs ? (s.usersPrimary ? rows[row.vsIdx].users : rows[row.vsIdx].n) : null;
+    const change   = (vsP !== null && vsP > 0) ? ((curP / vsP - 1) * 100).toFixed(0) : null;
+    const freq     = s.showFreq && users > 0 ? (n / users).toFixed(1) + '× a testa in media' : null;
+    // "% dall'inizio": la metrica dello step corrente sulla metrica del PRIMO step.
+    // Se il primo è usersPrimary e questo no, o viceversa, restano confrontati like-for-like: usiamo
+    // sempre la metrica primaria di questo step, e la metrica primaria del primo. Non è misto perché
+    // il paywall funnel è omogeneo (tutti eventi tranne "Abbonato pagante" che è users).
+    const startPct = i > 0 && headBig > 0 ? (curP / headBig * 100) : null;
+    return `
+      ${i > 0 ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 6px;min-width:48px">
+        ${change !== null ? `<div style="font-size:10px;color:${change < 0 ? '#ef4444' : '#4ade80'};font-weight:700;white-space:nowrap">${change > 0 ? '+' : ''}${change}%</div>` : ''}
+        <div style="font-size:20px;color:#2a2a3d;margin-top:-2px">→</div>
+      </div>` : ''}
+      <div style="flex:1;background:#111120;border:1px solid ${s.color}33;border-radius:10px;padding:14px 10px;text-align:center;min-width:0">
+        <div style="font-size:26px;font-weight:800;color:${s.color};line-height:1">${big}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">${bigUnit}</div>
+        <div style="font-size:11px;color:var(--fg);margin-top:5px;font-weight:500">${s.label}</div>
+        ${s.event ? `<div style="font-size:9px;color:#5a5a7a;margin-top:1px;font-family:var(--mono)">${esc(s.event)}</div>` : ''}
+        ${subLine ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${subLine}</div>` : ''}
+        ${freq ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${freq}</div>` : ''}
+        ${startPct !== null ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #2a2a3d" title="rispetto a ${esc(headLabel)} (${headBig})">${startPct.toFixed(1)}% dall'inizio</div>` : ''}
+      </div>`;
+  }).join('');
+
+  return `<div style="display:flex;align-items:center;flex-wrap:wrap;gap:0">${html}</div>`;
+}
+
+// ── TENTATIVI DI ACQUISTO — CONFRONTO FRA SPRINT ────────────────────────
+//
+// Una barra per sprint: su cento persone che hanno visto il paywall, quante provano a pagare.
+// Due metri: PERSONE (persone diverse con almeno un `paywall_purchase_attempt`) e CLICK (tutti
+// i tentativi, anche ripetuti), tutti e due divisi per chi ha visto il paywall.
+//
+// Perché una percentuale e non i conteggi giorno per giorno: la prima versione (26/09/2026)
+// sommava i tentativi giorno dopo giorno, e la linea di uno sprint lungo finiva sempre più in
+// alto di quella di uno corto. Mattia l'ha bocciata: confrontava la durata, non la resa.
+//
+// Dati: RPC kpi_purchase_attempt_rate (gate operatore), una chiamata per sprint e sesso, tenuta
+// in memoria. Coorte = registrati nello sprint; eventi contati solo dentro le date dello sprint.
+//
+// Il colore di uno sprint è quello del suo pallino nei chip (indice in state.sprints), lo
+// stesso delle altre tabelle di confronto: togliere uno sprint non ridipinge gli altri.
+
+// Sotto il 5% dei registrati che «vede il paywall» l'evento non era ancora tracciato (sprint
+// 1-4 a zero, sprint 10 allo 0,9%; tutti gli altri sopra il 24%): la percentuale non vale.
+const ATTEMPTS_MIN_TRACKED = 0.05;
+// Sotto queste persone al paywall la percentuale si mostra, ma con l'avviso «pochi dati».
+const ATTEMPTS_FEW = 30;
+
+function attemptsSprintColor(s) {
+  const i = state.sprints.findIndex(x => x.id === s.id);
+  return SPRINT_COLORS[(i < 0 ? 0 : i) % SPRINT_COLORS.length];
+}
+
+// Inizio e fine della finestra di uno sprint, sempre valorizzati (l'RPC non ha default):
+// l'ora impostata sullo sprint se c'è, altrimenti mezzanotte locale del primo giorno e
+// mezzanotte locale del giorno dopo l'ultimo.
+function attemptsSprintWindow(s) {
+  const start = sprintStartTs(s) || new Date(`${s.inizio}T00:00`).toISOString();
+  let end = sprintEndTs(s);
+  if (!end) {
+    const d = new Date(`${s.fine}T00:00`);
+    d.setDate(d.getDate() + 1);
+    end = d.toISOString();
+  }
+  return { start, end };
+}
+
+function attemptsKey(s) { return `${s.id}|${state.premiumGender}`; }
+
+async function ensureAttemptsChartData() {
+  const selected = state.sprints.filter(s => state.attemptsChartSel.includes(s.id));
+  const missing = selected.filter(s => {
+    const k = attemptsKey(s);
+    return !state.attemptsChartData[k] && !state.attemptsChartLoading[k] && !state.attemptsChartErrors[k];
+  });
+  if (!missing.length) return;
+  for (const s of missing) state.attemptsChartLoading[attemptsKey(s)] = true;
+  render();
+  await Promise.all(missing.map(async s => {
+    const k = attemptsKey(s);
+    try {
+      const { start, end } = attemptsSprintWindow(s);
+      const { data, error } = await sb.rpc('kpi_purchase_attempt_rate', {
+        p_start: start, p_end: end, p_gender: state.premiumGender,
+      });
+      if (error) throw error;
+      // Una risposta vuota va segnata come esito: lasciata a null, lo sprint risultava ancora
+      // «mancante», il render di fine giro richiamava questa funzione e il ciclo ripartiva
+      // all'infinito (pagina Premium bloccata e una RPC dopo l'altra sul DB).
+      if (!data) throw new Error('Nessun dato per questo sprint');
+      state.attemptsChartData[k] = data;
+    } catch (e) {
+      state.attemptsChartErrors[k] = e.message || 'Errore';
+    }
+    delete state.attemptsChartLoading[k];
+  }));
+  render();
+}
+
+// Una riga per sprint, con i numeri già pronti per barra, etichetta, tooltip e tabella.
+function attemptsRow(s) {
+  const d = state.attemptsChartData[attemptsKey(s)];
+  if (!d) return null;
+  const reg = Number(d.registrati) || 0, seen = Number(d.visto_paywall) || 0;
+  const people = Number(d.persone) || 0, clicks = Number(d.click) || 0;
+  const tracked = reg > 0 && seen / reg >= ATTEMPTS_MIN_TRACKED;
+  const { start, end } = attemptsSprintWindow(s);
+  const inCorso = new Date(end).getTime() > Date.now();
+  return {
+    sprint: s, color: attemptsSprintColor(s), reg, seen, people, clicks, tracked, inCorso,
+    days: Math.max(1, Math.round((new Date(end) - new Date(start)) / 86400000)),
+    ratePeople: tracked && seen > 0 ? people / seen * 100 : null,
+    rateClicks: tracked && seen > 0 ? clicks / seen * 100 : null,
+  };
+}
+
+function attemptsNiceMax(v) {
+  if (v <= 0) return 4;
+  const raw = v / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(st => st >= raw);
+  return step * 4;
+}
+
+const attemptsPct = (v, dec = 1) => v.toFixed(dec).replace('.', ',') + '%';
+// In Click il valore è un conteggio ogni cento persone (può passare 100): niente «%».
+const attemptsFmt = (mode, v, dec = 1) => (mode === 'people' ? attemptsPct(v, dec) : v.toFixed(dec).replace('.', ','));
+const attemptsDate = iso => String(iso).slice(5).split('-').reverse().join('/');
+const ATTEMPTS_GRID = 'grid-template-columns:minmax(120px,210px) 1fr 124px';
+
+function attemptsBars(rows, mode) {
+  const rateOf = r => (mode === 'people' ? r.ratePeople : r.rateClicks);
+  const max = attemptsNiceMax(Math.max(0, ...rows.map(r => rateOf(r) ?? 0)));
+  const ticks = [0, 1, 2, 3, 4].map(i => max / 4 * i);
+  const tickDec = Number.isInteger(max / 4) ? 0 : 1;
+  const grid = ticks.map(t => `<span style="position:absolute;top:-4px;bottom:-4px;left:${t / max * 100}%;width:1px;background:${t === 0 ? '#333345' : '#1c1c2a'}"></span>`).join('');
+
+  const bars = rows.map((r, i) => {
+    const rate = rateOf(r);
+    const num = mode === 'people' ? r.people : r.clicks;
+    const name = `<div style="display:flex;align-items:center;gap:7px;min-width:0">
+        <span style="width:8px;height:8px;border-radius:50%;background:${r.color};flex-shrink:0"></span>
+        <span style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(r.sprint.nome)}">${esc(r.sprint.nome)}</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin:2px 0 0 15px">${attemptsDate(r.sprint.inizio)} → ${attemptsDate(r.sprint.fine)} · ${r.days} g${r.inCorso ? ' · in corso' : ''}</div>`;
+    if (rate === null) {
+      return `<div class="attempts-bar-row" data-i="${i}" style="display:grid;${ATTEMPTS_GRID};align-items:center;gap:12px;padding:8px 0;border-radius:6px">
+        <div style="min-width:0">${name}</div>
+        <div style="grid-column:2 / span 2;font-size:11px;color:var(--muted);font-style:italic">paywall non tracciato in questo sprint · ${num} ${mode === 'people' ? (num === 1 ? 'persona' : 'persone') : 'click'} su ${r.reg} registrati</div>
+      </div>`;
+    }
+    return `<div class="attempts-bar-row" data-i="${i}" style="display:grid;${ATTEMPTS_GRID};align-items:center;gap:12px;padding:8px 0;border-radius:6px">
+      <div style="min-width:0">${name}</div>
+      <div style="position:relative;height:18px">${grid}
+        <div style="position:absolute;left:0;top:0;height:18px;width:${rate > 0 ? Math.max(rate / max * 100, 0.6) : 0}%;background:${r.color};border-radius:0 4px 4px 0"></div>
+      </div>
+      <div style="text-align:right;white-space:nowrap">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">${attemptsFmt(mode, rate)}</span>${mode === 'clicks' ? '<span style="font-size:11px;color:var(--muted)"> ogni 100</span>' : ''}
+        <div style="font-size:11px;color:var(--muted)">${num} su ${r.seen}${r.seen < ATTEMPTS_FEW ? ' · <span style="color:#fbbf24">pochi dati</span>' : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const axis = `<div style="display:grid;${ATTEMPTS_GRID};gap:12px;margin-top:4px">
+    <div></div>
+    <div style="position:relative;height:16px">${ticks.map((t, i) =>
+      `<span style="position:absolute;left:${t / max * 100}%;transform:translateX(${i === 0 ? '0' : i === 4 ? '-100%' : '-50%'});font-size:10px;color:var(--muted)">${attemptsFmt(mode, t, tickDec)}</span>`).join('')}</div>
+    <div></div>
+  </div>`;
+  return bars + axis;
+}
+
+function premiumAttemptsChartCard() {
+  if (!state.sprints.length) return '';
+  const mode = state.attemptsChartMode;
+  // In ordine di data, dal più vecchio: si legge come una storia, non come una classifica.
+  const selected = state.sprints.filter(s => state.attemptsChartSel.includes(s.id))
+    .sort((a, b) => String(a.inizio).localeCompare(String(b.inizio)));
+  const rows = selected.map(attemptsRow).filter(Boolean);
+  const loading = selected.some(s => state.attemptsChartLoading[attemptsKey(s)]);
+  const errors = selected.map(s => state.attemptsChartErrors[attemptsKey(s)] ? `${esc(s.nome)}: ${esc(state.attemptsChartErrors[attemptsKey(s)])}` : null).filter(Boolean);
+
+  const modeBtn = (key, label) =>
+    `<button class="filter-btn attempts-mode${mode === key ? ' active' : ''}" data-mode="${key}">${label}</button>`;
+
+  const chips = state.sprints.map(s => {
+    const on = state.attemptsChartSel.includes(s.id);
+    return `<button class="attempts-chip" data-id="${s.id}" aria-pressed="${on}"
+      style="cursor:pointer;padding:5px 12px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--muted)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${attemptsSprintColor(s)};flex-shrink:0;${on ? '' : 'opacity:.45'}"></span>
+      ${esc(s.nome)}
+    </button>`;
+  }).join('');
+
+  const th = (label, on) => `<th style="padding:6px 8px;font-weight:500;${on ? 'color:var(--text)' : ''}">${label}</th>`;
+  const table = rows.length ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:18px">
+    <thead><tr style="color:var(--muted);text-align:right">
+      <th style="text-align:left;padding:6px 8px;font-weight:500">Sprint</th>
+      ${th('Registrati')}${th('Hanno visto il paywall')}${th('Persone che tentano', mode === 'people')}${th('Click', mode === 'clicks')}${th('% persone', mode === 'people')}${th('Click ogni 100', mode === 'clicks')}
+    </tr></thead>
+    <tbody>${rows.map(r => `<tr style="border-top:1px solid var(--border);text-align:right;color:var(--text)">
+        <td style="text-align:left;padding:6px 8px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${r.color};margin-right:7px"></span>${esc(r.sprint.nome)}</td>
+        <td style="padding:6px 8px;color:var(--muted)">${r.reg}</td>
+        <td style="padding:6px 8px;color:var(--muted)">${r.seen}${r.reg ? ` <span style="font-size:10px">(${Math.round(r.seen / r.reg * 100)}%)</span>` : ''}</td>
+        <td style="padding:6px 8px">${r.people}</td>
+        <td style="padding:6px 8px">${r.clicks}</td>
+        <td style="padding:6px 8px;${mode === 'people' ? 'font-weight:700' : 'color:var(--muted)'}">${r.ratePeople === null ? '—' : attemptsPct(r.ratePeople)}</td>
+        <td style="padding:6px 8px;${mode === 'clicks' ? 'font-weight:700' : 'color:var(--muted)'}">${r.rateClicks === null ? '—' : r.rateClicks.toFixed(1).replace('.', ',')}</td>
+      </tr>`).join('')}</tbody>
+  </table>` : '';
+
+  const body = !selected.length
+    ? `<div style="color:var(--muted);font-size:13px;padding:28px 0;text-align:center">Scegli uno o più sprint da confrontare</div>`
+    : !rows.length && loading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🛒</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : rows.length
+    ? `<div id="attempts-chart-wrap" style="position:relative">${attemptsBars(rows, mode)}
+         <div id="attempts-tip" style="display:none;position:absolute;pointer-events:none;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--text);white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:5"></div>
+       </div>${table}`
+    : '';
+
+  return `<div class="card" style="margin-bottom:16px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px">
+      <div>
+        <div class="card-title" style="margin-bottom:4px">Tentativi di acquisto per sprint</div>
+        <div style="font-size:12px;color:var(--muted);max-width:600px">${mode === 'people'
+          ? 'Su cento persone che hanno visto il paywall, quante hanno toccato «acquista» almeno una volta.'
+          : 'Ogni cento persone che hanno visto il paywall, quanti tocchi su «acquista», anche ripetuti.'}
+          Persone registrate nello sprint, eventi dentro le date dello sprint: la durata non conta${loading ? ' · <span class="pulse">aggiorno…</span>' : ''}</div>
+      </div>
+      <div style="display:flex;gap:6px">${modeBtn('people', 'Persone')}${modeBtn('clicks', 'Click')}</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 16px">${chips}</div>
+    ${errors.length ? `<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠️ ${errors.join(' · ')}</div>` : ''}
+    ${body}
+  </div>`;
+}
+
+function attachAttemptsChartEvents() {
+  // Prima apertura: gli ultimi tre sprint, così il grafico non nasce vuoto.
+  if (!state.attemptsChartInit && state.sprints.length && document.querySelector('.attempts-chip')) {
+    state.attemptsChartInit = true;
+    const byStart = [...state.sprints].sort((a, b) => String(a.inizio).localeCompare(String(b.inizio)));
+    state.attemptsChartSel = byStart.slice(-3).map(s => s.id);
+  }
+  document.querySelectorAll('.attempts-mode').forEach(el =>
+    el.addEventListener('click', () => { state.attemptsChartMode = el.dataset.mode; render(); }));
+  document.querySelectorAll('.attempts-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const i = state.attemptsChartSel.indexOf(id);
+      if (i === -1) state.attemptsChartSel.push(id); else state.attemptsChartSel.splice(i, 1);
+      render();
+    }));
+  if (document.querySelector('.attempts-chip')) ensureAttemptsChartData();
+
+  const wrap = document.getElementById('attempts-chart-wrap');
+  const tip = document.getElementById('attempts-tip');
+  if (!wrap || !tip) return;
+  const rows = state.sprints.filter(s => state.attemptsChartSel.includes(s.id))
+    .sort((a, b) => String(a.inizio).localeCompare(String(b.inizio)))
+    .map(attemptsRow).filter(Boolean);
+  wrap.querySelectorAll('.attempts-bar-row').forEach(el => {
+    const r = rows[Number(el.dataset.i)];
+    if (!r) return;
+    el.addEventListener('mouseenter', () => {
+      el.style.background = 'rgba(255,255,255,.03)';
+      const line = (k, v) => `<div style="display:flex;gap:16px;justify-content:space-between;margin-top:3px"><span style="color:var(--muted)">${k}</span><span style="font-weight:600">${v}</span></div>`;
+      tip.innerHTML = `<div style="display:flex;align-items:center;gap:7px;font-weight:600"><span style="width:8px;height:8px;border-radius:50%;background:${r.color}"></span>${esc(r.sprint.nome)}</div>
+        ${line('Registrati', r.reg)}
+        ${line('Hanno visto il paywall', r.seen)}
+        ${line('Persone che tentano', r.people + (r.ratePeople === null ? '' : ` · ${attemptsPct(r.ratePeople)}`))}
+        ${line('Click', r.clicks + (r.rateClicks === null ? '' : ` · ${r.rateClicks.toFixed(1).replace('.', ',')} ogni 100`))}
+        ${r.people > 0 ? line('Click a persona', (r.clicks / r.people).toFixed(1).replace('.', ',')) : ''}
+        ${r.tracked ? '' : '<div style="color:#fbbf24;font-size:11px;margin-top:6px">paywall non tracciato: la percentuale non vale</div>'}`;
+      tip.style.display = 'block';
+      tip.style.top = (el.offsetTop + el.offsetHeight + 2) + 'px';
+      tip.style.left = Math.max(0, Math.min(wrap.clientWidth - tip.offsetWidth, wrap.clientWidth * 0.35)) + 'px';
+    });
+    el.addEventListener('mouseleave', () => { el.style.background = ''; tip.style.display = 'none'; });
+  });
+}
+
+// ── SPRINT COMPARE — FUNNEL PREMIUM ─────────────────────────────────────
+
+function sprintPremiumFunnelSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintPremiumFunnelOpen;
+
+  const badge = state.sprintPremiumFunnelSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintPremiumFunnelSel.length} sel.</span>`
+    : '';
+
+  const headerEl = `
+    <div id="sprint-premium-funnel-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
+        <span style="font-size:10px;color:var(--muted);font-weight:500" title="Ogni colonna conta gli utenti registrati nella finestra dello sprint e quello che hanno fatto dal signup in avanti. Non contamina più cross-sprint (cutover coorte, 24/07).">coorte reg. per sprint</span>
+        ${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+
+  if (!isOpen) {
+    return headerEl;
+  }
+
+  const chips = state.sprints.map((s, i) => {
+    const on    = state.sprintPremiumFunnelSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-premium-funnel-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+    </button>`;
+  }).join('');
+
+  const hasData = Object.keys(state.sprintPremiumFunnelData).length > 0;
+  const body = state.sprintPremiumFunnelLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintPremiumFunnelError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${state.sprintPremiumFunnelError}</div>`
+    : !hasData ? ''
+    : sprintPremiumFunnelCompareView();
+
+  return `
+    ${headerEl}
+    <div style="margin-top:18px">
+      <div style="margin-bottom:14px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <button id="sprint-premium-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+          ${!state.sprintPremiumFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+        ${hasData ? pctStartToggle('sprint-premium-pctstart') : ''}
+        ${!hasData && !state.sprintPremiumFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
+      </div>
+      ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px;overflow-x:auto">${body}</div>` : ''}
+    </div>`;
+}
+
+function sprintPremiumFunnelCompareView() {
+  const selected = state.sprints.filter(s => state.sprintPremiumFunnelSel.includes(s.id));
+  if (!selected.length) return '';
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px">
+    ${selected.map((s, i) => `
+      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
+        <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
+        <span style="font-weight:600;color:var(--text)">${s.nome}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</span>
+      </span>`).join('')}
+  </div>`;
+  return legend + sprintPremiumFunnelTable(selected, state.sprintPremiumFunnelData);
+}
+
+function sprintPremiumFunnelTable(selected, dataMap) {
+  const cfg    = state.premiumFunnelConfig;
+  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+
+  if (!cfg.length) return `<div style="color:var(--muted);font-size:13px">Nessuno step configurato nel funnel.</div>`;
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
+        <span>${s.nome}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
+    </th>`
+  ).join('');
+
+  // Testa del funnel per la "% dall'inizio": il primo step configurato (di norma "Paywall mostrato").
+  // La % è sul numero grande della riga (gli eventi), lo stesso metro che la cella già mostra.
+  const headStep = cfg[0] ? FUNNEL_ALL_STEPS[cfg[0].stepIdx] : null;
+
+  const rows = cfg.map((row, i) => {
+    const stepDef = FUNNEL_ALL_STEPS[row.stepIdx];
+    const nums    = selected.map(s => Number(dataMap[s.id]?.funnel?.[stepDef.field] ?? -1));
+    const maxN    = Math.max(...nums.filter(n => n >= 0), 0);
+    const vsRow   = (row.vsIdx !== null && row.vsIdx !== undefined && row.vsIdx >= 0 && row.vsIdx < i) ? cfg[row.vsIdx] : null;
+    const vsStep  = vsRow ? FUNNEL_ALL_STEPS[vsRow.stepIdx] : null;
+    // isBest sul rapporto num/vsN (miglior conversione), non sul numero assoluto. Al primo
+    // step (senza vsIdx) nessuno vince: è top-of-funnel, misura traffico non performance.
+    const ratios = selected.map(s => {
+      const fn = dataMap[s.id]?.funnel || {};
+      const num = Number(fn[stepDef.field] ?? 0);
+      const vsN = vsStep ? Number(fn[vsStep.field] ?? 0) : null;
+      return vsN !== null && vsN > 0 ? (num / vsN) : null;
+    });
+    const validRatios = ratios.filter(r => r !== null);
+    const maxRatio = validRatios.length ? Math.max(...validRatios) : null;
+
+    const cells = selected.map((s, si) => {
+      const fn     = dataMap[s.id]?.funnel || {};
+      const num    = Number(fn[stepDef.field] ?? 0);
+      const users  = Number(fn[stepDef.usersField] ?? 0);
+      const headN  = headStep ? Number(fn[headStep.field] ?? 0) : 0;
+      const startPct = state.sprintFunnelPctStart && headN > 0 && i > 0 ? (num / headN * 100) : null;
+      const vsN    = vsStep ? Number(fn[vsStep.field] ?? 0) : null;
+      const change = (vsN !== null && vsN > 0) ? ((num / vsN - 1) * 100) : null;
+      const changeStr   = change !== null ? (change > 0 ? '+' : '') + change.toFixed(0) + '%' : '—';
+      const changeColor = change === null ? '' : change < 0 ? 'var(--red)' : 'var(--mattia)';
+      const isBest = maxRatio !== null && ratios[si] === maxRatio;
+      const barW   = maxN > 0 ? Math.round(num / maxN * 100) : 0;
+      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
+          </div>
+          <span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}">${num}</span>
+        </div>
+        <div style="font-size:10px;color:var(--muted);text-align:right;margin-top:2px">${users} ut.</div>
+        ${pctCellLine(
+          change !== null ? `<span style="color:${changeColor}">${changeStr}</span>` : null,
+          startPct, headStep ? headStep.label : '')}
+      </td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">${stepDef.label}</td>${cells}
+    </tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="border-bottom:2px solid var(--border)">
+      <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Step</th>
+      ${headers}
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function premiumSourcesChart(sources, userCol = 'utenti', countCol = 'tentativi') {
+  if (!sources?.length) return `<div style="color:var(--muted);font-size:12px">Nessun dato registrato</div>`;
+  const maxT = Math.max(...sources.map(s => s[countCol] ?? 0), 1);
+  return sources.map(s => {
+    const label    = PREMIUM_SOURCE_LABELS[s.source] || s.source;
+    const count    = s[countCol] ?? 0;
+    const users    = s[userCol]  ?? 0;
+    const pct      = Math.round(count / maxT * 100);
+    const barColor = s.source.includes('ai') || s.source.includes('coach') ? '#a78bfa'
+                   : s.source.includes('roadmap') ? '#f59e0b'
+                   : s.source.includes('workout') ? '#4ade80'
+                   : '#60a5fa';
+    return `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <div style="font-size:12px;color:var(--fg)">${label}</div>
+          <div style="font-size:11px;color:var(--muted)">${count} eventi · ${users} utenti</div>
+        </div>
+        <div style="background:#1a1a2e;border-radius:3px;height:6px">
+          <div style="background:${barColor};border-radius:3px;height:6px;width:${pct}%;transition:width .3s"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+const PREMIUM_SOURCE_TABS = [
+  { key: 'trial_sources',   label: 'Offerta trial vista' },
+  { key: 'paywall_sources', label: 'Paywall aperto' },
+  { key: 'sources',         label: 'Tentativo acquisto' },
+  { key: 'conv',            label: 'Convertiti (trial/pag.)' },
+];
+
+const PREMIUM_SOURCE_TAB_CAPTIONS = {
+  trial_sources:   "da dove arriva l'offerta del trial · top of funnel",
+  paywall_sources: 'da dove viene aperto il paywall completo',
+  sources:         'da dove parte il tentativo di acquisto',
+  conv:            'da dove arrivano le conversioni reali (trial o pagamento)',
+};
+
+function premiumConvSources(purchasers) {
+  const bySource = {};
+  purchasers.forEach(p => {
+    const key = p.source || 'unknown';
+    if (!bySource[key]) bySource[key] = { source: key, attempts: 0, success: 0 };
+    bySource[key].attempts++;
+    if (p.success) bySource[key].success++;
+  });
+  return Object.values(bySource).sort((a, b) => b.success - a.success || b.attempts - a.attempts);
+}
+
+function premiumConvSourcesChart(rows) {
+  if (!rows?.length) return `<div style="color:var(--muted);font-size:12px">Nessun dato registrato</div>`;
+  const maxSuccess = Math.max(...rows.map(r => r.success), 1);
+  return rows.map(r => {
+    const pct = Math.round(r.success / maxSuccess * 100);
+    return `
+      <div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+          <div style="font-size:12px;color:var(--fg)">${esc(premiumSourceLabel(r.source))}</div>
+          <div style="font-size:11px;color:var(--muted)">${r.success} riusciti su ${r.attempts} tentativi · ${premiumPct(r.success, r.attempts)}</div>
+        </div>
+        <div style="background:#1a1a2e;border-radius:3px;height:6px">
+          <div style="background:#4ade80;border-radius:3px;height:6px;width:${pct}%;transition:width .3s"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function premiumSourcesCard(d, purchasers) {
+  const tab = PREMIUM_SOURCE_TABS.some(t => t.key === state.premiumSourceTab) ? state.premiumSourceTab : 'paywall_sources';
+  const tabs = PREMIUM_SOURCE_TABS.map(t => {
+    const on = tab === t.key;
+    return `<button class="filter-btn ${on ? 'active' : ''}" data-source-tab="${t.key}">${t.label}</button>`;
+  }).join('');
+
+  const body = tab === 'conv'            ? premiumConvSourcesChart(premiumConvSources(purchasers))
+             : tab === 'trial_sources'   ? premiumSourcesChart(d.trial_sources, 'utenti', 'eventi')
+             : tab === 'paywall_sources' ? premiumSourcesChart(d.paywall_sources, 'utenti', 'eventi')
+             : premiumSourcesChart(d.sources, 'utenti', 'tentativi');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:10px">Sorgenti</div>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">${tabs}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px">${PREMIUM_SOURCE_TAB_CAPTIONS[tab]}</div>
+      ${body}
+    </div>`;
+}
+
+function premiumErrorsCard(billingErrors, purchaseErrors) {
+  const errorLevelColor = (errore) => {
+    if (errore.includes('non disponibile') || errore.includes('inizializzato')) return '#ef4444';
+    if (errore.includes('annullato') || errore.includes('acquistato')) return '#f59e0b';
+    return '#60a5fa';
+  };
+  const phaseColor = (fase) => {
+    if (fase === 'not_initialized' || fase === 'unverified') return '#ef4444';
+    if (fase === 'pending_timeout' || fase === 'verify_rpc_failed') return '#f59e0b';
+    return '#60a5fa';
+  };
+
+  return `
+    <div class="card" style="margin-bottom:16px;border-color:#3a1a1a">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+        <span style="font-size:16px">⚠</span>
+        <div class="card-title" style="margin-bottom:0;color:#ef4444">Errori rilevati (utenti reali)</div>
+      </div>
+      <div class="grid-2">
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Billing errors</div>
+          ${(billingErrors || []).map(e => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:#111120;border-radius:6px;margin-bottom:6px;border-left:3px solid ${errorLevelColor(e.errore)}">
+              <div style="font-size:11px;color:var(--fg)">${e.errore}</div>
+              <div style="font-size:14px;font-weight:700;color:${errorLevelColor(e.errore)};margin-left:12px;flex-shrink:0">${e.n}×</div>
+            </div>`).join('') || '<div style="font-size:11px;color:var(--muted)">Nessuno</div>'}
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px">Purchase errors</div>
+          ${(purchaseErrors || []).map(e => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:#111120;border-radius:6px;margin-bottom:6px;border-left:3px solid ${phaseColor(e.fase)}">
+              <div>
+                <div style="font-size:11px;color:var(--fg)">${e.fase}</div>
+                ${e.msg ? `<div style="font-size:10px;color:var(--muted);margin-top:1px">${e.msg.slice(0,60)}</div>` : ''}
+              </div>
+              <div style="font-size:14px;font-weight:700;color:${phaseColor(e.fase)};margin-left:12px;flex-shrink:0">${e.n}×</div>
+            </div>`).join('') || '<div style="font-size:11px;color:var(--muted)">Nessuno</div>'}
+        </div>
+      </div>
+    </div>`;
+}
+
+function premiumPurchasersDetailCard(purchasers) {
+  if (!purchasers?.length) return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:10px">Chi ha tentato o acquistato</div>
+      <div style="color:var(--muted);font-size:12px;padding:16px 0">Nessun tentativo di acquisto nel periodo selezionato</div>
+    </div>`;
+
+  const successCount = purchasers.filter(p => p.success).length;
+  const problemCount = purchasers.filter(p => p.errorText).length;
+  const filter = ['all', 'success', 'failed'].includes(state.premiumPurchaserFilter) ? state.premiumPurchaserFilter : 'all';
+  const filtered = purchasers.filter(p => filter === 'success' ? p.success : filter === 'failed' ? !p.success : true);
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (a.success !== b.success) return a.success ? -1 : 1;
+    if (Boolean(a.errorText) !== Boolean(b.errorText)) return a.errorText ? -1 : 1;
+    return premiumNum(b.attempts) - premiumNum(a.attempts);
+  });
+
+  const chips = [
+    { key: 'all',     label: `Tutti (${purchasers.length})` },
+    { key: 'success', label: `Convertiti (${successCount})` },
+    { key: 'failed',  label: `Non convertiti (${purchasers.length - successCount})` },
+  ].map(c => `<button class="filter-btn ${filter === c.key ? 'active' : ''}" data-purchaser-filter="${c.key}">${c.label}</button>`).join('');
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;flex-wrap:wrap">
+        <div>
+          <div class="card-title" style="margin-bottom:3px">Chi ha tentato o acquistato</div>
+          <div style="font-size:11px;color:var(--muted)">stato = conversione reale (<span style="color:#22d3ee">In prova</span> / <span style="color:#4ade80">Pagante</span>) da play_purchases, non più view_PremiumActivated · ${problemCount} con problemi</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div>
+      </div>
+      ${!sorted.length ? `<div style="color:var(--muted);font-size:12px;padding:16px 0">Nessun utente in questo filtro</div>` : `
+      <div style="overflow-x:auto">
+        <table style="width:100%;font-size:12px;border-collapse:collapse;min-width:1120px">
+          <thead>
+            <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Utente</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Email</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Stato</th>
+              <th style="text-align:center;padding:6px 10px;border-bottom:1px solid #1a1a2e">Tentativi</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Prodotto</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Via</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Primo tentativo</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Ultimo tentativo</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Successo</th>
+              <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Problema / errore</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sorted.map(p => {
+              const product = premiumPlanLabel(p.product);
+              const prodColor = product === 'Annuale' ? '#a78bfa' : product === 'Mensile' ? '#4ade80' : 'var(--muted)';
+              const statusColor = p.convState === 'paid' ? (p.canceling ? '#f472b6' : '#4ade80') : p.convState === 'trial' ? '#22d3ee' : p.convState === 'at_risk' ? '#f59e0b' : p.convState === 'churned' ? '#ef4444' : p.errorText ? '#f59e0b' : 'var(--muted)';
+              const statusBg    = p.convState === 'paid' ? (p.canceling ? '#2c1622' : '#102915') : p.convState === 'trial' ? '#0e2a30' : p.convState === 'at_risk' ? '#2b210f' : p.convState === 'churned' ? '#2a1414' : p.errorText ? '#2b210f' : '#171728';
+              return `
+                <tr style="border-bottom:1px solid #111120">
+                  <td style="padding:10px 10px"><div style="font-weight:600;color:var(--fg);white-space:nowrap">${esc(p.name || 'Non tracciato')}</div></td>
+                  <td style="padding:10px 10px;color:var(--muted);font-family:monospace;font-size:11px">${esc(p.email || 'Non tracciata')}</td>
+                  <td style="padding:10px 10px"><span style="font-size:10px;padding:3px 8px;border-radius:999px;background:${statusBg};color:${statusColor};white-space:nowrap">${esc(p.status)}</span></td>
+                  <td style="padding:10px 10px;text-align:center"><span style="font-weight:700;color:${p.attempts > 3 ? '#f59e0b' : 'var(--fg)'}">${p.attempts}</span></td>
+                  <td style="padding:10px 10px"><span style="font-size:10px;padding:2px 7px;border-radius:4px;background:#161629;color:${prodColor};white-space:nowrap">${esc(product)}</span></td>
+                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${esc(premiumSourceLabel(p.source))}</td>
+                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${esc(premiumFormatDate(p.firstAttempt) || 'Non tracciato')}</td>
+                  <td style="padding:10px 10px;color:var(--muted);font-size:11px;white-space:nowrap">${esc(premiumFormatDate(p.lastAttempt) || 'Non tracciato')}</td>
+                  <td style="padding:10px 10px;color:${p.success ? '#4ade80' : 'var(--muted)'};font-size:11px;white-space:nowrap">${esc(premiumFormatDate(p.successAt) || (p.success ? 'Si' : 'No'))}</td>
+                  <td style="padding:10px 10px;color:${p.errorText ? '#f59e0b' : 'var(--muted)'};font-size:11px;min-width:190px">${esc(p.errorText || 'Nessun errore tracciato')}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>`;
+}
+
+function premiumPurchasesCard(purchases) {
+  const ET_LABEL = {
+    'SUBSCRIPTION_PURCHASED': 'Acquistato',
+    'SUBSCRIPTION_RENEWED':   'Rinnovato',
+    'SUBSCRIPTION_CANCELED':  'Annullato',
+    'SUBSCRIPTION_EXPIRED':   'Scaduto',
+    'SUBSCRIPTION_REVOKED':   'Revocato',
+    'CLIENT_VERIFIED':        'Verificato (app)',
+  };
+  const ET_COLOR = {
+    'SUBSCRIPTION_PURCHASED': '#4ade80',
+    'SUBSCRIPTION_RENEWED':   '#60a5fa',
+    'SUBSCRIPTION_CANCELED':  '#f59e0b',
+    'SUBSCRIPTION_EXPIRED':   '#ef4444',
+    'SUBSCRIPTION_REVOKED':   '#ef4444',
+    'CLIENT_VERIFIED':        '#a78bfa',
+  };
+  const CANCEL_REASON = { 0: 'utente', 1: 'sviluppatore', 2: 'pagamento' };
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px">
+        <div class="card-title" style="margin-bottom:0">Abbonamenti reali</div>
+        <div style="font-size:11px;color:var(--muted)">Esclusi sandbox &lt; 2h · esclusi account interni</div>
+      </div>
+      ${!purchases?.length ? `
+        <div style="text-align:center;padding:32px 20px">
+          <div style="font-size:32px;margin-bottom:10px">🚀</div>
+          <div style="color:var(--fg);font-size:14px;font-weight:600;margin-bottom:6px">Nessun abbonamento esterno ancora</div>
+          <div style="color:var(--muted);font-size:12px">Il primo abbonato reale comparirà qui automaticamente</div>
+        </div>` : `
+        <div style="overflow-x:auto">
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead>
+              <tr style="color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Data</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Prodotto</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Evento</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Valido fino</th>
+                <th style="text-align:left;padding:6px 10px;border-bottom:1px solid #1a1a2e">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${purchases.map(p => `
+                <tr style="border-bottom:1px solid #111120">
+                  <td style="padding:8px 10px;color:var(--muted);white-space:nowrap">${p.created_fmt}</td>
+                  <td style="padding:8px 10px">
+                    <span style="font-size:10px;padding:2px 7px;border-radius:4px;
+                      background:${p.product_id==='premium_yearly'?'#1a1a40':'#1a2a1a'};
+                      color:${p.product_id==='premium_yearly'?'#a78bfa':'#4ade80'}">
+                      ${p.product_id === 'premium_yearly' ? 'Annuale' : 'Mensile'}
+                    </span>
+                  </td>
+                  <td style="padding:8px 10px;white-space:nowrap">
+                    <span style="color:${ET_COLOR[p.event_type]||'var(--muted)'};font-weight:600">
+                      ${ET_LABEL[p.event_type] || p.event_type}
+                    </span>
+                  </td>
+                  <td style="padding:8px 10px;color:var(--muted)">${p.expires_date || '—'}</td>
+                  <td style="padding:8px 10px;color:var(--muted);font-size:11px">
+                    ${p.cancel_reason !== null ? 'Annullato da: ' + (CANCEL_REASON[p.cancel_reason] ?? p.cancel_reason) : ''}
+                    ${p.is_trial ? '🧪 trial' : ''}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+    </div>`;
+}
+
+function premiumExcludedCard(accounts) {
+  if (!accounts?.length) return '';
+  return `
+    <details style="margin-bottom:16px">
+      <summary style="cursor:pointer;padding:12px 16px;background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;
+        font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px;user-select:none">
+        <span style="font-size:14px">🔒</span>
+        <span><strong style="color:var(--fg)">${accounts.length} account interni esclusi</strong> da tutti i conteggi — clicca per vedere</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted);opacity:.7">gestiti in Sprint →</span>
+      </summary>
+      <div style="border:1px solid #2a2a3d;border-top:none;border-radius:0 0 10px 10px;overflow:hidden">
+        <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead>
+            <tr style="background:#111120;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="text-align:left;padding:8px 14px">Nome</th>
+              <th style="text-align:left;padding:8px 14px">Email</th>
+              <th style="text-align:left;padding:8px 14px">Motivo esclusione</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${accounts.map(a => `
+                <tr style="border-top:1px solid #1a1a2e">
+                  <td style="padding:8px 14px;color:var(--fg)">${esc(a.nome || a.username || '—')}</td>
+                  <td style="padding:8px 14px;color:var(--muted);font-family:monospace;font-size:11px">${esc(a.email || '')}</td>
+                  <td style="padding:8px 14px">
+                    <span style="font-size:10px;padding:2px 8px;border-radius:4px;background:#1a1a30;color:#60a5fa">${esc(a.motivo || '—')}</span>
+                  </td>
+                </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>`;
+}
+
+function premiumDataQualityCard(d) {
+  const q = d.data_quality || {};
+  const items = [];
+  // trial_started: evento morto
+  items.push(q.trial_started_events > 0
+    ? { ok: true,  t: `trial_started: ${q.trial_started_events} eventi`, s: 'evento di conversione trial attivo' }
+    : { ok: false, t: 'trial_started: mai emesso', s: 'NON usarlo come conversione — nel prodotto non esistono prove gratuite, la conversione vera è in play_purchases' });
+  // attribuzione variant
+  items.push(q.variant_attribution_live
+    ? { ok: true,  t: 'Attribuzione creatività: live', s: 'plan_select e purchase_attempt portano il nome della creatività' }
+    : { ok: false, t: 'Attribuzione creatività: non ancora in produzione', s: 'plan_select/purchase_attempt non portano ancora il variant — conversione per creatività non attribuibile finché l\'app non viene rilasciata' });
+  // sync is_premium
+  items.push((q.is_premium_sync_mismatch || 0) > 0
+    ? { ok: false, t: `is_premium desincronizzato: ${q.is_premium_sync_mismatch} utenti`, s: 'pagano (play_purchases attivo) ma users.is_premium=false — bug di sync da fixare lato app/webhook, rischiano di non avere accesso Premium' }
+    : { ok: true,  t: 'is_premium sincronizzato', s: 'nessuno scostamento tra pagamenti e flag premium' });
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title" style="margin-bottom:12px">Qualità dati Premium</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${items.map(it => `
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:9px 12px;background:#111120;border-radius:8px;border-left:3px solid ${it.ok ? '#4ade80' : '#ef4444'}">
+            <span style="font-size:14px;flex-shrink:0">${it.ok ? '✓' : '⚠'}</span>
+            <div>
+              <div style="font-size:12px;font-weight:600;color:${it.ok ? '#4ade80' : '#fbbf24'}">${esc(it.t)}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.5">${esc(it.s)}</div>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function premiumDiagnostics(d, hasRealErrors) {
+  return `
+    <details style="margin-bottom:16px">
+      <summary style="cursor:pointer;padding:12px 16px;background:#0d0d19;border:1px solid #2a2a3d;border-radius:10px;
+        font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:8px;user-select:none">
+        <span style="font-size:14px">🔧</span>
+        <span><strong style="color:var(--fg)">Diagnostica e dati grezzi</strong> — qualità dati, errori, log abbonamenti, account esclusi</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--muted);opacity:.7">clicca per espandere →</span>
+      </summary>
+      <div style="margin-top:12px">
+        ${premiumDataQualityCard(d)}
+        ${hasRealErrors ? premiumErrorsCard(d.billing_errors, d.purchase_errors) : `
+        <div class="card" style="margin-bottom:16px;border-color:#1a3a1a">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:18px">✓</span>
+            <div>
+              <div style="font-size:13px;font-weight:600;color:#4ade80">Nessun errore rilevato (utenti reali)</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">Gli errori BILLING_UNAVAILABLE erano tutti da sessioni di test interne</div>
+            </div>
+          </div>
+        </div>`}
+        ${premiumPurchasesCard(d.recent_purchases)}
+        ${premiumExcludedCard(state.blockedUsers)}
+      </div>
+    </details>`;
+}
+
+// ── SPRINT ────────────────────────────────────────────────────────────
+
+// Editor inline del funnel di uno sprint (compare solo per lo sprint in editing). Opera su
+// state.sprintFunnelEdit (working copy); il salvataggio scrive sprints.funnel_config nel DB.
+function sprintFunnelEditor(s) {
+  if (state.sprintFunnelEditId !== s.id || !state.sprintFunnelEdit) return '';
+  const rows = state.sprintFunnelEdit.map((row, i) => sprintCfgEditRow(row, i)).join('');
+  return `
+    <div style="margin-left:24px;margin-top:10px;background:var(--surface2);border-radius:10px;padding:16px">
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:4px">Funnel dello sprint “${s.nome}”</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+        Trascina ⠿ per riordinare. Le modifiche si salvano nel DB solo con “Salva”.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">${rows}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button id="sprint-cfg-add" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">+ Aggiungi step</button>
+        <button id="sprint-cfg-reset" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)">↺ Default</button>
+        <button id="sprint-cfg-clear" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--muted)"
+          title="Rimuovi la personalizzazione: lo sprint tornerà a usare il funnel di default">🗑 Rimuovi personalizzazione</button>
+        <button id="sprint-cfg-save" class="btn btn-primary" style="font-size:12px;padding:6px 14px;margin-left:auto" ${state.sprintFunnelSaving ? 'disabled' : ''}>
+          ${state.sprintFunnelSaving ? 'Salvataggio…' : '✓ Salva'}
+        </button>
+        <button id="sprint-cfg-close" class="btn btn-ghost" style="font-size:12px;padding:6px 12px">Chiudi</button>
+      </div>
+    </div>`;
+}
+
+function pageSprint() {
+  const sprints = state.sprints;
+
+  const formHtml = state.sprintFormOpen ? `
+    <div style="background:var(--surface2);border-radius:10px;padding:16px;margin-bottom:20px">
+      <div style="font-size:12px;font-weight:700;color:var(--text);margin-bottom:14px">
+        ${state.sprintEditingId ? '✏ Modifica sprint' : '+ Nuovo sprint'}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div style="flex:1;min-width:180px">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Nome</div>
+          <input id="sprint-form-nome" class="form-input" value="${state.sprintForm.nome}"
+            placeholder="es. Sprint 4 — Retention" style="width:100%;font-size:12px;padding:6px 10px">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Inizio</div>
+          <input id="sprint-form-inizio" type="date" class="form-input" value="${state.sprintForm.inizio}"
+            style="font-size:12px;padding:6px 10px">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Fine</div>
+          <input id="sprint-form-fine" type="date" class="form-input" value="${state.sprintForm.fine}"
+            style="font-size:12px;padding:6px 10px">
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        ${state.sprintForm.inizio_ora
+          ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Orario di partenza (ora locale)</div>
+             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+               <input id="sprint-form-inizio-ora" type="time" class="form-input" value="${state.sprintForm.inizio_ora}"
+                 style="font-size:12px;padding:6px 10px">
+               <button id="sprint-form-ora-clear" class="btn btn-ghost" style="font-size:11px;padding:5px 10px">Rimuovi orario</button>
+               <span style="font-size:10px;color:var(--muted)">Lo sprint conta solo da questo orario in poi.</span>
+             </div>`
+          : `<button id="sprint-form-ora-add" class="btn btn-ghost" style="font-size:11px;padding:5px 12px">+ Aggiungi orario di partenza</button>
+             <span style="font-size:10px;color:var(--muted);margin-left:8px">Opzionale — senza, conta il giorno intero.</span>`}
+      </div>
+      <div style="margin-bottom:14px">
+        ${state.sprintForm.fine_ora
+          ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Orario di fine (ora locale)</div>
+             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+               <input id="sprint-form-fine-ora" type="time" class="form-input" value="${state.sprintForm.fine_ora}"
+                 style="font-size:12px;padding:6px 10px">
+               <button id="sprint-form-fine-ora-clear" class="btn btn-ghost" style="font-size:11px;padding:5px 10px">Rimuovi orario</button>
+               <span style="font-size:10px;color:var(--muted)">Lo sprint conta solo fino a questo orario.</span>
+             </div>`
+          : `<button id="sprint-form-fine-ora-add" class="btn btn-ghost" style="font-size:11px;padding:5px 12px">+ Aggiungi orario di fine</button>
+             <span style="font-size:10px;color:var(--muted);margin-left:8px">Opzionale — senza, conta fino a fine giornata.</span>`}
+      </div>
+      <div style="margin-bottom:14px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Note</div>
+        <textarea id="sprint-form-note" class="form-input"
+          placeholder="Obiettivi, contesto, cosa abbiamo testato…"
+          style="width:100%;font-size:12px;padding:8px 10px;resize:vertical;min-height:80px;font-family:inherit;line-height:1.5">${state.sprintForm.note || ''}</textarea>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="sprint-form-save" class="btn btn-primary" style="font-size:12px;padding:6px 16px">
+          ${state.sprintEditingId ? '✓ Aggiorna' : 'Crea sprint'}
+        </button>
+        <button id="sprint-form-cancel" class="btn btn-ghost" style="font-size:12px;padding:6px 12px">Annulla</button>
+      </div>
+    </div>` : '';
+
+  const listHtml = !sprints.length
+    ? `<div class="empty" style="padding:40px 20px">
+        <div class="empty-icon">🏃</div>
+        <div class="empty-text" style="color:var(--muted)">Nessuno sprint. Creane uno!</div>
+      </div>`
+    : `<div>
+        ${sprints.map((s, i) => {
+          const days  = Math.round((new Date(s.fine) - new Date(s.inizio)) / 86400000) + 1;
+          const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+          const io = s.inizio_ora ? String(s.inizio_ora).slice(0,5) : '';
+          const fo = s.fine_ora   ? String(s.fine_ora).slice(0,5)   : '';
+          const oraLabel = io && fo ? ` · ⏱ dalle ${io} alle ${fo}`
+                         : io       ? ` · ⏱ dalle ${io}`
+                         : fo       ? ` · ⏱ fino alle ${fo}`
+                         : '';
+          return `
+            <div style="padding:16px 0;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+              <div class="sp-row" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+                <div style="display:flex;align-items:flex-start;gap:12px">
+                  <div style="width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0;margin-top:3px"></div>
+                  <div>
+                    <div style="font-weight:700;font-size:14px;color:var(--text);margin-bottom:3px">${s.nome}</div>
+                    <div style="font-size:11px;color:var(--muted);font-family:var(--mono)">${s.inizio} → ${s.fine} · ${days} giorni${oraLabel}</div>
+                  </div>
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0">
+                  <button class="btn btn-ghost sprint-funnel-edit" data-id="${s.id}"
+                    style="font-size:11px;padding:4px 10px">🎯 Funnel</button>
+                  <button class="btn btn-ghost sprint-edit" data-id="${s.id}"
+                    style="font-size:11px;padding:4px 10px">✏ Modifica</button>
+                  <button class="btn btn-ghost sprint-delete" data-id="${s.id}"
+                    style="font-size:11px;padding:4px 10px;color:var(--red)">✕</button>
+                </div>
+              </div>
+              ${s.note ? `<div style="margin-left:24px;font-size:12px;color:var(--muted);line-height:1.6;white-space:pre-wrap">${s.note}</div>` : ''}
+              <div style="margin-left:24px;font-size:11px;color:var(--muted)">
+                Funnel: ${Array.isArray(s.funnel_config) && s.funnel_config.length
+                  ? `<span style="color:var(--amber);font-weight:600">📌 personalizzato (${s.funnel_config.length} step)</span>`
+                  : `<span>default</span>`}
+              </div>
+              ${sprintFunnelEditor(s)}
+            </div>`;
+        }).join('')}
+      </div>`;
+
+  // ── Blocked users section ─────────────────────────────────────────
+  const blocked = state.blockedUsers;
+  const searchOpen = state.blockSearchOpen;
+
+  const blockedSearchHtml = searchOpen ? `
+    <div style="margin-bottom:20px">
+      <input id="blocked-search" class="form-input" placeholder="Cerca per nome, username o email…"
+        value="${esc(state.blockSearchQuery)}"
+        style="width:100%;font-size:12px;padding:8px 12px;box-sizing:border-box" autocomplete="off">
+      <div id="blocked-search-results"></div>
+    </div>` : '';
+
+  const blockedListHtml = blocked.length
+    ? `<div>${blocked.map(u => `
+        <div style="padding:12px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <div style="width:8px;height:8px;border-radius:50%;background:#ef4444;flex-shrink:0"></div>
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(u.nome || u.username || '—')} <span style="font-size:11px;font-weight:400;color:var(--muted)">@${esc(u.username || '')}</span></div>
+              <div style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.email || '')} · <span style="color:#60a5fa">${esc(u.motivo || '')}</span></div>
+            </div>
+          </div>
+          <button class="btn btn-ghost blocked-remove" data-id="${u.id}"
+            style="font-size:11px;padding:4px 10px;color:var(--red);flex-shrink:0">✕</button>
+        </div>`).join('')}</div>`
+    : `<div style="font-size:12px;color:var(--muted);padding:20px 0;text-align:center">Nessun account escluso.</div>`;
+
+  const recentlyRemovedHtml = state.recentlyUnblocked.length ? `
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.05em;text-transform:uppercase;margin-bottom:10px">Rimossi di recente</div>
+      ${state.recentlyUnblocked.map(u => `
+        <div style="padding:8px 0;display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0">
+            <div style="width:8px;height:8px;border-radius:50%;background:#6b7280;flex-shrink:0"></div>
+            <div style="min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--muted)">${esc(u.nome || u.username || '—')} <span style="font-size:11px;font-weight:400">@${esc(u.username || '')}</span></div>
+              <div style="font-size:11px;color:var(--muted);opacity:.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.email || '')}</div>
+            </div>
+          </div>
+          <button class="btn btn-ghost blocked-readd" data-user-id="${u.user_id}" data-username="${esc(u.username||'')}" data-email="${esc(u.email||'')}" data-nome="${esc(u.nome||'')}"
+            style="font-size:11px;padding:4px 10px;flex-shrink:0">+ Riaggiungi</button>
+        </div>`).join('')}
+    </div>` : '';
+
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:${state.sprintFormOpen ? '20px' : '16px'}">
+        <div>
+          <div class="card-title" style="margin-bottom:4px">Sprint</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5">Registro sprint con date e note. Il confronto dati è disponibile in Funnel e Retention.</div>
+        </div>
+        ${!state.sprintFormOpen ? `<button id="sprint-new" class="btn btn-primary" style="font-size:12px;padding:6px 14px;flex-shrink:0;margin-left:16px">+ Nuovo sprint</button>` : ''}
+      </div>
+      ${formHtml}
+      ${listHtml}
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:${searchOpen ? '20px' : '16px'}">
+        <div>
+          <div class="card-title" style="margin-bottom:4px">Account esclusi dalle metriche</div>
+          <div style="font-size:11px;color:var(--muted);line-height:1.5">Modifiche qui aggiornano Overview, Funnel, Retention, Premium e Comportamento.</div>
+        </div>
+        <button id="blocked-add-toggle" class="btn ${searchOpen ? 'btn-ghost' : 'btn-primary'}"
+          style="font-size:12px;padding:6px 14px;flex-shrink:0;margin-left:16px">
+          ${searchOpen ? '✕ Chiudi' : '+ Aggiungi'}
+        </button>
+      </div>
+      ${blockedSearchHtml}
+      ${blockedListHtml}
+      ${recentlyRemovedHtml}
+    </div>`;
+}
+
+// ── SPRINT COMPARE — FUNNEL ───────────────────────────────────────────
+
+function sprintFunnelSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintFunnelOpen;
+
+  const badge = state.sprintFunnelSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintFunnelSel.length} sel.</span>`
+    : '';
+
+  const headerEl = `
+    <div id="sprint-funnel-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
+        ${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+
+  if (!isOpen) {
+    return `<div class="card" style="margin-top:16px;padding:14px 20px">${headerEl}</div>`;
+  }
+
+  const chips = state.sprints.map((s, i) => {
+    const on    = state.sprintFunnelSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-funnel-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+    </button>`;
+  }).join('');
+
+  const hasData = Object.keys(state.sprintFunnelData).length > 0;
+  const body = state.sprintFunnelLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🎯</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintFunnelError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${state.sprintFunnelError}</div>`
+    : !hasData ? ''
+    : sprintFunnelCompareView();
+
+  return `
+    <div class="card" style="margin-top:16px">
+      ${headerEl}
+      <div style="margin-top:18px">
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button id="sprint-funnel-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+            ${!state.sprintFunnelSel.length ? 'disabled' : ''}>Calcola confronto</button>
+          ${sprintFunnelDefSelector()}
+          ${hasData ? pctStartToggle('sprint-funnel-pctstart') : ''}
+          ${!hasData && !state.sprintFunnelLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
+        </div>
+        ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// Selettore "quale funnel confrontare": Base (ogni sprint usa il suo funnel_config) oppure una
+// definizione salvata applicata IDENTICA a tutti gli sprint (stesso metro). Per ora lista le sole
+// definizioni tipo 'catalog' (gli event-based avranno la loro tabella dedicata nell'incremento successivo).
+function sprintFunnelDefSelector() {
+  const defs = (state.savedFunnels || []).filter(d => (d.tipo || 'catalog') === 'catalog');
+  if (!defs.length) return ''; // nessun funnel salvato → solo Base, selettore inutile
+  const opts = [`<option value="" ${!state.sprintFunnelDef ? 'selected' : ''}>Base (ogni sprint il suo)</option>`]
+    .concat(defs.map(d => `<option value="${esc(d.id)}" ${state.sprintFunnelDef === d.id ? 'selected' : ''}>${esc(d.name)}</option>`))
+    .join('');
+  return `
+    <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Funnel</span>
+    <select id="sprint-funnel-def-sel" class="form-select" style="font-size:12px;padding:5px 10px;min-width:180px">${opts}</select>`;
+}
+
+// La definizione (catalog) attualmente selezionata per il confronto, o null se siamo in modalità Base.
+function activeSprintFunnelDef() {
+  if (!state.sprintFunnelDef) return null;
+  return (state.savedFunnels || []).find(d => d.id === state.sprintFunnelDef && (d.tipo || 'catalog') === 'catalog') || null;
+}
+
+function sprintFunnelCompareView() {
+  const selected = state.sprints.filter(s => state.sprintFunnelSel.includes(s.id));
+  if (!selected.length) return '';
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px">
+    ${selected.map((s, i) => `
+      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
+        <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
+        <span style="font-weight:600;color:var(--text)">${s.nome}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</span>
+      </span>`).join('')}
+  </div>`;
+  const def = activeSprintFunnelDef();
+  const note = def
+    ? `Confronto sul funnel <strong style="color:var(--text)">${esc(def.name)}</strong>: gli <strong style="color:var(--text)">stessi step</strong> applicati a ogni sprint (stesso metro). Il funnel base di ogni sprint non viene toccato — torni a vederlo scegliendo “Base”.`
+    : `Ogni sprint usa il suo funnel (o quello di default). La cella <span style="color:#3a3a55">·</span> indica uno step non incluso nel funnel di quello sprint. I funnel si modificano nella pagina <strong style="color:var(--text)">Sprint</strong> o si assegnano da qui col pulsante “Assegna a sprint”.`;
+  // Quali sprint stanno usando una testa di ripiego (installazioni non ancora importate): vanno detti
+  // in chiaro, altrimenti la seconda % sembra confrontabile con quella degli altri e non lo è.
+  const fallbacks = selected
+    .map(s => {
+      const h = funnelHead(def ? def.config : sprintFunnelCfg(s), state.sprintFunnelData[s.id] || []);
+      return h && h.fallback ? { nome: s.nome, step: FUNNEL_LABELS[h.stepIdx] || '' } : null;
+    })
+    .filter(Boolean);
+  const pctNote = !state.sprintFunnelPctStart ? '' :
+    ` Sotto ogni numero: <strong style="color:var(--text)">prima %</strong> = vs step precedente (o quello scelto nel funnel), <strong style="color:var(--text)">seconda % in grigio</strong> = sul primo step del funnel di quello sprint.` +
+    (fallbacks.length ? `
+      <br><span style="color:var(--amber)">*</span> ${fallbacks.map(f => `<strong style="color:var(--text)">${esc(f.nome)}</strong>`).join(', ')}
+      ${fallbacks.length > 1 ? 'non hanno' : 'non ha'} ancora il dato installazioni (arriva ~7-10 giorni dopo):
+      per ora la seconda % parte da <strong style="color:var(--text)">${esc(fallbacks[0].step)}</strong> e si riallinea da sola quando il dato viene importato.
+      Finché c'è l'asterisco quella % ha un denominatore diverso dagli altri sprint — <strong style="color:var(--text)">non confrontarla 1:1</strong>.` : '');
+  return legend +
+    `<div style="font-size:11px;color:var(--muted);margin-bottom:16px;line-height:1.5">${note}${pctNote}</div>` +
+    sprintFunnelTable(selected, state.sprintFunnelData);
+}
+
+// ── SPRINT COMPARE — RETENTION ────────────────────────────────────────
+
+function sprintRetSection() {
+  if (!state.sprints.length) return '';
+  const isOpen = state.sprintRetOpen;
+
+  const badge = state.sprintRetSel.length
+    ? `<span style="background:var(--accent-lo);border:1px solid var(--accent);color:var(--purple);border-radius:20px;font-size:10px;padding:2px 9px;font-weight:600">${state.sprintRetSel.length} sel.</span>`
+    : '';
+
+  const headerEl = `
+    <div id="sprint-ret-toggle" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:14px;font-weight:700;color:var(--text)">Confronto Sprint</span>
+        ${badge}
+      </div>
+      <span style="font-size:12px;color:var(--muted);font-weight:500">${isOpen ? '▲ Chiudi' : '▼ Apri'}</span>
+    </div>`;
+
+  if (!isOpen) {
+    return `<div class="card" style="margin-top:16px;padding:14px 20px">${headerEl}</div>`;
+  }
+
+  const chips = state.sprints.map((s, i) => {
+    const on    = state.sprintRetSel.includes(s.id);
+    const color = SPRINT_COLORS[i % SPRINT_COLORS.length];
+    return `<button class="sprint-ret-chip" data-id="${s.id}"
+      style="cursor:pointer;padding:5px 14px;font-size:12px;font-weight:600;border-radius:20px;border:1.5px solid;display:inline-flex;align-items:center;gap:6px;transition:all .15s;
+        ${on ? 'background:var(--accent-lo);border-color:var(--accent);color:var(--purple)' : 'background:var(--surface2);border-color:#3a3a55;color:var(--text)'}">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0"></span>
+      ${on ? '✓ ' : ''}${s.nome}
+    </button>`;
+  }).join('');
+
+  const effMin   = state.sprintRetCustom ? state.sprintRetMin   : state.retMin;
+  const effWeeks = state.sprintRetCustom ? state.sprintRetWeeks : state.retWeeks;
+  const effMinW0 = state.sprintRetCustom ? state.sprintRetMinW0 : state.retMinW0;
+
+  const paramsEl = state.sprintRetCustom ? `
+    <div style="background:var(--surface2);border-radius:8px;padding:12px 14px;margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap">Retained se</span>
+        <select id="sprint-ret-min" class="form-select" style="font-size:12px;padding:4px 8px">
+          ${Array.from({length:10},(_,n)=>`<option value="${n+1}" ${state.sprintRetMin===n+1?'selected':''}>≥${n+1} wkt/sett.</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap">Eligible</span>
+        <select id="sprint-ret-min-w0" class="form-select" style="font-size:12px;padding:4px 8px">
+          ${[1,2,3,4,5].map(n=>`<option value="${n}" ${state.sprintRetMinW0===n?'selected':''}>≥${n} in W0</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap">Settimane</span>
+        <select id="sprint-ret-weeks" class="form-select" style="font-size:12px;padding:4px 8px">
+          ${[2,4,6,8,12].map(w=>`<option value="${w}" ${state.sprintRetWeeks===w?'selected':''}>W${w}</option>`).join('')}
+        </select>
+      </div>
+      <button id="sprint-ret-reset" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;color:var(--muted);white-space:nowrap">↺ Ripristina</button>
+    </div>` : `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">Parametri: <strong style="color:var(--text);font-weight:600">≥${effMin} wkt/sett · eligible ≥${effMinW0} in W0 · ${effWeeks} sett.</strong></span>
+      <button id="sprint-ret-customize" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;white-space:nowrap">⚙ Personalizza</button>
+    </div>`;
+
+  const hasData = Object.keys(state.sprintRetData).length > 0;
+  const body = state.sprintRetLoading
+    ? `<div class="empty" style="padding:28px 0"><div class="empty-icon pulse">🔄</div><div class="empty-text" style="color:var(--muted)">Calcolo...</div></div>`
+    : state.sprintRetError
+    ? `<div style="color:var(--red);font-size:13px;margin-top:4px">⚠️ ${state.sprintRetError}</div>`
+    : !hasData ? ''
+    : sprintRetCompareView();
+
+  return `
+    <div class="card" style="margin-top:16px">
+      ${headerEl}
+      <div style="margin-top:18px">
+        <div style="margin-bottom:14px">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Sprint da confrontare</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">${chips}</div>
+        </div>
+        ${paramsEl}
+        <div style="display:flex;align-items:center;gap:12px">
+          <button id="sprint-ret-calc" class="btn btn-primary" style="font-size:12px;padding:6px 16px"
+            ${!state.sprintRetSel.length ? 'disabled' : ''}>Calcola confronto</button>
+          ${!hasData && !state.sprintRetLoading ? `<span style="font-size:12px;color:var(--muted)">Seleziona sprint e calcola</span>` : ''}
+        </div>
+        ${body ? `<div style="border-top:1px solid var(--border);margin-top:20px;padding-top:20px">${body}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function sprintRetCompareView() {
+  const selected = state.sprints.filter(s => state.sprintRetSel.includes(s.id));
+  if (!selected.length) return '';
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:18px">
+    ${selected.map((s, i) => `
+      <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px">
+        <span style="width:22px;height:3px;border-radius:2px;background:${SPRINT_COLORS[i % SPRINT_COLORS.length]}"></span>
+        <span style="font-weight:600;color:var(--text)">${s.nome}</span>
+        <span style="color:var(--muted)">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</span>
+      </span>`).join('')}
+  </div>`;
+  return legend + sprintRetentionChart(selected, state.sprintRetData) + '<div style="margin-top:16px">' + sprintRetentionTable(selected, state.sprintRetData) + '</div>';
+}
+
+function sprintRetentionChart(selected, dataMap) {
+  const allData  = selected.map(s => dataMap[s.id] || []);
+  const maxWeeks = Math.max(...allData.map(d => d.length), 2);
+  const W = 800, H = 260, PT = 50, PB = 30, PL = 42, PR = 20;
+  const cW = W - PL - PR, cH = H - PT - PB;
+
+  const series = selected.map((s, si) => {
+    const data  = dataMap[s.id] || [];
+    const color = SPRINT_COLORS[si % SPRINT_COLORS.length];
+    const dash  = SPRINT_DASHES[si % SPRINT_DASHES.length];
+    const pts   = data.map((r, i) => ({
+      x: PL + (i / Math.max(maxWeeks - 1, 1)) * cW,
+      y: PT + cH - (Number(r.retention_pct) / 100) * cH,
+      pct: Number(r.retention_pct),
+    }));
+    if (!pts.length) return '';
+    const poly   = pts.map(p => `${p.x},${p.y}`).join(' ');
+    const lblOff = 11 + si * 13;
+    const dots   = pts.map(p =>
+      `<circle cx="${p.x}" cy="${p.y}" r="5" fill="${color}" stroke="#0d0d14" stroke-width="2"/>
+       <text x="${p.x}" y="${p.y - lblOff}" text-anchor="middle" font-size="9.5" fill="${color}" font-weight="700">${p.pct}%</text>`
+    ).join('');
+    return `<polyline points="${poly}" stroke="${color}" stroke-width="2.5" fill="none"
+              stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="${dash}"/>
+            ${dots}`;
+  }).join('');
+
+  const refs = [0, 25, 50, 75, 100].map(p => {
+    const y = PT + cH - (p / 100) * cH;
+    return `<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="#1d1d2e" stroke-width="1"/>
+            <text x="${PL-5}" y="${y+3}" text-anchor="end" font-size="8" fill="#5a5a80">${p}%</text>`;
+  }).join('');
+
+  const xLabels = Array.from({ length: maxWeeks }, (_, i) =>
+    `<text x="${PL + (i / Math.max(maxWeeks - 1, 1)) * cW}" y="${H - 6}" text-anchor="middle" font-size="9" fill="#6b6b90">${i === 0 ? 'W0' : `W${i}`}</text>`
+  ).join('');
+
+  return `
+    <div style="background:var(--surface2);border-radius:10px;padding:16px 20px;margin-bottom:4px">
+      <div style="font-size:10px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.6px">
+        Curva di retention comparata
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px" xmlns="http://www.w3.org/2000/svg">
+        ${refs}${series}${xLabels}
+      </svg>
+    </div>`;
+}
+
+// Checkbox "% dall'inizio", condivisa da TUTTI i confronti sprint (catalogo, eventi, Premium, AI):
+// è una preferenza di visualizzazione unica — la spunti una volta e vale ovunque, perché la domanda
+// ("quanti dei primi sono ancora qui?") è la stessa in ogni funnel. L'id cambia per pannello solo
+// perché possono coesistere nella stessa pagina; il cablaggio è sulla classe.
+function pctStartToggle(id) {
+  return `<label title="Aggiunge sotto ogni numero una seconda percentuale, calcolata sul primo step del funnel invece che sullo step precedente"
+      style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none">
+      <input type="checkbox" class="sprint-pctstart" id="${id}" ${state.sprintFunnelPctStart ? 'checked' : ''}
+        style="accent-color:var(--purple);cursor:pointer;margin:0">
+      % dall'inizio
+    </label>`;
+}
+
+// La seconda riga di percentuale in una cella di confronto: la % di conversione che la cella già
+// mostrava, più (se il flag è attivo) la % sulla testa del funnel in grigio. Tenerle sulla stessa
+// riga evita di far crescere l'altezza della tabella quando accendi il flag.
+// dupOf = la % di conversione, quando è lo STESSO tipo di misura della % dall'inizio: nello step
+// subito dopo la testa le due coincidono per forza e ripeterle ("80.7% · 80.7%") è solo rumore.
+// Chi confronta misure diverse (Premium mostra una variazione +/-, non una conversione) passa null
+// e non sopprime mai: lì due numeri uguali sarebbero una coincidenza, non un doppione.
+function pctCellLine(convHtml, startPct, headLabel, dupOf = null) {
+  // Prima mostravamo la "% dall'inizio" solo se diversa dalla "vs vsIdx" (dup skip), per non
+  // ripetere lo stesso numero sul primo step successivo alla testa. Rimosso: in funnel dove
+  // vsIdx=0 per tutti gli step le due sarebbero SEMPRE dup e l'utente vedrebbe una sola %,
+  // rompendo l'uniformità col funnel singolo che mostra sempre entrambe. Il parametro dupOf
+  // resta nella firma per backward-compat delle callsite (verrà ignorato).
+  const showStart = startPct !== null;
+  if (convHtml === null && !showStart) return '';
+  return `<div style="font-size:10px;font-weight:600;text-align:right;margin-top:2px">
+    ${convHtml !== null ? convHtml : ''}
+    ${showStart ? `<span title="${esc(`Dall'inizio del funnel (${headLabel})`)}" style="color:var(--muted);font-weight:500">${convHtml !== null ? ' · ' : ''}${startPct.toFixed(1)}%</span>` : ''}
+  </div>`;
+}
+
+// Testa del funnel per la "% dall'inizio": il primo step del funnel di QUESTO sprint che ha davvero
+// un numero. Le installazioni Google Play arrivano ~7-10 giorni dopo, quindi sugli sprint recenti lo
+// step 0 è null: senza fallback la colonna resterebbe vuota proprio sullo sprint che stai guardando.
+// Ci si aggancia allo step buono successivo (di norma "Onboarding iniziato") e ci si RIALLINEA DA SOLI
+// alle installazioni appena il dato viene importato — nessuna azione manuale.
+// fallback:true = denominatore diverso dagli altri sprint → la cella va marcata (*), altrimenti
+// confronteresti una % sulle installazioni con una % sugli onboarding e sembrerebbero la stessa cosa.
+// Il > 0 scarta anche gli step a zero (es. First Open, che non emettiamo): un denominatore 0 non serve.
+function funnelHead(cfg, data) {
+  for (let i = 0; i < cfg.length; i++) {
+    const raw = data[cfg[i].stepIdx]?.numero;
+    if (raw !== null && raw !== undefined && Number(raw) > 0) {
+      return { rowPos: i, stepIdx: cfg[i].stepIdx, num: Number(raw), fallback: i > 0 };
+    }
+  }
+  return null;
+}
+
+function sprintFunnelTable(selected, dataMap) {
+  const colors = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+
+  // Ogni sprint ha la sua config (o il default). La tabella mostra l'UNIONE di tutti gli step
+  // usati dagli sprint selezionati: dove uno sprint non include uno step, la cella resta vuota.
+  // L'ordine dell'unione preserva quello dei funnel (appende gli step nuovi man mano che compaiono).
+  // Modalità Base → ogni sprint usa il SUO funnel_config. Modalità definizione → gli stessi step
+  // (config della definizione) applicati a TUTTI gli sprint, così il confronto è a parità di metro.
+  const def   = activeSprintFunnelDef();
+  const cfgOf  = {};
+  selected.forEach(s => { cfgOf[s.id] = def ? def.config : sprintFunnelCfg(s); });
+  const headOf = {}; // testa del funnel per sprint (per la "% dall'inizio") — una volta, non per cella
+  selected.forEach(s => { headOf[s.id] = funnelHead(cfgOf[s.id], dataMap[s.id] || []); });
+  const unionSteps = [];
+  selected.forEach(s => cfgOf[s.id].forEach(r => {
+    if (!unionSteps.includes(r.stepIdx)) unionSteps.push(r.stepIdx);
+  }));
+
+  // Filtro di sola visualizzazione: righe nascoste dall'occhio (session-only, niente persistenza,
+  // le % restano calcolate sul funnel completo — nascondere non altera i numeri).
+  const hiddenSteps  = (state.sprintFunnelHiddenSteps || []).filter(idx => unionSteps.includes(idx));
+  const visibleSteps = unionSteps.filter(idx => !hiddenSteps.includes(idx));
+  const hiddenBar = hiddenSteps.length ? `
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:14px">
+      <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Righe nascoste</span>
+      ${hiddenSteps.map(idx => `
+        <button class="sprint-step-show" data-step="${idx}" title="Mostra di nuovo questa riga"
+          style="cursor:pointer;padding:3px 10px;font-size:11px;border-radius:20px;border:1px dashed #3a3a55;background:transparent;color:var(--muted);display:inline-flex;align-items:center;gap:5px">
+          👁 ${FUNNEL_LABELS[idx] || ''}
+        </button>`).join('')}
+      <button id="sprint-steps-show-all" class="btn btn-ghost" style="font-size:11px;padding:3px 10px;color:var(--purple)">Mostra tutte</button>
+    </div>` : '';
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
+        <span>${s.nome}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
+    </th>`
+  ).join('');
+
+  const rows = visibleSteps.map(stepIdx => {
+    const label = FUNNEL_LABELS[stepIdx] || '';
+    // maxN calcolato solo sugli sprint che includono questo step (per la barra relativa)
+    const nums = selected.map(s => {
+      const has = cfgOf[s.id].some(r => r.stepIdx === stepIdx);
+      if (!has) return -1;
+      return Number((dataMap[s.id] || [])[stepIdx]?.numero ?? -1);
+    });
+    const maxN = Math.max(...nums.filter(n => n >= 0), 0);
+    // Vincitore = miglior conversione (num/vsN), NON numero assoluto. Al primo step (dove vsN
+    // manca per definizione) convPct=null per tutti → nessuno vince, sensato per top-of-funnel.
+    const convPcts = selected.map(s => {
+      const cfg = cfgOf[s.id];
+      const rowPos = cfg.findIndex(r => r.stepIdx === stepIdx);
+      if (rowPos === -1) return null;
+      const row = cfg[rowPos];
+      const data = dataMap[s.id] || [];
+      const rawNum = data[stepIdx]?.numero;
+      if (rawNum === null || rawNum === undefined) return null;
+      const rawVs = row.vsIdx !== null && row.vsIdx >= 0 && row.vsIdx < rowPos ? data[cfg[row.vsIdx].stepIdx]?.numero : null;
+      const vsN = rawVs === null || rawVs === undefined ? null : Number(rawVs);
+      return vsN !== null && vsN > 0 ? (Number(rawNum) / vsN * 100) : null;
+    });
+    const validPcts = convPcts.filter(p => p !== null);
+    const maxConvPct = validPcts.length ? Math.max(...validPcts) : null;
+
+    const cells = selected.map((s, si) => {
+      const cfg     = cfgOf[s.id];
+      const rowPos  = cfg.findIndex(r => r.stepIdx === stepIdx);
+      // Lo sprint non include questo step nel suo funnel → cella vuota.
+      if (rowPos === -1) {
+        return `<td style="padding:6px 16px;text-align:center;color:#3a3a55;font-size:12px">·</td>`;
+      }
+      const row    = cfg[rowPos];
+      const data   = dataMap[s.id] || [];
+      const rawNum = data[stepIdx]?.numero;
+      const noData = rawNum === null || rawNum === undefined; // dato non disponibile (es. installs non importati)
+      const num    = Number(rawNum ?? 0);
+      const convPct   = convPcts[si];
+      const convStr   = convPct !== null ? convPct.toFixed(1) + '%' : '—';
+      const convColor = convPct === null ? '' : convPct >= 50 ? 'var(--mattia)' : convPct >= 25 ? 'var(--amber)' : 'var(--red)';
+      // Flag "% dall'inizio": seconda percentuale, calcolata sulla testa del funnel di questo sprint
+      // invece che sullo step precedente. Sulla testa stessa (e sopra) non ha senso: sarebbe 100%.
+      const head      = headOf[s.id];
+      const startPct  = state.sprintFunnelPctStart && !noData && head && rowPos > head.rowPos
+        ? (num / head.num * 100) : null;
+      const isBest    = !noData && maxConvPct !== null && convPct === maxConvPct;
+      const barW      = noData ? 0 : (maxN > 0 ? Math.round(num / maxN * 100) : 0);
+      return `<td style="padding:6px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <div style="width:48px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;flex-shrink:0">
+            <div style="height:100%;width:${barW}%;background:${colors[si]};border-radius:2px"></div>
+          </div>
+          ${(stepIdx === 10 || stepIdx === 18) && !noData && num > 0
+            ? `<span class="funnel-step-users" data-step="${stepIdx}" data-inizio="${esc(s.inizio)}" data-fine="${esc(s.fine)}" data-pstart="${esc(sprintStartTs(s) || '')}" data-pend="${esc(sprintEndTs(s) || '')}" data-label="${esc(label)}" data-sprint="${esc(s.nome)}" title="Vedi chi sono questi utenti" style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${colors[si]};cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px">${num}</span>`
+            : `<span style="font-family:var(--mono);font-size:15px;font-weight:${isBest ? '700' : '500'};min-width:30px;color:${isBest ? 'var(--text)' : 'var(--muted)'}" ${noData ? 'title="Dato non disponibile per questo periodo"' : ''}>${noData ? 'n.d.' : num}</span>`}
+        </div>
+        ${(() => {
+          // Nello step subito dopo la testa le due % coincidono per forza → mostra solo la conversione.
+          const dup = startPct !== null && convPct !== null && Math.abs(convPct - startPct) < 0.05;
+          const showStart = startPct !== null && !dup;
+          if (convPct === null && !showStart) return '';
+          return `<div style="font-size:10px;font-weight:600;text-align:right;margin-top:2px">
+            ${convPct !== null ? `<span style="color:${convColor}">${convStr}</span>` : ''}
+            ${showStart ? `<span title="${esc(head.fallback
+                ? `Su “${FUNNEL_LABELS[head.stepIdx] || ''}”: le installazioni non sono ancora disponibili per questo sprint, quindi il denominatore è diverso dagli altri`
+                : `Dall'inizio del funnel (${FUNNEL_LABELS[head.stepIdx] || ''})`)}" style="color:var(--muted);font-weight:500">${convPct !== null ? ' · ' : ''}${startPct.toFixed(1)}%${head.fallback ? '<span style="color:var(--amber)">*</span>' : ''}</span>` : ''}
+          </div>`;
+        })()}
+      </td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="sprint-step-hide" data-step="${stepIdx}" title="Nascondi questa riga (solo visualizzazione)"
+            style="cursor:pointer;background:none;border:none;padding:0;font-size:11px;color:#3a3a55;line-height:1;flex-shrink:0">👁</button>
+          <span>${label}</span>
+        </div>
+      </td>${cells}
+    </tr>`;
+  }).join('');
+
+  const metaRows = (() => {
+    if (!state.metaToken) return '';
+    const fmt2c = n => '€ ' + parseFloat(n).toFixed(2);
+    const topBorder = 'border-top:2px solid rgba(167,139,250,0.3)';
+    const bg = 'background:rgba(167,139,250,0.05)';
+    const lbl = 'font-size:12px;color:var(--muted);font-weight:600';
+    const mkCell = (val, color, pt, pb) =>
+      '<td style="padding:' + pt + ' 16px ' + pb + ' 16px;text-align:right;font-size:13px;font-weight:700;color:' + color + '">' + val + '</td>';
+    const mkEmpty = (pt, pb) =>
+      '<td style="padding:' + pt + ' 16px ' + pb + ' 16px;text-align:right;color:var(--muted);font-size:11px">—</td>';
+
+    const spendCells = selected.map(s => {
+      const md = state.metaSprintData[s.id];
+      if (!md) return mkEmpty('12px', '6px');
+      return mkCell(fmt2c(parseFloat(md.spend || 0)), 'var(--red)', '12px', '6px');
+    }).join('');
+
+    const cacCells = selected.map(s => {
+      const md = state.metaSprintData[s.id];
+      if (!md) return mkEmpty('6px', '6px');
+      const spend = parseFloat(md.spend || 0);
+      const onb = Number((dataMap[s.id] || [])[3]?.numero ?? 0);
+      const cac = onb > 0 ? spend / onb : null;
+      return mkCell(cac != null ? fmt2c(cac) : '—', 'var(--amber)', '6px', '6px');
+    }).join('');
+
+    const cpauCells = selected.map(s => {
+      const md = state.metaSprintData[s.id];
+      if (!md) return mkEmpty('6px', '12px');
+      const spend = parseFloat(md.spend || 0);
+      const wkt = Number((dataMap[s.id] || [])[4]?.numero ?? 0);
+      const cpau = wkt > 0 ? spend / wkt : null;
+      return mkCell(cpau != null ? fmt2c(cpau) : '—', 'var(--purple)', '6px', '12px');
+    }).join('');
+
+    return '<tr style="' + topBorder + ';' + bg + '"><td style="' + lbl + ';padding:12px 16px 6px 16px">Spesa Meta</td>' + spendCells + '</tr>' +
+           '<tr style="' + bg + '"><td style="' + lbl + ';padding:6px 16px">CAC</td>' + cacCells + '</tr>' +
+           '<tr style="' + bg + '"><td style="' + lbl + ';padding:6px 16px 12px 16px">CPAU</td>' + cpauCells + '</tr>';
+  })();
+
+  return `${hiddenBar}<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="border-bottom:2px solid var(--border)">
+      <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Step</th>
+      ${headers}
+    </tr></thead>
+    <tbody>${rows}${metaRows}</tbody>
+  </table>`;
+}
+
+// ── SPRINT COMPARE — DOVE SI PERDONO GLI UTENTI (fasi) ────────────────
+// Pannello separato sotto il Confronto Sprint: raggruppa il funnel in fasi (macro-aree) e mostra per
+// ogni fase quanta gente si perde, sprint per sprint. Due letture, perché "quale fase fa perdere di
+// più" ha due risposte diverse ed entrambe servono:
+//   'abs' = utenti persi  → il volume: dove c'è più gente da recuperare  (somma sugli sprint scelti)
+//   'pct' = tasso di calo → l'intensità: quanto è rotto il passaggio     (media sugli sprint scelti)
+// Tipicamente vincono fasi diverse: il tasso dice dov'è rotto, il volume dice dove conviene aggiustare.
+// Le fasi arrivano da funnel_phases (DB, condivise con Danilo) e si editano da qui.
+// I confini sono stepIdx del catalogo: la stessa lente su tutti gli sprint, anche con funnel diversi.
+// NB: il colore qui NON identifica lo sprint (quello è nell'intestazione) ma la gravità — rosso più
+// intenso = si perde di più. Un solo significato per canale visivo, altrimenti la tabella diventa caos.
+
+// Statistica di una fase per uno sprint. null se manca un confine (es. installs non importati per
+// quel periodo): meglio una cella vuota che un numero inventato.
+function leakStat(phase, sprintId) {
+  const data = state.sprintFunnelData[sprintId] || [];
+  const rawA = data[phase.from]?.numero;
+  const rawB = data[phase.to]?.numero;
+  if (rawA === null || rawA === undefined || rawB === null || rawB === undefined) return null;
+  const a = Number(rawA), b = Number(rawB);
+  if (!(a > 0)) return null;
+  return { a, b, lost: a - b, drop: (1 - b / a) * 100 };
+}
+
+// Legge le fasi dai campi del form. Serve per non ri-renderizzare a ogni tasto (perderesti il focus
+// mentre scrivi il nome): lo stato si aggiorna solo quando aggiungi/togli una fase, cambi un confine
+// o salvi.
+function readLeakEditFromDom() {
+  return Array.from(document.querySelectorAll('.leak-ph-row')).map(r => ({
+    nome: (r.querySelector('.leak-ph-name')?.value || '').trim() || 'Senza nome',
+    from: Number(r.querySelector('.leak-ph-from')?.value ?? 0),
+    to:   Number(r.querySelector('.leak-ph-to')?.value ?? 0),
+  }));
+}
+
+function sprintLeakSection() {
+  const selected = state.sprints.filter(s => state.sprintFunnelSel.includes(s.id));
+  const hasData  = Object.keys(state.sprintFunnelData).length > 0;
+  // Il pannello vive dei dati del Confronto Sprint: senza quelli non ha niente da dire.
+  if (!selected.length || !hasData || state.sprintFunnelLoading || state.sprintFunnelError) return '';
+
+  const editing = !!state.sprintLeakEdit;
+  const phases  = editing ? state.sprintLeakEdit : activeFunnelPhases();
+  const colors  = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+  const isAbs   = state.sprintLeakMode === 'abs';
+
+  const modeBtn = (mode, label, title) => `
+    <button class="leak-mode" data-mode="${mode}" title="${title}"
+      style="cursor:pointer;padding:5px 13px;font-size:12px;font-weight:600;border:none;border-radius:6px;transition:all .15s;
+        ${state.sprintLeakMode === mode ? 'background:var(--purple);color:#150e26' : 'background:transparent;color:var(--muted)'}">
+      ${label}
+    </button>`;
+
+  // Punteggio per fase → chi è "la peggiore". Somma per gli utenti persi (è un volume totale), media
+  // per il tasso (sommare percentuali di sprint diversi non vorrebbe dire niente).
+  const scores = phases.map(ph => {
+    const vals = selected.map(s => leakStat(ph, s.id)).filter(Boolean);
+    if (!vals.length) return null;
+    return isAbs
+      ? vals.reduce((t, v) => t + v.lost, 0)
+      : vals.reduce((t, v) => t + v.drop, 0) / vals.length;
+  });
+  const validScores = scores.filter(v => v !== null);
+  const worstIdx = validScores.length ? scores.indexOf(Math.max(...validScores)) : -1;
+
+  // Intensità del rosso = gravità relativa alla cella peggiore del pannello.
+  const maxCell = Math.max(0, ...phases.flatMap(ph => selected.map(s => {
+    const st = leakStat(ph, s.id);
+    return st ? (isAbs ? st.lost : st.drop) : 0;
+  })));
+
+  const stepOpts = sel => FUNNEL_LABELS
+    .map((l, i) => `<option value="${i}" ${i === sel ? 'selected' : ''}>${esc(l)}</option>`).join('');
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 14px;white-space:nowrap;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">
+      <span style="width:9px;height:9px;border-radius:50%;background:${colors[i]};display:inline-block;margin-right:6px;vertical-align:middle"></span>${esc(s.nome)}
+    </th>`).join('');
+
+  const rows = phases.map((ph, pi) => {
+    const isWorst = pi === worstIdx;
+    const cells = selected.map(s => {
+      const st = leakStat(ph, s.id);
+      if (!st) {
+        return `<td style="padding:6px 14px;text-align:right;color:#3a3a55;font-size:12px"
+          title="Dato non disponibile per uno dei due step di confine in questo sprint">—</td>`;
+      }
+      const val = isAbs ? st.lost : st.drop;
+      const t   = maxCell > 0 ? Math.max(0, val) / maxCell : 0;
+      const bg  = `rgba(248,113,113,${(0.05 + t * 0.28).toFixed(3)})`;
+      const col = t > 0.66 ? 'var(--red)' : t > 0.33 ? 'var(--amber)' : 'var(--muted)';
+      const main = isAbs ? `−${st.lost}` : `−${st.drop.toFixed(0)}%`;
+      const sub  = isAbs ? `${st.drop.toFixed(0)}% di ${st.a}` : `${st.lost} utenti`;
+      return `<td style="padding:4px 6px 4px 0">
+        <div style="background:${bg};border-radius:8px;padding:8px 12px;text-align:right;border:1px solid ${isWorst ? 'rgba(248,113,113,.35)' : 'transparent'}">
+          <div style="font-family:var(--mono);font-size:16px;font-weight:700;color:${col};line-height:1.15">${main}</div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:2px">${sub}</div>
+        </div>
+      </td>`;
+    }).join('');
+
+    const nameCell = editing ? `
+      <td class="leak-ph-row" style="padding:5px 14px 5px 0">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <input class="leak-ph-name" value="${esc(ph.nome)}" placeholder="Nome fase"
+            style="background:var(--surface2);border:1px solid #3a3a55;border-radius:6px;color:var(--text);font-size:12px;padding:5px 8px;width:120px">
+          <select class="leak-ph-from form-select" data-i="${pi}" style="font-size:11px;padding:4px 6px;max-width:150px">${stepOpts(ph.from)}</select>
+          <span style="color:var(--muted);font-size:11px">→</span>
+          <select class="leak-ph-to form-select" data-i="${pi}" style="font-size:11px;padding:4px 6px;max-width:150px">${stepOpts(ph.to)}</select>
+          <button class="leak-ph-del" data-i="${pi}" title="Elimina questa fase"
+            style="cursor:pointer;background:none;border:none;color:var(--red);font-size:13px;padding:2px 4px;line-height:1">✕</button>
+        </div>
+      </td>` : `
+      <td style="padding:6px 14px 6px 0;vertical-align:middle">
+        <div style="display:flex;align-items:center;gap:9px">
+          <span style="width:3px;height:30px;border-radius:2px;background:${isWorst ? 'var(--red)' : '#3a3a55'};flex-shrink:0"></span>
+          <span>
+            <span style="font-size:13px;font-weight:600;color:var(--text);display:block;line-height:1.25">${esc(ph.nome)}${
+              isWorst ? `<span style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;background:var(--red);color:#2a0a0a;border-radius:4px;padding:2px 5px;margin-left:7px;white-space:nowrap">peggiore</span>` : ''}</span>
+            <span style="font-size:10.5px;color:var(--muted)">${esc(FUNNEL_LABELS[ph.from] || '?')} → ${esc(FUNNEL_LABELS[ph.to] || '?')}</span>
+          </span>
+        </div>
+      </td>`;
+
+    return `<tr>${nameCell}${editing ? '' : cells}</tr>`;
+  }).join('');
+
+  const editBar = editing ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap">
+      <button id="leak-ph-add" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--purple)">+ Aggiungi fase</button>
+      <div style="flex:1"></div>
+      <button id="leak-ph-cancel" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--muted)">Annulla</button>
+      <button id="leak-ph-save" class="btn btn-primary" style="font-size:11px;padding:5px 14px" ${state.sprintLeakSaving ? 'disabled' : ''}>
+        ${state.sprintLeakSaving ? 'Salvo...' : 'Salva fasi'}
+      </button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.5">
+      Le fasi sono <strong style="color:var(--text)">condivise</strong>: quello che salvi qui lo vede anche Danilo.
+      Ogni fase è il calo tra due step del catalogo — puoi tagliarle come vuoi, anche sovrapposte.
+    </div>` : '';
+
+  const note = isAbs
+    ? `<strong style="color:var(--text)">Utenti persi</strong> = il volume: quante persone vere lasci per strada in quella fase. Dice <strong style="color:var(--text)">dove conviene aggiustare</strong>. Prova “Tasso di calo”: spesso la fase peggiore è un'altra.`
+    : `<strong style="color:var(--text)">Tasso di calo</strong> = l'intensità: che quota di chi entra nella fase la abbandona. Dice <strong style="color:var(--text)">dov'è rotto</strong> — ma una fase può essere rottissima e valere pochi utenti, perché ci arriva già poca gente. Incrocialo con “Utenti persi”.`;
+
+  return `
+    <div class="card" style="margin-top:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:14px;font-weight:700;color:var(--text)">Dove si perdono gli utenti</span>
+          <span style="font-size:11px;color:var(--muted)">${phases.length} fasi · ${selected.length} sprint</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${editing ? '' : `
+            <div style="display:inline-flex;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:3px">
+              ${modeBtn('abs', 'Utenti persi', 'Il volume: quante persone perdi in quella fase')}
+              ${modeBtn('pct', 'Tasso di calo', "L'intensità: che percentuale di chi entra nella fase la abbandona")}
+            </div>
+            <button id="leak-ph-edit" class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--muted)">⚙ Modifica fasi</button>`}
+        </div>
+      </div>
+
+      <div style="margin-top:16px;overflow-x:auto">
+        <table style="width:100%;border-collapse:separate;border-spacing:0;min-width:${editing ? 520 : 480}px">
+          ${editing ? '' : `<thead><tr>
+            <th style="text-align:left;padding:10px 14px 10px 0;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px;width:230px">Fase</th>
+            ${headers}
+          </tr></thead>`}
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${editBar}
+      ${editing ? '' : `<div style="font-size:11px;color:var(--muted);margin-top:16px;padding-top:14px;border-top:1px solid var(--border);line-height:1.6">${note}</div>`}
+    </div>`;
+}
+
+function sprintRetentionTable(selected, dataMap) {
+  const colors   = selected.map((_, i) => SPRINT_COLORS[i % SPRINT_COLORS.length]);
+  const allData  = selected.map(s => dataMap[s.id] || []);
+  const maxWeeks = Math.max(...allData.map(d => d.length), 0);
+  if (!maxWeeks) return '<div style="color:var(--muted);font-size:13px">Nessun dato.</div>';
+
+  const headers = selected.map((s, i) => `
+    <th style="text-align:right;padding:10px 16px;white-space:nowrap">
+      <div style="display:inline-flex;align-items:center;gap:6px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colors[i]};flex-shrink:0"></span>
+        <span>${s.nome}</span>
+      </div>
+      <div style="font-size:10px;font-weight:400;color:var(--muted);margin-top:2px">${s.inizio} → ${s.fine}${sprintHourSuffix(s)}</div>
+    </th>`
+  ).join('');
+
+  const rows = Array.from({ length: maxWeeks }, (_, i) => {
+    const label  = i === 0 ? 'W0 (base)' : `W${i}`;
+    const pcts   = selected.map(s => {
+      const r = (dataMap[s.id] || []).find(r => r.week === i);
+      return r ? Number(r.retention_pct) : -1;
+    });
+    const maxPct = Math.max(...pcts.filter(p => p >= 0), 0);
+
+    const cells = selected.map((s, si) => {
+      const row = (dataMap[s.id] || []).find(r => r.week === i);
+      if (!row) return `<td style="padding:8px 16px;text-align:right;color:var(--muted)">—</td>`;
+      const pct   = Number(row.retention_pct);
+      const color = pct >= 40 ? 'var(--mattia)' : pct >= 20 ? 'var(--amber)' : pct > 0 ? 'var(--red)' : 'var(--muted)';
+      const isBest = i > 0 && pct === maxPct && maxPct > 0;
+      return `<td style="padding:7px 16px;text-align:right;${isBest ? 'background:rgba(167,139,250,0.06)' : ''}">
+        <div style="font-weight:700;color:${color};font-size:16px">${pct}%</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">${row.retained}/${row.eligible}</div>
+      </td>`;
+    }).join('');
+
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="font-size:12px;color:var(--muted);padding:7px 16px;min-width:90px">${label}</td>${cells}
+    </tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="border-bottom:2px solid var(--border)">
+      <th style="text-align:left;padding:10px 16px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px">Settimana</th>
+      ${headers}
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+// ── COMPONENTI ────────────────────────────────────────────────────────
+
+function stat(label, value, sub, color, expandKey) {
+  const attrs = expandKey ? `data-stat-toggle="${expandKey}" style="cursor:pointer"` : '';
+  const expandSub = expandKey ? `<div class="stat-sub" style="color:var(--accent)">${state.streakChartOpen ? '▴ nascondi grafico' : '▾ vedi grafico'}</div>` : '';
+  return `<div class="stat-card" ${attrs}>
+    <div class="stat-label">${label}</div>
+    <div class="stat-value ${color}">${value ?? '—'}</div>
+    ${sub ? `<div class="stat-sub">${sub}</div>` : expandSub}
+  </div>`;
+}
+
+function mRow(label, value, note) {
+  return `<tr>
+    <td style="color:var(--muted)">${label}</td>
+    <td class="metric-val">${value ?? '—'}</td>
+    <td style="font-size:12px;color:var(--muted)">${note}</td>
+  </tr>`;
+}
+
+function barChart(data, key, color) {
+  if (!data || !data.length) return `<div style="height:110px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">Nessun dato</div>`;
+  const values = data.map(d => Number(d[key]) || 0);
+  const maxVal = Math.max(...values, 1);
+  const every  = data.length > 9 ? 2 : 1;
+  const bars   = data.map((d, i) => {
+    const val = values[i];
+    const h   = Math.max((val / maxVal) * 100, val > 0 ? 3 : 0);
+    return `<div style="flex:1;height:${h}%;background:${color};border-radius:2px 2px 0 0;opacity:.75;cursor:default"
+      title="${d.day||''}: ${val}"
+      onmouseenter="this.style.opacity='1'" onmouseleave="this.style.opacity='.75'"></div>`;
+  }).join('');
+  const labels = data.map((d, i) =>
+    `<div style="flex:1;font-size:7.5px;color:var(--muted);text-align:center">${i % every === 0 ? (d.day||'').slice(5) : ''}</div>`
+  ).join('');
+  return `
+    <div style="display:flex;align-items:flex-end;height:88px;gap:3px;margin-top:10px">${bars}</div>
+    <div style="display:flex;gap:3px;padding-top:5px">${labels}</div>`;
+}
+
+function chartPlaceholder() {
+  return `<div style="height:160px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">
+    ${state.loading ? '<span class="pulse">Caricamento…</span>' : 'Nessun dato'}
+  </div>`;
+}
+
+function growthChart(rawData, range) {
+  // range=0 → from first growth day; range=N → last N days
+  let data;
+  if (range > 0) {
+    data = rawData.slice(-range);
+  } else {
+    const firstGrowth = rawData.findIndex((d, i) =>
+      i > 0 && Number(d.total_users) > Number(rawData[i - 1].total_users)
+    );
+    data = firstGrowth > 0 ? rawData.slice(Math.max(0, firstGrowth - 1)) : rawData;
+  }
+  if (!data.length) return chartPlaceholder();
+
+  const n = data.length;
+  const W = 900, H = 190, PT = 20, PB = 28, PL = 52, PR = 20;
+  const cW = W - PL - PR, cH = H - PT - PB;
+
+  const values = data.map(d => Number(d.total_users));
+  const maxV   = Math.max(...values, 1);
+
+  const pts = data.map((d, i) => ({
+    x:   PL + (n === 1 ? cW / 2 : i / (n - 1) * cW),
+    y:   PT + cH - (Number(d.total_users) / maxV * cH),
+    val: Number(d.total_users),
+    day: d.day,
+  }));
+
+  const dense = n > 14;
+  const every = dense ? Math.ceil(n / 10) : 1;
+  const color = '#a78bfa';
+
+  const yTicks = [0, Math.round(maxV / 2), maxV];
+  const refs   = yTicks.map(v => {
+    const y = PT + cH - (v / maxV * cH);
+    return `<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="#1d1d2e" stroke-width="1"/>
+            <text x="${PL - 6}" y="${y + 3}" text-anchor="end" font-size="9" fill="#5a5a80">${v}</text>`;
+  }).join('');
+
+  const area = `${pts[0].x},${PT + cH} ${pts.map(p => `${p.x},${p.y}`).join(' ')} ${pts[n-1].x},${PT + cH}`;
+  const line = pts.map(p => `${p.x},${p.y}`).join(' ');
+
+  const dots = pts.map((p, i) => {
+    const isLast = i === n - 1;
+    return `<circle cx="${p.x}" cy="${p.y}" r="${isLast ? 5 : dense ? 2.5 : 3.5}"
+              fill="${color}" stroke="#111118" stroke-width="${isLast ? 2 : 1.5}"/>
+            ${isLast ? `<text x="${p.x}" y="${p.y - 11}" text-anchor="middle" font-size="11" fill="${color}" font-weight="700">${p.val}</text>` : ''}`;
+  }).join('');
+
+  const xLabels = pts.filter((_, i) => i % every === 0 || i === n - 1).map(p =>
+    `<text x="${p.x}" y="${H - 5}" text-anchor="middle" font-size="8" fill="#5a5a80">${p.day.slice(5)}</text>`
+  ).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="gg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.18"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.01"/>
+      </linearGradient>
+    </defs>
+    ${refs}
+    <polygon points="${area}" fill="url(#gg)"/>
+    <polyline points="${line}" stroke="${color}" stroke-width="2.5" fill="none"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+    ${xLabels}
+  </svg>`;
+}
+
+function weeklyWorkoutsChart(rawData, weeks) {
+  const data = weeks ? rawData.slice(-weeks) : rawData;
+  const values = data.map(d => Number(d.workouts));
+  const maxV   = Math.max(...values, 1);
+  const n      = data.length;
+  const W = 700, H = 180, PT = 20, PB = 28, PL = 36, PR = 12;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const gap  = Math.max(3, Math.floor(cW / n * 0.12));
+  const barW = Math.max(6, Math.floor(cW / n) - gap);
+
+  const refs = [0, Math.round(maxV / 2), maxV].map(v => {
+    const y = PT + cH - (v / maxV * cH);
+    return `<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="#1d1d2e" stroke-width="1"/>
+            <text x="${PL - 4}" y="${y + 3}" text-anchor="end" font-size="8" fill="#5a5a80">${v}</text>`;
+  }).join('');
+
+  const bars = data.map((d, i) => {
+    const val   = Number(d.workouts);
+    const h     = Math.max((val / maxV) * cH, val > 0 ? 3 : 0);
+    const x     = PL + (i / n) * cW + (cW / n - barW) / 2;
+    const y     = PT + cH - h;
+    const ratio = val / maxV;
+    const color = ratio >= 0.75 ? '#4ade80' : ratio >= 0.4 ? '#a78bfa' : '#60a5fa';
+    const isLast = i === n - 1;
+    const week  = d.week.slice(5);
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" ry="3"
+              fill="${color}" opacity="${isLast ? 1 : 0.75}"/>
+            ${val > 0 ? `<text x="${x + barW/2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="${color}">${val}</text>` : ''}
+            <text x="${x + barW/2}" y="${H - 5}" text-anchor="middle" font-size="8" fill="#5a5a80">${week}</text>`;
+  }).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px" xmlns="http://www.w3.org/2000/svg">
+    ${refs}${bars}
+  </svg>`;
+}
+
+function dailyStreaksChart(rawData, range) {
+  const data = range ? rawData.slice(-range) : rawData;
+  const n = data.length;
+  if (!n) return chartPlaceholder();
+  const W = 700, H = 180, PT = 20, PB = 28, PL = 36, PR = 12;
+  const cW = W - PL - PR, cH = H - PT - PB;
+  const color = '#22d3ee';
+
+  const values = data.map(d => Number(d.streak_users));
+  const maxV   = Math.max(...values, 1);
+
+  const pts = data.map((d, i) => ({
+    x:   PL + (n === 1 ? cW / 2 : i / (n - 1) * cW),
+    y:   PT + cH - (Number(d.streak_users) / maxV * cH),
+    val: Number(d.streak_users),
+    day: d.day,
+  }));
+
+  const dense = n > 20;
+  const every = dense ? Math.ceil(n / 10) : 1;
+
+  const refs = [0, Math.round(maxV / 2), maxV].map(v => {
+    const y = PT + cH - (v / maxV * cH);
+    return `<line x1="${PL}" y1="${y}" x2="${W - PR}" y2="${y}" stroke="#1d1d2e" stroke-width="1"/>
+            <text x="${PL - 4}" y="${y + 3}" text-anchor="end" font-size="8" fill="#5a5a80">${v}</text>`;
+  }).join('');
+
+  const area = `${pts[0].x},${PT + cH} ${pts.map(p => `${p.x},${p.y}`).join(' ')} ${pts[n-1].x},${PT + cH}`;
+  const line = pts.map(p => `${p.x},${p.y}`).join(' ');
+
+  const dots = pts.map((p, i) => {
+    const isLast = i === n - 1;
+    const show   = !dense || isLast || i % every === 0;
+    return `<circle cx="${p.x}" cy="${p.y}" r="${isLast ? 5 : dense ? 2.5 : 3.5}"
+              fill="${color}" stroke="#111118" stroke-width="${isLast ? 2 : 1.5}"/>
+            ${show && !dense ? `<text x="${p.x}" y="${p.y - 8}" text-anchor="middle" font-size="9" fill="${color}">${p.val}</text>` : ''}
+            ${isLast ? `<text x="${p.x}" y="${p.y - 13}" text-anchor="middle" font-size="11" fill="${color}" font-weight="700">${p.val}</text>` : ''}`;
+  }).join('');
+
+  const xLabels = pts.filter((_, i) => i % every === 0 || i === n - 1).map(p =>
+    `<text x="${p.x}" y="${H - 5}" text-anchor="middle" font-size="8" fill="#5a5a80">${p.day.slice(5)}</text>`
+  ).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.14"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.01"/>
+      </linearGradient>
+    </defs>
+    ${refs}
+    <polygon points="${area}" fill="url(#sg)"/>
+    <polyline points="${line}" stroke="${color}" stroke-width="2.5" fill="none"
+      stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}
+    ${xLabels}
+  </svg>`;
+}
+
+function pageMetaAds() {
+  const fmt2  = n => n != null ? parseFloat(n).toFixed(2) : '—';
+  const fmtN  = n => n != null ? parseInt(n).toLocaleString('it-IT') : '—';
+  // Meta ritorna ctr già come percentuale (2.41 = 2.41%). Non moltiplicare per 100.
+  const fmtPct = n => n != null ? parseFloat(n).toFixed(2) + '%' : '—';
+  const getInstalls = d => {
+    const act = d && d.actions && d.actions.find(a => ['mobile_app_install','app_install','omni_app_install'].includes(a.action_type));
+    return act ? parseInt(act.value) : null;
+  };
+  const getCostPerInstall = d => {
+    const cp = d && d.cost_per_action_type && d.cost_per_action_type.find(a => ['mobile_app_install','app_install','omni_app_install'].includes(a.action_type));
+    return cp ? parseFloat(cp.value) : null;
+  };
+
+  const presets = [
+    { id: 'last_7d',    label: '7g' },
+    { id: 'last_14d',   label: '14g' },
+    { id: 'last_30d',   label: '30g' },
+    { id: 'this_month', label: 'Mese' },
+    { id: 'last_month', label: 'Mese prec.' },
+  ];
+
+  const tokenStatus = state.metaTokenSaveError
+    ? '<span style="font-size:11px;color:var(--red)">⚠ Errore salvataggio su Supabase</span>'
+    : state.metaToken
+      ? '<span style="font-size:11px;color:var(--green)">● Token impostato</span>'
+      : '<span style="font-size:11px;color:var(--red)">● Nessun token</span>';
+
+  const settingsErrorBanner = state.settingsLoadError && !state.metaToken
+    ? '<div style="margin-top:10px;padding:8px 12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:6px;display:flex;align-items:center;gap:10px">' +
+      '<span style="font-size:12px;color:var(--red)">⚠ Impossibile caricare le impostazioni da Supabase. Il token potrebbe essere salvato ma non caricato per un problema di rete.</span>' +
+      '<button id="meta-settings-reload" class="btn btn-ghost" style="font-size:11px;padding:4px 10px;white-space:nowrap">↻ Ricarica</button>' +
+      '</div>'
+    : '';
+
+  const tokenSection = '<div class="card" style="margin-bottom:16px">' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+    '<span style="font-size:12px;color:var(--muted);white-space:nowrap">Token Meta API</span>' +
+    '<input id="meta-token-input" type="password" value="' + state.metaToken + '" placeholder="Incolla il token da Meta Developers…" style="flex:1;min-width:200px;background:#0d0d1a;border:1px solid var(--border);color:var(--fg);border-radius:6px;padding:6px 10px;font-size:12px;font-family:monospace"/>' +
+    '<button id="meta-token-save" class="btn-primary" style="font-size:12px;padding:6px 14px">Salva</button>' +
+    tokenStatus +
+    '</div>' +
+    '<div style="margin-top:6px;font-size:11px;color:var(--muted)">Il token non scade (System User Token). Rigeneralo solo se lo hai revocato.</div>' +
+    settingsErrorBanner +
+    '</div>';
+
+  if (!state.metaToken) return '<div class="page-header"><div><div class="page-title">Meta ADS</div><div class="page-sub">Dati campagne pubblicitarie</div></div></div>' +
+    tokenSection + '<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Inserisci il token per caricare i dati.</div>';
+
+  const activePreset = !state.metaUseCustom ? state.metaDatePreset : null;
+  const dateBar = '<div class="card" style="margin-bottom:16px;padding:14px 16px">' +
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+    '<span style="font-size:11px;color:var(--muted);white-space:nowrap">Periodo:</span>' +
+    presets.map(p => '<button class="meta-preset-btn" data-preset="' + p.id + '" style="padding:5px 12px;font-size:12px;border-radius:6px;border:1px solid var(--border);background:' + (activePreset === p.id ? 'var(--accent)' : 'transparent') + ';color:' + (activePreset === p.id ? '#fff' : 'var(--muted)') + ';cursor:pointer">' + p.label + '</button>').join('') +
+    '<span style="color:var(--border);padding:0 4px">|</span>' +
+    '<input type="date" id="meta-from" value="' + state.metaCustomFrom + '" style="background:#0d0d1a;border:1px solid ' + (state.metaUseCustom ? 'var(--accent)' : 'var(--border)') + ';color:var(--fg);border-radius:6px;padding:4px 8px;font-size:12px"/>' +
+    '<span style="font-size:11px;color:var(--muted)">→</span>' +
+    '<input type="date" id="meta-to" value="' + state.metaCustomTo + '" style="background:#0d0d1a;border:1px solid ' + (state.metaUseCustom ? 'var(--accent)' : 'var(--border)') + ';color:var(--fg);border-radius:6px;padding:4px 8px;font-size:12px"/>' +
+    '<button id="meta-custom-apply" class="btn-primary" style="font-size:12px;padding:5px 12px">Applica</button>' +
+    '</div></div>';
+
+  if (state.metaAdsLoading) return '<div class="page-header"><div><div class="page-title">Meta ADS</div><div class="page-sub">Dati campagne pubblicitarie</div></div></div>' + tokenSection + dateBar + '<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Caricamento dati Meta…</div>';
+
+  if (state.metaAdsError) return '<div class="page-header"><div><div class="page-title">Meta ADS</div><div class="page-sub">Dati campagne pubblicitarie</div></div></div>' + tokenSection + dateBar +
+    '<div class="card" style="padding:40px;text-align:center"><div style="color:var(--red);font-size:13px;margin-bottom:8px">⚠ ' + state.metaAdsError + '</div><div style="font-size:11px;color:var(--muted)">Il token potrebbe non avere i permessi corretti.</div></div>';
+
+  if (!state.metaAds) return '<div class="page-header"><div><div class="page-title">Meta ADS</div><div class="page-sub">Dati campagne pubblicitarie</div></div></div>' + tokenSection + dateBar +
+    '<div class="card" style="padding:60px;text-align:center;color:var(--muted)">Nessun dato per il periodo selezionato.</div>';
+
+  const d = state.metaAds;
+  const installs = getInstalls(d);
+  const cpi = getCostPerInstall(d);
+
+  const kpis = [
+    { label: 'Spesa Totale',   value: '€ ' + fmt2(d.spend),   color: 'var(--red)' },
+    { label: 'Impression',     value: fmtN(d.impressions),     color: 'var(--purple)' },
+    { label: 'Reach',          value: fmtN(d.reach),           color: 'var(--blue)' },
+    { label: 'Click',          value: fmtN(d.clicks),          color: 'var(--green)' },
+    { label: 'CTR',            value: fmtPct(d.ctr),           color: 'var(--amber)' },
+    { label: 'CPC',            value: '€ ' + fmt2(d.cpc),      color: 'var(--amber)' },
+    { label: 'CPM',            value: '€ ' + fmt2(d.cpm),      color: 'var(--muted)' },
+    { label: 'Frequenza',      value: fmt2(d.frequency),       color: 'var(--muted)' },
+    { label: 'Install',        value: installs != null ? fmtN(installs) : '—', color: 'var(--green)' },
+    { label: 'Costo/Install',  value: cpi != null ? '€ ' + fmt2(cpi) : '—',   color: 'var(--red)' },
+  ];
+
+  const kpiCards = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:12px;margin-bottom:16px">' +
+    kpis.map(k => '<div class="card" style="padding:16px"><div style="font-size:11px;color:var(--muted);margin-bottom:6px">' + k.label + '</div><div style="font-size:22px;font-weight:700;color:' + k.color + '">' + k.value + '</div></div>').join('') +
+    '</div>';
+
+  const camps = (state.metaCampaigns || []).filter(c => c.insights && c.insights.data && c.insights.data[0]);
+  const campTable = camps.length === 0 ? '' : '<div class="card" style="margin-bottom:16px"><div class="card-title" style="margin-bottom:12px">Campagne</div><div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Campagna</th><th>Stato</th><th>Spesa</th><th>Impression</th><th>Click</th><th>CTR</th><th>CPC</th><th>Install</th><th>Costo/Install</th></tr></thead><tbody>' +
+    camps.map(c => {
+      const i = c.insights.data[0];
+      const sc = c.status === 'ACTIVE' ? 'var(--green)' : 'var(--muted)';
+      const ci = getInstalls(i);
+      const cpi2 = getCostPerInstall(i);
+      return '<tr><td style="font-weight:500">' + c.name + '</td><td><span style="color:' + sc + ';font-size:11px">' + c.status + '</span></td><td>€ ' + fmt2(i.spend) + '</td><td>' + fmtN(i.impressions) + '</td><td>' + fmtN(i.clicks) + '</td><td>' + fmtPct(i.ctr) + '</td><td>€ ' + fmt2(i.cpc) + '</td><td>' + (ci != null ? fmtN(ci) : '—') + '</td><td>' + (cpi2 != null ? '€ ' + fmt2(cpi2) : '—') + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div></div>';
+
+  const sprints = state.sprints || [];
+  const sprintPanel = '<div class="card"><div class="card-title" style="margin-bottom:12px">Confronto Sprint</div>' +
+    (sprints.length === 0
+      ? '<div style="font-size:12px;color:var(--muted)">Nessuno sprint disponibile.</div>'
+      : '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">Seleziona gli sprint per vedere le metriche Meta ADS in quei periodi.</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">' +
+        sprints.map(s => {
+          const sel = state.metaSprintSel.includes(String(s.id));
+          return '<button class="meta-sprint-chip" data-sprint-id="' + s.id + '" style="padding:5px 12px;font-size:12px;border-radius:20px;border:1px solid ' + (sel ? 'var(--accent)' : 'var(--border)') + ';background:' + (sel ? 'var(--accent)' : 'transparent') + ';color:' + (sel ? '#fff' : 'var(--fg)') + ';cursor:pointer">' + s.nome + ' <span style="font-size:10px;opacity:.7">' + s.inizio + ' → ' + s.fine + '</span></button>';
+        }).join('') +
+        '</div>' +
+        (state.metaSprintSel.length > 0 ? '<button id="meta-sprint-calc" class="btn-primary" style="font-size:12px;padding:6px 14px;margin-bottom:12px">' + (state.metaSprintLoading ? 'Caricamento…' : 'Calcola') + '</button>' : '') +
+        (state.metaSprintSel.length > 0 && !state.metaSprintLoading && Object.keys(state.metaSprintData).length > 0 ? (() => {
+          const rows = state.metaSprintSel.map(id => {
+            const sprint = sprints.find(s => String(s.id) === String(id));
+            const sd = state.metaSprintData[id];
+            if (!sprint) return '';
+            if (!sd) return '<tr><td style="font-weight:500">' + sprint.nome + '</td><td colspan="8" style="color:var(--muted);font-size:11px">Nessun dato</td></tr>';
+            const si = getInstalls(sd);
+            const scpi = getCostPerInstall(sd);
+            return '<tr><td style="font-weight:500">' + sprint.nome + '</td><td style="font-size:11px;color:var(--muted)">' + sprint.inizio + ' → ' + sprint.fine + '</td><td>€ ' + fmt2(sd.spend) + '</td><td>' + fmtN(sd.impressions) + '</td><td>' + fmtN(sd.reach) + '</td><td>' + fmtN(sd.clicks) + '</td><td>' + fmtPct(sd.ctr) + '</td><td>' + (si != null ? fmtN(si) : '—') + '</td><td>' + (scpi != null ? '€ ' + fmt2(scpi) : '—') + '</td></tr>';
+          }).join('');
+          return '<div style="overflow-x:auto"><table class="data-table"><thead><tr><th>Sprint</th><th>Periodo</th><th>Spesa</th><th>Impression</th><th>Reach</th><th>Click</th><th>CTR</th><th>Install</th><th>Costo/Install</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        })() : '')) +
+    '</div>';
+
+  return '<div class="page-header"><div><div class="page-title">Meta ADS</div><div class="page-sub">Dati campagne pubblicitarie · ' + META_AD_ACCOUNT + '</div></div><button id="meta-refresh" class="btn-outline" style="font-size:12px;padding:6px 14px">↻ Aggiorna</button></div>' +
+    tokenSection + dateBar + kpiCards + campTable + sprintPanel;
+}
+
+// ── Login ops (gestori in attachEvents)
+
+function opsLoginModal() {
+  if (state.opsAuthError === null && state.opsEmailInput === '' && !state._opsLoginOpen) return '';
+  if (!state._opsLoginOpen) return '';
+  return `
+    <div class="modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px">
+      <div style="background:var(--surface,#fff);border-radius:12px;max-width:440px;width:100%;padding:20px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px">
+          <div style="font-size:15px;font-weight:700">Login ops</div>
+          <button data-ops-login-close style="background:transparent;border:none;cursor:pointer;color:var(--muted);padding:4px 8px;font-size:16px">✕</button>
+        </div>
+        <input data-ops-email type="email" placeholder="tuo.email@example.com" autocomplete="email" value="${esc(state.opsEmailInput || '')}" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:10px" />
+        <input data-ops-password type="password" placeholder="password" autocomplete="current-password" value="${esc(state.opsPasswordInput || '')}" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;margin-bottom:10px" />
+        ${state.opsAuthError ? `<div style="color:var(--red);font-size:12px;margin-bottom:8px">⚠️ ${esc(state.opsAuthError)}</div>` : ''}
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button data-ops-login-close class="btn-outline" style="font-size:13px;padding:8px 14px">Annulla</button>
+          <button data-ops-login-send style="font-size:13px;padding:8px 14px;border:none;border-radius:6px;background:var(--green);color:#fff;font-weight:600;cursor:pointer">Entra</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── EVENTS ────────────────────────────────────────────────────────────
+
+function attachEvents() {
+  applyNavState();
+  document.querySelectorAll('[data-nav-toggle]').forEach(el => el.addEventListener('click', toggleNav));
+  document.querySelector('[data-nav-close]')?.addEventListener('click', () => { state.navOpen = false; applyNavState(); });
+  attachStatsEvents();
+  if (state.page === 'ai-coach') aicAttach();
+  // Navigazione
+  document.querySelectorAll('[data-nav]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.page = el.dataset.nav;
+      state.navOpen = false;
+      window.scrollTo(0, 0);
+      if (state.page === 'stats') statsOnNav();
+      // L'auto-refresh salta l'Overview quando non è a schermo: tornandoci si rilegge.
+      if (needsGeneralData(state.page) && (state.overviewStale || !state.data) && !state.loading) fetchData();
+      if (state.page === 'funnel'     && state.funnelMode === 'catalog' && !state.funnel && !state.funnelLoading) fetchFunnel();
+      if (state.page === 'funnel'     && state.funnelMode === 'activation' && !state.activation && !state.activationLoading) fetchActivation();
+      if (state.page === 'goal'       && !state.goalBoard     && !state.goalLoading)      fetchGoalBoard();
+      if (state.page === 'retention'  && !state.retention     && !state.retLoading)       fetchRetention();
+      if (state.page === 'sprint'     && !state.sprints.length && !state.sprintsLoading)  { fetchSprints(); fetchBlockedUsers(); fetchRecentlyUnblocked(); }
+      if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
+      if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
+      if (state.page === 'premium'    && !state.purchases      && !state.purchasesLoading)      fetchPaywallPurchases();
+      if (state.page === 'ai-coach') {
+        // pagina AI Coach: i suoi dati li carica kpi-ai-coach.js
+        aicEnter();
+        if (!state.opsSessionCheckedOnce) { state.opsSessionCheckedOnce = true; refreshOpsSession(); }
+      }
+      if (state.page === 'behavior'   && !BEH.data            && !BEH.loading)            fetchBehavior();
+      if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
+      render();
+    }));
+
+  document.querySelectorAll('[data-ops-login-open]').forEach(el =>
+    el.addEventListener('click', () => { state._opsLoginOpen = true; render(); }));
+  document.querySelectorAll('[data-ops-login-close]').forEach(el =>
+    el.addEventListener('click', () => {
+      state._opsLoginOpen = false;
+      state.opsEmailInput = '';
+      state.opsPasswordInput = '';
+      state.opsAuthError = null;
+      render();
+    }));
+  document.querySelectorAll('[data-ops-email]').forEach(el =>
+    el.addEventListener('input', () => { state.opsEmailInput = el.value; }));
+  document.querySelectorAll('[data-ops-password]').forEach(el =>
+    el.addEventListener('input', () => { state.opsPasswordInput = el.value; }));
+  document.querySelectorAll('[data-ops-login-send]').forEach(el =>
+    el.addEventListener('click', () => {
+      const email = (state.opsEmailInput || '').trim();
+      const password = state.opsPasswordInput || '';
+      if (!email || !password) { state.opsAuthError = 'Email e password richieste'; render(); return; }
+      opsLoginPassword(email, password);
+    }));
+  document.querySelectorAll('[data-ops-logout]').forEach(el =>
+    el.addEventListener('click', () => opsLogout()));
+
+  // Chart range filters
+  // Date del periodo: si applica solo una data intera (mentre si scrive l'anno il campo passa per 0002, 0020...).
+  attachPremiumTimeline();
+  attachSprintRecord();
+  attachSprintActivation();
+  attachGoal();
+  document.querySelectorAll('[data-growth-range]').forEach(el =>
+    el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));
+  document.querySelectorAll('[data-weekly-range]').forEach(el =>
+    el.addEventListener('click', () => { state.weeklyRange = +el.dataset.weeklyRange; render(); }));
+  document.querySelectorAll('[data-streak-range]').forEach(el =>
+    el.addEventListener('click', () => { state.streakRange = +el.dataset.streakRange; render(); }));
+  document.querySelectorAll('[data-stat-toggle]').forEach(el =>
+    el.addEventListener('click', () => { state.streakChartOpen = !state.streakChartOpen; render(); }));
+  // Esercizi piu amati: filtri genere/eta + toggle "vedi tutti"
+  document.getElementById('liked-filter-toggle')?.addEventListener('click', () => {
+    state.likedFilterOpen = !state.likedFilterOpen; render();
+  });
+  document.getElementById('liked-show-all')?.addEventListener('click', () => {
+    state.likedShowAll = !state.likedShowAll; render();
+  });
+  document.querySelectorAll('[data-liked-gender]').forEach(el =>
+    el.addEventListener('click', () => {
+      if (state.likedGender === el.dataset.likedGender) return;
+      state.likedGender = el.dataset.likedGender; state.likedShowAll = false; fetchLikedExercises();
+    }));
+  document.querySelectorAll('[data-liked-age]').forEach(el =>
+    el.addEventListener('click', () => {
+      if (state.likedAge === el.dataset.likedAge) return;
+      state.likedAge = el.dataset.likedAge; state.likedShowAll = false; fetchLikedExercises();
+    }));
+
+  // Retention
+  document.getElementById('ret-sprint-sel')?.addEventListener('change', e => {
+    state.retSprintId = e.target.value; // '' = periodo libero
+    const sprint = state.sprints.find(s => s.id === e.target.value);
+    if (sprint) { state.retFrom = sprint.inizio; state.retTo = sprint.fine; }
+    state.retention = null;
+    fetchRetention();
+  });
+  document.getElementById('ret-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('ret-from')?.value;
+    const to   = document.getElementById('ret-to')?.value;
+    if (from) state.retFrom = from;
+    if (to)   state.retTo   = to;
+    // se le date non coincidono più con lo sprint selezionato, il periodo è ora "libero"
+    const selSprint = state.sprints.find(s => s.id === state.retSprintId);
+    if (!selSprint || selSprint.inizio !== state.retFrom || selSprint.fine !== state.retTo) state.retSprintId = '';
+    state.retention = null;
+    fetchRetention();
+  });
+  document.getElementById('ret-min')?.addEventListener('change', e => {
+    state.retMin = +e.target.value;
+    state.retention = null;
+    fetchRetention();
+  });
+  document.getElementById('ret-weeks')?.addEventListener('change', e => {
+    state.retWeeks = +e.target.value;
+    state.retention = null;
+    fetchRetention();
+  });
+  document.getElementById('ret-min-w0')?.addEventListener('change', e => {
+    state.retMinW0 = +e.target.value;
+    state.retention = null;
+    fetchRetention();
+  });
+  document.querySelectorAll('[data-ret-chart]').forEach(el =>
+    el.addEventListener('click', () => {
+      state.retChart = el.dataset.retChart;
+      render();
+    }));
+
+  // ── Retention · vista giornaliera ──────────────────────────────────
+  // Questi handler scrivono SOLO in state.retView e state.retD*: mai nei campi ret*
+  // della vista settimanale, mai nei campi funnel*. Il toggle non deve poter alterare
+  // i filtri dell'altra vista.
+  document.getElementById('ret-view-week')?.addEventListener('click', () => {
+    state.retView = 'week';
+    render();
+  });
+  document.getElementById('ret-view-day')?.addEventListener('click', () => {
+    state.retView = 'day';
+    state.retDDropdown = false;
+    if (!Object.keys(state.retDData || {}).length && !state.retDLoading) fetchRetentionDaily();
+    else render();
+  });
+
+  const retdPreset = (id, kind) =>
+    document.getElementById(id)?.addEventListener('click', () => {
+      const { from, to } = eventFunnelPresetRange(kind);
+      state.retDFrom = from;
+      state.retDTo   = to;
+      state.retDSprintSel = [];   // preset e sprint sono alternativi
+      fetchRetentionDaily();
+    });
+  retdPreset('retd-preset-today', 'today');
+  retdPreset('retd-preset-week',  'week');
+  retdPreset('retd-preset-month', 'month');
+
+  document.getElementById('retd-menu-btn')?.addEventListener('click', async () => {
+    state.retDDropdown = !state.retDDropdown;
+    if (state.retDDropdown && !state.retDSprints) await fetchRetentionDailySprints();
+    render();
+  });
+
+  document.querySelectorAll('[data-retd-sprint]').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.retdSprint;
+      const sel = state.retDSprintSel.slice();
+      const i   = sel.indexOf(id);
+      if (i >= 0) sel.splice(i, 1); else sel.push(id);
+      state.retDSprintSel = sel;
+      fetchRetentionDaily();
+    }));
+
+  document.querySelectorAll('[data-retd-last]').forEach(el =>
+    el.addEventListener('click', () => {
+      const n = +el.dataset.retdLast;
+      // retDSprints è già ordinato dal più recente: gli "ultimi N" sono i primi N.
+      state.retDSprintSel = n > 0
+        ? (state.retDSprints || []).slice(0, n).map(s => s.sprint_id)
+        : [];
+      state.retDDropdown = false;
+      fetchRetentionDaily();
+    }));
+
+  document.getElementById('retd-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('retd-from')?.value;
+    const to   = document.getElementById('retd-to')?.value;
+    if (from) state.retDFrom = from;
+    if (to)   state.retDTo   = to;
+    state.retDSprintSel = [];   // date esplicite = periodo libero
+    fetchRetentionDaily();
+  });
+
+  document.getElementById('refresh-btn')?.addEventListener('click', manualRefresh);
+
+  // Overview — personalizza
+  document.getElementById('edit-overview')?.addEventListener('click', () => {
+    state.editingOverview = !state.editingOverview;
+    render();
+  });
+  document.getElementById('done-overview')?.addEventListener('click', () => {
+    state.editingOverview = false;
+    render();
+  });
+  document.querySelectorAll('[data-toggle-metric]').forEach(el =>
+    el.addEventListener('click', () => {
+      const k = el.dataset.toggleMetric;
+      const idx = state.overviewKeys.indexOf(k);
+      if (idx === -1) state.overviewKeys.push(k);
+      else state.overviewKeys.splice(idx, 1);
+      saveSetting('overview_keys', state.overviewKeys);
+      render();
+    }));
+
+  // Popola il draft chip dalla preset attualmente attivo. Serve quando l'utente apre il
+  // Costruttore funnel: il pannello "Aspetto della chip" mostra i valori correnti della chip
+  // attiva così può modificarli inline. Default/onboarding built-in → nessun draft (chipEditorIdx=null).
+  function openChipDraftForActivePreset() {
+    const i = state.activeFunnelPreset;
+    const f = i != null ? state.savedFunnels[i] : null;
+    if (!f) { state.chipEditorIdx = null; state.chipDraft = null; return; }
+    state.chipEditorIdx = i;
+    state.chipDraft = {
+      name:  f.name  || '',
+      icon:  f.icon  || DEFAULT_CHIP_ICON,
+      color: f.color || DEFAULT_CHIP_COLOR,
+      label: f.label || '',
+    };
+  }
+
+  // ── Testata del funnel: menu, periodi rapidi, pannello «Chi è escluso» ──────────────
+  // I bottoni con data-fn-close chiudono il menu aperto PRIMA dei gestori sotto (stesso elemento,
+  // ordine di registrazione), così il render che parte dal calcolo ridisegna la testata già chiusa.
+  document.querySelectorAll('[data-fn-close]').forEach(el =>
+    el.addEventListener('click', () => { state.funnelMenu = null; }));
+  document.getElementById('fn-funnel-btn')?.addEventListener('click', () => {
+    state.funnelMenu = state.funnelMenu === 'funnel' ? null : 'funnel';
+    render();
+  });
+  document.getElementById('fn-funnel-btn')?.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' && state.funnelMenu !== 'funnel') { e.preventDefault(); e.target.click(); }
+  });
+  document.getElementById('fn-other-btn')?.addEventListener('click', () => {
+    state.funnelMenu = state.funnelMenu === 'other' ? null : 'other';
+    render();
+  });
+  // Un periodo scelto dalla testata: oggi/ieri (periodo libero) o uno sprint. Calcola subito.
+  const applyFunnelPeriod = ({ from, to, sprintId }) => {
+    state.funnelFrom = from;
+    state.funnelTo = to;
+    state.funnelSprintId = sprintId || '';
+    if (state.funnelMode === 'event') { fetchEventFunnel(); return; }
+    if (state.funnelMode === 'activation') { fetchActivation(); return; }
+    state.funnel = null;
+    fetchFunnel();
+  };
+  document.getElementById('fn-per-today')?.addEventListener('click', () => applyFunnelPeriod(eventFunnelPresetRange('today')));
+  document.getElementById('fn-per-yesterday')?.addEventListener('click', () => applyFunnelPeriod(eventFunnelPresetRange('yesterday')));
+  document.querySelectorAll('[data-fn-sprint]').forEach(el =>
+    el.addEventListener('click', () => {
+      const sp = state.sprints.find(x => x.id === el.dataset.fnSprint);
+      if (sp) applyFunnelPeriod({ from: sp.inizio, to: sp.fine, sprintId: sp.id });
+    }));
+  document.getElementById('fn-refresh-btn')?.addEventListener('click', manualRefresh);
+  document.getElementById('funnel-params-close')?.addEventListener('click', () => { state.funnelParamsOpen = false; render(); });
+
+  document.getElementById('funnel-cache-refresh')?.addEventListener('click', () => {
+    if (state.funnelMode === 'event') fetchEventFunnel({ force: true });
+    else if (state.funnelMode === 'activation') fetchActivation({ force: true });
+    else fetchFunnel({ force: true });
+  });
+  // Funnel — calcola
+  document.getElementById('funnel-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('funnel-from')?.value;
+    const to   = document.getElementById('funnel-to')?.value;
+    if (from) state.funnelFrom = from;
+    if (to)   state.funnelTo   = to;
+    // se le date non coincidono più con lo sprint selezionato, il periodo è ora "libero"
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    if (!selSprint || selSprint.inizio !== state.funnelFrom || selSprint.fine !== state.funnelTo) {
+      state.funnelSprintId = '';
+    }
+    state.activeFunnelPreset = null;
+    state.funnel = null;
+    state.metaFunnelData = null;
+    state.metaFunnelPeriod = null;
+    fetchFunnel();
+  });
+
+  // Attivazione (built-in) — coorte matura, non ha step configurabili: apre e calcola.
+  document.getElementById('funnel-activation-btn')?.addEventListener('click', () => {
+    state.funnelMode = 'activation';
+    state.activeFunnelPreset = null;
+    state.editingFunnel = false;
+    state.editingEventFunnel = false;
+    fetchActivation();
+  });
+  document.getElementById('activation-apply')?.addEventListener('click', () => fetchActivation());
+  // "Sprint 10 →" dell'avviso ambra: sposta il selettore in alto sull'ultimo sprint precedente.
+  document.querySelector('[data-act-sprint]')?.addEventListener('click', e => {
+    const sp = state.sprints.find(s => s.id === e.currentTarget.dataset.actSprint);
+    if (!sp) return;
+    state.funnelSprintId = sp.id;
+    state.funnelFrom = sp.inizio;
+    state.funnelTo   = sp.fine;
+    fetchActivation();
+  });
+
+  document.getElementById('edit-event-funnel')?.addEventListener('click', () => {
+    state.editingEventFunnel = true;
+    openChipDraftForActivePreset();
+    render();
+  });
+  document.getElementById('close-event-funnel-edit')?.addEventListener('click', () => {
+    state.editingEventFunnel = false;
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    render();
+  });
+  document.getElementById('event-funnel-reset')?.addEventListener('click', () => {
+    state.eventFunnelConfig = JSON.parse(JSON.stringify(ONBOARDING_FUNNEL_STEPS));
+    persistEventFunnelConfig(); render();
+  });
+
+  // Funnel — carica costi Meta
+  document.getElementById('meta-funnel-load')?.addEventListener('click', fetchMetaFunnel);
+
+  // Funnel — edit mode
+  document.getElementById('edit-funnel')?.addEventListener('click', () => {
+    state.editingFunnel = true;
+    openChipDraftForActivePreset();
+    render();
+  });
+  document.getElementById('close-funnel-edit')?.addEventListener('click', () => {
+    state.editingFunnel = false;
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    render();
+  });
+  document.getElementById('funnel-add')?.addEventListener('click', () => {
+    const lastIdx = state.funnelConfig.length > 0 ? state.funnelConfig.length - 1 : null;
+    state.funnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
+    persistFunnelConfig();
+    render();
+  });
+  document.getElementById('funnel-reset')?.addEventListener('click', () => {
+    state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+    persistFunnelConfig();
+    render();
+  });
+
+  // Funnel — saved presets
+  document.querySelectorAll('.funnel-preset-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      const idx = el.dataset.presetIdx;
+      if (idx === 'default') {
+        state.activeFunnelPreset = null;
+        state.funnelMode = 'catalog';
+        state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+        state.funnelFrom = BETA_START;
+        state.funnelTo   = TODAY;
+        state.funnel = null;
+        state.metaFunnelData = null;
+        state.metaFunnelPeriod = null;
+        fetchFunnel();
+        return;
+      }
+      const i = +idx;
+      const preset = state.savedFunnels[i];
+      if (!preset) return;
+      state.activeFunnelPreset = i;
+      if ((preset.tipo || 'catalog') === 'event') {
+        state.funnelMode = 'event';
+        state.eventFunnelConfig = JSON.parse(JSON.stringify(preset.steps || preset.config || []));
+        state.eventFunnelProvider = preset.provider || null;
+        state.eventFunnel = null;
+        fetchEventFunnel();
+      } else {
+        state.funnelMode = 'catalog';
+        state.funnelConfig = JSON.parse(JSON.stringify(preset.config));
+        state.funnel = null;
+        state.metaFunnelData = null;
+        state.metaFunnelPeriod = null;
+        fetchFunnel();
+      }
+    }));
+
+  // Eliminazione funnel salvato — vive nell'editor chip dentro il Costruttore (la × per-tab
+  // è stata rimossa dalla barra col redesign a tab).
+  document.getElementById('chip-editor-delete')?.addEventListener('click', async () => {
+    const i = state.chipEditorIdx;
+    const preset = i != null ? state.savedFunnels[i] : null;
+    if (!preset) return;
+    const wasActive = state.activeFunnelPreset === i;
+    if (preset.id) {
+      const del = await sb.from('funnel_definitions').delete().eq('id', preset.id);
+      if (del.error) { console.error('delete funnel', del.error); alert('Errore eliminazione funnel: ' + del.error.message); return; }
+    }
+    state.activeFunnelPreset = null; // gli indici cambiano dopo il refetch: si riparte da Default
+    state.chipEditorIdx = null;
+    state.chipDraft = null;
+    await fetchFunnelDefinitions();
+    if (wasActive) {
+      state.funnelMode = 'catalog';
+      state.funnelConfig = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+      state.editingFunnel = false;
+      state.editingEventFunnel = false;
+    }
+    render();
+  });
+
+  // Toggle Coorte/Volumi del funnel a eventi (p_mode kpi_funnel_v2). Persistito in localStorage;
+  // se c'è già un calcolo lo rilancia nella nuova modalità, altrimenti solo re-render.
+  document.querySelectorAll('.event-funnel-mode-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      const mode = el.dataset.mode === 'absolute' ? 'absolute' : 'cohort';
+      if (state.eventFunnelMode === mode) return;
+      state.eventFunnelMode = mode;
+      localStorage.setItem(LS_EVENT_FUNNEL_MODE, mode);
+      if (state.eventFunnel || state.eventFunnelLoading) fetchEventFunnel();
+      else render();
+    }));
+
+  // Editor chip — input testo
+  document.getElementById('chip-editor-name')?.addEventListener('input', e => {
+    if (state.chipDraft) state.chipDraft.name = e.target.value;
+  });
+  document.getElementById('chip-editor-label')?.addEventListener('input', e => {
+    if (state.chipDraft) state.chipDraft.label = e.target.value;
+  });
+  // Enter salva, Esc annulla — attivi su entrambi gli input testo
+  ['chip-editor-name', 'chip-editor-label'].forEach(id =>
+    document.getElementById(id)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('chip-editor-save')?.click();
+      if (e.key === 'Escape') document.getElementById('chip-editor-cancel')?.click();
+    }));
+
+  // Editor chip — picker icona
+  document.querySelectorAll('.chip-icon-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      if (!state.chipDraft) return;
+      state.chipDraft.icon = el.dataset.icon;
+      render();
+    }));
+
+  // Editor chip — picker colore
+  document.querySelectorAll('.chip-color-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      if (!state.chipDraft) return;
+      state.chipDraft.color = el.dataset.color;
+      render();
+    }));
+
+  // Editor chip — annulla: ripristina il draft dai valori attuali della chip senza chiudere il
+  // costruttore (che è controllato dal bottone "Chiudi" del costruttore stesso).
+  document.getElementById('chip-editor-cancel')?.addEventListener('click', () => {
+    const i = state.chipEditorIdx;
+    const f = i != null ? state.savedFunnels[i] : null;
+    if (!f) return;
+    state.chipDraft = {
+      name:  f.name  || '',
+      icon:  f.icon  || DEFAULT_CHIP_ICON,
+      color: f.color || DEFAULT_CHIP_COLOR,
+      label: f.label || '',
+    };
+    render();
+  });
+
+  // Editor chip — salva: aggiorna la chip ma tiene il pannello aperto (il costruttore rimane
+  // visibile finché non si preme "Chiudi" del costruttore stesso).
+  document.getElementById('chip-editor-save')?.addEventListener('click', async () => {
+    const i = state.chipEditorIdx;
+    const d = state.chipDraft;
+    if (i == null || !d) return;
+    const f = state.savedFunnels[i];
+    if (!f) return;
+    const name = (d.name || '').trim();
+    if (!name) { alert('Il nome della chip non può essere vuoto.'); return; }
+    await updateFunnelChip(f.id, {
+      name,
+      icon:  d.icon  || DEFAULT_CHIP_ICON,
+      color: d.color || DEFAULT_CHIP_COLOR,
+      label: (d.label || '').trim() || null,
+    });
+    render();
+  });
+
+  // Drag & drop nativo HTML5 su TUTTE le chip (Default, onboarding, salvate) — riordino manuale.
+  // Ogni wrap ha data-token ('default' | 'onboarding' | id funnel). `dragstart` memorizza il token
+  // sorgente; `dragover` evidenzia il target (chipDragOver); `drop` ricalcola l'array di token e
+  // persiste via saveFunnelToolbarOrder (localStorage + order_index sul DB per i salvati).
+  document.querySelectorAll('.funnel-chip-wrap').forEach(w => {
+    w.addEventListener('dragstart', e => {
+      if (state.chipReorderSaving) { e.preventDefault(); return; }
+      state.chipDragFrom = w.dataset.token;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', w.dataset.token); // Firefox richiede setData
+    });
+    w.addEventListener('dragover', e => {
+      if (state.chipDragFrom == null) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const over = w.dataset.token;
+      if (state.chipDragOver !== over) {
+        state.chipDragOver = over;
+        render();
+      }
+    });
+    w.addEventListener('drop', async e => {
+      e.preventDefault();
+      const from = state.chipDragFrom;
+      const to   = w.dataset.token;
+      state.chipDragFrom = null;
+      state.chipDragOver = null;
+      if (from == null || from === to) { render(); return; }
+      const tokens = funnelToolbarTokens();
+      const fromIdx = tokens.indexOf(from);
+      const toIdx   = tokens.indexOf(to);
+      if (fromIdx === -1 || toIdx === -1) { render(); return; }
+      const [moved] = tokens.splice(fromIdx, 1);
+      tokens.splice(toIdx, 0, moved);
+      await saveFunnelToolbarOrder(tokens);
+    });
+    w.addEventListener('dragend', () => {
+      if (state.chipDragFrom != null || state.chipDragOver != null) {
+        state.chipDragFrom = null;
+        state.chipDragOver = null;
+        render();
+      }
+    });
+  });
+
+  document.getElementById('funnel-save-open')?.addEventListener('click', () => {
+    state.funnelSaveOpen = true;
+    state.funnelSaveName = '';
+    render();
+    document.getElementById('funnel-save-name')?.focus();
+  });
+
+  document.getElementById('funnel-save-cancel')?.addEventListener('click', () => {
+    state.funnelSaveOpen = false;
+    render();
+  });
+
+  document.getElementById('funnel-save-name')?.addEventListener('input', e => {
+    state.funnelSaveName = e.target.value;
+  });
+
+  document.getElementById('funnel-save-name')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('funnel-save-confirm')?.click();
+    if (e.key === 'Escape') document.getElementById('funnel-save-cancel')?.click();
+  });
+
+  document.getElementById('funnel-save-confirm')?.addEventListener('click', async () => {
+    const name = state.funnelSaveName.trim();
+    if (!name) return;
+    const isEvent = state.funnelMode === 'event';
+    const steps = JSON.parse(JSON.stringify(isEvent ? state.eventFunnelConfig : state.funnelConfig));
+    state.funnelSaveOpen = false;
+    state.funnelSaveName = '';
+    render();
+    // nuovo funnel va in fondo alla lista: order_index = max esistente + 1
+    const maxOrder = (state.savedFunnels || []).reduce((m, f) => Math.max(m, f.orderIndex ?? -1), -1);
+    const ins = await sb.from('funnel_definitions').insert({
+      nome: name, tipo: isEvent ? 'event' : 'catalog', steps,
+      provider: isEvent ? state.eventFunnelProvider : null,
+      order_index: maxOrder + 1,
+    });
+    if (ins.error) { console.error('save funnel', ins.error); alert('Errore salvataggio funnel: ' + ins.error.message); return; }
+    await fetchFunnelDefinitions();
+    state.activeFunnelPreset = state.savedFunnels.length - 1; // il nuovo è l'ultimo (order_index max)
+    render();
+  });
+
+  // ── Builder funnel a eventi ──────────────────────────────────────────
+  document.getElementById('event-funnel-add')?.addEventListener('click', () => {
+    state.eventFunnelConfig.push({ event: '', label: '' });
+    persistEventFunnelConfig();
+    render();
+  });
+  const eventCalc = () => {
+    const from = document.getElementById('funnel-from')?.value;
+    const to   = document.getElementById('funnel-to')?.value;
+    if (from) state.funnelFrom = from;
+    if (to)   state.funnelTo   = to;
+    const selSprint = state.sprints.find(s => s.id === state.funnelSprintId);
+    if (!selSprint || selSprint.inizio !== state.funnelFrom || selSprint.fine !== state.funnelTo) state.funnelSprintId = '';
+    fetchEventFunnel();
+  };
+  document.getElementById('event-funnel-calc')?.addEventListener('click', eventCalc);
+  document.getElementById('event-funnel-apply')?.addEventListener('click', eventCalc);
+  // Selettore evento → apre l'event browser puntando allo step corrente
+  document.querySelectorAll('.event-funnel-pick').forEach(el =>
+    el.addEventListener('click', () => openEventBrowser(+el.dataset.row)));
+  // Label rinominabile: scrive direttamente in row.label. Vuoto → fallback catalogo/evento raw.
+  document.querySelectorAll('.event-funnel-label').forEach(el =>
+    el.addEventListener('input', () => {
+      state.eventFunnelConfig[+el.dataset.row].label = el.value;
+      persistEventFunnelConfig();
+    }));
+  document.querySelectorAll('.event-funnel-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.eventFunnelConfig.splice(i, 1);
+      // rimappa gli indici expanded (session-only): tutto quello che stava dopo i shifta di -1
+      const oldExp = state.eventFunnelExpanded || {};
+      const newExp = {};
+      Object.keys(oldExp).forEach(k => {
+        const ki = +k;
+        if (ki < i) newExp[ki] = oldExp[k];
+        else if (ki > i) newExp[ki - 1] = oldExp[k];
+      });
+      state.eventFunnelExpanded = newExp;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // Chevron in viz + toggle expand in editor: aprono/chiudono la sezione children
+  document.querySelectorAll('.event-funnel-chevron, .event-funnel-expand-toggle').forEach(el =>
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const i = +el.dataset.row;
+      if (!state.eventFunnelExpanded) state.eventFunnelExpanded = {};
+      state.eventFunnelExpanded[i] = !state.eventFunnelExpanded[i];
+      render();
+    }));
+
+  // Aggiungi variante child (crea children[] on demand). Espande automaticamente il parent.
+  document.querySelectorAll('.event-funnel-child-add').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      const row = state.eventFunnelConfig[i];
+      if (!row) return;
+      if (!Array.isArray(row.children)) row.children = [];
+      row.children.push({ event: '', label: '' });
+      if (!state.eventFunnelExpanded) state.eventFunnelExpanded = {};
+      state.eventFunnelExpanded[i] = true;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // Picker child → apre event browser puntando alla variante specifica
+  document.querySelectorAll('.event-funnel-pick-child').forEach(el =>
+    el.addEventListener('click', () => openEventBrowser(+el.dataset.parent, +el.dataset.child)));
+
+  // Label child rinominabile
+  document.querySelectorAll('.event-funnel-child-label').forEach(el =>
+    el.addEventListener('input', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
+      row.children[ci].label = el.value;
+      persistEventFunnelConfig();
+    }));
+
+  // ── Eventi in OR (step multi-evento) ────────────────────────────────────────
+  // Un solo set di handler per parent e varianti: `data-child` presente = variante.
+  // Risolve la riga bersaglio una volta sola, così i tre handler restano tre righe.
+  const orTarget = (el) => {
+    if (el.dataset.parent != null) {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return null;
+      return { target: row.children[ci], row: pi, child: ci };
+    }
+    const i = +el.dataset.row;
+    const row = state.eventFunnelConfig[i];
+    return row ? { target: row, row: i, child: undefined } : null;
+  };
+
+  document.querySelectorAll('.event-funnel-or-add').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = orTarget(el);
+      if (t) openEventBrowser(t.row, t.child, -1);
+    }));
+
+  document.querySelectorAll('.event-funnel-or-edit').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = orTarget(el);
+      if (t) openEventBrowser(t.row, t.child, +el.dataset.or);
+    }));
+
+  // Rimozione: se l'array si svuota il campo sparisce del tutto, così la config torna
+  // byte-identica al formato a evento singolo (nessun `orEvents: []` residuo su DB).
+  document.querySelectorAll('.event-funnel-or-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const t = orTarget(el);
+      if (!t) return;
+      const ors = rowOrEvents(t.target);
+      ors.splice(+el.dataset.or, 1);
+      if (ors.length) t.target.orEvents = ors; else delete t.target.orEvents;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // Filtro metadata sul parent: `provider=google` → filters {provider:'google'}. change→refetch not
+  // automatico: l'utente clicca "Calcola" (evita refetch per ogni tasto).
+  document.querySelectorAll('.event-funnel-filter').forEach(el =>
+    el.addEventListener('input', () => {
+      const i = +el.dataset.row;
+      const row = state.eventFunnelConfig[i];
+      if (!row) return;
+      const parsed = parseFilterInput(el.value);
+      if (parsed) row.filters = parsed; else delete row.filters;
+      persistEventFunnelConfig();
+    }));
+
+  // Filtro metadata sul child (stessa logica del parent). Il caso classico: variante "Google" con
+  // filtro `provider=google` sullo stesso event_name del parent (es. sign_up).
+  document.querySelectorAll('.event-funnel-child-filter').forEach(el =>
+    el.addEventListener('input', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children) || !row.children[ci]) return;
+      const parsed = parseFilterInput(el.value);
+      if (parsed) row.children[ci].filters = parsed; else delete row.children[ci].filters;
+      persistEventFunnelConfig();
+    }));
+
+  // Rimuovi child (dropp children[] se svuotato, così il parent torna "senza varianti")
+  document.querySelectorAll('.event-funnel-child-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const pi = +el.dataset.parent, ci = +el.dataset.child;
+      const row = state.eventFunnelConfig[pi];
+      if (!row || !Array.isArray(row.children)) return;
+      row.children.splice(ci, 1);
+      if (!row.children.length) delete row.children;
+      persistEventFunnelConfig();
+      render();
+    }));
+
+  // ── Event browser (modale) ──────────────────────────────────────────
+  attachEventBrowserHandlers();
+  document.querySelectorAll('.funnel-step-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.funnelConfig[+el.dataset.row].stepIdx = +el.value;
+      persistFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.funnel-vs-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.funnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
+      persistFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.funnel-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.funnelConfig.splice(i, 1);
+      state.funnelConfig.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      persistFunnelConfig();
+      render();
+    }));
+
+  // Funnel — drag & drop per riordinare gli step. La maniglia inizia il drag; l'intera riga è
+  // drop target. L'indice di partenza viaggia in dataTransfer (niente stato globale).
+  document.querySelectorAll('.funnel-drag').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.row);
+      e.dataTransfer.effectAllowed = 'move';
+      el.closest('.funnel-row')?.style.setProperty('opacity', '0.4');
+    });
+    el.addEventListener('dragend', () => {
+      el.closest('.funnel-row')?.style.setProperty('opacity', '1');
+    });
+  });
+  document.querySelectorAll('.funnel-row').forEach(rowEl => {
+    rowEl.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      rowEl.style.borderTop = '2px solid var(--purple)';
+    });
+    rowEl.addEventListener('dragleave', () => { rowEl.style.borderTop = ''; });
+    rowEl.addEventListener('drop', e => {
+      e.preventDefault();
+      rowEl.style.borderTop = '';
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to   = +rowEl.dataset.row;
+      if (!Number.isNaN(from)) moveFunnelRow(from, to);
+    });
+  });
+
+  // Funnel onboarding — drag & drop step (stesso meccanismo del Default, classi dedicate)
+  document.querySelectorAll('.event-funnel-drag').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.row);
+      e.dataTransfer.effectAllowed = 'move';
+      el.closest('.event-funnel-row')?.style.setProperty('opacity', '0.4');
+    });
+    el.addEventListener('dragend', () => { el.closest('.event-funnel-row')?.style.setProperty('opacity', '1'); });
+  });
+  document.querySelectorAll('.event-funnel-row').forEach(rowEl => {
+    rowEl.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; rowEl.style.borderTop = '2px solid var(--purple)'; });
+    rowEl.addEventListener('dragleave', () => { rowEl.style.borderTop = ''; });
+    rowEl.addEventListener('drop', e => {
+      e.preventDefault();
+      rowEl.style.borderTop = '';
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to   = +rowEl.dataset.row;
+      if (!Number.isNaN(from)) moveEventFunnelRow(from, to);
+    });
+  });
+
+  // Funnel onboarding — confronto sprint
+  document.getElementById('sprint-event-toggle')?.addEventListener('click', () => {
+    state.sprintEventOpen = !state.sprintEventOpen; render();
+  });
+  document.querySelectorAll('.sprint-event-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const idx = state.sprintEventSel.indexOf(id);
+      if (idx === -1) state.sprintEventSel.push(id); else state.sprintEventSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-event-calc')?.addEventListener('click', fetchSprintEventFunnel);
+
+  // Card Parametri — apri/chiudi + override esclusioni v2 (ricalcolo immediato del funnel)
+  document.getElementById('funnel-params-toggle')?.addEventListener('click', () => {
+    state.funnelParamsOpen = !state.funnelParamsOpen;
+    state.funnelMenu = null;
+    if (state.funnelParamsOpen) fetchExcludedUsers(); // lazy: la lista serve solo a card aperta
+    render();
+  });
+  document.querySelectorAll('.excl-filter').forEach(el =>
+    el.addEventListener('click', () => {
+      state.excludedFilter = el.dataset.filter || null;
+      render();
+    }));
+  document.querySelectorAll('.funnel-param-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const k = el.dataset.param;
+      if (k === 'emulators')    state.funnelIncludeEmulators = !state.funnelIncludeEmulators;
+      else if (k === 'test')    state.funnelIncludeTest      = !state.funnelIncludeTest;
+      else if (k === 'blocked') state.funnelIncludeBlocked   = !state.funnelIncludeBlocked;
+      else if (k === 'bots')    state.funnelIncludeBots      = !state.funnelIncludeBots;
+      // Il confronto sprint eventualmente già calcolato resta con i vecchi flag:
+      // lo svuoto così un nuovo "Calcola confronto" riparte coerente.
+      state.sprintEventData = {};
+      if (state.funnelMode === 'event') fetchEventFunnel();
+      else if (state.funnelMode === 'activation') fetchActivation();
+      else render();
+    }));
+
+  // Funnel — "Assegna a sprint": copia il funnel corrente negli sprint selezionati (DB).
+  document.getElementById('funnel-assign-open')?.addEventListener('click', () => {
+    state.funnelAssignOpen = !state.funnelAssignOpen;
+    if (state.funnelAssignOpen) {
+      // preseleziona gli sprint che hanno già esattamente questo funnel (comodo per confermare)
+      const cur = JSON.stringify(state.funnelConfig);
+      state.funnelAssignSel = state.sprints.filter(s => JSON.stringify(sprintFunnelCfg(s)) === cur).map(s => s.id);
+    }
+    render();
+  });
+  document.getElementById('funnel-assign-close')?.addEventListener('click', () => {
+    state.funnelAssignOpen = false;
+    render();
+  });
+  document.querySelectorAll('.funnel-assign-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const i = state.funnelAssignSel.indexOf(id);
+      if (i === -1) state.funnelAssignSel.push(id); else state.funnelAssignSel.splice(i, 1);
+      render();
+    }));
+  document.getElementById('funnel-assign-save')?.addEventListener('click', () => {
+    if (!state.funnelAssignSel.length || state.funnelAssignSaving) return;
+    // Se tra i selezionati c'è uno sprint con funnel GIÀ personalizzato (e diverso da quello che
+    // stiamo per scrivere), chiedi conferma col modal "digita Modifica".
+    const cur = JSON.stringify(state.funnelConfig);
+    const customized = state.sprints.filter(s =>
+      state.funnelAssignSel.includes(s.id) &&
+      Array.isArray(s.funnel_config) && s.funnel_config.length &&
+      JSON.stringify(s.funnel_config) !== cur);
+    if (customized.length) {
+      state.funnelOverwriteConfirm = { kind: 'assign', names: customized.map(s => s.nome) };
+      render();
+      document.getElementById('overwrite-confirm-input')?.focus();
+      return;
+    }
+    doFunnelAssignSave();
+  });
+
+  // Sprint — CRUD
+  document.getElementById('sprint-new')?.addEventListener('click', () => {
+    state.sprintFormOpen  = true;
+    state.sprintEditingId = null;
+    state.sprintForm      = { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' };
+    render();
+  });
+  document.getElementById('sprint-form-cancel')?.addEventListener('click', () => {
+    state.sprintFormOpen  = false;
+    state.sprintEditingId = null;
+    render();
+  });
+  document.getElementById('sprint-form-save')?.addEventListener('click', async () => {
+    const nome   = document.getElementById('sprint-form-nome')?.value?.trim();
+    const inizio = document.getElementById('sprint-form-inizio')?.value;
+    const fine   = document.getElementById('sprint-form-fine')?.value;
+    const note   = document.getElementById('sprint-form-note')?.value?.trim() || null;
+    const inizioOra = document.getElementById('sprint-form-inizio-ora')?.value || null;
+    const fineOra = document.getElementById('sprint-form-fine-ora')?.value || null;
+    if (!nome || !inizio || !fine) return;
+    state.sprintForm = { nome, inizio, fine, note: note || '', inizio_ora: inizioOra || '', fine_ora: fineOra || '' };
+    const res = state.sprintEditingId
+      ? await sb.from('sprints').update({ nome, inizio, fine, note, inizio_ora: inizioOra, fine_ora: fineOra }).eq('id', state.sprintEditingId)
+      : await sb.from('sprints').insert({ nome, inizio, fine, note, inizio_ora: inizioOra, fine_ora: fineOra });
+    if (res.error) { console.error(res.error); return; }
+    state.sprintFormOpen  = false;
+    state.sprintEditingId = null;
+    state.sprintForm      = { nome: '', inizio: BETA_START, fine: TODAY, note: '', inizio_ora: '', fine_ora: '' };
+    await fetchSprints();
+  });
+  // Orario di partenza: aggiungi/rimuovi. Prima snapshotto i campi dal DOM (il render li rigenera
+  // da state.sprintForm) per non perdere ciò che l'utente ha già digitato.
+  const snapshotSprintForm = () => {
+    const g = id => document.getElementById(id);
+    state.sprintForm = {
+      nome:       g('sprint-form-nome')?.value       ?? state.sprintForm.nome,
+      inizio:     g('sprint-form-inizio')?.value      ?? state.sprintForm.inizio,
+      fine:       g('sprint-form-fine')?.value        ?? state.sprintForm.fine,
+      note:       g('sprint-form-note')?.value        ?? state.sprintForm.note,
+      inizio_ora: g('sprint-form-inizio-ora')?.value  ?? state.sprintForm.inizio_ora,
+      fine_ora:   g('sprint-form-fine-ora')?.value    ?? state.sprintForm.fine_ora,
+    };
+  };
+  document.getElementById('sprint-form-ora-add')?.addEventListener('click', () => {
+    snapshotSprintForm();
+    state.sprintForm.inizio_ora = '09:00';
+    render();
+  });
+  document.getElementById('sprint-form-ora-clear')?.addEventListener('click', () => {
+    snapshotSprintForm();
+    state.sprintForm.inizio_ora = '';
+    render();
+  });
+  document.getElementById('sprint-form-fine-ora-add')?.addEventListener('click', () => {
+    snapshotSprintForm();
+    state.sprintForm.fine_ora = '18:00';
+    render();
+  });
+  document.getElementById('sprint-form-fine-ora-clear')?.addEventListener('click', () => {
+    snapshotSprintForm();
+    state.sprintForm.fine_ora = '';
+    render();
+  });
+  document.querySelectorAll('.sprint-edit').forEach(el =>
+    el.addEventListener('click', () => {
+      const s = state.sprints.find(sp => sp.id === el.dataset.id);
+      if (!s) return;
+      state.sprintFormOpen  = true;
+      state.sprintEditingId = s.id;
+      state.sprintForm      = { nome: s.nome, inizio: s.inizio, fine: s.fine, note: s.note || '', inizio_ora: s.inizio_ora ? String(s.inizio_ora).slice(0,5) : '', fine_ora: s.fine_ora ? String(s.fine_ora).slice(0,5) : '' };
+      render();
+    }));
+  document.querySelectorAll('.sprint-delete').forEach(el =>
+    el.addEventListener('click', () => {
+      const sprint = state.sprints.find(s => s.id === el.dataset.id);
+      state.deleteConfirm = { id: el.dataset.id, nome: sprint?.nome || 'sprint' };
+      render();
+      document.getElementById('delete-confirm-input')?.focus();
+    }));
+
+  // Sprint — editor funnel per-sprint
+  document.querySelectorAll('.sprint-funnel-edit').forEach(el =>
+    el.addEventListener('click', () => {
+      const s = state.sprints.find(sp => sp.id === el.dataset.id);
+      if (!s) return;
+      if (state.sprintFunnelEditId === s.id) { // toggle: chiudi se già aperto su questo sprint
+        state.sprintFunnelEditId = null;
+        state.sprintFunnelEdit   = null;
+      } else {
+        state.sprintFunnelEditId = s.id;
+        state.sprintFunnelEdit   = JSON.parse(JSON.stringify(sprintFunnelCfg(s)));
+      }
+      render();
+    }));
+  document.getElementById('sprint-cfg-add')?.addEventListener('click', () => {
+    const last = state.sprintFunnelEdit.length ? state.sprintFunnelEdit.length - 1 : null;
+    state.sprintFunnelEdit.push({ stepIdx: 0, vsIdx: last });
+    render();
+  });
+  document.getElementById('sprint-cfg-reset')?.addEventListener('click', () => {
+    state.sprintFunnelEdit = JSON.parse(JSON.stringify(DEF_FUN_CFG));
+    render();
+  });
+  document.querySelectorAll('.sprint-cfg-step-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintFunnelEdit[+el.dataset.row].stepIdx = +el.value;
+      render();
+    }));
+  document.querySelectorAll('.sprint-cfg-vs-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintFunnelEdit[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
+      render();
+    }));
+  document.querySelectorAll('.sprint-cfg-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.sprintFunnelEdit.splice(i, 1);
+      state.sprintFunnelEdit.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      render();
+    }));
+  document.querySelectorAll('.sprint-cfg-drag').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', el.dataset.row);
+      e.dataTransfer.effectAllowed = 'move';
+      el.closest('.sprint-cfg-row')?.style.setProperty('opacity', '0.4');
+    });
+    el.addEventListener('dragend', () => {
+      el.closest('.sprint-cfg-row')?.style.setProperty('opacity', '1');
+    });
+  });
+  document.querySelectorAll('.sprint-cfg-row').forEach(rowEl => {
+    rowEl.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; rowEl.style.borderTop = '2px solid var(--purple)'; });
+    rowEl.addEventListener('dragleave', () => { rowEl.style.borderTop = ''; });
+    rowEl.addEventListener('drop', e => {
+      e.preventDefault();
+      rowEl.style.borderTop = '';
+      const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+      const to   = +rowEl.dataset.row;
+      if (!Number.isNaN(from)) moveSprintCfgRow(from, to);
+    });
+  });
+  document.getElementById('sprint-cfg-close')?.addEventListener('click', () => {
+    state.sprintFunnelEditId = null;
+    state.sprintFunnelEdit   = null;
+    render();
+  });
+  document.getElementById('sprint-cfg-save')?.addEventListener('click', () => {
+    if (!state.sprintFunnelEditId || state.sprintFunnelSaving) return;
+    // Sprint già personalizzato (e la modifica cambia davvero qualcosa) → conferma "digita Modifica".
+    const s = state.sprints.find(sp => sp.id === state.sprintFunnelEditId);
+    const isCustom = s && Array.isArray(s.funnel_config) && s.funnel_config.length;
+    const changed  = isCustom && JSON.stringify(s.funnel_config) !== JSON.stringify(state.sprintFunnelEdit);
+    if (changed) {
+      state.funnelOverwriteConfirm = { kind: 'sprint', names: [s.nome] };
+      render();
+      document.getElementById('overwrite-confirm-input')?.focus();
+      return;
+    }
+    doSprintCfgSave();
+  });
+  document.getElementById('sprint-cfg-clear')?.addEventListener('click', async () => {
+    if (!state.sprintFunnelEditId || state.sprintFunnelSaving) return;
+    state.sprintFunnelSaving = true;
+    render();
+    const id = state.sprintFunnelEditId;
+    try {
+      const res = await sb.from('sprints').update({ funnel_config: null }).eq('id', id);
+      if (res.error) throw res.error;
+      state.sprintFunnelSaving = false;
+      state.sprintFunnelEditId = null;
+      state.sprintFunnelEdit   = null;
+      state.sprintFunnelData   = {};
+      await fetchSprints();
+    } catch (e) {
+      state.sprintFunnelSaving = false;
+      console.error('sprint-cfg-clear', e);
+      alert('Errore: ' + (e.message || e));
+      render();
+    }
+  });
+
+  // Delete confirm modal
+  const delInput = document.getElementById('delete-confirm-input');
+  const delBtn   = document.getElementById('delete-confirm-btn');
+  if (delInput && delBtn) {
+    delInput.addEventListener('input', () => {
+      const ok = delInput.value === 'DELETE';
+      delBtn.style.opacity = ok ? '1' : '0.4';
+      delBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+    });
+    delBtn.addEventListener('click', async () => {
+      if (delInput.value !== 'DELETE') return;
+      const id = state.deleteConfirm?.id;
+      state.deleteConfirm = null;
+      render();
+      const res = await sb.from('sprints').delete().eq('id', id);
+      if (res.error) { console.error(res.error); return; }
+      state.sprintFunnelSel = state.sprintFunnelSel.filter(x => x !== id);
+      state.sprintRetSel    = state.sprintRetSel.filter(x => x !== id);
+      delete state.sprintFunnelData[id];
+      delete state.sprintRetData[id];
+      await fetchSprints();
+    });
+    document.getElementById('delete-cancel-btn')?.addEventListener('click', () => {
+      state.deleteConfirm = null;
+      render();
+    });
+    document.getElementById('delete-overlay')?.addEventListener('click', e => {
+      if (e.target === e.currentTarget) { state.deleteConfirm = null; render(); }
+    });
+  }
+
+  // Overwrite confirm modal (funnel sprint già personalizzato — digita "Modifica")
+  const owInput = document.getElementById('overwrite-confirm-input');
+  const owBtn   = document.getElementById('overwrite-confirm-btn');
+  if (owInput && owBtn) {
+    owInput.addEventListener('input', () => {
+      const ok = owInput.value === 'Modifica';
+      owBtn.style.opacity = ok ? '1' : '0.4';
+      owBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+    });
+    owInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && owInput.value === 'Modifica') owBtn.click();
+    });
+    owBtn.addEventListener('click', () => {
+      if (owInput.value !== 'Modifica') return;
+      const kind = state.funnelOverwriteConfirm?.kind;
+      state.funnelOverwriteConfirm = null;
+      if (kind === 'assign')      doFunnelAssignSave();
+      else if (kind === 'sprint') doSprintCfgSave();
+    });
+    document.getElementById('overwrite-cancel-btn')?.addEventListener('click', () => {
+      state.funnelOverwriteConfirm = null;
+      render();
+    });
+    document.getElementById('overwrite-overlay')?.addEventListener('click', e => {
+      if (e.target === e.currentTarget) { state.funnelOverwriteConfirm = null; render(); }
+    });
+  }
+
+  // Blocked users
+  document.getElementById('blocked-add-toggle')?.addEventListener('click', () => {
+    state.blockSearchOpen    = !state.blockSearchOpen;
+    state.blockSearchQuery   = '';
+    state.blockSearchResults = [];
+    render();
+    if (state.blockSearchOpen) {
+      const inp = document.getElementById('blocked-search');
+      inp?.focus();
+      // ripopola risultati se c'era già una query
+      renderBlockedSearchResults();
+    }
+  });
+  const blockedSearchEl = document.getElementById('blocked-search');
+  if (blockedSearchEl) {
+    blockedSearchEl.addEventListener('input', e => searchUsersForBlock(e.target.value.trim()));
+    // ripristina risultati già presenti dopo un render
+    if (state.blockSearchResults.length) renderBlockedSearchResults();
+  }
+  document.querySelectorAll('.blocked-remove').forEach(el =>
+    el.addEventListener('click', () => removeBlockedUser(el.dataset.id)));
+  document.querySelectorAll('.blocked-readd').forEach(el =>
+    el.addEventListener('click', () => addBlockedUser({
+      id:       el.dataset.userId,
+      username: el.dataset.username,
+      email:    el.dataset.email,
+      name:     el.dataset.nome,
+    })));
+
+  // Sprint — confronto funnel (in pageFunnel)
+  document.getElementById('sprint-funnel-toggle')?.addEventListener('click', () => {
+    state.sprintFunnelOpen = !state.sprintFunnelOpen;
+    render();
+  });
+  // Selettore "quale funnel confrontare": Base vs una definizione (catalog) applicata a tutti gli sprint.
+  // I dati (kpi_funnel per sprint) coprono già tutti gli step del catalogo: basta ridisegnare, niente refetch.
+  document.getElementById('sprint-funnel-def-sel')?.addEventListener('change', el => {
+    state.sprintFunnelDef = el.target.value || null;
+    state.sprintFunnelHiddenSteps = []; // reset del filtro di visualizzazione: gli step cambiano tra funnel
+    render();
+  });
+  // Nascondi/mostra righe del confronto — filtro di sola visualizzazione, session-only
+  document.querySelectorAll('.sprint-step-hide').forEach(el =>
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.step;
+      if (!state.sprintFunnelHiddenSteps.includes(idx)) state.sprintFunnelHiddenSteps.push(idx);
+      render();
+    }));
+  document.querySelectorAll('.sprint-step-show').forEach(el =>
+    el.addEventListener('click', () => {
+      const idx = +el.dataset.step;
+      state.sprintFunnelHiddenSteps = state.sprintFunnelHiddenSteps.filter(i => i !== idx);
+      render();
+    }));
+  document.getElementById('sprint-steps-show-all')?.addEventListener('click', () => {
+    state.sprintFunnelHiddenSteps = [];
+    render();
+  });
+  document.querySelectorAll('.sprint-funnel-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.id;
+      const idx = state.sprintFunnelSel.indexOf(id);
+      if (idx === -1) state.sprintFunnelSel.push(id);
+      else state.sprintFunnelSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-funnel-calc')?.addEventListener('click', fetchSprintFunnel);
+  // Flag "% dall'inizio" — una preferenza sola per tutti i confronti sprint (catalogo, eventi,
+  // Premium, AI): la spunti dove sei e vale ovunque. Solo visualizzazione: i dati ci sono già.
+  document.querySelectorAll('.sprint-pctstart').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintFunnelPctStart = el.checked;
+      render();
+    }));
+
+  // ── Pannello "Dove si perdono gli utenti" ────────────────────────────
+  document.querySelectorAll('.leak-mode').forEach(el =>
+    el.addEventListener('click', () => {
+      state.sprintLeakMode = el.dataset.mode;
+      render();
+    }));
+  document.getElementById('leak-ph-edit')?.addEventListener('click', () => {
+    state.sprintLeakEdit = JSON.parse(JSON.stringify(activeFunnelPhases()));
+    render();
+  });
+  document.getElementById('leak-ph-cancel')?.addEventListener('click', () => {
+    state.sprintLeakEdit = null;
+    render();
+  });
+  document.getElementById('leak-ph-add')?.addEventListener('click', () => {
+    // rileggi prima dal DOM, altrimenti perdi i nomi digitati e non ancora in stato
+    state.sprintLeakEdit = readLeakEditFromDom().concat({ nome: 'Nuova fase', from: 0, to: 2 });
+    render();
+  });
+  document.querySelectorAll('.leak-ph-del').forEach(el =>
+    el.addEventListener('click', () => {
+      const cur = readLeakEditFromDom();
+      cur.splice(+el.dataset.i, 1);
+      state.sprintLeakEdit = cur;
+      render();
+    }));
+  // I confini cambiano i numeri → ridisegna (rileggendo i nomi digitati). Sui campi testo NON
+  // ridisegniamo: perderesti il focus a ogni tasto — i nomi si leggono dal DOM al salvataggio.
+  document.querySelectorAll('.leak-ph-from, .leak-ph-to').forEach(el =>
+    el.addEventListener('change', () => {
+      state.sprintLeakEdit = readLeakEditFromDom();
+      render();
+    }));
+  document.getElementById('leak-ph-save')?.addEventListener('click', () => {
+    const fasi = readLeakEditFromDom();
+    if (!fasi.length) { alert('Aggiungi almeno una fase.'); return; }
+    const bad = fasi.find(f => f.from === f.to);
+    if (bad) { alert(`La fase "${bad.nome}" ha lo stesso step come inizio e fine: il calo sarebbe sempre 0.`); return; }
+    saveFunnelPhases(fasi);
+  });
+
+  // Meta ADS — token save
+  document.getElementById('meta-token-save')?.addEventListener('click', () => {
+    const val = document.getElementById('meta-token-input')?.value?.trim();
+    if (!val) return;
+    state.metaToken = val;
+    state.metaTokenSaveError = false;
+    saveSetting('meta_token', val);
+    state.metaAds = null;
+    state.metaCampaigns = null;
+    fetchMetaAds();
+  });
+
+  // Meta ADS — ricarica impostazioni da Supabase
+  document.getElementById('meta-settings-reload')?.addEventListener('click', async () => {
+    await loadSettings();
+    render();
+    if (state.metaToken) fetchMetaAds();
+  });
+
+  // Meta ADS — refresh
+  document.getElementById('meta-refresh')?.addEventListener('click', () => {
+    state.metaAds = null;
+    state.metaCampaigns = null;
+    fetchMetaAds();
+  });
+
+  // Meta ADS — preset buttons
+  document.querySelectorAll('.meta-preset-btn').forEach(el =>
+    el.addEventListener('click', () => {
+      state.metaDatePreset = el.dataset.preset;
+      state.metaUseCustom = false;
+      state.metaAds = null;
+      state.metaCampaigns = null;
+      fetchMetaAds();
+    }));
+
+  // Meta ADS — custom date range
+  document.getElementById('meta-custom-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('meta-from')?.value;
+    const to   = document.getElementById('meta-to')?.value;
+    if (!from || !to) return;
+    state.metaCustomFrom = from;
+    state.metaCustomTo   = to;
+    state.metaUseCustom  = true;
+    state.metaAds = null;
+    state.metaCampaigns = null;
+    fetchMetaAds();
+  });
+
+  // Meta ADS — sprint chip selection
+  document.querySelectorAll('.meta-sprint-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.sprintId;
+      const idx = state.metaSprintSel.indexOf(id);
+      if (idx === -1) state.metaSprintSel.push(id);
+      else state.metaSprintSel.splice(idx, 1);
+      render();
+    }));
+
+  // Meta ADS — sprint calcola
+  document.getElementById('meta-sprint-calc')?.addEventListener('click', fetchMetaSprintData);
+
+  // Meta ADS — carica costi Meta nel funnel
+  document.getElementById('meta-funnel-load')?.addEventListener('click', fetchMetaFunnel);
+
+
+  // Sprint — confronto retention (in pageRetention)
+  document.getElementById('sprint-ret-toggle')?.addEventListener('click', () => {
+    state.sprintRetOpen = !state.sprintRetOpen;
+    render();
+  });
+  document.querySelectorAll('.sprint-ret-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.id;
+      const idx = state.sprintRetSel.indexOf(id);
+      if (idx === -1) state.sprintRetSel.push(id);
+      else state.sprintRetSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-ret-customize')?.addEventListener('click', () => {
+    state.sprintRetCustom  = true;
+    state.sprintRetMin     = state.retMin;
+    state.sprintRetWeeks   = state.retWeeks;
+    state.sprintRetMinW0   = state.retMinW0;
+    render();
+  });
+  document.getElementById('sprint-ret-reset')?.addEventListener('click', () => {
+    state.sprintRetCustom = false;
+    state.sprintRetData   = {};
+    render();
+  });
+  document.getElementById('sprint-ret-min')?.addEventListener('change', e => {
+    state.sprintRetMin = +e.target.value;
+  });
+  document.getElementById('sprint-ret-weeks')?.addEventListener('change', e => {
+    state.sprintRetWeeks = +e.target.value;
+  });
+  document.getElementById('sprint-ret-min-w0')?.addEventListener('change', e => {
+    state.sprintRetMinW0 = +e.target.value;
+  });
+  document.getElementById('sprint-ret-calc')?.addEventListener('click', fetchSprintRetention);
+
+  // Behavior — User Explorer
+  const ueSearchEl = document.getElementById('ue-search');
+  if (ueSearchEl) {
+    ueSearchEl.addEventListener('input', e => searchUsersForExplorer(e.target.value.trim()));
+    ueSearchEl.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        state.ueSearchQuery   = '';
+        state.ueSearchResults = [];
+        renderUeSearchResults();
+      }
+    });
+    if (state.ueSearchResults.length) renderUeSearchResults();
+  }
+  document.getElementById('ue-clear-user')?.addEventListener('click', () => {
+    state.ueSelectedUser  = null;
+    state.ueData          = null;
+    state.ueSearchQuery   = '';
+    state.ueSearchResults = [];
+    render();
+  });
+  document.getElementById('ue-from-time')?.addEventListener('change', e => {
+    state.ueFromDateTime = e.target.value;
+  });
+  document.getElementById('ue-load')?.addEventListener('click', fetchUserExplorer);
+
+  // User activity modal — open from feedback detail
+  document.querySelectorAll('.open-user-activity').forEach(el =>
+    el.addEventListener('click', () => {
+      fetchUserActivity({
+        user_id:  el.dataset.userId,
+        username: el.dataset.username,
+        email:    el.dataset.email,
+      });
+    }));
+
+  // User activity modal — close
+  document.getElementById('ua-close')?.addEventListener('click', () => {
+    state.userActivityOpen = false; render();
+  });
+  document.getElementById('ua-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.userActivityOpen = false; render(); }
+  });
+
+  // Feedback modal — open (button)
+  document.getElementById('open-feedback-modal')?.addEventListener('click', () => {
+    state.feedbackModalOpen  = true;
+    state.allFeedbacks       = null;
+    state.selectedFeedback   = null;
+    state.feedbackSearchQuery = '';
+    render();
+    fetchAllFeedbacks();
+  });
+
+  // Feedback mini card rows — open modal pre-selezionando il feedback
+  document.querySelectorAll('.fb-mini-row').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.fbId;
+      state.feedbackModalOpen   = true;
+      state.feedbackSearchQuery = '';
+      render();
+      fetchAllFeedbacks().then?.(() => {});
+      // pre-select after load (fetchAllFeedbacks sets selectedFeedback to first;
+      // override after load by matching id once allFeedbacks is ready)
+      const trySelect = () => {
+        if (state.allFeedbacks) {
+          const match = state.allFeedbacks.find(f => f.id === id);
+          if (match) { state.selectedFeedback = match; render(); }
+        } else { setTimeout(trySelect, 100); }
+      };
+      trySelect();
+    }));
+
+  // Feedback modal — close
+  document.getElementById('fb-modal-close')?.addEventListener('click', () => {
+    state.feedbackModalOpen = false; render();
+  });
+  document.getElementById('fb-modal-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.feedbackModalOpen = false; render(); }
+  });
+
+  // Feedback modal — search
+  document.getElementById('fb-search')?.addEventListener('input', e => {
+    state.feedbackSearchQuery = e.target.value;
+    render();
+    document.getElementById('fb-search')?.focus();
+  });
+
+  // Feedback modal — select item
+  document.querySelectorAll('.fb-list-item').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.fbId;
+      const f  = (state.allFeedbacks || []).find(x => x.id === id);
+      if (f) { state.selectedFeedback = f; render(); document.getElementById('fb-search')?.focus(); }
+    }));
+
+  // AI Conversations modal — open (solo-lettura: lista sessioni + chat)
+  document.getElementById('open-ai-conv')?.addEventListener('click', () => {
+    state.aiConvOpen        = true;
+    state.aiSessions        = null;
+    state.aiSelectedSession = null;
+    state.aiSessionMessages = null;
+    state.aiSearchQuery     = '';
+    render();
+    fetchAISessionsFull();
+  });
+
+  // AI modal — vai alla pagina AI Coach
+  document.getElementById('ai-conv-goto-page')?.addEventListener('click', () => {
+    state.aiConvOpen = false;
+    state.page = 'ai-coach';
+    aicEnter();
+    render();
+  });
+
+  // mini card session rows
+  document.querySelectorAll('.ai-session-row').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.sessionId;
+      const s  = (state.recentAISessions || []).find(x => x.session_id === id);
+      if (!s) return;
+      state.aiConvOpen        = true;
+      state.aiSessions        = null;
+      state.aiSelectedSession = s;
+      state.aiSessionMessages = null;
+      state.aiSearchQuery     = '';
+      render();
+      fetchAISessionsFull();
+    }));
+
+  // AI modal — close
+  document.getElementById('ai-conv-close')?.addEventListener('click', () => {
+    state.aiConvOpen = false;
+    render();
+  });
+  document.getElementById('ai-conv-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.aiConvOpen = false; render(); }
+  });
+
+  // AI modal — search
+  document.getElementById('ai-conv-search')?.addEventListener('input', e => {
+    state.aiSearchQuery = e.target.value;
+    render();
+    document.getElementById('ai-conv-search')?.focus();
+  });
+
+  // AI modal — session selection
+  document.querySelectorAll('.ai-session-list-item').forEach(el =>
+    el.addEventListener('click', () => {
+      const id = el.dataset.sessionId;
+      const s  = (state.aiSessions || []).find(x => x.session_id === id);
+      if (!s || state.aiSelectedSession?.session_id === id) return;
+      fetchAISessionMessages(s);
+    }));
+
+  // Premium
+  document.getElementById('premium-sprint-sel')?.addEventListener('change', e => {
+    state.premiumSprintId = e.target.value; // '' = periodo libero
+    const sprint = state.sprints.find(s => s.id === e.target.value);
+    if (sprint) { state.premiumFrom = sprint.inizio; state.premiumTo = sprint.fine; }
+    state.premiumData = null;
+    fetchPremium();
+    fetchCreativesAudit();
+    fetchPaywallPurchases();
+  });
+  document.getElementById('premium-apply')?.addEventListener('click', () => {
+    const from   = document.getElementById('premium-from')?.value;
+    const to     = document.getElementById('premium-to')?.value;
+    const gender = document.getElementById('premium-gender')?.value;
+    if (from)   state.premiumFrom   = from;
+    if (to)     state.premiumTo     = to;
+    if (gender) state.premiumGender = gender;
+    // se le date non coincidono più con lo sprint selezionato, il periodo è ora "libero"
+    const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+    if (!selSprint || selSprint.inizio !== state.premiumFrom || selSprint.fine !== state.premiumTo) state.premiumSprintId = '';
+    state.premiumData = null;
+    fetchPremium();
+    fetchCreativesAudit();
+    fetchPaywallPurchases();
+  });
+  document.getElementById('premium-refresh')?.addEventListener('click', () => {
+    // vista in cache: i numeri restano a schermo mentre il database ricalcola
+    if (!state.premiumCache) state.premiumData = null;
+    fetchPremium({ force: true });
+    fetchCreativesAudit();
+    fetchPaywallPurchases();
+  });
+  // Catalogo creatività: apri/chiudi la colonna del percorso, e scegli quale gesto vedere in
+  // percentuale di fianco al nome.
+  document.getElementById('creative-path-toggle')?.addEventListener('click', () => {
+    state.creativePathOpen = !state.creativePathOpen;
+    render();
+  });
+  document.querySelectorAll('.creative-rate-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const k = el.dataset.k || '';
+      state.creativeRateKey = state.creativeRateKey === k ? '' : k;
+      render();
+    }));
+
+  // Catalogo creatività: il numero di una colonna apre la lista di chi ha fatto quel gesto.
+  document.querySelectorAll('.creative-conv').forEach(el =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showCreativeConvUsers(el.dataset.variant, el.dataset.stato, el.dataset.label);
+    }));
+  document.querySelectorAll('.creative-act').forEach(el =>
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchCreativeActUsers(el.dataset.variant, el.dataset.event, el.dataset.label, el.dataset.desc);
+    }));
+
+  // Catalogo creatività: la riga apre la scheda (cos'è, le schermate, gli eventi).
+  document.querySelectorAll('.creative-open').forEach(el =>
+    el.addEventListener('click', () => {
+      state.creativeModal = el.dataset.variant;
+      state.shotsError = null;
+      // Le foto si rileggono a ogni apertura: le carica anche l'altro, e una scheda che
+      // mostra la fila di ieri è peggio di una che ci mette mezzo secondo.
+      fetchPaywallShots(el.dataset.variant);
+    }));
+
+  // Foto caricate a mano: aggiungi, sposta, togli.
+  document.getElementById('shot-add')?.addEventListener('click', () => {
+    document.getElementById('shot-file')?.click();
+  });
+  document.getElementById('shot-file')?.addEventListener('change', e => {
+    const variant = document.getElementById('shot-add')?.dataset.variant;
+    if (variant && e.target.files?.length) uploadPaywallShots(variant, e.target.files);
+  });
+  document.querySelectorAll('.shot-move').forEach(el =>
+    el.addEventListener('click', () => {
+      if (el.hasAttribute('disabled')) return;
+      movePaywallShot(el.dataset.variant, el.dataset.id, Number(el.dataset.dir));
+    }));
+  document.querySelectorAll('.shot-del').forEach(el =>
+    el.addEventListener('click', () => deletePaywallShot(el.dataset.variant, el.dataset.id, el.dataset.path)));
+  document.getElementById('creative-close')?.addEventListener('click', () => { state.creativeModal = null; render(); });
+  document.getElementById('creative-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.creativeModal = null; render(); }
+  });
+
+  // Click su un KPI cliccabile (paganti / in prova / a rischio / in disdetta) → modale lista utenti.
+  document.querySelectorAll('[data-premium-bucket]').forEach(el =>
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return; // non aprire se si clicca la ℹ
+      state.premiumBucketModal = el.dataset.premiumBucket;
+      render();
+    }));
+  document.getElementById('premium-bucket-close')?.addEventListener('click', () => {
+    state.premiumBucketModal = null; render();
+  });
+  document.getElementById('premium-bucket-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.premiumBucketModal = null; render(); }
+  });
+  // Click su una cella cliccabile del funnel (Premium pagante / Trial iniziato) → lista utenti di quel periodo/sprint.
+  document.querySelectorAll('.funnel-step-users').forEach(el =>
+    el.addEventListener('click', () => {
+      fetchFunnelStepUsers(+el.dataset.step, el.dataset.inizio, el.dataset.fine, el.dataset.label, el.dataset.sprint, el.dataset.pstart || null, el.dataset.pend || null);
+    }));
+  document.getElementById('funnel-step-users-close')?.addEventListener('click', () => {
+    state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render();
+  });
+  document.getElementById('funnel-step-users-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render(); }
+  });
+  // click su un box del percorso step di una creatività → lista utenti che lo hanno raggiunto
+  document.querySelectorAll('.premium-step-box').forEach(el =>
+    el.addEventListener('click', () => {
+      const variant = el.dataset.variant;
+      const steps   = (el.dataset.steps || el.dataset.step || '').split(',').filter(Boolean);
+      const label   = premiumCreativeLabel(variant);
+      fetchStepUsers(variant, steps, label, el.dataset.idx);
+    }));
+  document.getElementById('step-users-close')?.addEventListener('click', () => {
+    state.stepUsersModal = null; state.stepUsersData = null; render();
+  });
+  document.getElementById('step-users-overlay')?.addEventListener('click', e => {
+    if (e.target === e.currentTarget) { state.stepUsersModal = null; state.stepUsersData = null; render(); }
+  });
+  document.getElementById('premium-funnel-range-apply')?.addEventListener('click', () => {
+    const from = document.getElementById('premium-funnel-range-from')?.value;
+    const to   = document.getElementById('premium-funnel-range-to')?.value;
+    if (from) state.premiumFunnelRangeFrom = from;
+    if (to)   state.premiumFunnelRangeTo   = to;
+    fetchPremiumFunnelRange();
+  });
+  document.getElementById('premium-funnel-range-reset')?.addEventListener('click', () => {
+    state.premiumFunnelRangeData = null;
+    render();
+  });
+
+  document.getElementById('edit-premium-funnel')?.addEventListener('click', () => {
+    state.editingPremiumFunnel = true;
+    render();
+  });
+  document.getElementById('close-premium-funnel-edit')?.addEventListener('click', () => {
+    state.editingPremiumFunnel = false;
+    render();
+  });
+  document.getElementById('premium-funnel-add')?.addEventListener('click', () => {
+    const lastIdx = state.premiumFunnelConfig.length > 0 ? state.premiumFunnelConfig.length - 1 : null;
+    state.premiumFunnelConfig.push({ stepIdx: 0, vsIdx: lastIdx });
+    savePremiumFunnelConfig();
+    render();
+  });
+  document.getElementById('premium-funnel-reset')?.addEventListener('click', () => {
+    state.premiumFunnelConfig = JSON.parse(JSON.stringify(DEF_PREMIUM_FUN_CFG));
+    savePremiumFunnelConfig();
+    render();
+  });
+  document.querySelectorAll('.premium-funnel-step-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.premiumFunnelConfig[+el.dataset.row].stepIdx = +el.value;
+      savePremiumFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.premium-funnel-vs-sel').forEach(el =>
+    el.addEventListener('change', () => {
+      state.premiumFunnelConfig[+el.dataset.row].vsIdx = el.value === '' ? null : +el.value;
+      savePremiumFunnelConfig();
+      render();
+    }));
+  document.querySelectorAll('.premium-funnel-remove').forEach(el =>
+    el.addEventListener('click', () => {
+      const i = +el.dataset.row;
+      state.premiumFunnelConfig.splice(i, 1);
+      state.premiumFunnelConfig.forEach(r => {
+        if (r.vsIdx === i) r.vsIdx = null;
+        else if (r.vsIdx !== null && r.vsIdx > i) r.vsIdx--;
+      });
+      savePremiumFunnelConfig();
+      render();
+    }));
+
+  // Premium — grafico tentativi di acquisto per sprint
+  attachAttemptsChartEvents();
+
+  // Premium — confronto sprint
+  document.getElementById('sprint-premium-funnel-toggle')?.addEventListener('click', () => {
+    state.sprintPremiumFunnelOpen = !state.sprintPremiumFunnelOpen;
+    render();
+  });
+  document.querySelectorAll('.sprint-premium-funnel-chip').forEach(el =>
+    el.addEventListener('click', () => {
+      const id  = el.dataset.id;
+      const idx = state.sprintPremiumFunnelSel.indexOf(id);
+      if (idx === -1) state.sprintPremiumFunnelSel.push(id);
+      else state.sprintPremiumFunnelSel.splice(idx, 1);
+      render();
+    }));
+  document.getElementById('sprint-premium-funnel-calc')?.addEventListener('click', fetchSprintPremiumFunnel);
+
+  document.querySelectorAll('[data-source-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.premiumSourceTab = btn.dataset.sourceTab;
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-purchaser-filter]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.premiumPurchaserFilter = btn.dataset.purchaserFilter;
+      render();
+    });
+  });
+
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (state.creativeModal)     { state.creativeModal = null; render(); return; }
+    if (state.stepUsersModal)    { state.stepUsersModal = null; state.stepUsersData = null; render(); return; }
+    if (state.premiumBucketModal){ state.premiumBucketModal = null; render(); return; }
+    if (state.funnelStepUsersModal){ state.funnelStepUsersModal = null; state.funnelStepUsersData = null; render(); return; }
+    if (state.userActivityOpen)  { state.userActivityOpen = false; render(); return; }
+    if (state.aiConvOpen)        { state.aiConvOpen = false; render(); return; }
+    if (state.feedbackModalOpen) { state.feedbackModalOpen = false; render(); return; }
+    if (state.funnelOverwriteConfirm) { state.funnelOverwriteConfirm = null; render(); return; }
+    if (state.deleteConfirm)     { state.deleteConfirm = null; render(); }
+  }
+});
+
+// ── GATE DI ACCESSO ──────────────────────────────────────────────────
+// Le RPC `kpi_*` giravano con la sola anon key, che è pubblica: sta dentro l'APK
+// e in questo file. Chiunque la estraesse leggeva l'intera analitica di prodotto,
+// incluse le conversazioni col Coach (dati sanitari) via kpi_ai_session_detail.
+// Dal 31/07/2026 (tolto il 03/08, rimesso il 07/09/2026 per la campagna con utenti
+// veri) il DB pretende un operatore in `public.internal_operators`, quindi
+// la dashboard deve presentarsi con un JWT vero prima di chiedere qualsiasi dato.
+// Il login è lo stesso email+password già usato dal pannello prompt (opsLoginPassword).
+function renderOpsGate(message) {
+  document.body.innerHTML =
+    '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;' +
+    'font-family:system-ui,-apple-system,sans-serif;background:#08080f;color:#e8e8f0">' +
+      '<div style="max-width:420px;width:100%">' +
+        '<div style="font-size:20px;font-weight:600;margin-bottom:6px">Dashboard interna</div>' +
+        '<div id="ops-gate-msg" style="font-size:13px;color:#9a9ab0;margin-bottom:18px;line-height:1.5">' +
+          (message || 'Accesso riservato agli operatori.') +
+        '</div>' +
+        '<input id="ops-gate-email" type="email" placeholder="you@example.com" autocomplete="email" ' +
+          'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
+          'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
+        '<input id="ops-gate-password" type="password" placeholder="password" autocomplete="current-password" ' +
+          'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
+          'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
+        '<button id="ops-gate-send" style="width:100%;background:#5b4bff;border:0;color:#fff;border-radius:6px;' +
+          'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Entra</button>' +
+        '<button id="ops-gate-forgot" style="width:100%;background:none;border:0;color:#9a9ab0;' +
+          'padding:14px 12px 0;font-size:13px;text-decoration:underline;cursor:pointer">Password dimenticata? Ricevi il link via email</button>' +
+      '</div>' +
+    '</div>';
+
+  const emailEl = document.getElementById('ops-gate-email');
+  const passEl  = document.getElementById('ops-gate-password');
+  const msgEl   = document.getElementById('ops-gate-msg');
+  const send    = async () => {
+    const email = (emailEl.value || '').trim();
+    const password = passEl.value || '';
+    if (!email || !password) return;
+    msgEl.textContent = 'Accesso in corso…';
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) {
+      msgEl.textContent = 'Non ha funzionato: ' + (error.message || String(error));
+      return;
+    }
+    location.reload();
+  };
+  document.getElementById('ops-gate-send').addEventListener('click', send);
+  passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  document.getElementById('ops-gate-forgot').addEventListener('click', async () => {
+    const email = (emailEl.value || '').trim();
+    if (!email) { msgEl.textContent = 'Scrivi prima la tua email, poi tocca di nuovo il link.'; emailEl.focus(); return; }
+    msgEl.textContent = 'Invio in corso…';
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    msgEl.textContent = error
+      ? 'Non ha funzionato: ' + (error.message || String(error))
+      : 'Se l\'email è di un operatore, è partito un link per scegliere una password nuova. Aprilo da questo dispositivo.';
+  });
+}
+
+// Il link "Send password recovery" di Supabase riporta qui con type=recovery
+// nell'hash dell'URL: supabase-js apre da solo una sessione temporanea, ma
+// senza questa schermata non c'era nessun modulo per scegliere la password
+// e il link sembrava "non funzionare". updateUser la fissa sull'account.
+function renderSetPasswordForm() {
+  document.body.innerHTML =
+    '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;' +
+    'font-family:system-ui,-apple-system,sans-serif;background:#08080f;color:#e8e8f0">' +
+      '<div style="max-width:420px;width:100%">' +
+        '<div style="font-size:20px;font-weight:600;margin-bottom:6px">Imposta la password</div>' +
+        '<div id="set-pw-msg" style="font-size:13px;color:#9a9ab0;margin-bottom:18px;line-height:1.5">' +
+          'Scegli la password per accedere alla dashboard.' +
+        '</div>' +
+        '<input id="set-pw-input" type="password" placeholder="nuova password" autocomplete="new-password" ' +
+          'style="width:100%;box-sizing:border-box;background:#0d0d1a;border:1px solid #2a2a3d;color:#e8e8f0;' +
+          'border-radius:6px;padding:10px 12px;font-size:14px;margin-bottom:10px"/>' +
+        '<button id="set-pw-send" style="width:100%;background:#5b4bff;border:0;color:#fff;border-radius:6px;' +
+          'padding:10px 12px;font-size:14px;font-weight:600;cursor:pointer">Salva password</button>' +
+      '</div>' +
+    '</div>';
+
+  const pwEl  = document.getElementById('set-pw-input');
+  const msgEl = document.getElementById('set-pw-msg');
+  const send  = async () => {
+    const password = pwEl.value || '';
+    if (password.length < 6) { msgEl.textContent = 'Almeno 6 caratteri.'; return; }
+    msgEl.textContent = 'Salvataggio…';
+    // Col token_hash del template la sessione non esiste ancora: va aperta qui.
+    const tokenHash = new URLSearchParams(location.search).get('token_hash');
+    if (tokenHash) {
+      const { error: otpErr } = await sb.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' });
+      if (otpErr) {
+        msgEl.textContent = 'Link scaduto o già usato: ' + (otpErr.message || String(otpErr));
+        return;
+      }
+    }
+    const { error } = await sb.auth.updateUser({ password });
+    if (error) {
+      msgEl.textContent = 'Non ha funzionato: ' + (error.message || String(error));
+      return;
+    }
+    history.replaceState(null, '', location.pathname + location.search);
+    location.reload();
+  };
+  document.getElementById('set-pw-send').addEventListener('click', send);
+  pwEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+}
+
+(async () => {
+  // Due forme possibili: l'hash con la sessione già aperta da supabase-js, oppure
+  // il token_hash in query string quando il template punta direttamente qui.
+  if (location.hash.includes('type=recovery') ||
+      new URLSearchParams(location.search).get('type') === 'recovery') {
+    renderSetPasswordForm();
+    return;
+  }
+
+  // La sessione va risolta PRIMA di ogni fetch: senza, ogni RPC tornerebbe 403 e la
+  // dashboard mostrerebbe una griglia di errori invece di dire che manca il login.
+  // Qui si legge la sessione a mano invece di usare refreshOpsSession(): quella
+  // chiude con un render(), e a questo punto del boot loadSettings() non è ancora passata.
+  let sessionExpired = false;
+  try {
+    const { data: bootSession } = await sb.auth.getSession();
+    state.opsSession = bootSession?.session || null;
+    // getSession() legge solo lo storage locale: se il token è scaduto e il
+    // refresh automatico non è passato, torna comunque una sessione "fantasma"
+    // che supererebbe il controllo qui sotto e farebbe fallire ogni RPC con
+    // 403, mostrando una griglia di errori invece del login. getUser() invece
+    // fa un giro reale sul server e la smaschera.
+    if (state.opsSession) {
+      const { error: userErr } = await sb.auth.getUser();
+      if (userErr) {
+        console.error('boot getUser (sessione scaduta)', userErr);
+        await sb.auth.signOut();
+        state.opsSession = null;
+        sessionExpired = true;
+      }
+    }
+  } catch (e) {
+    console.error('boot getSession', e);
+    state.opsSession = null;
+  }
+  state.opsSessionCheckedOnce = true;
+
+  if (!state.opsSession) {
+    renderOpsGate(sessionExpired ? 'La sessione è scaduta. Rifai il login.' : undefined);
+    return;
+  }
+
+  await loadSettings();
+  render();
+  if (state.page === 'overview') fetchData();
+  else { state.loading = false; state.overviewStale = true; }
+  if (state.page === 'stats') fetchStats();
+  if (state.page === 'goal') fetchGoalBoard();
+  fetchSprints();
+  fetchFunnelDefinitions();
+  fetchFunnelPhases();
+  fetchEventRegistry();
+  fetchBlockedUsers();
+  fetchRecentlyUnblocked();
+  startAutoRefresh();
+})();

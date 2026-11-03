@@ -1,58 +1,32 @@
-# HANDOFF — «Sprint vs record» giorno per giorno, da portare nel codice (08/10/2026)
+# HANDOFF — redesign vista Retention «Per giorno» (03/11/2026)
 
-Il passaggio precedente (redesign «Funnel», 07/10) è nella storia git di questo file.
+## Richiesta
+Danilo: «/redesign-v2 di questa schermata per tracciare bene la retention»: utenti che entrano in app e utenti che si allenano. Intervista: scopo salute del prodotto, solo giorni, rifai tutto.
 
-## 1. Richiesta e vincoli di Danilo
-- «Si può fare qualche /redesign su questo? È illeggibile» sulla scheda «Sprint vs record» dell'Overview della dashboard KPI.
-- Intervista: danno fastidio troppi numeri uguali, sette riquadri slegati, colori senza senso, nomi tagliati e testo fitto. «Come ogni schermata noi vorremmo uno studio per sprint, quindi come Stats che ti fa scegliere lo sprint dall'inizio.»
-- APPROVATO l'08/10: «Mi piace questo redesign applicalo a sprint vs record», guardando la tavola «1 - Giorno per giorno».
-- Regole sue sui grafici: tempo sull'asse X sempre, curve continue, asse Y con valori e righe, legenda fuori dall'area, poco testo, tema Notte.
+## Stato
+- Documento: https://claude.ai/artifact/NKBoUPAYw475eomgE5kgKs (versione 4). Schede: Oggi, 23A, 23A — Attivo e confronti, 23B, 23C.
+- Decisioni e giudizi alla lettera: `_specs/design-flows/kpi-retention-giorno/redesign-v2.md`. Copia del prototipo in `prototipo/` (le proposte sono in `prototipo/n/`).
+- Bocciate: le 22 (troppo simili alla dashboard di oggi), 23A·1 e 23A·2 (non si capisce niente).
+- Piaciuta: 23A («molto molto bello»). Ultima versione: «Attivo e confronti», in attesa del giudizio di Danilo.
+- Nessun codice del programma toccato, niente commit.
 
-## 2. Decisioni e strade scartate
-- BOCCIATA 1A (i sette passi sull'asse X uniti da una curva): «mette su asse x cose non correlate tra loro». Non riproporla.
-- BOCCIATA 1C (una riga per passo con pallini): «è praticamente un istogramma». Non riproporla.
-- 1B e 1D mai commentate: non implementarle.
-- Scelta: un riquadro per passo (Home, Dettaglio, 1/2/3 workout, Prova, Pagante). X = giorni dal primo avvio dell'app (0–14, 0–21 per il pagante), Y = % di persone arrivate al passo entro quel giorno. Linea bianca = sprint scelto fin dove ha dati, linea grigia a tratti = sprint che detiene il record di quel passo. Numero grande = valore dello sprint al suo ultimo giorno; scarto e verdetto contro il record allo stesso giorno.
-- Scelte mie, non ancora confermate da Danilo: pillola blu per lo sprint più secondo menu «vs» con «Il migliore»; tre esiti (sotto rosso, in linea bianco/grigio, sopra verde) al posto dei quattro colori; nome dello sprint del record solo al passaggio del mouse; quarto riquadro della seconda riga con il conteggio «N sotto il record» e la legenda.
+## Prossimo passo
+Aspettare il giudizio su «23E — Per evento»: evento scelto da un menu nel titolo con ricerca su tutta la lista eventi, grafico da G0, sprint scelti da tendine con ricerca su tutti gli sprint. In implementazione serve una RPC N-day con parametro p_event (app_open, workout completato o qualsiasi evento di events_canonical).
 
-## 3. Correzioni ricevute in questa sessione
-- Una curva cumulata non può scendere: per gli sprint in corso il calcolo va fatto giorno per giorno solo su chi è ancora osservabile (vedi `KM` e `curve()` in `gen.py`).
-- Il verdetto pesa lo sprint su chi ha almeno un giorno di vita, non sulle poche persone dell'ultimo giorno.
+## Nuova richiesta di Danilo (03/11/2026, sostituisce il prossimo passo sopra)
+«Rendimi chiaro il poter vedere se sono attivi o si allenano e basta, sinceramente. Facciamo così: tracciamo come cambia nel tempo un determinato dato ed evento, quindi io seleziono l'evento e mi fai i grafici di quello.»
 
-## 4. File e stato reale
-- Documento: https://claude.ai/artifact/XMEyw2XBK1aMcmZmGTnibA (10 tavole). Fonte di verità per l'implementazione: `red-1-giorno-per-giorno.dc.html`.
-- `_specs/design-flows/kpi-sprint-record/` (`gen.py`, `design-proposte/`, `redesign-v1.md`): NON committato.
-- Codice di oggi, non toccato: `sprintScoreboardCard` in `public/internal/js/kpi.js` (riga ~3004), classi `sb-*` in `public/internal/css/kpi.css` (riga ~637), dati caricati con `sb.rpc('kpi_sprint_scoreboard')` (riga ~2130).
-- Fatto a parte e pubblicato su `main` (commit `3385989`): linea di soglia al 30% sul grafico «Prove che poi pagano» di Stats (`public/internal/js/kpi-stats.js`, `ST_RATE_SOGLIA`). Non visto nel browser; Danilo deve ancora dire se vuole 30%, 38% o entrambe.
-- Stati non disegnati nella fila «Redesign»: caricamento, errore, nessuno sprint, sprint senza persone, finestra stretta. Il modello è `red-2`…`red-5` in `_specs/design-flows/kpi-abbonamenti/design-proposte/`.
+Cosa significa per il redesign:
+- Tenere la base di 23A «Attivo e confronti»: riga «Sprint attivo», riga «Confrontalo con», numeri grandi in percentuale con lo scarto in punti, area sul grafico per giorno dal primo avvio.
+- Togliere le due fasce mescolate (si allena / apre e basta). Al loro posto un selettore di evento ben visibile in cima: «Entra in app» (app_open), «Si allena» (workout_sessions completed), poi gli altri eventi di events_canonical (per esempio workout_start, view_Paywall, exercise_complete, roadmap_piece_view).
+- Tutti i grafici e i numeri si ricalcolano sull'evento scelto: quota di persone dello sprint che fanno quell'evento il giorno N (N-day, D1..D30), una curva per lo sprint attivo e una tratteggiata per ogni confronto.
+- I dati per eventi diversi da app_open e workout vanno presi con una query sola (stessa coorte del prototipo: anonymous_sessions dello sprint, una persona per identità, esclusi kpi_excluded_users ed emulatori). Per il prototipo bastano 5–6 eventi sugli sprint 12, 14, 16, 18, 19.
+- Prototipo in `_specs/design-flows/kpi-retention-giorno/prototipo/n/` (funzione r23a3 in `a2.js`); ripubblicare sullo stesso Artifact passando `url`, dopo averlo letto con action read.
+- Paletti: tema Notte HypeMove, grafici con il tempo sull'asse X, niente scritte dentro l'area, niente codice della dashboard prima del via.
 
-## 5. Prossimo passo, alla lettera
-1. Scrivere la funzione Postgres `kpi_sprint_curves()` copiando coorte ed esclusioni da `kpi_sprint_scoreboard` (`assert_internal_operator`, `ev`, `c`, `play_token_facts`). Per ogni sprint e passo deve restituire, per ogni giorno 1…14 (1…21 per `paid`), la coppia [nuovi arrivati al passo in quel giorno fra chi ha almeno quel giorno di vita, persone osservabili non ancora arrivate], più `elig` (persone con almeno d giorni di vita). Le due query di prova usate l'08/10 sono descritte in `redesign-v1.md`; il calcolo sul client è `curve()` in `gen.py`.
-2. Riscrivere `sprintScoreboardCard` sulla tavola `red-1`: misure, colori e testi copiati dalla tavola; stile delle schede Notte già usato da `premiumTimelineCard` (classi `pt-*`). Lo sprint del record di ogni passo resta scelto come oggi (miglior valore finale fra gli sprint maturi con almeno 100 persone). La curva dello sprint si ferma dove `elig` scende sotto 30.
-3. Collegare la funzione nuova alla cache della dashboard, come le altre schede dell'Overview.
-4. Applicare la migrazione, provare nel browser, committare anche `_specs/design-flows/kpi-sprint-record/` e fare push su `main` senza richiedere conferma (indicazione permanente di Danilo sulla dashboard KPI).
-
-## 6. Aggiornamento dell'08/10, dopo «Applica»
-- La funzione `kpi_sprint_curves()` ESISTE già sul database (migrazione `kpi_sprint_curves_fast`): restituisce per ogni sprint `id`, `elig` (22 valori, giorni 0…21) e `steps` (per passo, 21 coppie [nuovi, osservabili non ancora arrivati]). Permessi: `authenticated` e `service_role`.
-- NON è verificata: chiamata a mano va in timeout. Anche `kpi_sprint_scoreboard()` oggi supera i 15 secondi, quindi il costo sta nella parte comune (lettura di `events` e incrocio con la coorte), non nella parte nuova.
-- Le mie prove hanno tenuto occupato il database di produzione per alcuni minuti (anche `select 1` non rispondeva). Le chiamate sono state fermate, il database risponde.
-- Regola per chi continua: mai chiamare `kpi_sprint_curves()` o `kpi_sprint_scoreboard()` a mano senza `set statement_timeout = '20s'` nella stessa chiamata, e mai due volte di seguito. La scheda deve leggere dalla cache della dashboard, non dalla funzione in diretta.
-- Il passo 1 del punto 5 è fatto a metà: resta da misurare il tempo, eventualmente alleggerire la funzione (per esempio limitandola agli sprint degli ultimi mesi più quelli che detengono un record), e agganciarla alla cache.
-
-## 7. Stato alla chiusura della sessione (08/10, pomeriggio)
-- Codice della scheda SCRITTO e NON committato: `public/internal/js/kpi.js` (`sprintScoreboardCard` riscritta, più `scoreCurve`, `scoreTile`, `attachSprintRecord`, lettura dalla cache con ripolling ogni 5 secondi) e `public/internal/css/kpi.css` (classi `sbr-*` al posto di `sb-*`). Provato solo `node --check` e una pagina di prova locale con i dati di `gen.py`; mai sulla dashboard vera.
-- Migrazione APPLICATA `kpi_sprint_curves_cached`: `kpi_sprint_curves()` riscritta (restituisce anche nome, date, `age_days`; solo sprint dalla beta), `kpi_cache_compute` e `kpi_cache_targets` con la voce `sprint_curves` (scope `all`, tier `hourly`), riga di richiesta inserita in `kpi_cache`.
-- La funzione NON HA MAI GIRATO: la riga `sprint_curves` di `kpi_cache` ha `computed_at` nullo, richiesta dalle 13:48 UTC. I numeri veri e il tempo di calcolo non sono verificati.
-- Il worker della cache risulta fermo su `stats_series` (tre esecuzioni interrotte dopo 90 secondi e una in corso, secondo l'agente): è un candidato per la lentezza del database di oggi, da verificare.
-- NON pubblicare finché `sprint_curves` non è calcolata: il codice nuovo non chiama più `kpi_sprint_scoreboard`, quindi senza cache la scheda resterebbe in caricamento.
-- Scostamenti dalla tavola: il menu elenca solo gli sprint dalla beta (11/06); il tooltip mostra il punto più vicino al cursore fra sprint e record.
-- Prossimo passo, alla lettera: quando il database è tornato normale, controllare `select query, computed_at, compute_ms, error from kpi_cache where query = 'sprint_curves'`; se è calcolata, aprire la dashboard, confrontare la scheda con la tavola `red-1`, poi committare `kpi.js`, `kpi.css`, `HANDOFF.md` e `_specs/design-flows/kpi-sprint-record/` e fare push su `main`.
-
-## 8. Card «Attivazione per sprint» nell'Overview (17/10/2026)
-
-Sotto «Prove gratuite». Tre linee per sprint, in % sulla stessa base: attivati (allenamento finito O pasto salvato, una persona conta una volta), premono Inizia, finiscono l'allenamento. Richiesta e regole decise da Mattia.
-- **Base**: chi finisce l'onboarding ed entra in app (prima schermata dopo onboarding_complete: chiusura del paywall di fine onboarding, onboarding_end_landing, view_Home, view_WorkoutDetail, view_Cibo). Vale anche per gli sprint con registrazione (la registrazione precede onboarding_complete). Coorte e finestre come kpi_sprint_curves, passi entro 14 giorni.
-- **Dati**: RPC kpi_sprint_activation() (migrazione app 20261017120000, applicata), letta SOLO dalla cache (kpi_cache_get / kpi_cache_recompute, voce sprint_activation/all, tier hourly). 1,3 s a calcolo.
-- **Sprint**: scelta multipla dal menu (Sprint 1 e 2 spenti: niente first_open), default gli ultimi 6 principali, salvata in localStorage (hm_sa_sprints_v1). Interruttore «Fasi» (hm_sa_phases_v1): fasce calcolate dai dati, paywall se lo vede almeno metà della base, atterraggio se una schermata prende almeno il 70% (altrimenti «Misto»). Costanti SA_* in kpi.js.
-- **Regole dei grafici**: asse X = sprint in ordine cronologico ma equispaziati (come la tavola approvata da Mattia), asse Y 0-100 con righe, legenda fuori, punto vuoto e niente etichette sotto 30 persone.
-- **Prove**: node scripts/test-sprint-activation.mjs (13 casi); collaudo visivo senza login con finto supabase-js: scripts/smoke-sprint-activation.mjs (Playwright: se www non ha node_modules, copiarlo temporaneamente in app/ e lanciarlo con cwd www).
+## VIA DI DANILO (03/11/2026): «Così è perfetto, lo implementiamo»
+Prototipo approvato: scheda «23E — Per evento», sorgente `_specs/design-flows/kpi-retention-giorno/prototipo/n/` (`index.html` per stile e grafico base, `ev.js` per la logica, `evdata.js` per la forma dei dati).
+Da fare:
+1. Migration con una RPC nuova, per esempio `kpi_retention_event_daily(p_sprint_ids uuid[], p_event text)`: per ogni sprint coorte = primi avvii in `anonymous_sessions` (stessa finestra e stesse esclusioni di `kpi_retention_daily`, una persona per identità; allineare il conteggio, oggi 803 contro 954 dello sprint 12), e per ogni giorno G0..G30 quante persone fanno l'evento in quel giorno (finestre di 24 ore dal primo avvio). `p_event` = nome di events_canonical; caso speciale `workout_completed` = `workout_sessions` con status completed; `app_open` a G0 = 100%. Restituire anche n e l'ultimo giorno osservabile. Attenzione al timeout (statement_timeout=0, ma i job cache hanno saturato il disco: niente job nuovi).
+2. In `public/internal/js/kpi.js` sostituire la vista «Per giorno» (`pageRetentionDaily` e funzioni retDaily*) con la 23E: titolo-frase con tendina evento e ricerca (cinque «più usati» + tutti gli eventi dal registro eventi già caricato da `fetchEventRegistry`), tendina «Sprint attivo» e «Confrontalo con» con ricerca su tutti gli sprint (`kpi_retention_daily_cohort_sizes`), quattro riquadri G0/G1/G7/ultimo, grafico da G0 con area arancione e confronti tratteggiati, stati caricamento, errore, sprint giovane. Stile tema Notte HypeMove come nel prototipo, classi con prefisso proprio in `kpi.css`.
+3. Provare nel browser con il login operatore, fotografare e confrontare con il prototipo; commit e push sulla dashboard senza chiedere (memoria «applica e pubblica senza chiedere»).

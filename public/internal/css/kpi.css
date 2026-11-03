@@ -443,30 +443,61 @@
   .stat-row { gap: 24px; }
 }
 
-/* ── Retention · menu sprint della vista giornaliera ────────────────
-   Menu a tendina invece di una fila di chip: scala a N sprint senza che la barra
-   dei filtri cresca, e ogni riga può portare date e coorte — con molti sprint il
-   numero da solo non identifica più il periodo. */
-.retd-menu { position: relative; }
-.retd-panel {
-  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: 320px;
-  background: var(--surface); border: 1px solid var(--border2, #333345);
-  border-radius: 9px; box-shadow: 0 14px 34px rgba(0, 0, 0, .55); overflow: hidden;
-}
-.retd-quick { display: flex; gap: 6px; padding: 9px 11px; border-bottom: 1px solid var(--border); }
-.retd-quick button {
-  font-family: inherit; font-size: 11.5px; padding: 4px 10px; background: transparent;
-  color: var(--muted); border: 1px solid var(--border2, #333345); border-radius: 6px; cursor: pointer;
-}
-.retd-quick button:hover { color: var(--text); border-color: var(--muted); }
-.retd-list { max-height: 244px; overflow-y: auto; scrollbar-width: thin; }
-.retd-row {
-  display: flex; align-items: center; gap: 9px; padding: 7px 11px; cursor: pointer;
-  border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 11.5px;
-  font-variant-numeric: tabular-nums;
-}
-.retd-row:last-child { border-bottom: 0; }
-.retd-row:hover { background: var(--surface2); }
+/* ── Retention · Per giorno (23E — Per evento) — tema Notte HypeMove ── */
+.rv { --rv-card:#1a1d24; --rv-card2:#22262f; --rv-line:#2a2f3a; --rv-step:#0a0c10; --rv-muted:#8b93a7; --rv-blue:#4361EE; --rv-orange:#FF8A00;
+  background:#0f1115; color:#fff; font-family:Nunito,system-ui,sans-serif; border-radius:20px; padding:28px 32px 36px; line-height:1.3; }
+.rv button { font-family:inherit; cursor:pointer; }
+.rv-q { font-size:34px; font-weight:900; line-height:1.25; margin-bottom:8px; }
+.rv-sel { position:relative; display:inline-block; }
+.rv-hbtn { font:inherit; color:var(--rv-orange); background:rgba(255,138,0,.12); border:0; border-bottom:3px solid var(--rv-orange); border-radius:10px 10px 4px 4px; padding:0 12px; }
+.rv-hbtn:hover { background:rgba(255,138,0,.2); }
+.rv-hbtn .c { font-size:20px; margin-left:6px; }
+.rv-hbtn.raw { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:26px; }
+.rv-hsub { color:var(--rv-muted); font-size:14px; font-weight:600; margin-bottom:24px; }
+.rv-menu { position:absolute; top:calc(100% + 10px); left:0; z-index:30; background:var(--rv-card2); border:1.5px solid var(--rv-line); border-radius:16px; padding:6px; width:440px; box-shadow:0 14px 34px rgba(0,0,0,.55); font-size:14px; line-height:1.3; }
+.rv-menu button { display:block; width:100%; text-align:left; background:none; border:0; color:#fff; border-radius:10px; padding:10px 14px; }
+.rv-menu button:hover { background:#2c313c; }
+.rv-menu button.on { background:rgba(255,138,0,.16); }
+.rv-menu button[disabled] { opacity:.45; cursor:default; }
+.rv-menu .t { font-size:16px; font-weight:900; }
+.rv-menu .d { font-size:12px; font-weight:700; color:var(--rv-muted); }
+.rv-menu .raw { font-family:'JetBrains Mono',ui-monospace,monospace; font-size:13px; font-weight:600; padding:7px 14px; }
+.rv-search { width:100%; box-sizing:border-box; background:#12151b; border:1.5px solid var(--rv-line); border-radius:10px; color:#fff; font:700 15px Nunito,sans-serif; padding:10px 12px; margin-bottom:6px; outline:none; }
+.rv-search:focus { border-color:var(--rv-orange); }
+.rv-grp { font-size:11px; font-weight:800; color:var(--rv-muted); text-transform:uppercase; letter-spacing:.08em; padding:8px 14px 4px; }
+.rv-list { max-height:300px; overflow:auto; }
+.rv-s3 { display:flex; flex-direction:column; gap:14px; margin-bottom:18px; }
+.rv-s3r { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.rv-s3l { width:150px; font-size:13px; font-weight:800; color:var(--rv-muted); }
+.rv-chip { display:inline-flex; align-items:center; gap:8px; background:var(--rv-card); border:1.5px solid var(--rv-line); box-shadow:0 3px 0 var(--rv-step); border-radius:999px; padding:8px 16px; color:var(--rv-muted); font-weight:800; font-size:14px; }
+.rv-chip:active { transform:translateY(2px); box-shadow:0 1px 0 var(--rv-step); }
+.rv-chip.act { background:var(--rv-blue); border-color:var(--rv-blue); color:#fff; box-shadow:0 3px 0 #2a3fae; }
+.rv-chip.cmp { border-color:currentColor; }
+.rv-chip .i { width:18px; height:0; border-top:3px dashed currentColor; }
+.rv-chip small { font-weight:700; opacity:.7; }
+.rv-chip.cmp button { background:none; border:0; color:inherit; font-size:16px; line-height:1; padding:0 0 0 4px; }
+.rv-card { background:var(--rv-card); border:1.5px solid var(--rv-line); box-shadow:0 4px 0 var(--rv-step); border-radius:20px; padding:24px 26px; }
+.rv-lab { font-size:12px; font-weight:800; color:var(--rv-muted); text-transform:uppercase; letter-spacing:.08em; }
+.rv-row4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:16px; }
+.rv-num { display:flex; align-items:baseline; gap:14px; margin-top:12px; }
+.rv-huge { font-size:52px; font-weight:900; line-height:1; letter-spacing:-.02em; color:var(--rv-orange); }
+.rv-big { font-size:26px; font-weight:900; line-height:1.1; margin:12px 0 8px; }
+.rv-sub { color:var(--rv-muted); font-size:14px; font-weight:600; margin-top:8px; white-space:nowrap; }
+.rv-xs { margin-top:12px; padding-top:6px; border-top:1px solid var(--rv-line); }
+.rv-x { font-size:13px; font-weight:700; margin-top:6px; display:flex; gap:8px; align-items:center; }
+.rv-x .dash { width:16px; border-top:2px dashed currentColor; display:inline-block; }
+.rv-x .up { color:#22c55e; } .rv-x .dn { color:#ef4444; }
+.rv-leg { display:flex; gap:20px; flex-wrap:wrap; font-size:13px; font-weight:700; color:var(--rv-muted); margin-top:14px; }
+.rv-leg span { display:inline-flex; align-items:center; gap:8px; }
+.rv-leg .ln { width:20px; height:0; border-top:3px solid currentColor; display:inline-block; }
+.rv-leg .ln.dashed { border-top-style:dashed; }
+.rv svg text { font-family:Nunito,sans-serif; font-weight:700; }
+.rv-skel { background:var(--rv-card); border-radius:20px; animation:rv-b 1.1s ease-in-out infinite alternate; }
+.rv > .rv-skel { margin-top:0; }
+@keyframes rv-b { from { opacity:.4 } to { opacity:1 } }
+.rv-retry { margin-top:18px; background:var(--rv-blue); border:0; color:#fff; border-radius:999px; padding:8px 16px; font-weight:800; font-size:13px; box-shadow:0 3px 0 #2a3fae; }
+.rv-tip { position:fixed; pointer-events:none; background:#000; color:#fff; border:1px solid #2a2f3a; border-radius:10px; padding:8px 10px; font:700 12px Nunito,sans-serif; display:none; z-index:60; max-width:330px; }
+@media (max-width:900px) { .rv { padding:18px 16px; } .rv-row4 { grid-template-columns:repeat(2,1fr); } .rv-q { font-size:24px; } .rv-huge { font-size:38px; } .rv-menu { width:min(440px,86vw); } }
 
 /* ── Attivazione ──────────────────────────────────────────────────────────────
    Tutte le classi sono prefissate `act-` perché i nomi del mockup (.track, .fill,
