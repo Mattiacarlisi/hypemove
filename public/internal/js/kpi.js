@@ -6965,21 +6965,23 @@ function rvChart() {
   let top = 0; all.forEach(x => { for (let d = 0; d < md; d++) { const r = rvRate(x, d); if (r !== null && r > top) top = r; } });
   const stepv = top <= 4 ? 1 : top <= 8 ? 2 : top <= 20 ? 5 : top <= 40 ? 10 : 20;
   const yMax = Math.max(4 * stepv, Math.ceil(top / stepv) * stepv), ySt = yMax / stepv;
-  const W = 1160, H = 380, L = 54, R = 16, T = 16, B = 40;
+  const W = 1160, H = 396, L = 54, R = 16, T = 16, B = 56;
+  const start = rvSprint(id) && rvSprint(id).inizio ? new Date(rvSprint(id).inizio + 'T12:00:00') : null;
+  const wd = i => start ? ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'][(start.getDay() + i) % 7] : '';
   const xOf = i => L + i / (md - 1) * (W - L - R), yOf = v => T + (1 - v / yMax) * (H - T - B);
   let g = '';
   for (let i = 0; i <= ySt; i++) { const v = yMax / ySt * i, y = yOf(v); g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="#2a2f3a"/><text x="${L - 10}" y="${y + 4}" text-anchor="end" font-size="12" fill="#8b93a7">${(+v.toFixed(1)).toString().replace('.', ',')}%</text>`; }
-  for (let i = 0; i < md; i++) { const x = xOf(i), lab = i % 5 === 0 ? 'G' + i : ''; g += `<line x1="${x}" x2="${x}" y1="${H - B}" y2="${H - B + (lab ? 7 : 4)}" stroke="#5b6274"/>`; if (lab) g += `<text x="${x}" y="${H - B + 22}" text-anchor="middle" font-size="12" fill="#8b93a7">${lab}</text>`; }
+  for (let i = 0; i < md; i++) { const x = xOf(i), lab = i % 5 === 0 ? 'G' + i : ''; g += `<line x1="${x}" x2="${x}" y1="${H - B}" y2="${H - B + (lab ? 7 : 4)}" stroke="#5b6274"/>`; g += `<text x="${x}" y="${H - B + 21}" text-anchor="middle" font-size="11" fill="${wd(i) === 'sab' || wd(i) === 'dom' ? '#FF8A00' : '#5b6274'}">${wd(i)}</text>`; if (lab) g += `<text x="${x}" y="${H - B + 40}" text-anchor="middle" font-size="12" fill="#8b93a7">${lab}</text>`; }
   const path = pts => pts.map(([i, v], k) => (k ? 'L' : 'M') + xOf(i).toFixed(1) + ' ' + yOf(v).toFixed(1)).join(' ');
   const pts = []; for (let d = 0; d <= Math.min(30, s.max_day); d++) pts.push([d, rvRate(id, d)]);
   g += `<path d="${path(pts)} L ${xOf(pts.length - 1)} ${yOf(0)} L ${xOf(0)} ${yOf(0)} Z" fill="#FF8A00" fill-opacity=".18"/><path d="${path(pts)}" fill="none" stroke="#FF8A00" stroke-width="3" stroke-linejoin="round"/>`;
   state.rvVs.filter(rvRow).forEach(v => { const cp = []; for (let d = 0; d <= Math.min(md - 1, rvRow(v).max_day); d++) { const r = rvRate(v, d); if (r !== null) cp.push([d, r]); } if (cp.length > 1) g += `<path d="${path(cp)}" fill="none" stroke="${rvColOf(v)}" stroke-width="2" stroke-dasharray="6 5"/>`; });
   pts.forEach(([i, r]) => {
-    const tip = `Giorno ${i}: ${rvCnt(id, i)} su ${s.n} (${rvF(r)}%)` + state.rvVs.map(v => rvRate(v, i) !== null ? ` · ${rvName(v)} ${rvF(rvRate(v, i))}%` : '').join('');
+    const tip = `Giorno ${i}${start ? ' (' + wd(i) + ')' : ''}: ${rvCnt(id, i)} su ${s.n} (${rvF(r)}%)` + state.rvVs.map(v => rvRate(v, i) !== null ? ` · ${rvName(v)} ${rvF(rvRate(v, i))}%` : '').join('');
     g += `<circle cx="${xOf(i)}" cy="${yOf(r)}" r="3.5" fill="#FF8A00"/><circle cx="${xOf(i)}" cy="${yOf(r)}" r="9" fill="transparent" data-rv-tip="${esc(tip)}"/>`;
   });
   return `<div class="rv-card"><div class="rv-lab">Chi ${esc(rvCur().d)}, giorno per giorno</div><svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:14px">${g}</svg>
-    <div class="rv-leg"><span style="color:#FF8A00"><i class="ln"></i>${esc(rvName(id))}</span>${state.rvVs.map(v => `<span style="color:${rvColOf(v)}"><i class="ln dashed"></i>${esc(rvName(v))}</span>`).join('')}<span>in percentuale sulle persone di ogni sprint</span></div></div>`;
+    <div class="rv-leg"><span style="color:#FF8A00"><i class="ln"></i>${esc(rvName(id))}</span>${state.rvVs.map(v => `<span style="color:${rvColOf(v)}"><i class="ln dashed"></i>${esc(rvName(v))}</span>`).join('')}<span>in percentuale sulle persone di ogni sprint · giorni della settimana contati dal primo giorno di ${esc(rvName(id))}: esatti per chi è entrato quel giorno</span></div></div>`;
 }
 
 // Gestori a livello di documento, registrati una volta: la vista si ridisegna con render()
