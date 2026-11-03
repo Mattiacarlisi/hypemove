@@ -311,8 +311,10 @@ const DEF_FUN_CFG = [
   { stepIdx: 4,  vsIdx: 2 },     // 3 Almeno 1 workout vs Onboarding completato
   { stepIdx: 5,  vsIdx: 3 },     // 4 Primo workout 24h vs Almeno 1 workout
   { stepIdx: 11, vsIdx: 3 },     // 5 Vede il paywall (fine onboarding) vs Almeno 1 workout
-  { stepIdx: 13, vsIdx: 5 },     // 6 Arriva in Home vs Vede il paywall
-  { stepIdx: 14, vsIdx: 5 },     // 7 Apre workout detail vs Vede il paywall
+  // 6-7 dal 03/11/2026 contro «Onboarding completato» e non più contro «Vede il paywall»:
+  // a fine onboarding il paywall non c'è più (base degli sprint 11-12, scelta di Mattia).
+  { stepIdx: 13, vsIdx: 2 },     // 6 Arriva in Home vs Onboarding completato
+  { stepIdx: 14, vsIdx: 2 },     // 7 Apre workout detail vs Onboarding completato
   { stepIdx: 6,  vsIdx: 3 },     // 8 ≥2 workout prima settimana vs Almeno 1 workout
   { stepIdx: 7,  vsIdx: 3 },     // 9 ≥3 workout prima settimana vs Almeno 1 workout
   { stepIdx: 9,  vsIdx: 3 },     // 10 3-day streak vs Almeno 1 workout
@@ -3379,7 +3381,10 @@ function attachGoal() {
 // persona conta una volta; premono Inizia; finiscono l'allenamento. Tutto entro 14 giorni dal primo avvio.
 // Numeri da kpi_sprint_activation (cache 'sprint_activation'/'all'), mai in diretta. Sopra il grafico due fasce
 // calcolate dai dati: se c'era il paywall a fine onboarding e su quale schermata si atterra per prima.
-const SA_MIN_BASE = 30;          // sotto: punto vuoto e niente etichette (regola dei grafici: niente curve su pochi dati)
+// Dal 03/11/2026 il paywall a fine onboarding non c'è più (la v2 esce dopo ogni allenamento): la base non cambia —
+// /inizia emette ancora onboarding_end_landing all'arrivo — e la fascia torna «Senza paywall» da sola quando le build
+// nuove sono la maggioranza dello sprint, come negli sprint 11-12.
+const SA_MIN_BASE = 30;         // sotto: punto vuoto e niente etichette (regola dei grafici: niente curve su pochi dati)
 const SA_PAYWALL_SHARE = 0.5;    // dalla metà della base in su che ha visto il paywall → «Paywall»
 const SA_LANDING_SHARE = 0.7;    // una schermata d'arrivo vale per lo sprint se ci atterra almeno il 70%
 const SA_DEFAULT_N = 6;          // sprint accesi di default: gli ultimi sei principali
@@ -7578,12 +7583,12 @@ const CREATIVE_REGISTRY = [
     variant: 'onboarding_trial_v2',
     name: 'Paywall di partenza · prova v2',
     rotation: 'live',
-    where: 'Pagina intera (/inizia), non un overlay: l\'app ci porta dentro da sola appena finita la scena «sto costruendo il tuo percorso», prima della Home. Anche in anteprima /dev (due voci: donna/dimagrire/principiante e uomo/tonificare/intermedio).',
-    when: 'Dalla prima release che la contiene (codice pronto il 10/10/2026), al primo ingresso, subito dopo l\'ultima domanda dell\'onboarding: la vede una volta sola chi installa. Prende il posto di onboarding_trial: per confrontarle, le due righe vanno lette per data, mai sommate, tenendo conto dei giorni in cui convivono. Il 29/10/2026 Mattia l\'ha sostituita con la N44 (onboarding_trial_n44, in app dalla 1.8.7); il 31/10 ha sospeso la N44 e rimesso questa su /inizia, in app dalla prima release che contiene il ritorno. Nei giorni di mezzo le due righe convivono: si leggono per data, mai sommate.',
+    where: 'Dal 03/11/2026: ultima slide del flusso di fine allenamento, a schermo intero, a OGNI allenamento dal primo (source post_workout). Fino al 03/11: pagina intera (/inizia), appena finita la scena «sto costruendo il tuo percorso», prima della Home (source onboarding_end). Anche in anteprima /dev (due voci coi dati scritti a mano, più «Proposta · Paywall v2 dopo l\'allenamento» coi dati del profilo).',
+    when: 'Due epoche nella stessa riga, da leggere per data e per sorgente (riquadro «Da dove è uscita»), mai sommate. FINE ONBOARDING (source onboarding_end): dalla prima release col codice del 10/10/2026, una volta sola per chi installa; il 29-31/10 sostituita dalla N44, poi tornata. DOPO OGNI ALLENAMENTO (source post_workout): dalla prima release col codice del 03/11/2026, scelta di Mattia — a fine onboarding non sale più nessun paywall, e questa schermata, identica, esce dopo ogni allenamento a chi non è premium né in prova, al posto delle tre slide (1° allenamento) e di annuncio + prezzi (dal 2°). L\'apertura porta `occurrence` = il numero dell\'allenamento. Nei giorni del passaggio le build vecchie emettono ancora onboarding_end.',
     exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nella v1.',
     what: 'La schermata di onboarding_trial al pixel — grafico, benefici per obiettivo, recensioni, chiusura, scheda dell\'annuale con «7 giorni gratis» e «0 € oggi» — dove cambiano SOLO tre testi, scritti su chi guarda. Titolo sul livello: principiante «Un percorso pensato per chi ricomincia.», intermedio e avanzato «Un percorso pensato per chi vuole di più.». Sottotitolo su obiettivo e genere: «Sarai seguita/seguito dal coach a ogni allenamento, e ti aiuterà a…» + sgonfiare la pancia e sentirti più leggera/o (dimagrire), avere un corpo più tonico e più forte (tonificare), sciogliere il corpo e muoverti con più facilità (mobilità), sciogliere le tensioni e rinforzare la schiena (mal di schiena), restare forte e autonoma/o negli anni (longevità). Titolino dei benefici: «Stare bene con soli N minuti al giorno.», coi minuti scelti — il vecchio titolo grande, sceso sopra la lista. Il sottotitolo non nomina più il prezzo.',
     cta: 'Identica alla v1: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy` uguale (`onboarding_start.trial.band` sulla scheda con la prova).',
-    note: 'Ripieghi: livello ignoto → «per chi ricomincia» (il livello più scelto); genere ignoto → maschile, come in tutto l\'onboarding; obiettivo ignoto → «ti aiuterà ad arrivare al tuo obiettivo». Livello e genere arrivano con lo stato di fine onboarding, e dal profilo se mancano. Copy nato il 10/10/2026 da tre ricerche e cinque copywriter, poi la proposta di Mattia rifinita insieme. Stesso KPI di guardia — primo allenamento entro 48h.',
+    note: 'Ripieghi: livello ignoto → «per chi ricomincia» (il livello più scelto); genere ignoto → maschile, come in tutto l\'onboarding; obiettivo ignoto → «ti aiuterà ad arrivare al tuo obiettivo». Fino al 03/11 livello e genere arrivavano con lo stato di fine onboarding (dal profilo se mancavano); dopo l\'allenamento livello, genere, obiettivo e minuti escono tutti dal profilo (`PostWorkoutTrialPaywallV2`). Una sola `paywall_open` per apertura anche dopo l\'allenamento: la emette la slide, la schermata riceve la sua `exposure_id`. Dati di partenza (10/10-03/11, a fine onboarding): 766 persone, 15 acquisti (8 diretti, 7 prove). Copy nato il 10/10/2026 da tre ricerche e cinque copywriter, poi la proposta di Mattia rifinita insieme. Stesso KPI di guardia — primo allenamento entro 48h.',
     file: 'app/src/pages/OnboardingTrialPaywallV2/OnboardingTrialPaywallV2.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'come la v1, con i tre testi scritti su livello, obiettivo e genere (nello scatto: donna, dimagrire, principiante, 10 minuti)' },
@@ -7612,9 +7617,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'welcome_offer',
     name: 'Offerta di benvenuto',
-    rotation: 'live',
-    where: 'Due pezzi in due posti: un foglietto che sale in Home, e dietro il suo unico tocco la pagina intera `/offerta`. È una rotta e non un overlay per il tasto indietro di Android: da un overlay porterebbe fuori dall\'app.',
-    when: 'Dal 20/09/2026, UNA VOLTA SOLA nella vita dell\'installazione, solo a chi ha appena chiuso con la × il paywall di partenza. Tre guardie: il passaggio di consegne da `/inizia`, il «mai più» su localStorage scritto nell\'istante in cui compare, e l\'offerta `discount-19` presente DAVVERO nel catalogo di quel telefono — che oggi vuol dire solo Italia.',
+    rotation: 'retired',
+    where: 'Due pezzi in due posti: un foglietto che sale in Home, e dietro il suo unico tocco la pagina intera `/offerta`. È una rotta e non un overlay per il tasto indietro di Android: da un overlay porterebbe fuori dall\'app. Dal 03/11/2026 il foglietto non si monta più: resta solo l\'anteprima /dev.',
+    when: 'SOSPESA dal 03/11/2026, scelta di Mattia (dalla prima release che contiene il cambio): il foglietto non si monta più in Home, quindi non sale a nessuno; componente, rotta e dati restano. Dal 23/09 al 03/11 saliva una volta sola, in Home, dopo il primo allenamento completato e dopo che il paywall di apertura aveva deciso senza vendere. Prima ancora, dal 20/09/2026, UNA VOLTA SOLA nella vita dell\'installazione, solo a chi ha appena chiuso con la × il paywall di partenza. Tre guardie: il passaggio di consegne da `/inizia`, il «mai più» su localStorage scritto nell\'istante in cui compare, e l\'offerta `discount-19` presente DAVVERO nel catalogo di quel telefono — che oggi vuol dire solo Italia.',
     exit: 'Dal foglietto si esce facendolo scendere, e finisce lì: non torna più, la chiave resta scritta anche dopo il rifiuto. Dalla schermata: la × in alto a destra o il tasto indietro, entrambi tracciati, entrambi riportano in Home. Nessuna micro-survey «Perché no?»: `onboarding_end` è uscito dalle sorgenti della survey lo stesso giorno, perché a trenta secondi da una controproposta quella domanda anticipa l\'obiezione invece di raccoglierla.',
     what: 'Un prodotto solo e nessun confronto — chi è qui ha appena guardato due piani affiancati e ha detto di no. Il riquadro del risparmio, 59,99 € sbarrato → 19,99 €/anno, la riga «Poi 29,99 €/anno, e disdici quando vuoi» che Play pretende su ogni offerta introduttiva, «Te la proponiamo una volta sola», e in fondo il piano annuale col suo equivalente al mese. Il foglietto invece NON mostra il prezzo: dice che c\'è un regalo e lascia decidere.',
     note: '⚠️ Il barrato 59,99 € è l\'unica cifra che non esce dal catalogo: su Play il piano base annuale è 29,99 € e non esiste nessun prezzo superiore da cui scontare. È una decisione presa col rischio dichiarato e chiusa in un file solo (`annualListPrice.ts`). Le due cifre che si pagano davvero — primo anno e rinnovo — escono dalle due fasi di `discount-19` come le vede quel telefono. · Prima giornata di vita (21/09/2026): 56 hanno visto il foglietto, 30 l\'hanno aperto, 30 hanno visto il prezzo, 1 è arrivata alla cassa di Google e ha annullato. Zero acquisti. L\'account usato per il collaudo non è idoneo all\'offerta — l\'idoneità la decide Play sull\'account Google — ma gli utenti veri in Italia sì, quindi la riga si popola da sé. · ⚠️ Il foglietto RISALE: dopo che lo si fa scendere l\'effect di `WelcomeOfferSheet` riparte e lo rimette davanti finché non si esce dalla Home — 164 comparse per 56 persone il primo giorno. Le 56 sono persone, le 164 no.',
@@ -7627,9 +7632,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'coach_slides',
     name: 'Primo allenamento · 3 slide',
-    rotation: 'live',
-    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, prima del ritorno in Home. Porta la sua chrome: i tre segmenti in cima e la × solo sull\'ultima slide.',
-    when: 'Alla fine del PRIMO allenamento in assoluto (conteggio allenamenti completati = 1), a utente non premium e non in prova. Dal 15/09/2026 prende il posto del Giorno Zero, che qui non esce più.',
+    rotation: 'dormant',
+    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, prima del ritorno in Home. Porta la sua chrome: i tre segmenti in cima e la × solo sull\'ultima slide. Oggi resta nel registro post-workout senza essere pescata, e montabile da /dev.',
+    when: 'SOSPESA dal 03/11/2026 (dalla prima release che contiene il cambio): dopo ogni allenamento, primo compreso, esce la v2 di fine onboarding (onboarding_trial_v2). Dal 15/09 al 03/11/2026 usciva alla fine del PRIMO allenamento in assoluto, a utente non premium e non in prova, al posto del Giorno Zero. Dal 10/10 al 03/11: 163 persone, 1 acquisto. Non è cancellata: i suoi dati restano questa riga.',
     exit: 'Sulle prime due slide NON c\'è nessuna ×: l\'unica uscita è «Avanti». La × compare sulla terza, quella dei prezzi. Il tasto indietro del telefono torna alla slide precedente e chiude solo dalla prima.',
     what: 'Tre slide bianche al posto di uno spot da 24 secondi. Le prime due sono due dimostrazioni dentro un telefono disegnato: la chat del coach che risponde coi numeri e apre il grafico del peso, e la foto di un piatto che diventa calorie, macro e punteggio. La terza è la scena dei prezzi dello spot, parola per parola, con la timeline della prova al posto di un elenco di vantaggi — perché quella schermata non era il problema (il 95% di chi vedeva lo spot ci arrivava) e perché la domanda che blocca questo pubblico è «e poi mi ritrovo un addebito?», non «cosa fa l\'app».',
     file: 'app/src/components/PremiumProposals/CoachSlidesPaywall/CoachSlidesFlow.tsx',
@@ -7677,9 +7682,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'ad_paywall',
     name: 'Annuncio + prezzi',
-    rotation: 'live',
-    where: 'Ultima slide del flusso di fine allenamento, subito dopo l\'interstitial AdMob a schermo pieno.',
-    when: 'Alla fine di ogni allenamento dal 2° in poi, a utente non premium e non in prova. Prima parte l\'interstitial AdMob a schermo pieno, poi — chiuso l\'annuncio, o se l\'annuncio non parte — compare la schermata dei prezzi.',
+    rotation: 'dormant',
+    where: 'Ultima slide del flusso di fine allenamento, subito dopo l\'interstitial AdMob a schermo pieno. Oggi resta nel registro post-workout senza essere pescata, e montabile da /dev.',
+    when: 'SOSPESA dal 03/11/2026 (dalla prima release che contiene il cambio): dopo ogni allenamento esce la v2 di fine onboarding (onboarding_trial_v2). Fino ad allora usciva alla fine di ogni allenamento dal 2° in poi, a utente non premium e non in prova: prima l\'interstitial AdMob, poi — chiuso l\'annuncio, o se l\'annuncio non parte — la schermata dei prezzi. Dal 10/10 al 03/11: 110 persone, 607 aperture, 0 acquisti; l\'annuncio nei 14 giorni prima risultava sempre `disabled` (AdMob spento da configurazione), quindi la sospensione non toglie incassi pubblicitari. Non è cancellata: i suoi dati restano questa riga.',
     exit: 'La × in alto, oppure «continua gratis» in fondo: sono due gesti diversi e la dashboard li distingue.',
     what: 'Un interstitial AdMob a schermo intero (l\'annuncio vero, quello che paga), poi UNA sola schermata che vende e fa pagare. Niente hero illustrata e niente secondo passaggio prima dei prezzi: dopo un annuncio a schermo pieno un altro racconto è un ostacolo. È la proposta che la stessa persona rivede decine di volte, quindi le aperture sono molte più degli utenti.',
     file: 'app/src/components/PremiumProposals/AdPaywall/AdThenPaywallFlow.tsx',
