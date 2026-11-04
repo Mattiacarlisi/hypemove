@@ -7531,7 +7531,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20261010a';
+const PAYWALL_SHOT_V = '20261104a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7582,13 +7582,13 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'onboarding_trial_v2',
     name: 'Paywall di partenza · prova v2',
-    rotation: 'live',
+    rotation: 'dormant',
     where: 'Dal 03/11/2026: ultima slide del flusso di fine allenamento, a schermo intero, a OGNI allenamento dal primo (source post_workout). Fino al 03/11: pagina intera (/inizia), appena finita la scena «sto costruendo il tuo percorso», prima della Home (source onboarding_end). Anche in anteprima /dev (due voci coi dati scritti a mano, più «Proposta · Paywall v2 dopo l\'allenamento» coi dati del profilo).',
-    when: 'Due epoche nella stessa riga, da leggere per data e per sorgente (riquadro «Da dove è uscita»), mai sommate. FINE ONBOARDING (source onboarding_end): dalla prima release col codice del 10/10/2026, una volta sola per chi installa; il 29-31/10 sostituita dalla N44, poi tornata. DOPO OGNI ALLENAMENTO (source post_workout): dalla prima release col codice del 03/11/2026, scelta di Mattia — a fine onboarding non sale più nessun paywall, e questa schermata, identica, esce dopo ogni allenamento a chi non è premium né in prova, al posto delle tre slide (1° allenamento) e di annuncio + prezzi (dal 2°). L\'apertura porta `occurrence` = il numero dell\'allenamento. Nei giorni del passaggio le build vecchie emettono ancora onboarding_end.',
+    when: 'Due epoche nella stessa riga, da leggere per data e per sorgente (riquadro «Da dove è uscita»), mai sommate. FINE ONBOARDING (source onboarding_end): dalla prima release col codice del 10/10/2026, una volta sola per chi installa; il 29-31/10 sostituita dalla N44, poi tornata. DOPO OGNI ALLENAMENTO (source post_workout): dalla prima release col codice del 03/11/2026, scelta di Mattia — a fine onboarding non sale più nessun paywall, e questa schermata, identica, esce dopo ogni allenamento a chi non è premium né in prova, al posto delle tre slide (1° allenamento) e di annuncio + prezzi (dal 2°). L\'apertura porta `occurrence` = il numero dell\'allenamento. Nei giorni del passaggio le build vecchie emettono ancora onboarding_end. SOSPESA dal 04/11/2026: dopo ogni allenamento esce post_workout_trial_v3, dalla prima release col codice del 04/11; le build vecchie mostrano ancora la v2 finché non si aggiornano. Resta in /dev, inattiva, e i suoi dati restano in questa riga.',
     exit: 'La × in alto a sinistra, che compare a grafico finito, o il tasto indietro di Android. Nessun «continua gratis», come nella v1.',
     what: 'La schermata di onboarding_trial al pixel — grafico, benefici per obiettivo, recensioni, chiusura, scheda dell\'annuale con «7 giorni gratis» e «0 € oggi» — dove cambiano SOLO tre testi, scritti su chi guarda. Titolo sul livello: principiante «Un percorso pensato per chi ricomincia.», intermedio e avanzato «Un percorso pensato per chi vuole di più.». Sottotitolo su obiettivo e genere: «Sarai seguita/seguito dal coach a ogni allenamento, e ti aiuterà a…» + sgonfiare la pancia e sentirti più leggera/o (dimagrire), avere un corpo più tonico e più forte (tonificare), sciogliere il corpo e muoverti con più facilità (mobilità), sciogliere le tensioni e rinforzare la schiena (mal di schiena), restare forte e autonoma/o negli anni (longevità). Titolino dei benefici: «Stare bene con soli N minuti al giorno.», coi minuti scelti — il vecchio titolo grande, sceso sopra la lista. Il sottotitolo non nomina più il prezzo.',
     cta: 'Identica alla v1: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy` uguale (`onboarding_start.trial.band` sulla scheda con la prova).',
-    note: 'Ripieghi: livello ignoto → «per chi ricomincia» (il livello più scelto); genere ignoto → maschile, come in tutto l\'onboarding; obiettivo ignoto → «ti aiuterà ad arrivare al tuo obiettivo». Fino al 03/11 livello e genere arrivavano con lo stato di fine onboarding (dal profilo se mancavano); dopo l\'allenamento livello, genere, obiettivo e minuti escono tutti dal profilo (`PostWorkoutTrialPaywallV2`). Una sola `paywall_open` per apertura anche dopo l\'allenamento: la emette la slide, la schermata riceve la sua `exposure_id`. Dati di partenza (10/10-03/11, a fine onboarding): 766 persone, 15 acquisti (8 diretti, 7 prove). Copy nato il 10/10/2026 da tre ricerche e cinque copywriter, poi la proposta di Mattia rifinita insieme. Stesso KPI di guardia — primo allenamento entro 48h.',
+    note: 'Ripieghi: livello ignoto → «per chi ricomincia» (il livello più scelto); genere ignoto → maschile, come in tutto l\'onboarding; obiettivo ignoto → «ti aiuterà ad arrivare al tuo obiettivo». Fino al 03/11 livello e genere arrivavano con lo stato di fine onboarding (dal profilo se mancavano); dopo l\'allenamento livello, genere, obiettivo e minuti escono tutti dal profilo (`PostWorkoutTrialPaywall`, dal 04/11 lo stesso wrapper della v3). Una sola `paywall_open` per apertura anche dopo l\'allenamento: la emette la slide, la schermata riceve la sua `exposure_id`. Dati di partenza (10/10-03/11, a fine onboarding): 766 persone, 15 acquisti (8 diretti, 7 prove). Copy nato il 10/10/2026 da tre ricerche e cinque copywriter, poi la proposta di Mattia rifinita insieme. Stesso KPI di guardia — primo allenamento entro 48h.',
     file: 'app/src/pages/OnboardingTrialPaywallV2/OnboardingTrialPaywallV2.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'come la v1, con i tre testi scritti su livello, obiettivo e genere (nello scatto: donna, dimagrire, principiante, 10 minuti)' },
@@ -7612,6 +7612,21 @@ const CREATIVE_REGISTRY = [
       { idx: 3, t: 'Recensioni', d: '«Cosa dicono di noi», il carosello dei messaggi, per metà sullo schermo' },
       { idx: 4, t: 'Come funziona', d: '«Come funziona la prova gratuita», i tre passi (solo con la prova), per metà sullo schermo' },
       { idx: 5, t: 'Chiusura', d: 'Movy, il «+2000» e «Il prossimo allenamento è il tuo», per metà sullo schermo' },
+    ],
+  },
+  {
+    variant: 'post_workout_trial_v3',
+    name: 'Paywall dopo l\'allenamento · v3',
+    rotation: 'live',
+    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, a OGNI allenamento dal primo (source post_workout), a chi non è premium né in prova. Anche in anteprima /dev (due voci coi dati scritti a mano, più «Proposta · Paywall v3 dopo l\'allenamento» coi dati del profilo), dove non emette eventi.',
+    when: 'Dalla prima release col codice del 04/11/2026, scelta di Mattia: prende il posto di onboarding_trial_v2, che dopo l\'allenamento era uscita il 03-04/11. Per confrontarle le due righe vanno lette per data, mai sommate: nei giorni del passaggio le build vecchie mostrano ancora la v2. L\'apertura porta occurrence = il numero dell\'allenamento.',
+    exit: 'La × in alto a sinistra, che NON c\'è finché non si scorre: compare al primo scroll e poi resta (come la N44). Il tasto indietro di Android chiude sempre, anche prima. Nessun «continua gratis».',
+    what: 'Pagina verde che si scorre, nell\'ordine: «Sblocca il potenziale del tuo corpo.» con «Con Hypemove+ hai allenamenti illimitati e un coach che li adatta al tuo obiettivo.» e il grafico con «Sei qui» alla partenza e «Il tuo obiettivo» all\'arrivo, senza date; «I benefici di N minuti di allenamento» coi minuti scelti e gli otto benefici per obiettivo; la striscia del chinesiologo, una fascia verde con Mattia scontornato (la testa esce dal bordo), «Mattia Carlisi», «Chinesiologo, fondatore di Hypemove», «Ho insegnato al coach come costruire i tuoi allenamenti.»; «Come funziona la prova gratuita.» in tre passi (oggi 0 €, anche un altro allenamento oggi; entro il 7° giorno disdici e non paghi; dall\'8° il totale dell\'anno); in fondo «Cosa dicono dopo l\'allenamento» con le recensioni. Niente community né numeri della chiusura. In basso le due schede della v2: l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile.',
+    cta: 'Identica alla v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova. Senza prova sul telefono la scheda torna a prezzo pieno e la sezione «Come funziona la prova» non compare.',
+    note: 'Profondità di lettura: ogni sezione, la prima volta che è per metà sullo schermo, esce come paywall_step_view con step «features», index 1–4 e feature = benefits · trainer · how · reviews (how solo con la prova). Una sola paywall_open per apertura: la emette la slide, la schermata riceve la sua exposure_id. Obiettivo e minuti dal profilo (`PostWorkoutTrialPaywall`, attesa massima 1,5 s). Il testo sul chinesiologo dice cosa ha fatto Mattia sul metodo, mai una promessa personale: sua scelta.',
+    file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'l\'apertura: «Sblocca il potenziale del tuo corpo.», il grafico con «Sei qui»; in basso l\'annuale con «7 giorni gratis» e il mensile (nello scatto: donna, dimagrire, 10 minuti)' },
     ],
   },
   {
@@ -8849,6 +8864,7 @@ const CREATIVE_LABELS = {
   onboarding_trial: 'Paywall di partenza · con la prova',
   onboarding_trial_v2: 'Paywall di partenza · prova v2',
   onboarding_trial_n44: 'Paywall di fine onboarding · N44',
+  post_workout_trial_v3: 'Paywall dopo l’allenamento · v3',
   welcome_offer: 'Offerta di benvenuto',
   daily_limit_sheet: 'Limite giornaliero · prima versione',
   daily_limit_done: 'Limite giornaliero · gratuito completato',
