@@ -6863,7 +6863,8 @@ const rvCur = () => RV_FAV.find(x => x.k === state.rvEvent) || { k: state.rvEven
 const rvRow = id => (state.rvData[state.rvEvent] || {})[id];
 const rvColOf = id => RV_COL[state.rvVs.indexOf(id) % RV_COL.length];
 const rvCnt = (id, d) => { const r = rvRow(id); return !r || d > r.max_day || d < 0 ? null : r.days[d]; };
-const rvRate = (id, d) => { const c = rvCnt(id, d), r = rvRow(id); return c === null || !r.n ? null : c / r.n * 100; };
+const rvBase = (id, d) => { const r = rvRow(id); return r && r.base ? r.base[d] : r ? r.n : 0; };
+const rvRate = (id, d) => { const c = rvCnt(id, d), b = rvBase(id, d); return c === null || !b ? null : c / b * 100; };
 
 function rvAllEvents() {
   const fav = new Set(RV_FAV.map(x => x.k));
@@ -6959,7 +6960,7 @@ function rvCards() {
   const c = (d, lab) => {
     const v = rvCnt(id, d), r = rvRate(id, d);
     const rows = state.rvVs.map(x => { const rx = rvRate(x, d); return `<div class="rv-x" style="color:${rvColOf(x)}"><span class="dash"></span>${esc(rvName(x))}: ${rx === null ? 'non ancora' : rvF(rx) + '%'}${rx !== null && r !== null ? ` <span class="${r - rx >= 0 ? 'up' : 'dn'}">(${r - rx >= 0 ? '+' : '−'}${rvF(Math.abs(r - rx))})</span>` : ''}</div>`; }).join('');
-    return `<div class="rv-card"><div class="rv-lab">${lab}</div><div class="rv-num"><div class="rv-huge">${r === null ? '—' : rvF(r) + '%'}</div><div class="rv-sub" style="margin:0">${v ?? 0} su ${s.n}</div></div>${rows ? `<div class="rv-xs">${rows}</div>` : ''}</div>`;
+    return `<div class="rv-card"><div class="rv-lab">${lab}</div><div class="rv-num"><div class="rv-huge">${r === null ? '—' : rvF(r) + '%'}</div><div class="rv-sub" style="margin:0">${v ?? 0} su ${rvBase(id, d)}</div></div>${rows ? `<div class="rv-xs">${rows}</div>` : ''}</div>`;
   };
   return `<div class="rv-row4">${c(0, 'Il primo giorno')}${c(1, 'Il giorno dopo')}${c(Math.min(7, md), md >= 7 ? 'Dopo una settimana' : 'Al giorno ' + md)}${md >= 30 ? c(30, 'Dopo un mese') : c(md, 'Al giorno ' + md + ", l'ultimo visto")}</div>`;
 }
@@ -6982,7 +6983,7 @@ function rvChart() {
   g += `<path d="${path(pts)} L ${xOf(pts.length - 1)} ${yOf(0)} L ${xOf(0)} ${yOf(0)} Z" fill="#FF8A00" fill-opacity=".18"/><path d="${path(pts)}" fill="none" stroke="#FF8A00" stroke-width="3" stroke-linejoin="round"/>`;
   state.rvVs.filter(rvRow).forEach(v => { const cp = []; for (let d = 0; d <= Math.min(md - 1, rvRow(v).max_day); d++) { const r = rvRate(v, d); if (r !== null) cp.push([d, r]); } if (cp.length > 1) g += `<path d="${path(cp)}" fill="none" stroke="${rvColOf(v)}" stroke-width="2" stroke-dasharray="6 5"/>`; });
   pts.forEach(([i, r]) => {
-    const tip = `Giorno ${i}${start ? ' (' + wd(i) + ')' : ''}: ${rvCnt(id, i)} su ${s.n} (${rvF(r)}%)` + state.rvVs.map(v => rvRate(v, i) !== null ? ` · ${rvName(v)} ${rvF(rvRate(v, i))}%` : '').join('');
+    const tip = `Giorno ${i}${start ? ' (' + wd(i) + ')' : ''}: ${rvCnt(id, i)} su ${rvBase(id, i)} (${rvF(r)}%)` + state.rvVs.map(v => rvRate(v, i) !== null ? ` · ${rvName(v)} ${rvF(rvRate(v, i))}%` : '').join('');
     g += `<circle cx="${xOf(i)}" cy="${yOf(r)}" r="3.5" fill="#FF8A00"/><circle cx="${xOf(i)}" cy="${yOf(r)}" r="9" fill="transparent" data-rv-tip="${esc(tip)}"/>`;
   });
   return `<div class="rv-card"><div class="rv-lab">Chi ${esc(rvCur().d)}, giorno per giorno</div><svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:14px">${g}</svg>
