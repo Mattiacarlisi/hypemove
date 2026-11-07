@@ -12,10 +12,13 @@ const AIC = {
 };
 const AIC_PERIODS = [['oggi', 'Oggi'], ['settimana', 'Settimana'], ['mese', 'Mese'], ['sprint', 'Sprint']];
 const AIC_CAP = { oggi: 'oggi', settimana: 'ultima settimana', mese: 'ultimo mese', sprint: 'sprint' };
-const AIC_TABS = [['spontanee', 'Spontanee', 'spontanea'], ['feedback', 'Post-workout', 'feedback'], ['paywall', 'Primo workout', 'paywall']];
+const AIC_TABS = [['spontanee', 'Spontanee', 'spontanea'], ['feedback', 'Post-workout', 'feedback'], ['paywall', 'Primo workout', 'paywall'], ['onboarding', 'Onboarding', 'onboarding']];
 const AIC_FEED = [['Notifiche', 'workout_feedback_notification_scheduled'], ['Mostrati', 'workout_feedback_shown'], ['Risposte', 'workout_feedback_replied']];
 const AIC_ROWS = 6;   // righe mostrate prima di «Altre N»
-const AIC_SCREEN = { home: 'Home', 'workout-feedback': 'Fine workout', 'workout-details': 'Dettaglio workout', profile: 'Profilo' };
+// Le chat dell'onboarding (tab «Onboarding», dal 07/11/2026): la n.1 a metà delle domande, la n.2 alla fine;
+// 'onboarding-x' è la chat unica del secondo onboarding.
+const AIC_SCREEN = { home: 'Home', 'workout-feedback': 'Fine workout', 'workout-details': 'Dettaglio workout', profile: 'Profilo',
+  'onboarding-1': 'Chat 1', 'onboarding-2': 'Chat 2', onboarding: 'Chat 1 e 2', 'onboarding-x': 'Onboarding' };
 
 const aic = {
   bench: { data: null, error: null, loading: false, animated: false },
