@@ -7532,7 +7532,7 @@ function sezioneTimeoutBox(msg, retryCall) {
 // mostrare i byte vecchi anche con no-cache (successo il 17/09/2026: la miniatura di
 // «Fine onboarding · grafico» mostrava ancora «programma pronto», che era il contenuto
 // precedente di quel file). Da bumpare a ogni giro di paywall-shots.mjs.
-const PAYWALL_SHOT_V = '20261104a';
+const PAYWALL_SHOT_V = '20261108a';
 
 const CREATIVE_REGISTRY = [
   {
@@ -7552,9 +7552,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'app_open',
     name: 'Paywall apertura app',
-    rotation: 'live',
-    where: 'Overlay a pieno campo sopra qualunque schermata, non una rotta: l\'app si apre e lui c\'è già.',
-    when: 'A OGNI accesso, dal 20/09/2026: sia quando l\'app parte da zero, sia quando torna in primo piano dopo essere stata in background — anche dopo pochi secondi. Nessuna soglia di tempo, nessun tetto giornaliero. Non si mostra a chi è premium, a chi non ha finito l\'onboarding, né nella sessione in cui l\'onboarding è appena finito (lì ha già girato il paywall di partenza).',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (voce «Paywall apertura app · v1 (inattivo dal 08/11)»). Fino all\'08/11/2026: overlay a pieno campo sopra qualunque schermata, non una rotta: l\'app si apre e lui c\'è già.',
+    when: 'RITIRATA dalla rotazione l\'08/11/2026, sostituita da app_open_v2 dalla prima release che la contiene: per qualche giorno le build vecchie la mostrano ancora. I suoi dati (20/09–08/11) restano questa riga, mai sommati alla v2. Prima: a OGNI accesso, dal 20/09/2026: sia quando l\'app parte da zero, sia quando torna in primo piano dopo essere stata in background — anche dopo pochi secondi. Nessuna soglia di tempo, nessun tetto giornaliero. Non si mostra a chi è premium, a chi non ha finito l\'onboarding, né nella sessione in cui l\'onboarding è appena finito (lì ha già girato il paywall di partenza).',
     exit: 'La × in alto a sinistra, o il tasto indietro di Android: entrambe portano in Home e finisce lì. A differenza del paywall di partenza NON passa la palla all\'offerta di benvenuto — la richiesta tornerà da sé alla prossima apertura.',
     what: 'La stessa schermata del paywall di partenza, con due titoli suoi: «Prenditi cura del tuo corpo.» e «Bastano 5 minuti al giorno per stare meglio.». Tutto il resto — il grafico, i benefici, le recensioni, i numeri, i due piani incollati in basso — è identico. A schermo la prova gratuita non è nominata da nessuna parte: c\'è solo il prezzo. Chi la ottiene la scopre sul foglio di Google, dopo il tocco.',
     cta: 'Non c\'è una CTA separata: il bottone È la carta del piano, e UN SOLO tocco apre il pagamento di Google — niente primo tocco che sceglie e secondo che conferma. «Annuale»: il listino dichiarato sbarrato (59,99 €, solo in euro — fuori dall\'euro la riga torna a «29,99 € in un anno») accanto al totale d\'impegno 29,99 €, «2,50 €/mese» a destra, etichetta «Il più scelto», chevron ›. «Mensile»: «Senza impegno», «9,90 €/mese». Sotto, «Ripristina acquisti». Conseguenza sugli eventi, voluta: da questa superficie `paywall_plan_select` non esce MAI, e il tocco si legge da `paywall_cta_tap.product_id` — il campo `cta_copy` riporta la chiave della carta toccata (`plans_v2.annual.label`), non un testo di CTA.',
@@ -7563,6 +7563,25 @@ const CREATIVE_REGISTRY = [
     file: 'app/src/pages/AppOpenPaywall/AppOpenPaywall.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'si scorre tutta: grafico, benefici, recensioni, numeri, piani' },
+    ],
+  },
+  {
+    variant: 'app_open_v2',
+    name: 'Paywall apertura app · v2',
+    rotation: 'live',
+    where: 'Overlay a pieno campo sopra qualunque schermata, lo stesso Host della v1: l\'app si apre e lui c\'è già. Anche in anteprima /dev (voce «Paywall apertura app · v2 (attivo)»), dove non emette eventi.',
+    when: 'Dalla prima release col codice dell\'08/11/2026, al posto di app_open: a ogni accesso a chi è attivato (allenamento finito o pasto analizzato) e non è premium. Stessi source della v1 (app_cold_start / app_resume) e stessa `activation` (workout | meal) in paywall_open. Nei giorni del passaggio le build vecchie emettono ancora app_open: le due righe si leggono per data, mai sommate.',
+    exit: 'La × in alto a sinistra, VISIBILE dal primo istante (a differenza della v3 e della N44: qui la pagina sale da sola a ogni accesso, e su iPhone senza tasto indietro un\'uscita nascosta è un rischio di revisione), o il tasto indietro di Android. Entrambe portano in Home. Nessun «continua gratis».',
+    what: 'Pagina verde che si scorre, nell\'ordine: «Sblocca il potenziale del tuo corpo.» con «Con Hypemove+ hai tutto quello che ti serve:» e le quattro icone crema della N44 (Il tuo piano, Coach AI, Community, Nutrizione); subito sotto, già nel primo schermo, la tabella «Cosa sblocchi con Hypemove+» Gratis / Hypemove+ con sei righe — Allenamenti personalizzati (1 al giorno / Illimitati), Coach AI personale (Limitato / Illimitato), Esercizi da escludere (Limitati / Illimitati), Calorie dei pasti in un attimo (Limitate / Illimitate), Memoria di dolori e preferenze (× / ✓), Piano rivisto ogni settimana (× / ✓), colonna Hypemove+ scura con bordo e testata oro; la striscia del chinesiologo con «Ho costruito il coach per seguirti nell\'allenamento e a tavola.»; «Come funziona la prova gratuita.» in tre passi (oggi 0 €: allenamenti, coach e calorie dei pasti; entro il 7° giorno disdici; dall\'8° il totale dell\'anno); «Cosa dicono di noi» con le sei recensioni; in fondo il rinnovo automatico e dove si disdice, «Ripristina acquisti · Termini · Privacy». Niente grafico, niente benefici. In basso le due schede della v3: l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile.',
+    cta: 'Identica alla v3: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova. Senza prova sul telefono la scheda torna a prezzo pieno e la sezione «Come funziona la prova» non compare. Termini e Privacy emettono paywall_terms_open / paywall_privacy_open; il ripristino i suoi eventi di restore.',
+    note: 'Profondità di lettura: ogni sezione, la prima volta che è per metà sullo schermo, esce come paywall_step_view con step «features», index 1–4 e feature = compare · trainer · how · reviews (how solo con la prova). Una sola paywall_open per apertura, con source e activation. ⚠️ La riga «Esercizi da escludere: Limitati» l\'ha voluta Mattia l\'08/11 ma OGGI il gratuito non ha un limite sugli esercizi esclusi: il limite va costruito. «Coach AI» e «Calorie» condividono i 10 crediti AI a vita del gratuito, per questo nessun numero per riga. Disegno: artifact «Paywall d\'apertura», opzione A.',
+    file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
+    screens: [
+      { idx: 0, t: 'La pagina', d: 'l\'apertura: «Sblocca il potenziale del tuo corpo.», i quattro pilastri e l\'inizio della tabella Gratis/Hypemove+; in basso l\'annuale con «7 giorni gratis» e il mensile' },
+      { idx: 1, t: 'Confronto', d: 'la tabella «Cosa sblocchi con Hypemove+», per metà sullo schermo' },
+      { idx: 2, t: 'Chinesiologo', d: 'la striscia di Mattia, per metà sullo schermo' },
+      { idx: 3, t: 'Come funziona', d: '«Come funziona la prova gratuita», i tre passi (solo con la prova), per metà sullo schermo' },
+      { idx: 4, t: 'Recensioni', d: '«Cosa dicono di noi», il carosello, per metà sullo schermo' },
     ],
   },
   {
@@ -8862,6 +8881,7 @@ function creativeModal() {
 const CREATIVE_LABELS = {
   onboarding_start: 'Paywall di partenza',
   app_open: 'Paywall apertura app',
+  app_open_v2: 'Paywall apertura app · v2',
   onboarding_trial: 'Paywall di partenza · con la prova',
   onboarding_trial_v2: 'Paywall di partenza · prova v2',
   onboarding_trial_n44: 'Paywall di fine onboarding · N44',
