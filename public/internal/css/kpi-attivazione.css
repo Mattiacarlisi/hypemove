@@ -1,0 +1,52 @@
+/* Pagina «Attivazione» — tema Notte come Stats e Funnel. Misure dal prototipo A in www/_specs/design-flows/kpi-attivazione/. */
+.asp-sub { margin: -16px 0 24px; font-size: 14px; font-weight: 600; color: #9ca3af; max-width: 820px; line-height: 1.5; }
+.asp-sub b { color: #fff; font-weight: 800; }
+.asp-mut { font-size: 13px; color: #9ca3af; font-weight: 600; text-align: center; max-width: 420px; }
+.asp-page .fun-empty-ring { margin: 0 auto; }
+.asp-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: center; }
+.asp-row + .asp-row { border-top: 1px solid #22262e; }
+.asp-lab { padding-right: 14px; display: flex; flex-direction: column; gap: 2px; }
+.asp-lab b { font: 800 14px Nunito, sans-serif; color: #fff; }
+.asp-lab span { font: 600 11px Nunito, sans-serif; color: #6b7280; }
+.asp-plot { min-width: 0; }
+.asp-plot svg { display: block; }
+.asp-g { padding: 22px 32px 10px; }
+.asp-gd { margin: 6px 0 12px; font: 600 13px/1.5 Nunito, sans-serif; color: #9ca3af; }
+.asp-sticky { position: sticky; top: 0; z-index: 20; background: #0f1115; padding: 8px 34px 6px; margin: 0 -2px 10px; border-bottom: 1px solid #2a2e37; }
+.asp-trow .asp-lab span { color: #9ca3af; }
+.asp-tk { font: 800 12px Nunito, sans-serif; fill: #fff; }
+.asp-tk.prov { fill: #9ca3af; }
+.asp-tk2 { font: 600 10px Nunito, sans-serif; fill: #6b7280; }
+.asp-tk3 { font: 600 10px Nunito, sans-serif; fill: #9ca3af; }
+.asp-gh { stroke: #2a2e37; stroke-width: 1; }
+.asp-line { stroke: #4361ee; stroke-width: 2.5; fill: none; }
+.asp-dot { fill: #4361ee; stroke: #4361ee; stroke-width: 2; }
+.asp-dot.prov { fill: #0f1115; }
+.asp-val { font: 700 11px Nunito, sans-serif; fill: #fff; }
+.asp-val.prov { fill-opacity: .6; }
+.asp-axis { font: 600 10px Nunito, sans-serif; fill: #6b7280; }
+.asp-col { fill: transparent; }
+.asp-col.on { fill: rgba(67, 97, 238, .12); }
+.asp-legend { display: flex; gap: 22px; flex-wrap: wrap; font: 600 12px Nunito, sans-serif; color: #9ca3af; margin: 4px 0 20px; }
+.asp-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.asp-tcard { padding: 18px 32px; }
+.asp-tw { overflow-x: auto; margin-top: 16px; }
+.asp-tab { border-collapse: collapse; width: 100%; font: 600 12px Nunito, sans-serif; }
+.asp-tab th { text-align: right; color: #9ca3af; font-weight: 700; padding: 6px 8px; border-bottom: 1.5px solid #2a2e37; vertical-align: bottom; line-height: 1.25; }
+.asp-tab th:first-child, .asp-tab td:first-child { text-align: left; }
+.asp-tab td { text-align: right; padding: 6px 8px; border-bottom: 1px solid #22262e; white-space: nowrap; }
+.asp-tab td b { display: block; color: #fff; font-weight: 800; font-size: 13px; }
+.asp-tab td span { color: #6b7280; font-size: 11px; }
+.asp-tab tr.prov td b { color: #9ca3af; }
+.asp-tip { position: fixed; z-index: 500; pointer-events: none; display: none; min-width: 180px; padding: 10px 12px; border-radius: 12px;
+  background: #262d45; border: 1.5px solid #4361ee; box-shadow: 0 3px 0 #050608; font: 600 12px/1.45 Nunito, sans-serif; color: #fff; }
+.asp-tip b { font-weight: 800; }
+.asp-tip .m { color: #9ca3af; }
+@media (max-width: 700px) {
+  .asp-row { grid-template-columns: minmax(0, 1fr); }
+  .asp-lab { padding: 10px 0 0; }
+  .asp-g, .asp-tcard { padding-left: 16px; padding-right: 16px; }
+  .asp-sticky { padding-left: 18px; padding-right: 18px; }
+  .asp-trow .asp-lab { display: none; }
+}
+.asp-plot svg .asp-line, .asp-plot svg .asp-dot, .asp-plot svg .asp-val, .asp-plot svg .asp-gh, .asp-plot svg .asp-axis { pointer-events: none; }

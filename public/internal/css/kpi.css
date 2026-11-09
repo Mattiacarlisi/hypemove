@@ -1282,3 +1282,4 @@
   .kc-busy::before { animation: none; width: 100%; opacity: .6; }
   .kc-pulse, .kc-fade { animation: none; }
 }
+.nav-item .icon svg { display: block; margin: 0 auto; }

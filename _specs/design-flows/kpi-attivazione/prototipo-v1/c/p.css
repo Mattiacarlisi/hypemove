@@ -1,0 +1,25 @@
+.cc-card { padding: 20px 20px 18px; }
+.cc-tw { overflow-x: auto; }
+.cc-tab { border-collapse: separate; border-spacing: 3px; width: 100%; font-family: Nunito, sans-serif; table-layout: fixed; }
+.cc-tab th, .cc-tab td { text-align: center; }
+.cc-corner { width: 168px; text-align: left !important; font: 700 11px Nunito, sans-serif; color: #6b7280; vertical-align: bottom; padding: 0 6px 6px; }
+.cc-h { padding: 0 0 6px; vertical-align: bottom; }
+.cc-h b { display: block; font: 800 12px Nunito, sans-serif; color: #fff; }
+.cc-h span { display: block; font: 600 10px Nunito, sans-serif; color: #6b7280; }
+.cc-h.prov b { color: #9ca3af; }
+.cc-lab { text-align: left !important; padding: 4px 6px; }
+.cc-lab b { display: block; font: 800 13px Nunito, sans-serif; color: #fff; white-space: nowrap; }
+.cc-lab span { display: block; font: 600 10px Nunito, sans-serif; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-coh td[data-c] { font: 800 12px Nunito, sans-serif; color: #9ca3af; padding: 6px 0; border-bottom: 1.5px solid #2a2e37; }
+.cc-coh td[data-c] b { font-weight: 800; }
+.cc-sep td { text-align: left !important; font: 800 11px Nunito, sans-serif; letter-spacing: .6px; text-transform: uppercase; color: #9ca3af; padding: 14px 6px 4px; }
+.cc-v { height: 44px; border-radius: 6px; position: relative; cursor: default; padding: 0; }
+.cc-v b { display: block; font: 800 13px Nunito, sans-serif; color: #fff; line-height: 16px; }
+.cc-v span { display: block; font: 600 10px Nunito, sans-serif; color: rgba(255,255,255,.62); line-height: 12px; }
+.cc-v.prov::after { content: ''; position: absolute; inset: 0; border-radius: 6px; border: 1.5px dashed rgba(255,255,255,.55); pointer-events: none; }
+.cc-v.hc, .cc-h.hc { outline: 1.5px solid rgba(255,255,255,.35); outline-offset: -1px; }
+.cc-v:hover { outline: 2px solid #fff !important; }
+tr.hr .cc-lab b { color: #fb8b04; }
+.cc-sw { display: inline-flex; gap: 2px; }
+.cc-sw i { width: 18px; height: 14px; border-radius: 3px; display: inline-block; }
+.cc-hatch { background: rgba(67,97,238,.4); border: 1.5px dashed rgba(255,255,255,.55); box-sizing: border-box; }

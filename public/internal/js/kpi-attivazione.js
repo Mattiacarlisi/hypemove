@@ -1,0 +1,188 @@
+// Pagina «Attivazione»: funnel di attivazione per sprint a 11 passi, un grafico a linea per passo con le colonne degli
+// sprint allineate fra le strisce. Numeri da kpi_activation_sprint, letti solo dalla cache (voce activation_sprint/all).
+// Design: www/_specs/design-flows/kpi-attivazione/ (proposta A, scelta da Danilo il 09/11/2026).
+const ACT = {
+  PASSI: ['Primo avvio', 'Workout details', 'Tocca «Avvia»', 'Finisce un esercizio', '1° workout',
+    '2° avvio', '2° workout', '3° avvio', '3° workout', '4° avvio', '4° workout'],
+  EVENTI: ['first_open', 'view_WorkoutDetail', 'workout_start', 'exercise_complete', 'workout_complete',
+    'app_open dopo 30 min fermo', 'workout_complete ×2', 'app_open ×2 dopo 30 min', 'workout_complete ×3',
+    'app_open ×3 dopo 30 min', 'workout_complete ×4'],
+  GRUPPI: [
+    { t: 'La prima volta', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del primo allenamento.', passi: [1, 2, 3, 4] },
+    { t: 'Tornano ad aprire l\'app', d: 'Quante aprono di nuovo l\'app dopo almeno 30 minuti senza usarla.', passi: [5, 7, 9] },
+    { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10] },
+  ],
+  RECENT_DAYS: 14,   // come la scheda «Attivazione per sprint»: entro 14 giorni dalla fine i numeri possono ancora salire
+  H: 118, PADT: 22, PADB: 10,
+  rows: null, cache: null, error: null, force: false, table: false, w: 0,
+};
+
+ACT.today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
+ACT.dm = d => d.slice(8, 10) + '/' + d.slice(5, 7);
+ACT.pct = (n, b) => b ? n * 100 / b : 0;
+ACT.fp = (n, b) => { const p = ACT.pct(n, b); return (p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : Math.round(p)) + '%'; };
+ACT.sprints = () => {
+  const today = ACT.today();
+  return (ACT.rows || []).map(r => {
+    const days = Math.floor((Date.parse(today) - Date.parse(r.fine)) / 864e5);
+    return { k: 'S' + r.numero, dal: ACT.dm(r.inizio), al: ACT.dm(r.fine), v: r.v, coorte: r.v[0],
+      inCorso: r.fine >= today, prov: days < ACT.RECENT_DAYS };
+  });
+};
+
+async function fetchActivationSprint(force) {
+  force = force || ACT.force; ACT.force = false;
+  try {
+    const { data, error } = await sb.rpc('kpi_cache_get', { p_query: 'activation_sprint', p_scope: 'all', p_force: false });
+    if (error) throw error;
+    if (data && Array.isArray(data.data)) {
+      ACT.rows = data.data; ACT.error = null;
+      ACT.cache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
+      render();
+      if (!ACT.cache.pending) return;
+    } else {
+      ACT.cache = null;
+      if (state.page === 'attivazione') render();
+    }
+  } catch (e) {
+    console.error('fetchActivationSprint', e);
+    ACT.error = e.message || 'Errore caricamento attivazione';
+    render();
+    return;
+  }
+  const r = await kpiRecompute('activation_sprint', 'all', force || !ACT.rows);
+  if (r.data && Array.isArray(r.data)) {
+    ACT.rows = r.data; ACT.error = null;
+    ACT.cache = { computedAt: r.computed_at, pending: false, failed: r.failed, fresh: !!r.recomputed };
+  } else if (ACT.rows) {
+    ACT.cache = { ...ACT.cache, pending: false, failed: true, fresh: false };
+  } else {
+    ACT.error = 'Attivazione per sprint non disponibile';
+  }
+  render();
+  if (ACT.cache) ACT.cache.fresh = false;
+}
+
+function actGeo(n, w) { const step = (w - 16) / n; return { step, X: i => 8 + step * (i + .5) }; }
+const actNiceMax = v => Math.max(10, Math.ceil(v / 10) * 10);
+
+function actStrip(S, p, max, w) {
+  const { H, PADT, PADB } = ACT, { step, X } = actGeo(S.length, w);
+  const Y = v => PADT + (H - PADT - PADB) * (1 - v / max);
+  const vals = S.map(s => ACT.pct(s.v[p], s.coorte)), labels = step >= 22;
+  let s = `<svg width="${w}" height="${H}" role="img" aria-label="${esc(ACT.PASSI[p])} per sprint">`;
+  [0, max / 2, max].forEach(v => s += `<line class="asp-gh" x1="0" x2="${w}" y1="${Y(v)}" y2="${Y(v)}"${v ? ' stroke-dasharray="2 4"' : ''}/>`);
+  S.forEach((sp, i) => s += `<rect class="asp-col" data-i="${i}" x="${X(i) - step / 2}" y="0" width="${step}" height="${H}"/>`);
+  let solid = '', dash = '';
+  vals.forEach((v, i) => {
+    if (!i) return;
+    const seg = `M${X(i - 1)},${Y(vals[i - 1])}L${X(i)},${Y(v)}`;
+    if (S[i].prov) dash += seg; else solid += seg;
+  });
+  s += `<path d="${solid}" class="asp-line"/><path d="${dash}" class="asp-line" stroke-dasharray="4 4"/>`;
+  vals.forEach((v, i) => {
+    const pr = S[i].prov;
+    s += `<circle cx="${X(i)}" cy="${Y(v)}" r="4" class="asp-dot${pr ? ' prov' : ''}"/>`;
+    if (labels) s += `<text class="asp-val${pr ? ' prov' : ''}" x="${X(i)}" y="${Y(v) - 9}" text-anchor="middle">${Math.round(v)}</text>`;
+  });
+  s += `<text class="asp-axis" x="${w - 2}" y="${Y(max) - 6}" text-anchor="end">${max}%</text>`;
+  return s + '</svg>';
+}
+
+function actTicks(S, w) {
+  const { step, X } = actGeo(S.length, w);
+  let s = `<svg width="${w}" height="44">`;
+  S.forEach((sp, i) => {
+    // colonne strette (telefono): uno sprint sì e uno no, senza data né persone, che restano nel riquadro al tocco
+    if (step < 30 && i % 2 && i !== S.length - 1) return;
+    s += `<text x="${X(i)}" y="15" text-anchor="middle" class="asp-tk${sp.prov ? ' prov' : ''}">${sp.k}</text>`;
+    if (step < 30) return;
+    s += `<text x="${X(i)}" y="29" text-anchor="middle" class="asp-tk2">${sp.inCorso ? 'in corso' : sp.dal}</text>`;
+    s += `<text x="${X(i)}" y="41" text-anchor="middle" class="asp-tk3">${sp.coorte}</text>`;
+  });
+  return s + '</svg>';
+}
+
+function actTable(S) {
+  const head = '<tr><th>Sprint</th>' + ACT.PASSI.map(p => `<th>${esc(p)}</th>`).join('') + '</tr>';
+  const rows = S.map(s => `<tr${s.prov ? ' class="prov"' : ''}><td><b>${s.k}</b><span>${s.inCorso ? 'in corso' : 'dal ' + s.dal}</span></td>`
+    + s.v.map((n, j) => `<td><b>${n}</b>${j ? `<span>${ACT.fp(n, s.coorte)}</span>` : ''}</td>`).join('') + '</tr>').join('');
+  return `<div class="asp-tw"><table class="asp-tab">${head}${rows}</table></div>`;
+}
+
+function pageActivationSprint() {
+  const pending = !!(ACT.cache && ACT.cache.pending);
+  const head = `<div class="st-head"><button class="nav-toggle nav-toggle-desk" data-nav-toggle
+      title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button>
+    <h1 class="st-h1">Attivazione per sprint</h1><span class="st-grow"></span>
+    ${ACT.cache ? `<span class="st-meta">${kcMark(ACT.cache)}</span>` : ''}
+    <button class="st-refresh" data-asp-refresh ${pending || !ACT.rows ? 'disabled' : ''}>Aggiorna</button></div>
+    <p class="asp-sub">Ogni striscia è un passo, ogni colonna uno sprint: <b>su 100 persone al primo avvio, quante arrivano a quel passo</b>, contando fino a oggi. I passi non sono in cascata: il secondo avvio non richiede il primo allenamento.</p>`;
+  let body;
+  if (ACT.error && !ACT.rows) {
+    body = `<section class="sa-card"><div class="pt-err">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.5"/></svg>
+      <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-asp-retry>Riprova</button></div></section>`;
+  } else if (!ACT.rows) {
+    body = `<section class="sa-card"><div class="pt-err"><div class="fun-empty-ring spin"></div>
+      <div class="pt-err-t">Primo calcolo in corso</div><div class="asp-mut">Conta tutti gli eventi di ogni persona dal primo avvio a oggi: ci vuole circa un minuto.</div></div></section>`;
+  } else {
+    const S = ACT.sprints();
+    const groups = ACT.GRUPPI.map(g => {
+      const max = actNiceMax(Math.max(...g.passi.flatMap(p => S.map(s => ACT.pct(s.v[p], s.coorte)))));
+      return `<section class="sa-card asp-g"><h2 class="sa-title">${g.t}</h2><p class="asp-gd">${g.d} Le strisce di questo riquadro hanno la stessa scala, da 0 a ${max}%.</p>`
+        + g.passi.map(p => `<div class="asp-row"><div class="asp-lab"><b>${esc(ACT.PASSI[p])}</b><span>${esc(ACT.EVENTI[p])}</span></div><div class="asp-plot" data-p="${p}" data-max="${max}"></div></div>`).join('')
+        + '</section>';
+    }).join('');
+    body = `<div class="asp-sticky"><div class="asp-row asp-trow"><div class="asp-lab"><span>Sprint · persone al primo avvio</span></div><div class="asp-plot asp-ticks"></div></div></div>
+      ${groups}
+      <div class="asp-legend"><span><svg width="26" height="8" aria-hidden="true"><line x1="0" x2="26" y1="4" y2="4" class="asp-line"/></svg>Sprint chiuso da più di ${ACT.RECENT_DAYS} giorni</span>
+      <span><svg width="26" height="10" aria-hidden="true"><line x1="0" x2="26" y1="5" y2="5" class="asp-line" stroke-dasharray="4 4"/><circle cx="13" cy="5" r="3.5" class="asp-dot prov"/></svg>Sprint in corso o chiuso da meno di ${ACT.RECENT_DAYS} giorni: i numeri possono ancora salire</span></div>
+      <section class="sa-card asp-tcard"><button class="sa-phases${ACT.table ? ' pt-on' : ''}" data-asp-table aria-expanded="${ACT.table}">${ACT.table ? 'Nascondi i numeri' : 'Mostra i numeri'}</button>${ACT.table ? actTable(S) : ''}</section>`;
+  }
+  return `<div class="st-page asp-page">${head}${body}</div>`;
+}
+
+// I grafici si disegnano alla larghezza vera della colonna, dopo ogni render e quando cambia la finestra.
+function actDraw() {
+  const plot = document.querySelector('.asp-plot');
+  if (!plot || !ACT.rows) return;
+  const w = Math.round(plot.clientWidth);
+  if (!w) return;
+  ACT.w = w;
+  const S = ACT.sprints();
+  document.querySelector('.asp-ticks').innerHTML = actTicks(S, w);
+  document.querySelectorAll('.asp-plot[data-p]').forEach(el => el.innerHTML = actStrip(S, +el.dataset.p, +el.dataset.max, w));
+  let tip = document.querySelector('.asp-tip');
+  if (!tip) { tip = document.createElement('div'); tip.className = 'asp-tip'; document.body.appendChild(tip); }
+  tip.style.display = 'none';
+  const off = () => { document.querySelectorAll('.asp-col.on').forEach(c => c.classList.remove('on')); tip.style.display = 'none'; };
+  document.querySelectorAll('.asp-col').forEach(r => {
+    r.addEventListener('mouseenter', () => {
+      const i = +r.dataset.i, sp = S[i], p = +r.closest('.asp-plot').dataset.p;
+      off();
+      document.querySelectorAll(`.asp-col[data-i="${i}"]`).forEach(c => c.classList.add('on'));
+      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: <b>${sp.v[p]}</b> su ${sp.coorte} · <b>${ACT.fp(sp.v[p], sp.coorte)}</b>`;
+      tip.style.display = 'block';
+    });
+    r.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - 240) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
+    r.addEventListener('mouseleave', off);
+  });
+}
+
+let actResizeBound = false;
+function attachActivationSprint() {
+  document.querySelector('.asp-tip')?.style.setProperty('display', 'none');
+  if (state.page !== 'attivazione') return;
+  document.querySelector('[data-asp-refresh]')?.addEventListener('click', () => fetchActivationSprint(true));
+  document.querySelector('[data-asp-retry]')?.addEventListener('click', () => { ACT.error = null; render(); fetchActivationSprint(true); });
+  document.querySelector('[data-asp-table]')?.addEventListener('click', () => { ACT.table = !ACT.table; render(); });
+  actDraw();
+  if (!actResizeBound) {
+    actResizeBound = true;
+    addEventListener('resize', () => {
+      const plot = state.page === 'attivazione' && document.querySelector('.asp-plot');
+      if (plot && Math.abs(Math.round(plot.clientWidth) - ACT.w) >= 6) actDraw();
+    });
+  }
+}

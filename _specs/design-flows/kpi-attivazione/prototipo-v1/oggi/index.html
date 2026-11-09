@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attivazione per sprint</title><meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Public+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{--ground:#eef1f5;--surface:#fff;--sunken:#e2e7ee;--rule:#ccd4de;--ink:#141920;--ink-soft:#4a5462;--ink-faint:#6f7a87;--accent:#3a45c4;--accent-bg:#e4e6fb;--warm:#a94f18;--warm-bg:#f9e9dd;--good:#12655a;--good-bg:#daefeb;--mono-ink:#8b3a12;--mono-bg:#e6ebf1;--scale:1}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--ground:#0e131a;--surface:#161d26;--sunken:#1b232e;--rule:#2c3744;--ink:#f0f4f9;--ink-soft:#b4bfcd;--ink-faint:#808b99;--accent:#939bf9;--accent-bg:#1a1f42;--warm:#f2a664;--warm-bg:#2f2010;--good:#5ad3c0;--good-bg:#0d2b28;--mono-ink:#ffc48a;--mono-bg:#1f2833}}
+:root[data-theme="dark"]{color-scheme:dark;--ground:#0e131a;--surface:#161d26;--sunken:#1b232e;--rule:#2c3744;--ink:#f0f4f9;--ink-soft:#b4bfcd;--ink-faint:#808b99;--accent:#939bf9;--accent-bg:#1a1f42;--warm:#f2a664;--warm-bg:#2f2010;--good:#5ad3c0;--good-bg:#0d2b28;--mono-ink:#ffc48a;--mono-bg:#1f2833}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:"Public Sans",system-ui,sans-serif;font-size:calc(22px*var(--scale));line-height:1.55;margin:0;padding-block:0 5rem}
+.banda{width:100%;padding:3.2rem max(16px,5vw)}
+.surface{background:var(--surface)}.sunken{background:var(--sunken)}.accento{background:var(--accent-bg)}.calda{background:var(--warm-bg)}.buona{background:var(--good-bg)}
+.inner{max-width:48rem;margin:0 auto;display:flex;flex-direction:column;gap:2rem}
+.sizer{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--ground);border-bottom:1px solid var(--rule);padding:.6rem max(16px,5vw)}
+.sizer .inner{flex-direction:row;align-items:center;gap:.7rem;font-family:"JetBrains Mono",monospace;font-size:.68em;color:var(--ink-faint)}
+.sizer button{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:.3em .9em;cursor:pointer}
+.sizer button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cat{font-family:"JetBrains Mono",monospace;font-size:.62em;font-weight:600;letter-spacing:.16em;text-transform:uppercase;margin:0;color:var(--ink-faint)}
+.accento .cat{color:var(--accent)}.buona .cat{color:var(--good)}.calda .cat{color:var(--warm)}
+h1{font-family:"Fraunces",Georgia,serif;font-weight:800;font-size:clamp(2.4em,9vw,4.4em);line-height:.96;letter-spacing:-.03em;text-wrap:balance;margin:0}
+h2{font-family:"Fraunces",Georgia,serif;font-weight:800;font-size:clamp(1.7em,5.5vw,2.6em);line-height:1.05;letter-spacing:-.02em;margin:0;text-wrap:balance}
+h3{font-family:"Fraunces",Georgia,serif;font-weight:800;font-size:1.25em;margin:0;letter-spacing:-.01em}
+p{margin:0;max-width:64ch}
+.sotto{color:var(--ink-soft)}
+.verdetto{font-size:1.4em;font-weight:700;line-height:1.25;text-wrap:balance;max-width:40ch}
+.campione{display:flex;flex-direction:column;gap:.8rem}
+.etichetta{font-family:"JetBrains Mono",monospace;font-size:.64em;letter-spacing:.06em;color:var(--ink-faint);margin:0}
+.etichetta b{display:block;color:var(--ink);text-transform:uppercase;letter-spacing:.1em}
+.demo{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:1.3rem 1.4rem;display:flex;flex-direction:column;gap:.9rem}
+.surface .demo{background:var(--ground)}
+.tris{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:1rem}
+.tile{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:1.2rem 1.3rem;display:flex;flex-direction:column;gap:.35rem}
+.tile .q{font-size:.8em;color:var(--ink-soft)}
+.tile .noi{font-family:"Fraunces",serif;font-weight:800;font-size:2.3em;line-height:1;color:var(--warm);font-variant-numeric:tabular-nums}
+.tile .noi.su{color:var(--good)}
+.tile .med{font-family:"JetBrains Mono",monospace;font-size:.66em;color:var(--ink-faint)}
+.pila{display:flex;flex-direction:column;gap:2px}
+.stato{padding:1.3rem 1.5rem;display:flex;flex-direction:column;gap:.45rem;background:var(--surface)}
+.stato:first-child{border-radius:12px 12px 0 0}.stato:last-child{border-radius:0 0 12px 12px}
+.stato p{color:var(--ink-soft);font-size:.92em}
+.segno{font-family:"JetBrains Mono",monospace;font-size:.6em;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+ul,ol{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:.5rem;max-width:64ch}
+ol.fasi{list-style:none;padding:0;gap:1.1rem}
+ol.fasi li{display:grid;grid-template-columns:2.2em 1fr;gap:0 .9rem;align-items:baseline}
+.num{font-family:"Fraunces",serif;font-weight:800;font-size:1.5em;line-height:1;color:var(--accent)}
+.fase-nome{font-weight:700}.fase-cosa{grid-column:2;color:var(--ink-soft);font-size:.92em;margin-top:.2em}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.88em}
+th,td{text-align:left;padding:.6em .7em;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-family:"JetBrains Mono",monospace;font-size:.72em;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+td.n{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+td.giu{color:var(--warm);font-weight:600}td.ok{color:var(--good);font-weight:600}
+code{font-family:"JetBrains Mono",monospace;font-size:.82em;background:var(--mono-bg);color:var(--mono-ink);padding:.1em .35em;border-radius:4px}
+.fonte{font-size:.78em;color:var(--ink-faint)}
+a{color:var(--accent)}
+footer{font-size:.8em;color:var(--ink-faint)}
+@media (min-width:1060px){.inner{max-width:78rem}.campione{display:grid;grid-template-columns:17rem minmax(0,1fr);gap:0 3rem;align-items:start}.campione>.etichetta{text-align:right;position:sticky;top:5rem;padding-top:.3rem}}
+.grafico svg{width:100%;height:auto;display:block}
+.legenda{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;font-size:.8em}.legenda span{display:inline-flex;align-items:center;gap:.4rem}.legenda i{display:inline-block;width:1.4em;height:3px;border-radius:2px}
+.icone{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.5rem 2rem}.icone figure{margin:0;display:flex;flex-direction:column;gap:.5rem}.icone .big{font-family:"Fraunces",serif;font-weight:800;font-size:1.9em;line-height:1}.icone .chi{font-size:.8em;color:var(--ink-soft)}.icone svg{width:100%;height:auto;display:block}
+.quattro{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1rem}.punto{background:var(--surface);border-radius:14px;padding:1.4rem;display:flex;flex-direction:column;gap:.8rem}.testa{display:flex;align-items:center;gap:.6rem;font-weight:700;font-size:.9em}.ico{width:1.5em;height:1.5em;color:var(--accent);flex:none}.coppia{display:flex;flex-wrap:wrap;gap:.6rem 1.4rem;align-items:flex-end}.coppia>div{display:flex;flex-direction:column;gap:.2rem}.val{white-space:nowrap;font-family:"Fraunces",serif;font-weight:800;font-size:2.2em;line-height:1;font-variant-numeric:tabular-nums}.val.med{font-size:1.5em;color:var(--accent)}.val.giu,.esito.giu{color:var(--warm)}.val.su,.esito.su{color:var(--good)}.coppia .chi{font-family:"JetBrains Mono",monospace;font-size:.58em;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}.esito{font-weight:700;margin:0}.nota{font-size:.75em;color:var(--ink-soft);margin:0}
+.legenda i.tr{height:0;border-top:3px dashed currentColor;background:none}
+.video{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1.2rem}
+.scheda{background:var(--surface);border-radius:16px;padding:1.6rem;display:flex;flex-direction:column;gap:1rem}
+.scheda .lettera{display:flex;align-items:center;gap:.8rem}
+.scheda .tondo{width:3.2em;height:3.2em;border-radius:50%;background:var(--accent-bg);color:var(--accent);display:grid;place-items:center;flex:none}
+.scheda .tondo svg{width:1.7em;height:1.7em}
+.scheda .promessa{font-family:"Fraunces",serif;font-weight:800;font-size:1.45em;line-height:1.15;letter-spacing:-.015em;text-wrap:balance}
+.scheda .riga{display:grid;grid-template-columns:6.5em 1fr;gap:.2rem .8rem;font-size:.9em}
+.scheda .riga b{font-family:"JetBrains Mono",monospace;font-size:.7em;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);padding-top:.35em}
+.flusso{display:flex;flex-direction:column;gap:.5rem}
+.passo{display:grid;grid-template-columns:2.4em 1fr;gap:.8rem;align-items:center;background:var(--ground);border-radius:10px;padding:.7rem .9rem;font-size:.88em}
+.passo .n{width:2.1em;height:2.1em;border-radius:50%;background:var(--accent);color:var(--surface);display:grid;place-items:center;font-weight:700;font-size:.9em}
+.passo.pay .n{background:var(--warm)}
+.freccia{height:1rem;margin-left:1.35em;border-left:2px dashed var(--rule)}
+.no{display:grid;grid-template-columns:repeat(auto-fit,minmax(14rem,1fr));gap:1rem}
+.no .punto{background:var(--surface)}
+.no .ico{color:var(--warm)}
+.dots{display:grid;grid-template-columns:repeat(10,1fr);gap:5px;max-width:19rem}
+.dots i{aspect-ratio:1;border-radius:50%;display:block;background:var(--rule)}
+.leg2{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem;font-size:.78em;color:var(--ink-soft)}
+.leg2 span{display:inline-flex;align-items:center;gap:.45rem}
+.leg2 i{width:.9em;height:.9em;border-radius:50%;display:inline-block}
+.coppiadots{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:1.5rem 2.5rem}
+.coppiadots figure{margin:0;display:flex;flex-direction:column;gap:.6rem}
+.coppiadots .big{font-family:"Fraunces",serif;font-weight:800;font-size:1.9em;line-height:1}
+.coppiadots .chi{font-family:"JetBrains Mono",monospace;font-size:.6em;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+svg .t{font-family:"Public Sans",sans-serif;fill:var(--ink)}
+svg .m{font-family:"JetBrains Mono",monospace;fill:var(--ink-faint)}
+.tag{font-family:"JetBrains Mono",monospace;font-size:.62em;font-weight:600;letter-spacing:.12em;text-transform:uppercase;margin-right:.5em}
+.tag.f{color:var(--good)}.tag.d{color:var(--warm)}
+</style>
+<style>.banda{padding-left:max(16px,5vw,env(safe-area-inset-left,0px));padding-right:max(16px,5vw,env(safe-area-inset-right,0px))}.lin path{fill:none;stroke-width:2.5}.multi{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1.5rem}.multi figure{margin:0;display:flex;flex-direction:column;gap:.3rem;min-width:0}.multi figcaption{font-size:.8em}.multi svg{width:100%;height:auto;display:block}</style>
+<section class="banda surface"><div class="inner">
+<p class="cat">HypeMove · attivazione · coorti per sprint</p>
+<h1>Primo allenamento: 24% negli sprint 3-12, 14% negli sprint 15-21</h1>
+<p class="verdetto">966 persone su 3.981 negli sprint 3-12, 258 su 1.858 negli sprint 15-21. Workout verificati con la dashboard su S8, S12 e S21.</p>
+<div class="tris" id="tiles"></div>
+<p class="fonte">Coorte: persone il cui primo avvio in assoluto cade nelle date e ore dello sprint (tabella sprints), con le esclusioni della dashboard (emulatori, test, bloccati, robot); coincide con la coorte del funnel a eventi della dashboard. Nessun taglio a fine sprint, come la dashboard in modalità coorte. Ogni passo conta le persone della coorte che, dal primo avvio fino a oggi, hanno fatto almeno N volte quella cosa, senza ordine fra i passi. Avvio: il primo avvio, più ogni apertura (a freddo o dallo sfondo) preceduta da almeno 30 minuti senza nessuna attività nell'app. «Avvia»: almeno un workout_start. Esercizio: almeno un exercise_complete. Workout: evento workout_complete. Fonte events_canonical.</p>
+</div></section>
+
+<section class="banda"><div class="inner">
+<p class="cat">1 · Quota della coorte che arriva a ogni passo, fino a oggi</p>
+<h2>Andamento per sprint</h2>
+<div class="legenda" id="leg1"></div>
+<div class="grafico scroll" id="g1"></div>
+</div></section>
+
+
+
+
+
+<section class="banda surface"><div class="inner">
+<p class="cat">2 · I numeri interi</p>
+<h2>Cascata per sprint</h2>
+<div class="scroll"><table id="tab"></table></div>
+<p class="fonte">Sprint con note di Danilo e Mattia: S11 dettaglio workout subito dopo l'onboarding · S13 paywall post-onboarding e regalo annuale · S14 prova 7 giorni · S15 redesign e bug nel passaggio al dettaglio · S16 utenti divisi fra cibo e dettaglio · S17-S18 campagne Meta di prova · S21 paywall spostato dopo il workout. S17 ha 93 persone, S20 ne ha 55: sono campioni piccoli.</p>
+</div></section>
+
+<section class="banda"><div class="inner">
+<p class="cat">Cosa non sappiamo</p>
+<ul><li>Sprint 1 e 2 non sono misurabili: l'evento di primo avvio esiste dal 09/03/2026.</li><li>Sprint 7 (tutorial di 5 squat): i workout completati hanno identificativi di workout normali e diversi fra loro, non risulta un workout unico di tutorial. È però l'unico sprint in cui chi finisce un esercizio (121) supera chi tocca «Avvia» (80).</li><li>I conteggi arrivano fino a oggi: gli sprint vecchi hanno avuto mesi per gli avvii e i workout successivi, i più recenti pochi giorni.</li><li>Lo sprint 21 è in corso fino all'11/11: i numeri sono quelli fino a oggi.</li><li>Dallo sprint 16 una parte delle persone atterra sul cibo invece che sul dettaglio del workout.</li></ul>
+</div></section>
+
+<script>
+const S=[["S3",448,144,106,83,55,227,32,133,17,95,11],["S4",433,247,202,155,101,265,54,180,40,122,33],["S5",224,107,91,73,61,133,29,81,21,52,17],["S6",100,35,24,21,17,45,9,27,5,20,4],["S7",188,99,80,121,60,129,37,91,27,61,22],["S8",333,195,146,128,102,206,50,151,37,100,27],["S9",209,117,82,70,61,127,38,89,26,65,21],["S10",873,440,321,276,199,481,121,330,88,223,61],["S11",202,122,72,57,47,107,22,66,20,40,14],["S12",971,626,413,328,263,537,148,312,116,222,92],["S13",260,86,55,46,34,115,18,53,11,26,9],["S14",258,98,59,51,42,105,15,50,7,30,5],["S15",403,214,118,88,58,185,25,104,19,58,17],["S16",325,152,81,65,52,161,21,88,11,55,9],["S17",93,43,19,13,12,38,3,22,0,13,0],["S18",196,94,50,35,24,93,9,55,6,36,4],["S19",435,228,84,71,52,196,27,98,11,60,7],["S20",55,21,8,7,4,30,2,15,1,7,1],["S21",351,201,109,77,56,161,14,81,6,42,1]];
+const W=[["13/07",361,197,100,62,41,37,30,21,16],["20/07",214,108,56,41,29,26,19,13,13],["03/08",607,282,130,104,76,65,52,43,33],["10/08",288,132,57,40,29,24,18,17,10],["31/08",198,118,46,31,19,17,15,12,11],["07/09",680,437,173,139,96,84,64,54,45],["14/09",313,180,84,58,42,37,31,27,21],["21/09",308,87,41,30,22,18,13,11,11],["28/09",221,83,36,22,12,11,6,4,4],["05/10",395,201,52,36,21,19,16,15,13],["12/10",329,152,49,38,20,16,11,10,8],["19/10",309,148,44,28,13,10,7,7,5]];
+const P=["Primo avvio","Workout details","Tocca «Avvia»","Finisce un esercizio","1° workout","2° avvio","2° workout","3° avvio","3° workout","4° avvio","4° workout"];
+const pct=(a,b)=>b?a/b*100:0, cs=getComputedStyle(document.documentElement);
+const C=["--accent","--warm","--good","--ink-soft","--mono-ink"], D=["","7 4","2 3","10 3 2 3","1 0"];
+function chart(id,legId,rows,series,maxY){
+ document.getElementById(legId).hidden=true;const el=document.getElementById(id);el.className="multi";
+ el.innerHTML=series.map((se,k)=>`<figure><figcaption><b>${se.n}</b></figcaption><div id="${id}_${k}"></div></figure>`).join("");
+ series.forEach((se,k)=>one(`${id}_${k}`,rows,se,se.max||maxY));}
+function one(id,rows,se,maxY){
+ const w=520,h=230,l=40,r=16,t=22,b=30,n=rows.length,x=i=>l+i*(w-l-r)/(n-1),y=v=>t+(h-t-b)*(1-Math.min(v,maxY)/maxY),c="var(--accent)";
+ const vals=rows.map(se.f);let s=`<svg viewBox="0 0 ${w} ${h}" class="lin">`;
+ for(let v=0;v<=maxY;v+=maxY/4)s+=`<line x1="${l}" x2="${w-r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule)"/><text class="m" x="${l-6}" y="${y(v)+4}" text-anchor="end" font-size="11">${Math.round(v)}%</text>`;
+ rows.forEach((d,i)=>{if(n<=12||i%2==0)s+=`<text class="m" x="${x(i)}" y="${h-10}" text-anchor="middle" font-size="11">${d[0]}</text>`});
+ s+=`<path d="${vals.map((v,i)=>(i?'L':'M')+x(i)+','+y(v)).join('')}" stroke="${c}"/>`;
+ vals.forEach((v,i)=>s+=`<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${c}"><title>${rows[i][0]}: ${v.toFixed(0)}%</title></circle><text class="t" x="${x(i)}" y="${y(v)-8}" text-anchor="middle" font-size="10">${v.toFixed(0)}</text>`);
+ document.getElementById(id).innerHTML=s+"</svg>";}
+function chartOld(id,legId,rows,series,maxY){
+ const w=900,h=360,l=46,r=110,t=14,b=36,n=rows.length,x=i=>l+i*(w-l-r)/(n-1),y=v=>t+(h-t-b)*(1-v/maxY);
+ let s=`<svg viewBox="0 0 ${w} ${h}" style="min-width:600px" class="lin">`;
+ for(let v=0;v<=maxY;v+=maxY>50?20:10)s+=`<line x1="${l}" x2="${w-r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--rule)"/><text class="m" x="${l-8}" y="${y(v)+4}" text-anchor="end" font-size="12">${v}%</text>`;
+ rows.forEach((d,i)=>s+=`<text class="m" x="${x(i)}" y="${h-12}" text-anchor="middle" font-size="12">${d[0]}</text>`);
+ let lg="";series.forEach((se,k)=>{const vals=rows.map(se.f),c=`var(${C[k%5]})`;
+  s+=`<path d="${vals.map((v,i)=>(i?'L':'M')+x(i)+','+y(v)).join('')}" stroke="${c}" stroke-dasharray="${D[k%5]}"/>`;
+  vals.forEach((v,i)=>s+=`<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="${c}"><title>${rows[i][0]} · ${se.n}: ${v.toFixed(0)}%</title></circle>`);
+  s+=`<text class="t" x="${w-r+8}" y="${y(vals[n-1])+4}" font-size="12" fill="${c}">${se.n} ${vals[n-1].toFixed(0)}%</text>`;
+  lg+=`<span><svg width="28" height="6"><line x1="0" x2="28" y1="3" y2="3" stroke="${c}" stroke-width="3" stroke-dasharray="${D[k%5]}"/></svg>${se.n}</span>`});
+ document.getElementById(id).innerHTML=s+"</svg>";document.getElementById(legId).innerHTML=lg;}
+const tot=[{n:"Workout details",f:d=>pct(d[2],d[1])},{n:"Tocca «Avvia»",f:d=>pct(d[3],d[1])},{n:"Finisce un esercizio",f:d=>pct(d[4],d[1])},{n:"1° workout",f:d=>pct(d[5],d[1])},{n:"2° avvio",f:d=>pct(d[6],d[1])},{n:"2° workout",f:d=>pct(d[7],d[1])},{n:"3° avvio",f:d=>pct(d[8],d[1])},{n:"3° workout",f:d=>pct(d[9],d[1])},{n:"4° avvio",f:d=>pct(d[10],d[1])},{n:"4° workout",f:d=>pct(d[11],d[1])}];
+chart("g1","leg1",S,tot,100);
+
+
+const avg=(a,i,j)=>{let x=0,y=0;a.forEach(d=>{x+=d[i];y+=d[j]});return [x,y]};
+const pre=S.slice(0,10),post=S.slice(12);const tl=[[5,"Primo allenamento"],[7,"Secondo allenamento"],[11,"Quarto allenamento"],[3,"Tocca «Avvia»"]];
+document.getElementById("tiles").innerHTML=tl.map(([i,nm])=>{const [a,b]=avg(pre,i,1),[c,d]=avg(post,i,1);return `<div class="tile"><span class="q">${nm}</span><span class="noi">${pct(c,d).toFixed(0)}%</span><span class="med">S15-S21: ${c} su ${d}<br>S3-S12: ${a} su ${b}, ${pct(a,b).toFixed(0)}%</span></div>`}).join("");
+let tb="<tr><th>Sprint</th>"+P.map(p=>`<th>${p}</th>`).join("")+"</tr>";
+S.forEach(d=>{tb+=`<tr><td>${d[0]}</td>`+d.slice(1).map((v,i)=>`<td class="n">${v}${i?`<br><span class="fonte">${pct(v,d[1]).toFixed(0)}%</span>`:""}</td>`).join("")+"</tr>"});
+document.getElementById("tab").innerHTML=tb;
+</script>

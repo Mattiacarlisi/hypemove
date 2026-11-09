@@ -2247,6 +2247,7 @@ function autoRefreshTick() {
   else { state.overviewStale = true; startCountdown(); }
   if (state.page === 'stats') fetchStats({ silent: true, fresh: true });
   if (state.page === 'goal') fetchGoalBoard();
+  if (state.page === 'attivazione') fetchActivationSprint();
 }
 
 function startAutoRefresh() {
@@ -2363,7 +2364,7 @@ document.addEventListener('click', e => {
 
 const PAGE_LABELS = {
   stats: 'Stats', goal: 'Goal', overview: 'Overview', funnel: 'Funnel', retention: 'Retention', metriche: 'Metriche', sprint: 'Sprint',
-  premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS',
+  premium: 'Premium', 'ai-coach': 'AI Coach', behavior: 'Comportamento', 'meta-ads': 'Meta ADS', attivazione: 'Attivazione',
 };
 const NAV_ICON = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
 const NAV_PANEL_ICON = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>`;
@@ -2372,13 +2373,13 @@ function layout() {
   return `
     ${sidebar()}
     <div class="nav-backdrop" data-nav-close></div>
-    <div class="main${state.page === 'stats' || state.page === 'funnel' || state.page === 'ai-coach' || state.page === 'retention' ? ' main-stats' : ''}">
+    <div class="main${state.page === 'stats' || state.page === 'funnel' || state.page === 'ai-coach' || state.page === 'retention' || state.page === 'attivazione' ? ' main-stats' : ''}">
       <div class="mtop">
         <button class="nav-toggle" data-nav-toggle aria-label="Apri il menu">${NAV_ICON}</button>
         <span class="logo-mark">Hype<span>move</span></span>
         <span class="mtop-page">${PAGE_LABELS[state.page] || ''}</span>
       </div>
-      ${state.page === 'stats' ? pageStats() : state.page === 'ai-coach' ? pageAICoach() : state.page === 'retention' ? `<div class="st-page rv-page">${pageRetention()}</div>` : state.page === 'funnel'
+      ${state.page === 'stats' ? pageStats() : state.page === 'attivazione' ? pageActivationSprint() : state.page === 'ai-coach' ? pageAICoach() : state.page === 'retention' ? `<div class="st-page rv-page">${pageRetention()}</div>` : state.page === 'funnel'
         ? `<div class="st-page fn-page" id="fn-page">${pageFunnel()}${funnelParamsDrawer()}</div>`
         : `<div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div class="page-head-l">
@@ -2504,10 +2505,24 @@ function headerActions() {
     </button>`;
 }
 
+// Icone del menu: path Lucide (viewBox 24, tratto currentColor), al posto delle emoji (Danilo, 09/11/2026).
+const NAV_ICONS = {
+  stats: '<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>',
+  goal: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  overview: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',
+  funnel: '<path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/>',
+  attivazione: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  retention: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
+  sprint: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M17 14h-6M13 18H7"/>',
+  premium: '<path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/>',
+  'ai-coach': '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>',
+  behavior: '<path d="m9 9 5 12 1.8-5.2L21 14Z"/><path d="M7.2 2.2 8 5.1M5.1 8l-2.9-.8M14 4.1 12 6M6 12l-1.9 2"/>',
+  'meta-ads': '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+};
 function sidebar() {
-  const nav = (id, icon, label) => `
+  const nav = (id, label) => `
     <button class="nav-item ${state.page === id ? 'active' : ''}" data-nav="${id}">
-      <span class="icon">${icon}</span>${label}
+      <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${NAV_ICONS[id]}</svg></span>${label}
     </button>`;
   return `
     <div class="sidebar">
@@ -2517,17 +2532,18 @@ function sidebar() {
       </a>
       <nav class="nav">
         <div class="nav-section">KPI</div>
-        ${nav('stats',     '📈', 'Stats')}
-        ${nav('goal',      '🏁', 'Goal')}
-        ${nav('overview',  '📊', 'Overview')}
-        ${nav('funnel',    '🎯', 'Funnel')}
-        ${nav('retention', '🔄', 'Retention')}
-        ${nav('sprint',    '🏃', 'Sprint')}
-        ${nav('premium',    '💎', 'Premium')}
-        ${nav('ai-coach',   '🤖', 'AI Coach')}
-        ${nav('behavior',   '🖱️', 'Comportamento')}
+        ${nav('stats',       'Stats')}
+        ${nav('goal',        'Goal')}
+        ${nav('overview',    'Overview')}
+        ${nav('funnel',      'Funnel')}
+        ${nav('attivazione', 'Attivazione')}
+        ${nav('retention',   'Retention')}
+        ${nav('sprint',      'Sprint')}
+        ${nav('premium',     'Premium')}
+        ${nav('ai-coach',    'AI Coach')}
+        ${nav('behavior',    'Comportamento')}
         <div class="nav-section" style="margin-top:8px">Marketing</div>
-        ${nav('meta-ads',   '📣', 'Meta ADS')}
+        ${nav('meta-ads',    'Meta ADS')}
       </nav>
       <div style="padding:14px 20px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)">
         Mattia & Danilo · 50/50
@@ -2565,6 +2581,7 @@ function page() {
     case 'premium':     return pagePremium();
     case 'ai-coach':    return pageAICoach();
     case 'behavior':    return pageBehavior();
+    case 'attivazione': return pageActivationSprint();
     case 'meta-ads':    return pageMetaAds();
     default:            return pageOverview();
   }
@@ -11376,6 +11393,7 @@ function attachEvents() {
         if (!state.opsSessionCheckedOnce) { state.opsSessionCheckedOnce = true; refreshOpsSession(); }
       }
       if (state.page === 'behavior'   && !BEH.data            && !BEH.loading)            fetchBehavior();
+      if (state.page === 'attivazione' && !ACT.rows && !ACT.error)                        fetchActivationSprint();
       if (state.page === 'meta-ads'   && !state.metaAds       && !state.metaAdsLoading && state.metaToken)  fetchMetaAds();
       render();
     }));
@@ -11409,6 +11427,7 @@ function attachEvents() {
   attachPremiumTimeline();
   attachSprintRecord();
   attachSprintActivation();
+  attachActivationSprint();
   attachGoal();
   document.querySelectorAll('[data-growth-range]').forEach(el =>
     el.addEventListener('click', () => { state.growthRange = +el.dataset.growthRange; render(); }));
