@@ -8,18 +8,23 @@ const ACT = {
     'app_open dopo 30 min fermo', 'workout_complete ×2', 'app_open ×2 dopo 30 min', 'workout_complete ×3',
     'app_open ×3 dopo 30 min', 'workout_complete ×4'],
   GRUPPI: [
-    { t: 'La prima volta', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del primo allenamento.', passi: [1, 2, 3, 4] },
-    { t: 'Tornano ad aprire l\'app', d: 'Quante aprono di nuovo l\'app dopo almeno 30 minuti senza usarla.', passi: [5, 7, 9] },
-    { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10] },
+    { t: 'La prima volta', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del primo allenamento.', passi: [1, 2, 3, 4], r: 'Ogni passo su chi ha fatto il passo prima: Workout details sul primo avvio, Avvia su Workout details, Finisce su Avvia, 1° workout su Finisce. Può superare il 100% perché i passi non sono in cascata: quel punto resta sul bordo in alto, con il suo numero.' },
+    { t: 'Tornano ad aprire l\'app', d: 'Quante aprono di nuovo l\'app dopo almeno 30 minuti senza usarla.', passi: [5, 7, 9], r: 'Il 2° avvio sul primo avvio, il 3° sul 2°, il 4° sul 3°.' },
+    { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10], r: 'Il 2° workout sul 1°, il 3° sul 2°, il 4° sul 3°.' },
   ],
   RECENT_DAYS: 14,   // come la scheda «Attivazione per sprint»: entro 14 giorni dalla fine i numeri possono ancora salire
   H: 118, PADT: 22, PADB: 10,
+  // «Relativo»: ogni passo diviso per il passo prima nella catena del suo riquadro
+  PREV: { 1: 0, 2: 1, 3: 2, 4: 3, 5: 0, 7: 5, 9: 7, 6: 4, 8: 6, 10: 8 },
   rows: null, cache: null, error: null, force: false, table: false, w: 0,
+  mode: (() => { try { return localStorage.getItem('hm_asp_mode') === 'rel' ? 'rel' : 'tot'; } catch (e) { return 'tot'; } })(),
 };
 
 ACT.today = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
 ACT.dm = d => d.slice(8, 10) + '/' + d.slice(5, 7);
 ACT.pct = (n, b) => b ? n * 100 / b : 0;
+// base del passo p nello sprint s: chi è entrato (Totale) o chi ha fatto il passo prima (Relativo)
+ACT.base = (s, p) => ACT.mode === 'rel' && p in ACT.PREV ? s.v[ACT.PREV[p]] : s.coorte;
 ACT.fp = (n, b) => { const p = ACT.pct(n, b); return (p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : Math.round(p)) + '%'; };
 ACT.sprints = () => {
   const today = ACT.today();
@@ -68,8 +73,8 @@ const actNiceMax = v => Math.max(10, Math.ceil(v / 10) * 10);
 
 function actStrip(S, p, max, w) {
   const { H, PADT, PADB } = ACT, { step, X } = actGeo(S.length, w);
-  const Y = v => PADT + (H - PADT - PADB) * (1 - v / max);
-  const vals = S.map(s => ACT.pct(s.v[p], s.coorte)), labels = step >= 22;
+  const Y = v => PADT + (H - PADT - PADB) * (1 - Math.min(v, max) / max);
+  const vals = S.map(s => ACT.pct(s.v[p], ACT.base(s, p))), labels = step >= 22;
   let s = `<svg width="${w}" height="${H}" role="img" aria-label="${esc(ACT.PASSI[p])} per sprint">`;
   [0, max / 2, max].forEach(v => s += `<line class="asp-gh" x1="0" x2="${w}" y1="${Y(v)}" y2="${Y(v)}"${v ? ' stroke-dasharray="2 4"' : ''}/>`);
   S.forEach((sp, i) => s += `<rect class="asp-col" data-i="${i}" x="${X(i) - step / 2}" y="0" width="${step}" height="${H}"/>`);
@@ -117,7 +122,7 @@ function actXTicks(S, w) {
 function actTable(S) {
   const head = '<tr><th>Sprint</th>' + ACT.PASSI.map(p => `<th>${esc(p)}</th>`).join('') + '</tr>';
   const rows = S.map(s => `<tr${s.prov ? ' class="prov"' : ''}><td><b>${s.k}</b><span>${s.inCorso ? 'in corso' : 'dal ' + s.dal}</span></td>`
-    + s.v.map((n, j) => `<td><b>${n}</b>${j ? `<span>${ACT.fp(n, s.coorte)}</span>` : ''}</td>`).join('') + '</tr>').join('');
+    + s.v.map((n, j) => `<td><b>${n}</b>${j ? `<span>${ACT.fp(n, ACT.base(s, j))}</span>` : ''}</td>`).join('') + '</tr>').join('');
   return `<div class="asp-tw"><table class="asp-tab">${head}${rows}</table></div>`;
 }
 
@@ -125,10 +130,10 @@ function pageActivationSprint() {
   const pending = !!(ACT.cache && ACT.cache.pending);
   const head = `<div class="st-head"><button class="nav-toggle nav-toggle-desk" data-nav-toggle
       title="${state.navCollapsed ? 'Mostra il menu' : 'Nascondi il menu'}" aria-label="Mostra o nascondi il menu">${NAV_PANEL_ICON}</button>
-    <h1 class="st-h1">Attivazione per sprint</h1><span class="st-grow"></span>
+    <h1 class="st-h1">Attivazione per sprint</h1>${ACT.rows ? `<div class="asp-mode" role="group" aria-label="Base delle percentuali"><button class="sa-phases${ACT.mode === 'tot' ? ' pt-on' : ''}" data-asp-mode="tot" aria-pressed="${ACT.mode === 'tot'}">Totale</button><button class="sa-phases${ACT.mode === 'rel' ? ' pt-on' : ''}" data-asp-mode="rel" aria-pressed="${ACT.mode === 'rel'}">Relativo</button></div>` : ''}<span class="st-grow"></span>
     ${ACT.cache ? `<span class="st-meta">${kcMark(ACT.cache)}</span>` : ''}
     <button class="st-refresh" data-asp-refresh ${pending || !ACT.rows ? 'disabled' : ''}>Aggiorna</button></div>
-    <p class="asp-sub">Ogni striscia è un passo, ogni colonna uno sprint: <b>su 100 persone al primo avvio, quante arrivano a quel passo</b>, contando fino a oggi. I passi non sono in cascata: il secondo avvio non richiede il primo allenamento.</p>`;
+    <p class="asp-sub">Ogni striscia è un passo, ogni colonna uno sprint: ${ACT.mode === 'rel' ? '<b>su 100 persone che hanno fatto il passo prima, quante fanno questo</b> (Avvia su Workout details, Finisce su Avvia…)' : '<b>su 100 persone al primo avvio, quante arrivano a quel passo</b>'}, contando fino a oggi. I passi non sono in cascata: il secondo avvio non richiede il primo allenamento.</p>`;
   let body;
   if (ACT.error && !ACT.rows) {
     body = `<section class="sa-card"><div class="pt-err">
@@ -140,8 +145,10 @@ function pageActivationSprint() {
   } else {
     const S = ACT.sprints();
     const groups = ACT.GRUPPI.map(g => {
-      const max = actNiceMax(Math.max(...g.passi.flatMap(p => S.map(s => ACT.pct(s.v[p], s.coorte)))));
-      return `<section class="sa-card asp-g"><h2 class="sa-title">${g.t}</h2><p class="asp-gd">${g.d} Le strisce di questo riquadro hanno la stessa scala, da 0 a ${max}%.</p>`
+      // in Relativo la scala si ferma al 100%: un passo che supera quello prima resta sul bordo col suo numero
+      const top = actNiceMax(Math.max(...g.passi.flatMap(p => S.map(s => ACT.pct(s.v[p], ACT.base(s, p))))));
+      const max = ACT.mode === 'rel' ? Math.min(100, top) : top;
+      return `<section class="sa-card asp-g"><h2 class="sa-title">${g.t}</h2><p class="asp-gd">${ACT.mode === 'rel' ? g.r : g.d} Le strisce di questo riquadro hanno la stessa scala, da 0 a ${max}%.</p>`
         + g.passi.map(p => `<div class="asp-row"><div class="asp-lab"><b>${esc(ACT.PASSI[p])}</b><span>${esc(ACT.EVENTI[p])}</span></div><div class="asp-plot" data-p="${p}" data-max="${max}"></div></div>`).join('')
         + '<div class="asp-row asp-xrow"><div class="asp-lab"></div><div class="asp-plot asp-xticks"></div></div></section>';
     }).join('');
@@ -175,7 +182,7 @@ function actDraw() {
       const i = +r.dataset.i, sp = S[i], p = +r.closest('.asp-plot').dataset.p;
       off();
       document.querySelectorAll(`.asp-col[data-i="${i}"]`).forEach(c => c.classList.add('on'));
-      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: <b>${sp.v[p]}</b> su ${sp.coorte} · <b>${ACT.fp(sp.v[p], sp.coorte)}</b>`;
+      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: <b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`;
       tip.style.display = 'block';
     });
     r.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - 240) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
@@ -189,6 +196,11 @@ function attachActivationSprint() {
   if (state.page !== 'attivazione') return;
   document.querySelector('[data-asp-refresh]')?.addEventListener('click', () => fetchActivationSprint(true));
   document.querySelector('[data-asp-retry]')?.addEventListener('click', () => { ACT.error = null; render(); fetchActivationSprint(true); });
+  document.querySelectorAll('[data-asp-mode]').forEach(b => b.addEventListener('click', () => {
+    ACT.mode = b.dataset.aspMode;
+    try { localStorage.setItem('hm_asp_mode', ACT.mode); } catch (e) { /* resta in memoria */ }
+    render();
+  }));
   document.querySelector('[data-asp-table]')?.addEventListener('click', () => { ACT.table = !ACT.table; render(); });
   actDraw();
   if (!actResizeBound) {

@@ -54,3 +54,4 @@
 .asp-xt { font: 700 10px Nunito, sans-serif; fill: #9ca3af; }
 .asp-xt.prov { fill: #6b7280; }
 @media (max-width: 700px) { .asp-xrow .asp-lab { display: none; } }
+.asp-mode { display: inline-flex; gap: 6px; margin-left: 8px; }
