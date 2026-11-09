@@ -3,19 +3,27 @@
 // Design: www/_specs/design-flows/kpi-attivazione/ (proposta A, scelta da Danilo il 09/11/2026).
 const ACT = {
   PASSI: ['Primo avvio', 'Workout details', 'Tocca «Avvia»', 'Finisce un esercizio', '1° workout',
-    '2° avvio', '2° workout', '3° avvio', '3° workout', '4° avvio', '4° workout'],
+    '2° avvio', '2° workout', '3° avvio', '3° workout', '4° avvio', '4° workout',
+    'Entra in Cibo', 'Apre la fotocamera', 'Fa una foto', '1° pasto salvato', '2° pasto salvato', '3° pasto salvato',
+    '4° pasto salvato', '5° pasto salvato'],
   EVENTI: ['first_open', 'view_WorkoutDetail', 'workout_start', 'exercise_complete', 'workout_complete',
     'app_open dopo 30 min fermo', 'workout_complete ×2', 'app_open ×2 dopo 30 min', 'workout_complete ×3',
-    'app_open ×3 dopo 30 min', 'workout_complete ×4'],
+    'app_open ×3 dopo 30 min', 'workout_complete ×4',
+    'view_Cibo', 'meal_camera_opened', 'meal_photo_returned', 'meal_scan_saved', 'meal_scan_saved ×2',
+    'meal_scan_saved ×3', 'meal_scan_saved ×4', 'meal_scan_saved ×5'],
   GRUPPI: [
     { t: 'La prima volta', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del primo allenamento.', passi: [1, 2, 3, 4], r: 'Ogni passo su chi ha fatto il passo prima: Workout details sul primo avvio, Avvia su Workout details, Finisce su Avvia, 1° workout su Finisce. Può superare il 100% perché i passi non sono in cascata: quel punto resta sul bordo in alto, con il suo numero.' },
     { t: 'Tornano ad aprire l\'app', d: 'Quante aprono di nuovo l\'app dopo almeno 30 minuti senza usarla.', passi: [5, 7, 9], r: 'Il 2° avvio sul primo avvio, il 3° sul 2°, il 4° sul 3°.' },
     { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10], r: 'Il 2° workout sul 1°, il 3° sul 2°, il 4° sul 3°.' },
+    { t: 'Cibo', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del cibo. Gli sprint iniziati prima che esistesse l\'evento non hanno il punto.', passi: [11, 12, 13, 14, 15, 16, 17, 18],
+      r: 'Entra in Cibo sul primo avvio, la fotocamera su chi entra, la foto su chi apre la fotocamera, il 1° pasto su chi entra in Cibo (non sulla foto: quasi tutti salvano scrivendo), poi ogni pasto sul precedente.' },
   ],
   RECENT_DAYS: 14,   // come la scheda «Attivazione per sprint»: entro 14 giorni dalla fine i numeri possono ancora salire
   H: 118, PADT: 22, PADB: 10,
   // «Relativo»: ogni passo diviso per il passo prima nella catena del suo riquadro
-  PREV: { 1: 0, 2: 1, 3: 2, 4: 3, 5: 0, 7: 5, 9: 7, 6: 4, 8: 6, 10: 8 },
+  PREV: { 1: 0, 2: 1, 3: 2, 4: 3, 5: 0, 7: 5, 9: 7, 6: 4, 8: 6, 10: 8, 11: 0, 12: 11, 13: 12, 14: 11, 15: 14, 16: 15, 17: 16, 18: 17 },
+  // giorno in cui ogni evento del cibo è nato: uno sprint iniziato prima non è misurato
+  FROM: { 11: '2026-09-25', 12: '2026-10-18', 13: '2026-10-18', 14: '2026-09-10', 15: '2026-09-10', 16: '2026-09-10', 17: '2026-09-10', 18: '2026-09-10' },
   rows: null, cache: null, error: null, force: false, table: false, w: 0,
   mode: (() => { try { return localStorage.getItem('hm_asp_mode') === 'rel' ? 'rel' : 'tot'; } catch (e) { return 'tot'; } })(),
 };
@@ -25,12 +33,14 @@ ACT.dm = d => d.slice(8, 10) + '/' + d.slice(5, 7);
 ACT.pct = (n, b) => b ? n * 100 / b : 0;
 // base del passo p nello sprint s: chi è entrato (Totale) o chi ha fatto il passo prima (Relativo)
 ACT.base = (s, p) => ACT.mode === 'rel' && p in ACT.PREV ? s.v[ACT.PREV[p]] : s.coorte;
+ACT.val = (s, p) => s.v[p] == null || ACT.base(s, p) == null ? null : ACT.pct(s.v[p], ACT.base(s, p));
 ACT.fp = (n, b) => { const p = ACT.pct(n, b); return (p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : Math.round(p)) + '%'; };
 ACT.sprints = () => {
   const today = ACT.today();
   return (ACT.rows || []).map(r => {
     const days = Math.floor((Date.parse(today) - Date.parse(r.fine)) / 864e5);
-    return { k: 'S' + r.numero, dal: ACT.dm(r.inizio), al: ACT.dm(r.fine), v: r.v, coorte: r.v[0],
+    return { k: 'S' + r.numero, dal: ACT.dm(r.inizio), al: ACT.dm(r.fine), v: ACT.PASSI.map((_, j) => r.v[j] == null || (ACT.FROM[j] && r.inizio < ACT.FROM[j]) ? null : r.v[j]),
+      from: j => ACT.FROM[j] ? ACT.dm(ACT.FROM[j]) : '', coorte: r.v[0],
       inCorso: r.fine >= today, prov: days < ACT.RECENT_DAYS };
   });
 };
@@ -74,18 +84,19 @@ const actNiceMax = v => Math.max(10, Math.ceil(v / 10) * 10);
 function actStrip(S, p, max, w) {
   const { H, PADT, PADB } = ACT, { step, X } = actGeo(S.length, w);
   const Y = v => PADT + (H - PADT - PADB) * (1 - Math.min(v, max) / max);
-  const vals = S.map(s => ACT.pct(s.v[p], ACT.base(s, p))), labels = step >= 22;
+  const vals = S.map(s => ACT.val(s, p)), labels = step >= 22;
   let s = `<svg width="${w}" height="${H}" role="img" aria-label="${esc(ACT.PASSI[p])} per sprint">`;
   [0, max / 2, max].forEach(v => s += `<line class="asp-gh" x1="0" x2="${w}" y1="${Y(v)}" y2="${Y(v)}"${v ? ' stroke-dasharray="2 4"' : ''}/>`);
   S.forEach((sp, i) => s += `<rect class="asp-col" data-i="${i}" x="${X(i) - step / 2}" y="0" width="${step}" height="${H}"/>`);
   let solid = '', dash = '';
   vals.forEach((v, i) => {
-    if (!i) return;
+    if (!i || v == null || vals[i - 1] == null) return;
     const seg = `M${X(i - 1)},${Y(vals[i - 1])}L${X(i)},${Y(v)}`;
     if (S[i].prov) dash += seg; else solid += seg;
   });
   s += `<path d="${solid}" class="asp-line"/><path d="${dash}" class="asp-line" stroke-dasharray="4 4"/>`;
   vals.forEach((v, i) => {
+    if (v == null) return;
     const pr = S[i].prov;
     s += `<circle cx="${X(i)}" cy="${Y(v)}" r="4" class="asp-dot${pr ? ' prov' : ''}"/>`;
     if (labels) s += `<text class="asp-val${pr ? ' prov' : ''}" x="${X(i)}" y="${Y(v) - 9}" text-anchor="middle">${Math.round(v)}</text>`;
@@ -122,7 +133,7 @@ function actXTicks(S, w) {
 function actTable(S) {
   const head = '<tr><th>Sprint</th>' + ACT.PASSI.map(p => `<th>${esc(p)}</th>`).join('') + '</tr>';
   const rows = S.map(s => `<tr${s.prov ? ' class="prov"' : ''}><td><b>${s.k}</b><span>${s.inCorso ? 'in corso' : 'dal ' + s.dal}</span></td>`
-    + s.v.map((n, j) => `<td><b>${n}</b>${j ? `<span>${ACT.fp(n, ACT.base(s, j))}</span>` : ''}</td>`).join('') + '</tr>').join('');
+    + s.v.map((n, j) => n == null ? '<td><span>—</span></td>' : `<td><b>${n}</b>${j ? `<span>${ACT.val(s, j) == null ? '' : ACT.fp(n, ACT.base(s, j))}</span>` : ''}</td>`).join('') + '</tr>').join('');
   return `<div class="asp-tw"><table class="asp-tab">${head}${rows}</table></div>`;
 }
 
@@ -146,7 +157,7 @@ function pageActivationSprint() {
     const S = ACT.sprints();
     const groups = ACT.GRUPPI.map(g => {
       // in Relativo la scala si ferma al 100%: un passo che supera quello prima resta sul bordo col suo numero
-      const top = actNiceMax(Math.max(...g.passi.flatMap(p => S.map(s => ACT.pct(s.v[p], ACT.base(s, p))))));
+      const top = actNiceMax(Math.max(0, ...g.passi.flatMap(p => S.map(s => ACT.val(s, p))).filter(v => v != null)));
       const max = ACT.mode === 'rel' ? Math.min(100, top) : top;
       return `<section class="sa-card asp-g"><h2 class="sa-title">${g.t}</h2><p class="asp-gd">${ACT.mode === 'rel' ? g.r : g.d} Le strisce di questo riquadro hanno la stessa scala, da 0 a ${max}%.</p>`
         + g.passi.map(p => `<div class="asp-row"><div class="asp-lab"><b>${esc(ACT.PASSI[p])}</b><span>${esc(ACT.EVENTI[p])}</span></div><div class="asp-plot" data-p="${p}" data-max="${max}"></div></div>`).join('')
@@ -182,7 +193,7 @@ function actDraw() {
       const i = +r.dataset.i, sp = S[i], p = +r.closest('.asp-plot').dataset.p;
       off();
       document.querySelectorAll(`.asp-col[data-i="${i}"]`).forEach(c => c.classList.add('on'));
-      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: <b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`;
+      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: ${sp.v[p] == null ? `non misurato: l\'evento esiste dal ${sp.from(p)}` : `<b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`}`;
       tip.style.display = 'block';
     });
     r.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - 240) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
