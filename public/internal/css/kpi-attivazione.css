@@ -50,3 +50,7 @@
   .asp-trow .asp-lab { display: none; }
 }
 .asp-plot svg .asp-line, .asp-plot svg .asp-dot, .asp-plot svg .asp-val, .asp-plot svg .asp-gh, .asp-plot svg .asp-axis { pointer-events: none; }
+.asp-row.asp-xrow { border-top: 1px solid #2a2e37; padding: 2px 0 6px; }
+.asp-xt { font: 700 10px Nunito, sans-serif; fill: #9ca3af; }
+.asp-xt.prov { fill: #6b7280; }
+@media (max-width: 700px) { .asp-xrow .asp-lab { display: none; } }

@@ -103,6 +103,17 @@ function actTicks(S, w) {
   return s + '</svg>';
 }
 
+// Nomi degli sprint in piccolo in fondo a ogni riquadro, sotto le colonne.
+function actXTicks(S, w) {
+  const { step, X } = actGeo(S.length, w);
+  let s = `<svg width="${w}" height="18" aria-hidden="true">`;
+  S.forEach((sp, i) => {
+    if (step < 30 && i % 2 && i !== S.length - 1) return;
+    s += `<text x="${X(i)}" y="12" text-anchor="middle" class="asp-xt${sp.prov ? ' prov' : ''}">${sp.k}</text>`;
+  });
+  return s + '</svg>';
+}
+
 function actTable(S) {
   const head = '<tr><th>Sprint</th>' + ACT.PASSI.map(p => `<th>${esc(p)}</th>`).join('') + '</tr>';
   const rows = S.map(s => `<tr${s.prov ? ' class="prov"' : ''}><td><b>${s.k}</b><span>${s.inCorso ? 'in corso' : 'dal ' + s.dal}</span></td>`
@@ -132,7 +143,7 @@ function pageActivationSprint() {
       const max = actNiceMax(Math.max(...g.passi.flatMap(p => S.map(s => ACT.pct(s.v[p], s.coorte)))));
       return `<section class="sa-card asp-g"><h2 class="sa-title">${g.t}</h2><p class="asp-gd">${g.d} Le strisce di questo riquadro hanno la stessa scala, da 0 a ${max}%.</p>`
         + g.passi.map(p => `<div class="asp-row"><div class="asp-lab"><b>${esc(ACT.PASSI[p])}</b><span>${esc(ACT.EVENTI[p])}</span></div><div class="asp-plot" data-p="${p}" data-max="${max}"></div></div>`).join('')
-        + '</section>';
+        + '<div class="asp-row asp-xrow"><div class="asp-lab"></div><div class="asp-plot asp-xticks"></div></div></section>';
     }).join('');
     body = `<div class="asp-sticky"><div class="asp-row asp-trow"><div class="asp-lab"><span>Sprint · persone al primo avvio</span></div><div class="asp-plot asp-ticks"></div></div></div>
       ${groups}
@@ -152,6 +163,8 @@ function actDraw() {
   ACT.w = w;
   const S = ACT.sprints();
   document.querySelector('.asp-ticks').innerHTML = actTicks(S, w);
+  const xt = actXTicks(S, w);
+  document.querySelectorAll('.asp-xticks').forEach(el => el.innerHTML = xt);
   document.querySelectorAll('.asp-plot[data-p]').forEach(el => el.innerHTML = actStrip(S, +el.dataset.p, +el.dataset.max, w));
   let tip = document.querySelector('.asp-tip');
   if (!tip) { tip = document.createElement('div'); tip.className = 'asp-tip'; document.body.appendChild(tip); }
