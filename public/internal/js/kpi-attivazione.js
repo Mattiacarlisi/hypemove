@@ -5,18 +5,23 @@ const ACT = {
   PASSI: ['Primo avvio', 'Workout details', 'Tocca «Avvia»', 'Finisce un esercizio', '1° workout',
     '2° avvio', '2° workout', '3° avvio', '3° workout', '4° avvio', '4° workout',
     'Entra in Cibo', 'Apre la fotocamera', 'Fa una foto', '1° pasto salvato', '2° pasto salvato', '3° pasto salvato',
-    '4° pasto salvato', '5° pasto salvato'],
+    '4° pasto salvato', '5° pasto salvato',
+    '1 giorno', '2 giorno', '3 giorno', '4 giorno', '5 giorno', '6 giorno', '7 giorno'],
   EVENTI: ['first_open', 'view_WorkoutDetail', 'workout_start', 'exercise_complete', 'workout_complete',
     'app_open dopo 30 min fermo', 'workout_complete ×2', 'app_open ×2 dopo 30 min', 'workout_complete ×3',
     'app_open ×3 dopo 30 min', 'workout_complete ×4',
     'view_Cibo', 'meal_camera_opened', 'meal_photo_returned', 'meal_scan_saved', 'meal_scan_saved ×2',
-    'meal_scan_saved ×3', 'meal_scan_saved ×4', 'meal_scan_saved ×5'],
+    'meal_scan_saved ×3', 'meal_scan_saved ×4', 'meal_scan_saved ×5',
+    'apre l\'app il giorno dopo', 'apre l\'app 2 giorni dopo', 'apre l\'app 3 giorni dopo', 'apre l\'app 4 giorni dopo',
+    'apre l\'app 5 giorni dopo', 'apre l\'app 6 giorni dopo', 'apre l\'app 7 giorni dopo'],
   GRUPPI: [
     { t: 'La prima volta', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del primo allenamento.', passi: [1, 2, 3, 4], r: 'Ogni passo su chi ha fatto il passo prima: Workout details sul primo avvio, Avvia su Workout details, Finisce su Avvia, 1° workout su Finisce. Può superare il 100% perché i passi non sono in cascata: quel punto resta sul bordo in alto, con il suo numero.' },
     { t: 'Tornano ad aprire l\'app', d: 'Quante aprono di nuovo l\'app dopo almeno 30 minuti senza usarla.', passi: [5, 7, 9], r: 'Il 2° avvio sul primo avvio, il 3° sul 2°, il 4° sul 3°.' },
     { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10], r: 'Il 2° workout sul 1°, il 3° sul 2°, il 4° sul 3°.' },
     { t: 'Cibo', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del cibo. Gli sprint iniziati prima che esistesse l\'evento non hanno il punto.', passi: [11, 12, 13, 14, 15, 16, 17, 18],
       r: 'Entra in Cibo sul primo avvio, la fotocamera su chi entra, la foto su chi apre la fotocamera, il 1° pasto su chi entra in Cibo (non sulla foto: quasi tutti salvano scrivendo), poi ogni pasto sul precedente.' },
+    { t: 'Attivazione', d: 'Su 100 persone che aprono l\'app per la prima volta, quante la riaprono in ognuno dei sette giorni dopo. I giorni sono di calendario: chi installa lunedì ha il 1 giorno martedì e il 7 giorno il lunedì dopo.', passi: [19, 20, 21, 22, 23, 24, 25],
+      r: 'Qui ogni giorno resta sul primo avvio anche in Relativo: chi torna il 3 giorno può non essere tornato il 2.' },
   ],
   RECENT_DAYS: 14,   // come la scheda «Attivazione per sprint»: entro 14 giorni dalla fine i numeri possono ancora salire
   H: 118, PADT: 22, PADB: 10,
@@ -193,7 +198,7 @@ function actDraw() {
       const i = +r.dataset.i, sp = S[i], p = +r.closest('.asp-plot').dataset.p;
       off();
       document.querySelectorAll(`.asp-col[data-i="${i}"]`).forEach(c => c.classList.add('on'));
-      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: ${sp.v[p] == null ? `non misurato: l\'evento esiste dal ${sp.from(p)}` : `<b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`}`;
+      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: ${sp.v[p] == null ? `non misurato: l\'evento esiste dal ${sp.from(p)}` : `<b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' && p in ACT.PREV ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`}`;
       tip.style.display = 'block';
     });
     r.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - 240) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
