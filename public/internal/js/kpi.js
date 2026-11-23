@@ -7631,8 +7631,8 @@ const CREATIVE_REGISTRY = [
     rotation: 'live',
     where: 'Pagina intera di fine onboarding (/inizia), al posto di onboarding_x: è la porta del gruppo A («blocco subito») dell\'A/B dello sprint 23. Poi la stessa schermata risale sopra l\'app a ogni apertura e a ogni ritorno in primo piano, finché non si paga (l\'host del muro, `AppOpenPaywallHost`). Anche in anteprima /dev (voce «Paywall fine onboarding · senza X (sprint 23)»), dove non emette eventi.',
     when: 'Dalla build del 23/11/2026 (prima alla squadra, al pubblico dopo): a fine onboarding, a chi riceve il gruppo A — solo Android, 50/50 a sorte con il B (su iPhone niente gruppo A: rischio revisione Apple). Il gruppo A non ha parte gratuita: il muro resta, e a ogni riapertura risale questa schermata finché non paga. Source `onboarding_end` la prima volta, `app_cold_start` / `app_resume` quando la ritrova riaprendo l\'app. I due gruppi a confronto: riquadro «A/B paywall sprint 23» qui sotto.',
-    exit: 'Nessuna ×. L\'unica uscita a schermo è «No, esco», un link bianco sotto i link legali, che emette paywall_close con dismiss_method `exit_button`; il tasto indietro di Android emette `back_hardware`. Entrambe portano alla schermata «Qui l\'app si ferma» (`PaywallStop`), non nell\'app: tornando in primo piano il paywall risale, con un\'esposizione nuova. ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
-    what: '«Il tuo piano è pronto.» (seconda riga in oro), sotto «Per iniziare serve Hypemove+.», i quattro pilastri, poi la tabella «Cosa hai con Hypemove+» con la SOLA colonna Hypemove+ (niente colonna Gratis: senza ×, il gratis non c\'è). Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy». In fondo alla barra dei piani, «No, esco».',
+    exit: 'Nessuna × e nessuna uscita a schermo (Mattia, 23/11: «il paywall rimane, al massimo chiudono l\'app»). Su Android il tasto indietro chiude l\'app (paywall_close con dismiss_method `back_hardware`); su iPhone niente. Riaprendo l\'app il paywall risale, con un\'esposizione nuova. ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
+    what: '«Il tuo piano è pronto.» (seconda riga in oro), sotto «Per iniziare serve Hypemove+.», i quattro pilastri, poi la tabella «Cosa hai con Hypemove+» con la SOLA colonna Hypemove+ (niente colonna Gratis: senza ×, il gratis non c\'è). Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy».',
     cta: 'Identica ad app_open_v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova.',
     note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026, in app dalla build dello stesso giorno (prima alla squadra, al pubblico dopo). Ogni evento porta `arm` e `arm_reason`: il confronto fra i gruppi si legge nel riquadro «A/B paywall sprint 23», non sommando queste righe. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
     file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
@@ -7650,8 +7650,8 @@ const CREATIVE_REGISTRY = [
     rotation: 'live',
     where: 'Overlay a pieno campo sopra la schermata da cui si partiva: sale al tocco su «Inizia» del terzo allenamento o su «aggiungi» del terzo pasto, e risale a ogni apertura dell\'app finché non si paga (l\'host del muro, `AppOpenPaywallHost`). È il muro del gruppo B («X poi muro») dell\'A/B dello sprint 23. Anche in anteprima /dev (voce «Paywall blocco 3° allenamento o pasto · senza X (sprint 23)»), dove non emette eventi.',
     when: 'Dalla build del 23/11/2026 (prima alla squadra, al pubblico dopo), a chi è nel gruppo B: su Android chi l\'ha avuto a sorte, su iPhone tutti, e i vecchi utenti (regole del B, fuori dal confronto). Parte gratuita: tutorial + un allenamento da 5 minuti, due pasti. Il blocco scatta al terzo allenamento o al terzo pasto e resta (`users.paywall_wall_at`). Source `free_limit_workout` o `free_limit_meal` per chi ci sbatte; `app_cold_start` / `app_resume` per chi lo ritrova riaprendo l\'app.',
-    exit: 'Nessuna ×. «No, esco» sotto i link legali (dismiss_method `exit_button`) o il tasto indietro di Android (`back_hardware`): nessuna delle due riporta nell\'app gratuita, entrambe portano alla schermata «Qui l\'app si ferma» (`PaywallStop`). ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
-    what: '«Continua da dove sei.» (seconda riga in oro), sotto «La parte gratuita finisce qui.», i quattro pilastri, poi la tabella «Cosa hai con Hypemove+» con la SOLA colonna Hypemove+. Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy». In fondo alla barra dei piani, «No, esco».',
+    exit: 'Nessuna × e nessuna uscita a schermo. Su Android il tasto indietro chiude l\'app (`back_hardware`), su iPhone niente: nessuna strada riporta nell\'app gratuita, e riaprendo il paywall risale. ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
+    what: '«Continua da dove sei.» (seconda riga in oro), sotto «La parte gratuita finisce qui.», i quattro pilastri, poi la tabella «Cosa hai con Hypemove+» con la SOLA colonna Hypemove+. Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy».',
     cta: 'Identica ad app_open_v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova.',
     note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026, in app dalla build dello stesso giorno (prima alla squadra, al pubblico dopo). Ogni evento porta `arm` e `arm_reason`: il confronto fra i gruppi si legge nel riquadro «A/B paywall sprint 23», non sommando queste righe. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
     file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
@@ -8658,7 +8658,7 @@ const PAYWALL_ARMS_METRICS = [
   { k: 'saw_paywall',                   l: 'Hanno visto un paywall' },
   { k: 'saw_wall',                      l: 'Hanno visto il muro senza X' },
   { k: 'wall_hit',                      l: 'Muro scattato' },
-  { k: 'exit_tapped',                   l: 'Hanno toccato «No, esco»' },
+  { k: 'exit_tapped',                   l: 'Usciti dal muro (indietro su Android)' },
   { k: 'trial_started',                 l: 'Prova avviata' },
   { k: 'payers',                        l: 'Paganti finora (anche chi è entrato da poco)', s: 'Paganti finora' },
   // Chi è in prova oggi può ancora pagare: finché ce n'è, i paganti di quel gruppo non sono finiti.
@@ -8835,14 +8835,14 @@ function premiumPaywallArmsCard() {
   ].map(([l, r]) => `${esc(l)} ${Number((r && r.was_premium) || 0)}`).join(' · ');
 
   // Gruppo A: niente parte gratis, quindi l'allenamento entro 24 h non dice niente. Lì contano
-  // quanti toccano «No, esco» e quanti non tornano, contro quanti pagano. Una nota, non un allarme.
+  // quanti escono dal muro (indietro su Android) e quanti non tornano, contro quanti pagano. Una nota, non un allarme.
   const mA = k => (A && A.metrics && A.metrics[k]) || null;
   const nA = Number((mA('assigned') || {}).n || 0);
   const quota = (x, n) => `${x} / ${n} · ${paywallArmsPct(n ? 100 * x / n : null)}%`;
   const notaA = nA ? `
         <div style="margin-top:4px">
           <strong style="color:var(--muted)">Gruppo A:</strong> qui l'allenamento entro 24 h non dice niente (non c'è una parte gratis).
-          Contano «No, esco» ${quota(Number((mA('exit_tapped') || {}).x || 0), nA)}
+          Escono dal muro ${quota(Number((mA('exit_tapped') || {}).x || 0), nA)}
           e i non tornati il giorno dopo ${quota(nA - Number((mA('returned_d1') || {}).x || 0), nA)},
           contro i paganti ${quota(Number((mA('payers') || {}).x || 0), nA)}.
         </div>` : '';
