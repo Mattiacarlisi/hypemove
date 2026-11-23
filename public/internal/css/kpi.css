@@ -45,22 +45,35 @@
 /* step box cliccabile nel percorso creatività paywall */
 .premium-step-box:hover { border-color: #a78bfa !important; background: #18182b !important; }
 
-/* A/B paywall sprint 23 (premiumPaywallArmsCard): metrica | A | B; sul telefono la metrica va
-   sopra, a tutta riga, e A e B le stanno sotto affiancati. */
-.pwa-grid { display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(0, 1fr) minmax(0, 1fr); font-size: 12px; }
-.pwa-arm { padding: 8px 10px 9px; background: #111120; border-radius: 0 0 6px 6px; margin: 0 4px 4px; }
-.pwa-lab { padding: 8px 10px 8px 0; border-top: 1px solid #1a1a2e; color: var(--fg); display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
-.pwa-cell { padding: 8px 10px; border-top: 1px solid #1a1a2e; line-height: 1.45; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
-.pwa-tag { display: none; font-size: 9px; font-weight: 700; color: #5a5a7a; flex-shrink: 0; }
-.pwa-badge { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: #8b8ba7; border: 1px solid #2a2a3d; background: #14141f; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
-@media (max-width: 700px) {
-  .pwa-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .pwa-corner { display: none; }
-  .pwa-arm { margin: 0 2px 4px; }
-  .pwa-lab { grid-column: 1 / -1; padding: 10px 0 2px; }
-  .pwa-cell { border-top: none; padding: 2px 6px 8px 0; font-size: 11.5px; }
-  .pwa-tag { display: inline; }
-}
+/* A/B test 23 (pageAb23): risultato in cima, poi un imbuto per gruppo, una riga per passo, accanto
+   allo sprint 15. Sul telefono le due tabelle vanno una sotto l'altra. */
+.ab23 { display: flex; flex-direction: column; gap: 16px; }
+.ab23-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 12px; color: var(--muted); }
+.ab23-chip { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: var(--amber-bg); color: var(--amber); }
+.ab23-chip.ab23-on { background: var(--mattia-bg); color: var(--mattia); }
+.ab23-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.ab23-card { margin: 0; min-width: 0; }
+.ab23-card h2 { margin: 0 0 10px; font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 9px; }
+.ab23-tag { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 6px; color: #0a0a0f; font-weight: 700; font-size: 11px; }
+.ab23-tag.ab23-s15 { background: var(--surface2); color: var(--text); }
+.ab23 table { width: 100%; border-collapse: collapse; table-layout: fixed; font-variant-numeric: tabular-nums; font-size: 13px; }
+.ab23 th, .ab23 td { padding: 9px 0; border-top: 1px solid var(--border); vertical-align: middle; color: var(--text); }
+.ab23 th { border-top: 0; padding-top: 0; font-size: 11px; font-weight: 600; color: var(--muted); text-align: right; }
+.ab23 th:first-child, .ab23 td:first-child { text-align: left; padding-right: 8px; }
+.ab23 col.ab23-c { width: 84px; }
+.ab23 td.ab23-v { text-align: right; font-weight: 700; font-size: 14px; white-space: nowrap; }
+.ab23 td.ab23-v small { font-weight: 400; font-size: 11px; color: var(--muted); margin-right: 5px; }
+.ab23 td.ab23-ref { color: var(--muted); font-weight: 600; }
+.ab23 tr.ab23-phase td { border-top: 0; padding: 16px 0 4px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; font-weight: 600; color: var(--muted); }
+.ab23 tr.ab23-sub td { border-top: 0; padding-top: 0; font-size: 12px; color: var(--muted); }
+.ab23 tr.ab23-sub td:first-child { padding-left: 14px; }
+.ab23 tr.ab23-sub td.ab23-v { font-size: 12px; font-weight: 600; }
+.ab23 tr.ab23-money td:first-child, .ab23 tr.ab23-money td.ab23-v:not(.ab23-ref) { color: var(--mattia); }
+.ab23 tr.ab23-money td:first-child { font-weight: 600; }
+.ab23-big td.ab23-v { font-size: 17px; }
+.ab23-foot { margin: 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+@media (max-width: 860px) { .ab23-cols { grid-template-columns: 1fr; } }
+@media (max-width: 420px) { .ab23 col.ab23-c { width: 74px; } .ab23 td.ab23-v { font-size: 13px; } }
 
 /* bar chart: resa con flex inline in JS */
 

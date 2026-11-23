@@ -2516,6 +2516,7 @@ const NAV_ICONS = {
   attivazione: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   retention: '<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>',
   sprint: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M17 14h-6M13 18H7"/>',
+  ab23: '<path d="M10 2v7.31"/><path d="M14 9.3V1.99"/><path d="M8.5 2h7"/><path d="M14 9.3a6.5 6.5 0 1 1-4 0"/><path d="M5.52 16h12.96"/>',
   premium: '<path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/>',
   'ai-coach': '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2M20 14h2M15 13v2M9 13v2"/>',
   behavior: '<path d="m9 9 5 12 1.8-5.2L21 14Z"/><path d="M7.2 2.2 8 5.1M5.1 8l-2.9-.8M14 4.1 12 6M6 12l-1.9 2"/>',
@@ -2542,6 +2543,7 @@ function sidebar() {
         ${nav('retention',   'Retention')}
         ${nav('sprint',      'Sprint')}
         ${nav('premium',     'Premium')}
+        ${nav('ab23',        'A/B test 23')}
         ${nav('ai-coach',    'AI Coach')}
         ${nav('behavior',    'Comportamento')}
         <div class="nav-section" style="margin-top:8px">Marketing</div>
@@ -2581,6 +2583,7 @@ function page() {
     case 'metriche':   return pageMetriche();
     case 'sprint':      return pageSprint();
     case 'premium':     return pagePremium();
+    case 'ab23':        return pageAb23();
     case 'ai-coach':    return pageAICoach();
     case 'behavior':    return pageBehavior();
     case 'attivazione': return pageActivationSprint();
@@ -7470,9 +7473,6 @@ function pagePremium() {
     <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
     ${premiumCreativesAuditCard()}
 
-    <!-- A/B dello sprint 23: blocco subito (A) contro X poi muro (B) -->
-    ${premiumPaywallArmsCard()}
-
     <!-- Chi ha pagato davvero nel periodo, e da quale proposta arriva -->
     ${premiumPaywallPurchasesCard()}
 
@@ -8641,251 +8641,169 @@ function paywallShotsStrip(variant) {
     </div>`;
 }
 
-// ── A/B PAYWALL DELLO SPRINT 23 ──────────────────────────────────────────────
-// Dal 23/11/2026 chi finisce l'onboarding riceve un gruppo, una volta sola (`users.paywall_arm`):
-//  · A «blocco subito»: onboarding_no_x a fine onboarding, nessuna parte gratuita, il muro risale
-//    a ogni apertura finché non paga;
-//  · B «X poi muro»: onboarding_x con la ×, poi tutorial + un allenamento da 5 minuti, due pasti, e
-//    al terzo allenamento o al terzo pasto free_limit_no_x, che resta.
-// Solo il motivo `random` (Android, 50/50 a sorte) entra nel confronto. `ios` (iPhone: sempre B),
-// `legacy` (chi aveva già l'app: regole del B) e `web` sono contesto, in una tabella spenta sotto.
-// I numeri arrivano dal vivo da kpi_paywall_arms (niente cache, come kpi_paywall_purchases): ogni
-// metrica è {x, n, pct, ci_lo, ci_hi} con l'intervallo di Wilson al 95% calcolato nel database.
+// ── A/B TEST 23 ──────────────────────────────────────────────────────────────
+// Pagina approvata da Mattia il 23/11/2026 (artifact VKVxBCeiPkxhEQmXREUjns, v8). Chi finisce
+// l'onboarding su Android riceve un gruppo a sorte, una volta sola (`users.paywall_arm`):
+//  · A «blocco subito»: paywall senza X a fine onboarding, niente parte gratuita; riaprendo l'app il
+//    blocco risale finché non paga;
+//  · B «X, poi blocco»: paywall con la X, poi gratis fino a 2 allenamenti e 2 pasti, al terzo il
+//    paywall senza X, che resta.
+// Una tabella per gruppo, una riga per passo, accanto allo sprint 15 (il migliore). In cima il
+// risultato sulle prime aperture: il sorteggio è a fine onboarding e prima l'app è uguale per tutti,
+// quindi le prime aperture Android (`fo_android` della RPC) si dividono fra A e B come i gruppi.
+// Nel confronto solo il motivo `random`; iPhone, web e chi aveva già l'app restano fuori.
+// Numeri dal vivo da kpi_paywall_arms (niente cache).
 
-// Le metriche nell'ordine in cui si leggono: chi c'è, cosa ha visto, cosa ha pagato, cosa ha fatto.
-const PAYWALL_ARMS_METRICS = [
-  { k: 'assigned',                      l: 'Persone nel gruppo' },
-  { k: 'saw_paywall',                   l: 'Hanno visto un paywall' },
-  { k: 'saw_wall',                      l: 'Hanno visto il muro senza X' },
-  { k: 'wall_hit',                      l: 'Muro scattato' },
-  { k: 'exit_tapped',                   l: 'Usciti dal muro (indietro su Android)' },
-  { k: 'trial_started',                 l: 'Prova avviata' },
-  { k: 'payers',                        l: 'Paganti finora (anche chi è entrato da poco)', s: 'Paganti finora' },
-  // Chi è in prova oggi può ancora pagare: finché ce n'è, i paganti di quel gruppo non sono finiti.
-  { k: 'in_trial_now',                  l: 'In prova adesso' },
-  // La coorte matura: nel gruppo da almeno 35 giorni, prova e primo rinnovo passati. Ha il suo n.
-  { k: 'payers_35d',                    l: 'Paganti fra chi è nel gruppo da almeno 35 giorni', mature: true },
-  // La guardia vale solo per B: è nata per la X all'inizio. A non ha una parte gratis, e il suo
-  // allenamento entro 24 h è quasi solo chi ha avviato la prova.
-  { k: 'activated_24h',                 l: 'Almeno un allenamento entro 24 h', guard: 30, guardArm: 'B' },
-  { k: 'activated_24h_beyond_tutorial', l: 'Allenamento oltre il tutorial entro 24 h' },
-  { k: 'first_real_workout_24h',        l: 'Primo allenamento da 5 minuti entro 24 h' },
-  { k: 'first_real_workout_ever',       l: 'Primo allenamento da 5 minuti, entro sempre' },
-  { k: 'meal_24h',                      l: 'Pasto entro 24 h' },
-  { k: 'returned_d1',                   l: 'Tornati il giorno dopo' },
-];
+// Da quando si legge: il giorno del rilascio dell'A/B. Le prime aperture la RPC le conta comunque
+// solo dal primo sorteggio vero.
+const AB23_START = '2026-11-23T00:00:00+01:00';
+const AB23_PRICE = { m: 9.90, a: 29.99 }; // prezzi di listino, per l'incasso lordo
 
-// Le righe fuori dal confronto, col nome che si legge.
-const PAYWALL_ARMS_CONTEXT = {
-  ios:    'B · iPhone',
-  legacy: 'B · chi aveva già l\'app',
-  web:    'B · web',
+// Sprint 15 (prime aperture 4-12/10/2026), letto dal database il 23/11/2026: 402 prime aperture, 320
+// hanno finito l'onboarding. Paywall con la X a fine onboarding; dopo, altri paywall con la X
+// (apertura, dopo l'allenamento, limite giornaliero) al posto del blocco. Il tutorial non c'era: al suo
+// posto il primo esercizio. Paganti cercati anche col codice dell'acquisto Google.
+const AB23_S15 = {
+  fo: 402, n: 320,
+  first_seen: 295, first_tap: 47, first_tap_m: 6, first_tap_a: 44, first_gclose: 40, first_trial: 6, first_close: 241,
+  tutorial_done: 89, meal_ever: 29, second_workout: 24, returned_d1: 53,
+  wall_hit: 95, wall_tap: 19, wall_tap_m: 8, wall_tap_a: 15, wall_gclose: 16, wall_trial: 4,
+  trial_cancelled: 3, trial_started: 10, payers: 9, payers_m: 0, payers_a: 9,
 };
-
-// La finestra della pagina, con la stessa regola di kpi_paywall_purchases: l'orario dello sprint
-// se c'è, altrimenti i giorni interi [inizio, fine + 1) — che lì il database converte con
-// `date::timestamptz`, cioè a mezzanotte UTC. Qui la RPC vuole due istanti e nient'altro, quindi
-// la conversione si fa prima, uguale.
-function paywallArmsWindow() {
-  const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
-  const dayUtc = (d, plus) => {
-    const t = new Date(d + 'T00:00:00Z');
-    if (plus) t.setUTCDate(t.getUTCDate() + plus);
-    return t.toISOString();
-  };
-  return {
-    p_start: (selSprint && sprintStartTs(selSprint)) || dayUtc(state.premiumFrom, 0),
-    p_end:   (selSprint && sprintEndTs(selSprint))   || dayUtc(state.premiumTo, 1),
-  };
-}
 
 async function fetchPaywallArms() {
   state.paywallArmsLoading = true; state.paywallArmsError = null;
   render();
   try {
-    const { data, error } = await sb.rpc('kpi_paywall_arms', paywallArmsWindow());
+    const { data, error } = await sb.rpc('kpi_paywall_arms', {
+      p_start: AB23_START,
+      p_end: new Date(Date.now() + 60 * 1000).toISOString(),
+    });
     if (error) throw error;
     state.paywallArms = data || { rows: [] };
   } catch (e) {
-    state.paywallArmsError = e.message || 'Errore caricamento A/B paywall';
+    state.paywallArmsError = e.message || 'Errore caricamento A/B test 23';
     state.paywallArmsErrorTimeout = isRpcTimeout(e);
   }
   state.paywallArmsLoading = false;
   render();
 }
 
-// Una cifra decimale sotto il 10%, intero sopra, con la virgola: la stessa regola di
-// creativeRateFmt. Il database manda già percentuali (0–100), null quando n = 0.
-function paywallArmsPct(v) {
-  if (v == null || isNaN(Number(v))) return '—';
-  const p = Number(v);
-  return p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p));
+// «12%», con un decimale sotto il 10% e la virgola. Senza base, null (la cella mostra un trattino).
+function ab23Pct(x, n) {
+  if (!n) return null;
+  const p = x / n * 100;
+  return (p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p))) + '%';
 }
 
-// «x / n · pct% (ci_lo–ci_hi%)». Senza persone resta un trattino: uno 0% su zero persone
-// sembrerebbe un risultato.
-function paywallArmsValue(m) {
-  if (!m || !Number(m.n)) return `<span style="color:#5a5a7a">—</span>`;
-  return `<span style="color:var(--muted)">${Number(m.x)} / ${Number(m.n)}</span>
-    · <strong style="color:var(--fg)">${paywallArmsPct(m.pct)}%</strong>
-    <span style="color:#5a5a7a;white-space:nowrap">(${paywallArmsPct(m.ci_lo)}–${paywallArmsPct(m.ci_hi)}%)</span>`;
-}
-
-// Due intervalli di Wilson che si toccano: la differenza fra le due percentuali può essere solo
-// il caso. Con questi numeri piccoli è la lettura più comune, e va detta sulla riga.
-function paywallArmsOverlap(a, b) {
-  if (!a || !b || !Number(a.n) || !Number(b.n)) return false;
-  if (a.ci_lo == null || b.ci_lo == null) return false;
-  return Number(a.ci_lo) <= Number(b.ci_hi) && Number(b.ci_lo) <= Number(a.ci_hi);
-}
-
-function premiumPaywallArmsCard() {
+function pageAb23() {
+  const fmtN = v => Number(v || 0).toLocaleString('it-IT');
+  const eur = v => v.toLocaleString('it-IT', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
   const busy = state.paywallArmsLoading && state.paywallArms;
-  const head = `
-    <div style="margin-bottom:12px">
-      <div class="card-title" style="margin-bottom:3px">A/B paywall sprint 23 — blocco subito contro X poi muro${busy ? ' <span class="pulse" style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">aggiorno…</span>' : ''}</div>
-      <div style="font-size:11px;color:var(--muted);line-height:1.55">
-        Chi ha ricevuto il gruppo <strong style="color:var(--fg)">nel periodo selezionato qui sopra</strong>, contando da quel momento.
-        Il gruppo si dà una volta sola, a fine onboarding. Nel confronto solo Android, 50/50 a sorte ·
-        le percentuali sono su chi non era già premium · tra parentesi l'intervallo di Wilson al 95%:
-        se i due si toccano, la differenza può essere solo il caso.
-      </div>
+  const header = `
+    <div class="page-header" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div><div class="page-title">A/B test 23</div>
+        <div class="page-sub">Blocco subito contro X, poi blocco${busy ? ' · <span class="pulse">aggiorno…</span>' : ''}</div></div>
+      <button id="ab23-refresh" class="btn-refresh" ${state.paywallArmsLoading ? 'disabled' : ''}>Aggiorna</button>
     </div>`;
 
   if (state.paywallArmsLoading && !state.paywallArms) {
-    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:22px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Leggo i due gruppi…</div></div>`;
+    return header + `<div class="card" style="padding:40px;text-align:center;color:var(--muted)" class="pulse">Leggo i due gruppi…</div>`;
   }
   if (state.paywallArmsError && !state.paywallArms) {
     const box = state.paywallArmsErrorTimeout
       ? sezioneTimeoutBox(state.paywallArmsError, 'fetchPaywallArms()')
-      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.paywallArmsError)}</div>`;
-    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
+      : `<div style="color:var(--red);font-size:13px">${esc(state.paywallArmsError)}</div>`;
+    return header + `<div class="card">${box}</div>`;
   }
 
-  const rows = (state.paywallArms && state.paywallArms.rows) || [];
-  const find = (arm, reason) => rows.find(r => r.arm === arm && r.reason === reason) || null;
-  const A = find('A', 'random');
-  const B = find('B', 'random');
-  const ctx = Object.keys(PAYWALL_ARMS_CONTEXT).map(reason => ({ reason, row: find('B', reason) }));
-  const nOf = r => Number(((r && r.metrics) || {}).assigned ? r.metrics.assigned.n : 0);
-  const totale = rows.reduce((t, r) => t + nOf(r), 0);
+  const data = state.paywallArms || { rows: [] };
+  const rows = data.rows || [];
+  const row = arm => rows.find(r => r.arm === arm && r.reason === 'random') || null;
+  const A = row('A'), B = row('B');
+  const x = (r, k) => Number(((r && r.metrics && r.metrics[k]) || {}).x || 0);
+  const nA = x(A, 'assigned'), nB = x(B, 'assigned');
+  const S = AB23_S15;
 
-  if (!totale) {
-    return `<div class="card" style="margin-bottom:16px">${head}
-      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessuno è ancora in un gruppo: il test parte con la build nuova (23/11/2026).</div></div>`;
-  }
+  // Una cella: il numero piccolo e la percentuale; senza persone un trattino; vuota se non c'è il dato.
+  const cell = (v, n, cls = '') => {
+    if (v == null) return `<td class="ab23-v ${cls}"></td>`;
+    const p = ab23Pct(v, n);
+    return `<td class="ab23-v ${cls}">${p == null ? '—' : `<small>${fmtN(v)}</small>${p}`}</td>`;
+  };
+  const head = (letter, n) => `<colgroup><col><col class="ab23-c"><col class="ab23-c"></colgroup>
+    <tr><th></th><th>${letter}<br>${fmtN(n)} pers.</th><th>Sprint 15<br>${fmtN(S.n)} pers.</th></tr>`;
+  const phase = t => `<tr class="ab23-phase"><td colspan="3">${t}</td></tr>`;
+  const line = (r, n, label, k, refKey, cls = '') =>
+    `<tr class="${cls}"><td>${label}</td>${cell(x(r, k), n)}${cell(refKey ? S[refKey] : null, S.n, 'ab23-ref')}</tr>`;
+  // Mensile e annuale sotto la riga, solo dove si sceglie il piano.
+  const split = (r, n, k, withRef = true) => ['m', 'a'].map(s =>
+    `<tr class="ab23-sub"><td>${s === 'm' ? 'mensile' : 'annuale'}</td>${cell(x(r, k + '_' + s), n)}${cell(withRef ? S[k + '_' + s] : null, S.n, 'ab23-ref')}</tr>`).join('');
 
-  const armHead = (lettera, nome, desc, col) => `
-    <div class="pwa-arm" style="border-top:2px solid ${col}">
-      <div style="font-size:12px;font-weight:700;color:var(--fg)"><span style="color:${col}">${lettera}</span> · ${nome}</div>
-      <div style="font-size:10px;color:#5a5a7a;line-height:1.4;margin-top:2px">${desc}</div>
-    </div>`;
+  const funA = head('A', nA) +
+    phase('Fine onboarding') +
+    line(A, nA, 'Hanno visto il paywall', 'first_seen', 'first_seen') +
+    line(A, nA, 'Hanno toccato un piano', 'first_tap', 'first_tap') + split(A, nA, 'first_tap') +
+    line(A, nA, 'Hanno chiuso Google', 'first_gclose', 'first_gclose') +
+    line(A, nA, 'Hanno iniziato la prova', 'first_trial', 'first_trial') +
+    line(A, nA, 'Sono usciti (tasto indietro)', 'first_close', null) +
+    phase("Riaprono l'app") +
+    line(A, nA, 'Sono tornati', 'returned', null) +
+    line(A, nA, 'Hanno toccato un piano', 'back_tap', null) + split(A, nA, 'back_tap', false) +
+    line(A, nA, 'Hanno iniziato la prova', 'back_trial', null) +
+    phase('Esito') +
+    line(A, nA, 'Hanno disdetto la prova', 'trial_cancelled', 'trial_cancelled') +
+    line(A, nA, 'Hanno pagato', 'payers', 'payers', 'ab23-money') + split(A, nA, 'payers');
 
-  const lines = PAYWALL_ARMS_METRICS.map(def => {
-    const ma = A && A.metrics ? A.metrics[def.k] : null;
-    const mb = B && B.metrics ? B.metrics[def.k] : null;
-    // «Persone nel gruppo» è la base, non un tasso: il numero e basta, e nessun badge.
-    if (def.k === 'assigned') {
-      const cnt = m => `<strong style="color:var(--fg);font-size:14px">${m ? Number(m.n) : 0}</strong>`;
-      return `
-        <div class="pwa-lab"><span>${esc(def.l)}</span></div>
-        <div class="pwa-cell"><span class="pwa-tag">A</span>${cnt(ma)}</div>
-        <div class="pwa-cell"><span class="pwa-tag">B</span>${cnt(mb)}</div>`;
-    }
-    // Il badge confronta gli intervalli della metrica stessa, ognuno sul suo n (payers_35d sta
-    // sulla coorte matura, non sul gruppo intero).
-    const badge = paywallArmsOverlap(ma, mb)
-      ? `<span class="pwa-badge" title="I due intervalli di Wilson al 95% si sovrappongono: con questi numeri la differenza può essere solo il caso">differenza non leggibile</span>`
-      : '';
-    // La guardia, solo sul gruppo che la porta (guardArm): sotto la soglia, un avviso.
-    const sotto = (m, arm) => def.guard && (!def.guardArm || def.guardArm === arm)
-      && m && Number(m.n) > 0 && m.pct != null && Number(m.pct) < def.guard;
-    const warn = (m, arm) => sotto(m, arm) ? `<div style="font-size:9.5px;color:#fbbf24;margin-top:2px">sotto la soglia del ${def.guard}%</div>` : '';
-    // Nessuno ancora da 35 giorni: lo si dice, uno 0% su zero persone sembrerebbe un risultato.
-    const value = m => def.mature && m && !Number(m.n)
-      ? `<span style="color:#5a5a7a">ancora nessuno da 35 giorni</span>`
-      : paywallArmsValue(m);
-    return `
-      <div class="pwa-lab"><span>${esc(def.l)}</span>${badge}</div>
-      <div class="pwa-cell"><span class="pwa-tag">A</span><div>${value(ma)}${warn(ma, 'A')}</div></div>
-      <div class="pwa-cell"><span class="pwa-tag">B</span><div>${value(mb)}${warn(mb, 'B')}</div></div>`;
-  }).join('');
+  const funB = head('B', nB) +
+    phase('Fine onboarding, con la X') +
+    line(B, nB, 'Hanno visto il paywall', 'first_seen', 'first_seen') +
+    line(B, nB, 'Hanno toccato un piano', 'first_tap', 'first_tap') + split(B, nB, 'first_tap') +
+    line(B, nB, 'Hanno chiuso Google', 'first_gclose', 'first_gclose') +
+    line(B, nB, 'Hanno iniziato la prova', 'first_trial', 'first_trial') +
+    line(B, nB, 'Hanno chiuso con la X', 'first_close', 'first_close') +
+    phase('Uso gratis') +
+    line(B, nB, 'Tutorial (S15: primo esercizio)', 'tutorial_done', 'tutorial_done') +
+    line(B, nB, 'Primo pasto', 'meal_ever', 'meal_ever') +
+    line(B, nB, 'Secondo allenamento', 'second_workout', 'second_workout') +
+    line(B, nB, 'Tornati il giorno dopo', 'returned_d1', 'returned_d1') +
+    phase('Paywall bloccante (S15: paywall dopo, con la X)') +
+    line(B, nB, 'Ci sono arrivati', 'wall_hit', 'wall_hit') +
+    line(B, nB, 'Hanno toccato un piano', 'wall_tap', 'wall_tap') + split(B, nB, 'wall_tap') +
+    line(B, nB, 'Hanno chiuso Google', 'wall_gclose', 'wall_gclose') +
+    line(B, nB, 'Hanno iniziato la prova', 'wall_trial', 'wall_trial') +
+    line(B, nB, 'Sono usciti (tasto indietro)', 'wall_exit', null) +
+    phase('Esito') +
+    line(B, nB, 'Hanno disdetto la prova', 'trial_cancelled', 'trial_cancelled') +
+    line(B, nB, 'Hanno pagato', 'payers', 'payers', 'ab23-money') + split(B, nB, 'payers');
 
-  // Le righe fuori dal confronto: poche colonne, spente, e mai accanto ai due gruppi.
-  const CTX_COLS = ['assigned', 'saw_wall', 'trial_started', 'payers', 'activated_24h', 'first_real_workout_24h', 'returned_d1'];
-  const ctxHead = CTX_COLS.map(k => {
-    const d = PAYWALL_ARMS_METRICS.find(x => x.k === k);
-    return `<th style="text-align:right;padding:5px 8px;border-bottom:1px solid #1a1a2e;font-weight:600">${esc(d.s || d.l)}</th>`;
-  }).join('');
-  const ctxRows = ctx.map(({ reason, row }) => {
-    const cells = CTX_COLS.map(k => {
-      const m = row && row.metrics ? row.metrics[k] : null;
-      const v = !m || !Number(m.n) ? '—'
-        : k === 'assigned' ? String(Number(m.n))
-        : `${Number(m.x)} / ${Number(m.n)} · ${paywallArmsPct(m.pct)}%`;
-      return `<td style="text-align:right;padding:6px 8px;border-bottom:1px solid #111120;white-space:nowrap">${v}</td>`;
-    }).join('');
-    return `<tr><td style="padding:6px 8px;border-bottom:1px solid #111120;white-space:nowrap">${esc(PAYWALL_ARMS_CONTEXT[reason])}
-      <span style="font-family:var(--mono);font-size:9.5px;color:#4a4a6a">${esc(reason)}</span></td>${cells}</tr>`;
-  }).join('');
+  // Il risultato, sulle prime aperture.
+  const foAll = Number(data.fo_android || 0);
+  const foOf = n => (nA + nB) ? foAll * n / (nA + nB) : 0;
+  const foA = foOf(nA), foB = foOf(nB);
+  const incasso = (m, a, fo) => `<td class="ab23-v">${fo ? eur((m * AB23_PRICE.m + a * AB23_PRICE.a) / fo * 100) : '—'}</td>`;
+  const count = v => `<td class="ab23-v">${fmtN(Math.round(v))}</td>`;
+  const res = `<colgroup><col><col class="ab23-c"><col class="ab23-c"><col class="ab23-c"></colgroup>
+    <tr><th></th><th><span class="ab23-tag" style="background:#f472b6">A</span></th><th><span class="ab23-tag" style="background:#60a5fa">B</span></th><th><span class="ab23-tag ab23-s15">S15</span></th></tr>
+    <tr><td>Prime aperture</td>${count(foA)}${count(foB)}${count(S.fo)}</tr>
+    <tr><td>Finito l'onboarding</td>${cell(nA, foA)}${cell(nB, foB)}${cell(S.n, S.fo)}</tr>
+    <tr><td>Prova iniziata</td>${cell(x(A, 'trial_started'), foA)}${cell(x(B, 'trial_started'), foB)}${cell(S.trial_started, S.fo)}</tr>
+    <tr class="ab23-money"><td>Hanno pagato</td>${cell(x(A, 'payers'), foA)}${cell(x(B, 'payers'), foB)}${cell(S.payers, S.fo)}</tr>
+    <tr><td>Incasso ogni 100 prime aperture</td>${incasso(x(A, 'payers_m'), x(A, 'payers_a'), foA)}${incasso(x(B, 'payers_m'), x(B, 'payers_a'), foB)}${incasso(S.payers_m, S.payers_a, S.fo)}</tr>`;
 
-  const giaPremium = [
-    ['A', A], ['B', B],
-    ...ctx.map(c => [PAYWALL_ARMS_CONTEXT[c.reason].replace('B · ', ''), c.row]),
-  ].map(([l, r]) => `${esc(l)} ${Number((r && r.was_premium) || 0)}`).join(' · ');
+  const status = (nA + nB)
+    ? `<span class="ab23-chip ab23-on">In corso</span>`
+    : `<span class="ab23-chip">Non ancora partito</span>`;
 
-  // Gruppo A: niente parte gratis, quindi l'allenamento entro 24 h non dice niente. Lì contano
-  // quanti escono dal muro (indietro su Android) e quanti non tornano, contro quanti pagano. Una nota, non un allarme.
-  const mA = k => (A && A.metrics && A.metrics[k]) || null;
-  const nA = Number((mA('assigned') || {}).n || 0);
-  const quota = (x, n) => `${x} / ${n} · ${paywallArmsPct(n ? 100 * x / n : null)}%`;
-  const notaA = nA ? `
-        <div style="margin-top:4px">
-          <strong style="color:var(--muted)">Gruppo A:</strong> qui l'allenamento entro 24 h non dice niente (non c'è una parte gratis).
-          Escono dal muro ${quota(Number((mA('exit_tapped') || {}).x || 0), nA)}
-          e i non tornati il giorno dopo ${quota(nA - Number((mA('returned_d1') || {}).x || 0), nA)},
-          contro i paganti ${quota(Number((mA('payers') || {}).x || 0), nA)}.
-        </div>` : '';
-
-  return `
-    <div class="card" style="margin-bottom:16px">
-      ${head}
-      <div class="pwa-grid">
-        <div class="pwa-corner"></div>
-        ${armHead('A', 'blocco subito', 'onboarding_no_x a fine onboarding, niente gratis: il muro risale a ogni apertura', '#f472b6')}
-        ${armHead('B', 'X poi muro', 'onboarding_x con la ×, poi tutorial + un allenamento da 5 minuti, due pasti; al 3° free_limit_no_x', '#60a5fa')}
-        ${lines}
+  return header + `
+    <div class="ab23">
+      <div class="ab23-status">${status}<span>Dati dal vivo · solo Android, gruppi a sorte</span></div>
+      <section class="card ab23-card ab23-big"><h2>Il risultato</h2><table>${res}</table></section>
+      <div class="ab23-cols">
+        <section class="card ab23-card"><h2><span class="ab23-tag" style="background:#f472b6">A</span>Blocco subito</h2><table>${funA}</table></section>
+        <section class="card ab23-card"><h2><span class="ab23-tag" style="background:#60a5fa">B</span>X, poi blocco</h2><table>${funB}</table></section>
       </div>
-
-      <div style="margin-top:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Fuori dal confronto · regole del gruppo B, ma non a sorte</div>
-        <div style="overflow-x:auto">
-          <table style="width:100%;min-width:720px;font-size:11px;border-collapse:collapse;color:var(--muted)">
-            <thead><tr style="color:#5a5a7a;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em">
-              <th style="text-align:left;padding:5px 8px;border-bottom:1px solid #1a1a2e;font-weight:600">Gruppo</th>${ctxHead}
-            </tr></thead>
-            <tbody>${ctxRows}</tbody>
-          </table>
-        </div>
-      </div>
-
-      <div style="margin-top:12px;font-size:10.5px;color:#5a5a7a;line-height:1.65">
-        <div>Già premium quando hanno ricevuto il gruppo, e per questo fuori dalle percentuali: ${giaPremium}.</div>
-        <div style="margin-top:4px">
-          <strong style="color:var(--muted)">Soldi:</strong> prove e paganti vengono da <code style="font-family:var(--mono)">play_purchases</code>
-          e <code style="font-family:var(--mono)">apple_purchases</code>, non dagli eventi, con le regole di «Gli acquisti del periodo»:
-          contano solo gli acquisti comparsi dopo l'assegnazione del gruppo (le rivalidazioni di un abbonamento vecchio sono escluse),
-          cercati anche sugli altri account dello stesso telefono. Pagante = un addebito vero, non una prova.
-        </div>
-        <div style="margin-top:4px">
-          I paganti di chi è entrato da poco non sono finiti: chi è <strong style="color:var(--muted)">in prova adesso</strong> può ancora pagare.
-          Il confronto vero dei soldi è sulla riga dei 35 giorni (prova e primo rinnovo passati).
-        </div>
-        <div style="margin-top:4px;color:#d9c48a">
-          ⚠️ Guardia (gruppo B): se l'allenamento entro 24 h scende sotto il 30%, la X all'inizio sta frenando l'attivazione.
-        </div>
-        ${notaA}
-      </div>
+      <p class="ab23-foot">Il risultato è sulle prime aperture Android, divise come i gruppi. Negli imbuti la base è chi ha finito l'onboarding. Pagato = primo addebito vero. Incasso lordo a prezzo di listino.</p>
     </div>`;
 }
 
@@ -11700,7 +11618,7 @@ function attachEvents() {
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
       if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
       if (state.page === 'premium'    && !state.purchases      && !state.purchasesLoading)      fetchPaywallPurchases();
-      if (state.page === 'premium'    && !state.paywallArms    && !state.paywallArmsLoading)    fetchPaywallArms();
+      if (state.page === 'ab23'       && !state.paywallArms    && !state.paywallArmsLoading)    fetchPaywallArms();
       if (state.page === 'ai-coach') {
         // pagina AI Coach: i suoi dati li carica kpi-ai-coach.js
         aicEnter();
@@ -13130,6 +13048,9 @@ function attachEvents() {
       fetchAISessionMessages(s);
     }));
 
+  // A/B test 23
+  document.getElementById('ab23-refresh')?.addEventListener('click', () => fetchPaywallArms());
+
   // Premium
   document.getElementById('premium-sprint-sel')?.addEventListener('change', e => {
     state.premiumSprintId = e.target.value; // '' = periodo libero
@@ -13139,7 +13060,6 @@ function attachEvents() {
     fetchPremium();
     fetchCreativesAudit();
     fetchPaywallPurchases();
-    fetchPaywallArms();
   });
   document.getElementById('premium-apply')?.addEventListener('click', () => {
     const from   = document.getElementById('premium-from')?.value;
@@ -13155,7 +13075,6 @@ function attachEvents() {
     fetchPremium();
     fetchCreativesAudit();
     fetchPaywallPurchases();
-    fetchPaywallArms();
   });
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
     // vista in cache: i numeri restano a schermo mentre il database ricalcola
@@ -13163,7 +13082,6 @@ function attachEvents() {
     fetchPremium({ force: true });
     fetchCreativesAudit();
     fetchPaywallPurchases();
-    fetchPaywallArms();
   });
   // Catalogo creatività: apri/chiudi la colonna del percorso, e scegli quale gesto vedere in
   // percentuale di fianco al nome.
