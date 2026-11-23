@@ -557,6 +557,8 @@ let state = {
   shots: {}, shotsLoading: false, shotsError: null, shotsUploading: 0,
   // Acquisti veri del periodo + attribuzione per ultimo tocco (kpi_paywall_purchases).
   purchases: null, purchasesLoading: false, purchasesError: null, purchasesErrorTimeout: false,
+  // A/B paywall dello sprint 23, gruppo A contro gruppo B, letto dal vivo (kpi_paywall_arms).
+  paywallArms: null, paywallArmsLoading: false, paywallArmsError: null, paywallArmsErrorTimeout: false,
   stepUsersData: null, stepUsersLoading: false, stepUsersError: null,
   premiumBucketModal: null, // bucket key (paying|trialing|at_risk|canceling) quando aperto → lista utenti
   funnelStepUsersModal: null, // { stepIdx, label, sprintNome, inizio, fine } quando aperto → chi è nello step del funnel
@@ -7468,6 +7470,9 @@ function pagePremium() {
     <!-- Catalogo: cosa è ogni creatività, dove esce, e se il tracciamento regge -->
     ${premiumCreativesAuditCard()}
 
+    <!-- A/B dello sprint 23: blocco subito (A) contro X poi muro (B) -->
+    ${premiumPaywallArmsCard()}
+
     <!-- Chi ha pagato davvero nel periodo, e da quale proposta arriva -->
     ${premiumPaywallPurchasesCard()}
 
@@ -7585,9 +7590,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'app_open_v2',
     name: 'Paywall apertura app · v2',
-    rotation: 'live',
-    where: 'Overlay a pieno campo sopra qualunque schermata, lo stesso Host della v1: l\'app si apre e lui c\'è già. Anche in anteprima /dev (voce «Paywall apertura app · v2 (attivo)»), dove non emette eventi.',
-    when: 'Dalla prima release col codice dell\'08/11/2026, al posto di app_open: a ogni accesso a chi è attivato (allenamento finito o pasto analizzato) e non è premium. Stessi source della v1 (app_cold_start / app_resume) e stessa `activation` (workout | meal) in paywall_open. Nei giorni del passaggio le build vecchie emettono ancora app_open: le due righe si leggono per data, mai sommate.',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (voce «Paywall apertura app · v2»), dove non emette eventi. Fino al 23/11/2026: overlay a pieno campo sopra qualunque schermata, lo stesso Host della v1: l\'app si apre e lui c\'è già.',
+    when: 'Sospeso dal 23/11/2026 (sprint 23); le build vecchie continuano a mostrarlo. Dalla build del 23/11 lo stesso Host fa risalire all\'apertura solo il muro senza × (onboarding_no_x / free_limit_no_x), e solo a chi l\'ha già incontrato: i suoi dati restano questa riga. Prima: dalla prima release col codice dell\'08/11/2026, al posto di app_open: a ogni accesso a chi è attivato (allenamento finito o pasto analizzato) e non è premium. Stessi source della v1 (app_cold_start / app_resume) e stessa `activation` (workout | meal) in paywall_open. Nei giorni del passaggio le build vecchie emettono ancora app_open: le due righe si leggono per data, mai sommate.',
     exit: 'La × in alto a sinistra, VISIBILE dal primo istante (a differenza della v3 e della N44: qui la pagina sale da sola a ogni accesso, e su iPhone senza tasto indietro un\'uscita nascosta è un rischio di revisione), o il tasto indietro di Android. Entrambe portano in Home. Nessun «continua gratis».',
     what: 'Pagina verde che si scorre, nell\'ordine: «Sblocca il potenziale del tuo corpo.» con «Con Hypemove+ hai tutto quello che ti serve:» e le quattro icone crema della N44 (Il tuo piano, Coach AI, Community, Nutrizione); subito sotto, già nel primo schermo, la tabella «Cosa sblocchi con Hypemove+» Gratis / Hypemove+ con sei righe — Allenamenti personalizzati (1 al giorno / Illimitati), Coach AI personale (Limitato / Illimitato), Esercizi da escludere (Limitati / Illimitati), Calorie dei pasti in un attimo (Limitate / Illimitate), Memoria di dolori e preferenze (× / ✓), Piano rivisto ogni settimana (× / ✓), colonna Hypemove+ scura con bordo e testata oro; la striscia del chinesiologo con «Ho costruito il coach per seguirti nell\'allenamento e a tavola.»; «Come funziona la prova gratuita.» in tre passi (oggi 0 €: allenamenti, coach e calorie dei pasti; entro il 7° giorno disdici; dall\'8° il totale dell\'anno); «Cosa dicono di noi» con le sei recensioni; in fondo il rinnovo automatico e dove si disdice, «Ripristina acquisti · Termini · Privacy». Niente grafico, niente benefici. In basso le due schede della v3: l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile.',
     cta: 'Identica alla v3: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova. Senza prova sul telefono la scheda torna a prezzo pieno e la sezione «Come funziona la prova» non compare. Termini e Privacy emettono paywall_terms_open / paywall_privacy_open; il ripristino i suoi eventi di restore.',
@@ -7604,13 +7609,13 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'onboarding_x',
     name: 'Paywall fine onboarding · con la X',
-    rotation: 'dormant',
-    where: 'Pensato per la fine dell\'onboarding, prima del tutorial dello squat. Oggi solo in anteprima /dev (voce «Paywall fine onboarding · con la X (sprint 23)»).',
-    when: 'Una volta nella vita, a chi ha appena finito le domande dell\'onboarding. Source `onboarding_end`.',
-    exit: 'La × in alto a sinistra, visibile dal primo istante, o il tasto indietro di Android: dietro c\'è la parte gratuita (squat e un allenamento, due pasti). Nessun «continua gratis».',
-    what: 'Come app_open_v2 parola per parola — «Sblocca il potenziale del tuo corpo.», «Con Hypemove+ hai tutto quello che ti serve:», «Cosa sblocchi con Hypemove+» con le colonne Gratis e Hypemove+ — tranne una cella: negli allenamenti personalizzati il gratis dice «Limitati» e non «1 al giorno», perché la parte gratuita nuova è lo squat più un allenamento. Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy».',
+    rotation: 'live',
+    where: 'Pagina intera di fine onboarding (/inizia), prima del tutorial: è la porta del gruppo B («X poi muro») dell\'A/B dello sprint 23. Anche in anteprima /dev (voce «Paywall fine onboarding · con la X (sprint 23)»), dove non emette eventi.',
+    when: 'Dalla build del 23/11/2026 (prima alla squadra, al pubblico dopo): una volta nella vita, appena finite le domande dell\'onboarding, a chi riceve il gruppo B. Il gruppo si assegna lì, una volta sola (`users.paywall_arm`): su Android 50/50 a sorte fra A e B; su iPhone sempre B (motivo `ios`); chi aveva già l\'app prima del rilascio segue le regole del B ma resta fuori dal confronto (motivo `legacy`). Dopo la ×, la parte gratuita: tutorial + un allenamento da 5 minuti, due pasti; al terzo allenamento o al terzo pasto sale free_limit_no_x, e resta. Source `onboarding_end`. I due gruppi a confronto: riquadro «A/B paywall sprint 23» qui sotto.',
+    exit: 'La × in alto a sinistra, visibile dal primo istante, o il tasto indietro di Android: dietro c\'è la parte gratuita (tutorial + un allenamento da 5 minuti, due pasti). Nessun «continua gratis».',
+    what: 'Come app_open_v2 parola per parola — «Sblocca il potenziale del tuo corpo.», «Con Hypemove+ hai tutto quello che ti serve:», «Cosa sblocchi con Hypemove+» con le colonne Gratis e Hypemove+ — tranne una cella: negli allenamenti personalizzati il gratis dice «Limitati» e non «1 al giorno», perché la parte gratuita nuova è il tutorial più un allenamento da 5 minuti. Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy».',
     cta: 'Identica ad app_open_v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova.',
-    note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026: per ora vive solo in /dev, dove non emette eventi; quando un punto dell\'app la monta, la scheda passa a «live» con la data vera. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
+    note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026, in app dalla build dello stesso giorno (prima alla squadra, al pubblico dopo). Ogni evento porta `arm` e `arm_reason`: il confronto fra i gruppi si legge nel riquadro «A/B paywall sprint 23», non sommando queste righe. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
     file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'l\'apertura: titolo, i quattro pilastri e l\'inizio della tabella; in basso l\'annuale con «7 giorni gratis» e il mensile' },
@@ -7623,13 +7628,13 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'onboarding_no_x',
     name: 'Paywall fine onboarding · senza X',
-    rotation: 'dormant',
-    where: 'Pensato per la fine dell\'onboarding, in alternativa a onboarding_x. Oggi solo in anteprima /dev (voce «Paywall fine onboarding · senza X (sprint 23)»).',
-    when: 'Una volta nella vita, a chi ha appena finito le domande dell\'onboarding. Source `onboarding_end`.',
-    exit: 'Nessuna ×. L\'unica uscita a schermo è «No, esco», un link bianco sotto i link legali, che emette paywall_close con dismiss_method `exit_button`; il tasto indietro di Android emette `back_hardware`. Cosa succede dopo l\'uscita lo decide chi monta il paywall. ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
+    rotation: 'live',
+    where: 'Pagina intera di fine onboarding (/inizia), al posto di onboarding_x: è la porta del gruppo A («blocco subito») dell\'A/B dello sprint 23. Poi la stessa schermata risale sopra l\'app a ogni apertura e a ogni ritorno in primo piano, finché non si paga (l\'host del muro, `AppOpenPaywallHost`). Anche in anteprima /dev (voce «Paywall fine onboarding · senza X (sprint 23)»), dove non emette eventi.',
+    when: 'Dalla build del 23/11/2026 (prima alla squadra, al pubblico dopo): a fine onboarding, a chi riceve il gruppo A — solo Android, 50/50 a sorte con il B (su iPhone niente gruppo A: rischio revisione Apple). Il gruppo A non ha parte gratuita: il muro resta, e a ogni riapertura risale questa schermata finché non paga. Source `onboarding_end` la prima volta, `app_cold_start` / `app_resume` quando la ritrova riaprendo l\'app. I due gruppi a confronto: riquadro «A/B paywall sprint 23» qui sotto.',
+    exit: 'Nessuna ×. L\'unica uscita a schermo è «No, esco», un link bianco sotto i link legali, che emette paywall_close con dismiss_method `exit_button`; il tasto indietro di Android emette `back_hardware`. Entrambe portano alla schermata «Qui l\'app si ferma» (`PaywallStop`), non nell\'app: tornando in primo piano il paywall risale, con un\'esposizione nuova. ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
     what: '«Il tuo piano è pronto.» (seconda riga in oro), sotto «Per iniziare serve Hypemove+.», i quattro pilastri, poi la tabella «Cosa hai con Hypemove+» con la SOLA colonna Hypemove+ (niente colonna Gratis: senza ×, il gratis non c\'è). Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy». In fondo alla barra dei piani, «No, esco».',
     cta: 'Identica ad app_open_v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova.',
-    note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026: per ora vive solo in /dev, dove non emette eventi; quando un punto dell\'app la monta, la scheda passa a «live» con la data vera. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
+    note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026, in app dalla build dello stesso giorno (prima alla squadra, al pubblico dopo). Ogni evento porta `arm` e `arm_reason`: il confronto fra i gruppi si legge nel riquadro «A/B paywall sprint 23», non sommando queste righe. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
     file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'l\'apertura: titolo, i quattro pilastri e l\'inizio della tabella; in basso l\'annuale con «7 giorni gratis» e il mensile' },
@@ -7642,13 +7647,13 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'free_limit_no_x',
     name: 'Paywall blocco 3° allenamento o pasto · senza X',
-    rotation: 'dormant',
-    where: 'Pensato come blocco della parte gratuita: sale al tocco su «Inizia» del terzo allenamento o su «aggiungi» del terzo pasto, e resta all\'apertura dell\'app finché non si paga. Oggi solo in anteprima /dev (voce «Paywall blocco 3° allenamento o pasto · senza X (sprint 23)»).',
-    when: 'Dopo lo squat e un allenamento completo, o dopo due pasti. Source `free_limit_workout` o `free_limit_meal` per chi ci sbatte; `app_cold_start` / `app_resume` per chi lo ritrova riaprendo l\'app.',
-    exit: 'Nessuna ×. «No, esco» sotto i link legali (dismiss_method `exit_button`) o il tasto indietro di Android (`back_hardware`): nessuna delle due riporta nell\'app gratuita. ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
+    rotation: 'live',
+    where: 'Overlay a pieno campo sopra la schermata da cui si partiva: sale al tocco su «Inizia» del terzo allenamento o su «aggiungi» del terzo pasto, e risale a ogni apertura dell\'app finché non si paga (l\'host del muro, `AppOpenPaywallHost`). È il muro del gruppo B («X poi muro») dell\'A/B dello sprint 23. Anche in anteprima /dev (voce «Paywall blocco 3° allenamento o pasto · senza X (sprint 23)»), dove non emette eventi.',
+    when: 'Dalla build del 23/11/2026 (prima alla squadra, al pubblico dopo), a chi è nel gruppo B: su Android chi l\'ha avuto a sorte, su iPhone tutti, e i vecchi utenti (regole del B, fuori dal confronto). Parte gratuita: tutorial + un allenamento da 5 minuti, due pasti. Il blocco scatta al terzo allenamento o al terzo pasto e resta (`users.paywall_wall_at`). Source `free_limit_workout` o `free_limit_meal` per chi ci sbatte; `app_cold_start` / `app_resume` per chi lo ritrova riaprendo l\'app.',
+    exit: 'Nessuna ×. «No, esco» sotto i link legali (dismiss_method `exit_button`) o il tasto indietro di Android (`back_hardware`): nessuna delle due riporta nell\'app gratuita, entrambe portano alla schermata «Qui l\'app si ferma» (`PaywallStop`). ⚠️ Una pagina d\'acquisto senza × è un rischio per la revisione App Store.',
     what: '«Continua da dove sei.» (seconda riga in oro), sotto «La parte gratuita finisce qui.», i quattro pilastri, poi la tabella «Cosa hai con Hypemove+» con la SOLA colonna Hypemove+. Il corpo è quello di app_open_v2 (stesso file, stessa famiglia `COMPARE_COPY` in onboardingStartFacts.ts): i quattro pilastri, la tabella, la striscia del chinesiologo, «Come funziona la prova gratuita.», le recensioni, il rinnovo automatico; in basso l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile, «Ripristina acquisti · Termini · Privacy». In fondo alla barra dei piani, «No, esco».',
     cta: 'Identica ad app_open_v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova.',
-    note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026: per ora vive solo in /dev, dove non emette eventi; quando un punto dell\'app la monta, la scheda passa a «live» con la data vera. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
+    note: 'Profondità di lettura come app_open_v2 (paywall_step_view, step «features», feature = compare · trainer · how · reviews). Disegno: artifact «Sprint 23, cosa dicono i dati», sezione «I tre paywall». Nata il 23/11/2026, in app dalla build dello stesso giorno (prima alla squadra, al pubblico dopo). Ogni evento porta `arm` e `arm_reason`: il confronto fra i gruppi si legge nel riquadro «A/B paywall sprint 23», non sommando queste righe. Tre righe a sé con onboarding_x / onboarding_no_x / free_limit_no_x: mai sommate fra loro né ad app_open_v2.',
     file: 'app/src/pages/OnboardingStart/OnboardingStart.tsx',
     screens: [
       { idx: 0, t: 'La pagina', d: 'l\'apertura: titolo, i quattro pilastri e l\'inizio della tabella; in basso l\'annuale con «7 giorni gratis» e il mensile' },
@@ -7711,9 +7716,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'post_workout_trial_v3',
     name: 'Paywall dopo l\'allenamento · v3',
-    rotation: 'live',
-    where: 'Ultima slide del flusso di fine allenamento, a schermo intero, a OGNI allenamento dal primo (source post_workout), a chi non è premium né in prova. Anche in anteprima /dev (due voci coi dati scritti a mano, più «Proposta · Paywall v3 dopo l\'allenamento» coi dati del profilo), dove non emette eventi.',
-    when: 'Dalla prima release col codice del 04/11/2026, scelta di Mattia: prende il posto di onboarding_trial_v2, che dopo l\'allenamento era uscita il 03-04/11. Per confrontarle le due righe vanno lette per data, mai sommate: nei giorni del passaggio le build vecchie mostrano ancora la v2. L\'apertura porta occurrence = il numero dell\'allenamento.',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (due voci coi dati scritti a mano, più «Proposta · Paywall v3 dopo l\'allenamento» coi dati del profilo), dove non emette eventi. Fino al 23/11/2026: ultima slide del flusso di fine allenamento, a schermo intero, a OGNI allenamento dal primo (source post_workout), a chi non è premium né in prova.',
+    when: 'Sospeso dal 23/11/2026 (sprint 23); le build vecchie continuano a mostrarlo. Dalla build del 23/11 la slide del paywall è tolta dal flusso di fine allenamento: il paywall si incontra a fine onboarding (onboarding_x / onboarding_no_x) e al blocco della parte gratuita (free_limit_no_x). I suoi dati restano questa riga. Prima: dalla prima release col codice del 04/11/2026, scelta di Mattia: prende il posto di onboarding_trial_v2, che dopo l\'allenamento era uscita il 03-04/11. Per confrontarle le due righe vanno lette per data, mai sommate: nei giorni del passaggio le build vecchie mostrano ancora la v2. L\'apertura porta occurrence = il numero dell\'allenamento.',
     exit: 'La × in alto a sinistra, che NON c\'è finché non si scorre: compare al primo scroll e poi resta (come la N44). Il tasto indietro di Android chiude sempre, anche prima. Nessun «continua gratis».',
     what: 'Pagina verde che si scorre, nell\'ordine: «Sblocca il potenziale del tuo corpo.» con «Con Hypemove+ hai allenamenti illimitati e un coach che li adatta al tuo obiettivo.» e il grafico con «Sei qui» alla partenza e «Il tuo obiettivo» all\'arrivo, senza date; «I benefici di N minuti di allenamento» coi minuti scelti e gli otto benefici per obiettivo; la striscia del chinesiologo, una fascia verde con Mattia scontornato (la testa esce dal bordo), «Mattia Carlisi», «Chinesiologo, fondatore di Hypemove», «Ho insegnato al coach come costruire i tuoi allenamenti.»; «Come funziona la prova gratuita.» in tre passi (oggi 0 €, anche un altro allenamento oggi; entro il 7° giorno disdici e non paghi; dall\'8° il totale dell\'anno); in fondo «Cosa dicono dopo l\'allenamento» con le recensioni. Niente community né numeri della chiusura. In basso le due schede della v2: l\'annuale con «7 giorni gratis» e «0 € oggi», il mensile.',
     cta: 'Identica alla v2: il bottone È la scheda, l\'annuale compra l\'offerta `freetrial-7d` nominata, il mensile il suo piano di sempre. `cta_copy`: `onboarding_start.trial.band` sulla scheda con la prova. Senza prova sul telefono la scheda torna a prezzo pieno e la sezione «Come funziona la prova» non compare.',
@@ -7819,9 +7824,9 @@ const CREATIVE_REGISTRY = [
   {
     variant: 'daily_limit_done',
     name: 'Limite giornaliero · gratuito completato',
-    rotation: 'live',
-    where: 'Bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
-    when: 'Dalla build che esce dopo il 04/10/2026 (chi non ha ancora aggiornato vede la prima versione), stesso muro: un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo, conteggio rimasto a ieri — si passa.',
+    rotation: 'retired',
+    where: 'Oggi solo l\'anteprima /dev (voce «Proposta · Limite giornaliero · «Allenati ancora oggi»»). Fino al 23/11/2026: bottom-sheet sopra la schermata da cui si stava partendo — il popup della Roadmap in Home e il dettaglio allenamento. Non è una rotta: chi la chiude resta dov\'era.',
+    when: 'Sospeso dal 23/11/2026 (sprint 23); le build vecchie continuano a mostrarlo. Dalla build del 23/11 nessun punto d\'avvio monta più il limite giornaliero: al suo posto c\'è il blocco della parte gratuita (free_limit_no_x, al terzo allenamento o al terzo pasto). I suoi dati restano questa riga. Prima: dalla build che esce dopo il 04/10/2026 (chi non ha ancora aggiornato vede la prima versione), stesso muro: un utente non premium prova ad avviare il SECONDO allenamento della giornata (ne ha già chiuso uno oggi). La giornata finisce a mezzanotte LOCALE del telefono. Non esce a chi riprende un allenamento col segnalibro, e in ogni dubbio — stato premium non ancora letto, conteggio in volo, conteggio rimasto a ieri — si passa.',
     exit: 'Nessun tasto di rifiuto e nessuna × («Aspetto domani» è stato tolto il 04/10/2026, prima del rilascio): si chiude toccando fuori o con lo swipe, che si registrano come `x_button`, o col tasto indietro di Android, che arriva come `back_hardware` (con la prima versione era l\'83% delle chiusure). «Perché no?» può comparire dopo `x_button`, non dopo `back_hardware`; mai al primo paywall rifiutato e al massimo una volta ogni 7 giorni. A pagamento aperto non si chiude.',
     what: 'Spunta verde al posto dell\'orologio con l\'avviso, «Allenamento gratuito di oggi completato», «Il prossimo si rigenera tra 9 h 42 min» con un conto alla rovescia VIVO fino alla mezzanotte del telefono, il pulsante verde a due righe «Allenati senza limiti» + «7 giorni gratis», sotto «Oggi non paghi niente. Poi <prezzo annuale> l\'anno, disdici quando vuoi da Google Play». Nessun secondo bottone accanto al pulsante. Niente percentuale di sconto. La riga sotto il pulsante è lì per il foglio di Google: con la versione precedente 12 persone su 12 lo chiudevano senza attivare la prova.',
     note: 'Prezzo e giorni sempre dal catalogo vivo, offerta `freetrial-7d`. Chi la prova l\'ha già consumata legge «Allenati senza limiti» + «<prezzo annuale> l\'anno» e sotto solo «Disdici quando vuoi da Google Play»; senza prezzo dallo store resta la prima riga del pulsante. Il `cta_copy` degli acquisti dice quale seconda riga si è letta (`cta_sub_trial` / `cta_sub_price`). I dati NON si sommano a quelli della versione precedente.',
@@ -8633,6 +8638,254 @@ function paywallShotsStrip(variant) {
                <strong style="color:var(--muted)">+ Aggiungi foto</strong>: puoi sceglierne più d'uno in una volta e riordinarli con le frecce.
                Sono la prova di cosa vede davvero l'utente — gli scatti automatici qui sotto vengono da un browser, non da un telefono.
              </div>`}
+    </div>`;
+}
+
+// ── A/B PAYWALL DELLO SPRINT 23 ──────────────────────────────────────────────
+// Dal 23/11/2026 chi finisce l'onboarding riceve un gruppo, una volta sola (`users.paywall_arm`):
+//  · A «blocco subito»: onboarding_no_x a fine onboarding, nessuna parte gratuita, il muro risale
+//    a ogni apertura finché non paga;
+//  · B «X poi muro»: onboarding_x con la ×, poi tutorial + un allenamento da 5 minuti, due pasti, e
+//    al terzo allenamento o al terzo pasto free_limit_no_x, che resta.
+// Solo il motivo `random` (Android, 50/50 a sorte) entra nel confronto. `ios` (iPhone: sempre B),
+// `legacy` (chi aveva già l'app: regole del B) e `web` sono contesto, in una tabella spenta sotto.
+// I numeri arrivano dal vivo da kpi_paywall_arms (niente cache, come kpi_paywall_purchases): ogni
+// metrica è {x, n, pct, ci_lo, ci_hi} con l'intervallo di Wilson al 95% calcolato nel database.
+
+// Le metriche nell'ordine in cui si leggono: chi c'è, cosa ha visto, cosa ha pagato, cosa ha fatto.
+const PAYWALL_ARMS_METRICS = [
+  { k: 'assigned',                      l: 'Persone nel gruppo' },
+  { k: 'saw_paywall',                   l: 'Hanno visto un paywall' },
+  { k: 'saw_wall',                      l: 'Hanno visto il muro senza X' },
+  { k: 'wall_hit',                      l: 'Muro scattato' },
+  { k: 'exit_tapped',                   l: 'Hanno toccato «No, esco»' },
+  { k: 'trial_started',                 l: 'Prova avviata' },
+  { k: 'payers',                        l: 'Paganti finora (anche chi è entrato da poco)', s: 'Paganti finora' },
+  // Chi è in prova oggi può ancora pagare: finché ce n'è, i paganti di quel gruppo non sono finiti.
+  { k: 'in_trial_now',                  l: 'In prova adesso' },
+  // La coorte matura: nel gruppo da almeno 35 giorni, prova e primo rinnovo passati. Ha il suo n.
+  { k: 'payers_35d',                    l: 'Paganti fra chi è nel gruppo da almeno 35 giorni', mature: true },
+  // La guardia vale solo per B: è nata per la X all'inizio. A non ha una parte gratis, e il suo
+  // allenamento entro 24 h è quasi solo chi ha avviato la prova.
+  { k: 'activated_24h',                 l: 'Almeno un allenamento entro 24 h', guard: 30, guardArm: 'B' },
+  { k: 'activated_24h_beyond_tutorial', l: 'Allenamento oltre il tutorial entro 24 h' },
+  { k: 'first_real_workout_24h',        l: 'Primo allenamento da 5 minuti entro 24 h' },
+  { k: 'first_real_workout_ever',       l: 'Primo allenamento da 5 minuti, entro sempre' },
+  { k: 'meal_24h',                      l: 'Pasto entro 24 h' },
+  { k: 'returned_d1',                   l: 'Tornati il giorno dopo' },
+];
+
+// Le righe fuori dal confronto, col nome che si legge.
+const PAYWALL_ARMS_CONTEXT = {
+  ios:    'B · iPhone',
+  legacy: 'B · chi aveva già l\'app',
+  web:    'B · web',
+};
+
+// La finestra della pagina, con la stessa regola di kpi_paywall_purchases: l'orario dello sprint
+// se c'è, altrimenti i giorni interi [inizio, fine + 1) — che lì il database converte con
+// `date::timestamptz`, cioè a mezzanotte UTC. Qui la RPC vuole due istanti e nient'altro, quindi
+// la conversione si fa prima, uguale.
+function paywallArmsWindow() {
+  const selSprint = state.sprints.find(s => s.id === state.premiumSprintId);
+  const dayUtc = (d, plus) => {
+    const t = new Date(d + 'T00:00:00Z');
+    if (plus) t.setUTCDate(t.getUTCDate() + plus);
+    return t.toISOString();
+  };
+  return {
+    p_start: (selSprint && sprintStartTs(selSprint)) || dayUtc(state.premiumFrom, 0),
+    p_end:   (selSprint && sprintEndTs(selSprint))   || dayUtc(state.premiumTo, 1),
+  };
+}
+
+async function fetchPaywallArms() {
+  state.paywallArmsLoading = true; state.paywallArmsError = null;
+  render();
+  try {
+    const { data, error } = await sb.rpc('kpi_paywall_arms', paywallArmsWindow());
+    if (error) throw error;
+    state.paywallArms = data || { rows: [] };
+  } catch (e) {
+    state.paywallArmsError = e.message || 'Errore caricamento A/B paywall';
+    state.paywallArmsErrorTimeout = isRpcTimeout(e);
+  }
+  state.paywallArmsLoading = false;
+  render();
+}
+
+// Una cifra decimale sotto il 10%, intero sopra, con la virgola: la stessa regola di
+// creativeRateFmt. Il database manda già percentuali (0–100), null quando n = 0.
+function paywallArmsPct(v) {
+  if (v == null || isNaN(Number(v))) return '—';
+  const p = Number(v);
+  return p > 0 && p < 10 ? p.toFixed(1).replace('.', ',') : String(Math.round(p));
+}
+
+// «x / n · pct% (ci_lo–ci_hi%)». Senza persone resta un trattino: uno 0% su zero persone
+// sembrerebbe un risultato.
+function paywallArmsValue(m) {
+  if (!m || !Number(m.n)) return `<span style="color:#5a5a7a">—</span>`;
+  return `<span style="color:var(--muted)">${Number(m.x)} / ${Number(m.n)}</span>
+    · <strong style="color:var(--fg)">${paywallArmsPct(m.pct)}%</strong>
+    <span style="color:#5a5a7a;white-space:nowrap">(${paywallArmsPct(m.ci_lo)}–${paywallArmsPct(m.ci_hi)}%)</span>`;
+}
+
+// Due intervalli di Wilson che si toccano: la differenza fra le due percentuali può essere solo
+// il caso. Con questi numeri piccoli è la lettura più comune, e va detta sulla riga.
+function paywallArmsOverlap(a, b) {
+  if (!a || !b || !Number(a.n) || !Number(b.n)) return false;
+  if (a.ci_lo == null || b.ci_lo == null) return false;
+  return Number(a.ci_lo) <= Number(b.ci_hi) && Number(b.ci_lo) <= Number(a.ci_hi);
+}
+
+function premiumPaywallArmsCard() {
+  const busy = state.paywallArmsLoading && state.paywallArms;
+  const head = `
+    <div style="margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:3px">A/B paywall sprint 23 — blocco subito contro X poi muro${busy ? ' <span class="pulse" style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">aggiorno…</span>' : ''}</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        Chi ha ricevuto il gruppo <strong style="color:var(--fg)">nel periodo selezionato qui sopra</strong>, contando da quel momento.
+        Il gruppo si dà una volta sola, a fine onboarding. Nel confronto solo Android, 50/50 a sorte ·
+        le percentuali sono su chi non era già premium · tra parentesi l'intervallo di Wilson al 95%:
+        se i due si toccano, la differenza può essere solo il caso.
+      </div>
+    </div>`;
+
+  if (state.paywallArmsLoading && !state.paywallArms) {
+    return `<div class="card" style="margin-bottom:16px">${head}<div style="padding:22px;text-align:center;color:var(--muted);font-size:12px" class="pulse">Leggo i due gruppi…</div></div>`;
+  }
+  if (state.paywallArmsError && !state.paywallArms) {
+    const box = state.paywallArmsErrorTimeout
+      ? sezioneTimeoutBox(state.paywallArmsError, 'fetchPaywallArms()')
+      : `<div style="color:var(--red);font-size:12px;padding:10px 0">${esc(state.paywallArmsError)}</div>`;
+    return `<div class="card" style="margin-bottom:16px">${head}${box}</div>`;
+  }
+
+  const rows = (state.paywallArms && state.paywallArms.rows) || [];
+  const find = (arm, reason) => rows.find(r => r.arm === arm && r.reason === reason) || null;
+  const A = find('A', 'random');
+  const B = find('B', 'random');
+  const ctx = Object.keys(PAYWALL_ARMS_CONTEXT).map(reason => ({ reason, row: find('B', reason) }));
+  const nOf = r => Number(((r && r.metrics) || {}).assigned ? r.metrics.assigned.n : 0);
+  const totale = rows.reduce((t, r) => t + nOf(r), 0);
+
+  if (!totale) {
+    return `<div class="card" style="margin-bottom:16px">${head}
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessuno è ancora in un gruppo: il test parte con la build nuova (23/11/2026).</div></div>`;
+  }
+
+  const armHead = (lettera, nome, desc, col) => `
+    <div class="pwa-arm" style="border-top:2px solid ${col}">
+      <div style="font-size:12px;font-weight:700;color:var(--fg)"><span style="color:${col}">${lettera}</span> · ${nome}</div>
+      <div style="font-size:10px;color:#5a5a7a;line-height:1.4;margin-top:2px">${desc}</div>
+    </div>`;
+
+  const lines = PAYWALL_ARMS_METRICS.map(def => {
+    const ma = A && A.metrics ? A.metrics[def.k] : null;
+    const mb = B && B.metrics ? B.metrics[def.k] : null;
+    // «Persone nel gruppo» è la base, non un tasso: il numero e basta, e nessun badge.
+    if (def.k === 'assigned') {
+      const cnt = m => `<strong style="color:var(--fg);font-size:14px">${m ? Number(m.n) : 0}</strong>`;
+      return `
+        <div class="pwa-lab"><span>${esc(def.l)}</span></div>
+        <div class="pwa-cell"><span class="pwa-tag">A</span>${cnt(ma)}</div>
+        <div class="pwa-cell"><span class="pwa-tag">B</span>${cnt(mb)}</div>`;
+    }
+    // Il badge confronta gli intervalli della metrica stessa, ognuno sul suo n (payers_35d sta
+    // sulla coorte matura, non sul gruppo intero).
+    const badge = paywallArmsOverlap(ma, mb)
+      ? `<span class="pwa-badge" title="I due intervalli di Wilson al 95% si sovrappongono: con questi numeri la differenza può essere solo il caso">differenza non leggibile</span>`
+      : '';
+    // La guardia, solo sul gruppo che la porta (guardArm): sotto la soglia, un avviso.
+    const sotto = (m, arm) => def.guard && (!def.guardArm || def.guardArm === arm)
+      && m && Number(m.n) > 0 && m.pct != null && Number(m.pct) < def.guard;
+    const warn = (m, arm) => sotto(m, arm) ? `<div style="font-size:9.5px;color:#fbbf24;margin-top:2px">sotto la soglia del ${def.guard}%</div>` : '';
+    // Nessuno ancora da 35 giorni: lo si dice, uno 0% su zero persone sembrerebbe un risultato.
+    const value = m => def.mature && m && !Number(m.n)
+      ? `<span style="color:#5a5a7a">ancora nessuno da 35 giorni</span>`
+      : paywallArmsValue(m);
+    return `
+      <div class="pwa-lab"><span>${esc(def.l)}</span>${badge}</div>
+      <div class="pwa-cell"><span class="pwa-tag">A</span><div>${value(ma)}${warn(ma, 'A')}</div></div>
+      <div class="pwa-cell"><span class="pwa-tag">B</span><div>${value(mb)}${warn(mb, 'B')}</div></div>`;
+  }).join('');
+
+  // Le righe fuori dal confronto: poche colonne, spente, e mai accanto ai due gruppi.
+  const CTX_COLS = ['assigned', 'saw_wall', 'trial_started', 'payers', 'activated_24h', 'first_real_workout_24h', 'returned_d1'];
+  const ctxHead = CTX_COLS.map(k => {
+    const d = PAYWALL_ARMS_METRICS.find(x => x.k === k);
+    return `<th style="text-align:right;padding:5px 8px;border-bottom:1px solid #1a1a2e;font-weight:600">${esc(d.s || d.l)}</th>`;
+  }).join('');
+  const ctxRows = ctx.map(({ reason, row }) => {
+    const cells = CTX_COLS.map(k => {
+      const m = row && row.metrics ? row.metrics[k] : null;
+      const v = !m || !Number(m.n) ? '—'
+        : k === 'assigned' ? String(Number(m.n))
+        : `${Number(m.x)} / ${Number(m.n)} · ${paywallArmsPct(m.pct)}%`;
+      return `<td style="text-align:right;padding:6px 8px;border-bottom:1px solid #111120;white-space:nowrap">${v}</td>`;
+    }).join('');
+    return `<tr><td style="padding:6px 8px;border-bottom:1px solid #111120;white-space:nowrap">${esc(PAYWALL_ARMS_CONTEXT[reason])}
+      <span style="font-family:var(--mono);font-size:9.5px;color:#4a4a6a">${esc(reason)}</span></td>${cells}</tr>`;
+  }).join('');
+
+  const giaPremium = [
+    ['A', A], ['B', B],
+    ...ctx.map(c => [PAYWALL_ARMS_CONTEXT[c.reason].replace('B · ', ''), c.row]),
+  ].map(([l, r]) => `${esc(l)} ${Number((r && r.was_premium) || 0)}`).join(' · ');
+
+  // Gruppo A: niente parte gratis, quindi l'allenamento entro 24 h non dice niente. Lì contano
+  // quanti toccano «No, esco» e quanti non tornano, contro quanti pagano. Una nota, non un allarme.
+  const mA = k => (A && A.metrics && A.metrics[k]) || null;
+  const nA = Number((mA('assigned') || {}).n || 0);
+  const quota = (x, n) => `${x} / ${n} · ${paywallArmsPct(n ? 100 * x / n : null)}%`;
+  const notaA = nA ? `
+        <div style="margin-top:4px">
+          <strong style="color:var(--muted)">Gruppo A:</strong> qui l'allenamento entro 24 h non dice niente (non c'è una parte gratis).
+          Contano «No, esco» ${quota(Number((mA('exit_tapped') || {}).x || 0), nA)}
+          e i non tornati il giorno dopo ${quota(nA - Number((mA('returned_d1') || {}).x || 0), nA)},
+          contro i paganti ${quota(Number((mA('payers') || {}).x || 0), nA)}.
+        </div>` : '';
+
+  return `
+    <div class="card" style="margin-bottom:16px">
+      ${head}
+      <div class="pwa-grid">
+        <div class="pwa-corner"></div>
+        ${armHead('A', 'blocco subito', 'onboarding_no_x a fine onboarding, niente gratis: il muro risale a ogni apertura', '#f472b6')}
+        ${armHead('B', 'X poi muro', 'onboarding_x con la ×, poi tutorial + un allenamento da 5 minuti, due pasti; al 3° free_limit_no_x', '#60a5fa')}
+        ${lines}
+      </div>
+
+      <div style="margin-top:16px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#5a5a7a;margin-bottom:6px">Fuori dal confronto · regole del gruppo B, ma non a sorte</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;min-width:720px;font-size:11px;border-collapse:collapse;color:var(--muted)">
+            <thead><tr style="color:#5a5a7a;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em">
+              <th style="text-align:left;padding:5px 8px;border-bottom:1px solid #1a1a2e;font-weight:600">Gruppo</th>${ctxHead}
+            </tr></thead>
+            <tbody>${ctxRows}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;font-size:10.5px;color:#5a5a7a;line-height:1.65">
+        <div>Già premium quando hanno ricevuto il gruppo, e per questo fuori dalle percentuali: ${giaPremium}.</div>
+        <div style="margin-top:4px">
+          <strong style="color:var(--muted)">Soldi:</strong> prove e paganti vengono da <code style="font-family:var(--mono)">play_purchases</code>
+          e <code style="font-family:var(--mono)">apple_purchases</code>, non dagli eventi, con le regole di «Gli acquisti del periodo»:
+          contano solo gli acquisti comparsi dopo l'assegnazione del gruppo (le rivalidazioni di un abbonamento vecchio sono escluse),
+          cercati anche sugli altri account dello stesso telefono. Pagante = un addebito vero, non una prova.
+        </div>
+        <div style="margin-top:4px">
+          I paganti di chi è entrato da poco non sono finiti: chi è <strong style="color:var(--muted)">in prova adesso</strong> può ancora pagare.
+          Il confronto vero dei soldi è sulla riga dei 35 giorni (prova e primo rinnovo passati).
+        </div>
+        <div style="margin-top:4px;color:#d9c48a">
+          ⚠️ Guardia (gruppo B): se l'allenamento entro 24 h scende sotto il 30%, la X all'inizio sta frenando l'attivazione.
+        </div>
+        ${notaA}
+      </div>
     </div>`;
 }
 
@@ -11447,6 +11700,7 @@ function attachEvents() {
       if (state.page === 'premium'    && !state.premiumData   && !state.premiumLoading)   fetchPremium();
       if (state.page === 'premium'    && !state.creativesAudit && !state.creativesAuditLoading) fetchCreativesAudit();
       if (state.page === 'premium'    && !state.purchases      && !state.purchasesLoading)      fetchPaywallPurchases();
+      if (state.page === 'premium'    && !state.paywallArms    && !state.paywallArmsLoading)    fetchPaywallArms();
       if (state.page === 'ai-coach') {
         // pagina AI Coach: i suoi dati li carica kpi-ai-coach.js
         aicEnter();
@@ -12885,6 +13139,7 @@ function attachEvents() {
     fetchPremium();
     fetchCreativesAudit();
     fetchPaywallPurchases();
+    fetchPaywallArms();
   });
   document.getElementById('premium-apply')?.addEventListener('click', () => {
     const from   = document.getElementById('premium-from')?.value;
@@ -12900,6 +13155,7 @@ function attachEvents() {
     fetchPremium();
     fetchCreativesAudit();
     fetchPaywallPurchases();
+    fetchPaywallArms();
   });
   document.getElementById('premium-refresh')?.addEventListener('click', () => {
     // vista in cache: i numeri restano a schermo mentre il database ricalcola
@@ -12907,6 +13163,7 @@ function attachEvents() {
     fetchPremium({ force: true });
     fetchCreativesAudit();
     fetchPaywallPurchases();
+    fetchPaywallArms();
   });
   // Catalogo creatività: apri/chiudi la colonna del percorso, e scegli quale gesto vedere in
   // percentuale di fianco al nome.

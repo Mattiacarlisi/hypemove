@@ -38,7 +38,7 @@
 .asp-tab td b { display: block; color: #fff; font-weight: 800; font-size: 13px; }
 .asp-tab td span { color: #6b7280; font-size: 11px; }
 .asp-tab tr.prov td b { color: #9ca3af; }
-.asp-tip { position: fixed; z-index: 500; pointer-events: none; display: none; min-width: 180px; padding: 10px 12px; border-radius: 12px;
+.asp-tip { position: fixed; z-index: 500; pointer-events: none; display: none; min-width: 180px; max-width: 280px; padding: 10px 12px; border-radius: 12px;
   background: #262d45; border: 1.5px solid #4361ee; box-shadow: 0 3px 0 #050608; font: 600 12px/1.45 Nunito, sans-serif; color: #fff; }
 .asp-tip b { font-weight: 800; }
 .asp-tip .m { color: #9ca3af; }

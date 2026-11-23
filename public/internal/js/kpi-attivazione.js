@@ -17,7 +17,9 @@ const ACT = {
   GRUPPI: [
     { t: 'La prima volta', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del primo allenamento.', passi: [1, 2, 3, 4], r: 'Ogni passo su chi ha fatto il passo prima: Workout details sul primo avvio, Avvia su Workout details, Finisce su Avvia, 1° workout su Finisce. Può superare il 100% perché i passi non sono in cascata: quel punto resta sul bordo in alto, con il suo numero.' },
     { t: 'Tornano ad aprire l\'app', d: 'Quante aprono di nuovo l\'app dopo almeno 30 minuti senza usarla.', passi: [5, 7, 9], r: 'Il 2° avvio sul primo avvio, il 3° sul 2°, il 4° sul 3°.' },
-    { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10], r: 'Il 2° workout sul 1°, il 3° sul 2°, il 4° sul 3°.' },
+    { t: 'Rifanno l\'allenamento', d: 'Quante finiscono un secondo, un terzo, un quarto allenamento.', passi: [6, 8, 10], r: 'Il 2° workout sul 1°, il 3° sul 2°, il 4° sul 3°.',
+      // sprint 23: i passi restano gli stessi eventi, cambia cosa c'è dietro (solo testo, i conti non cambiano)
+      nota: 'Da S23 il 2° workout è l\'allenamento da 5 minuti (prima: «Primi passi!», 1 minuto); dal 3° in poi serve l\'abbonamento.', notaDal: '2026-11-23' },
     { t: 'Cibo', d: 'Su 100 persone che aprono l\'app per la prima volta, quante arrivano a ogni passo del cibo. Gli sprint iniziati prima che esistesse l\'evento non hanno il punto.', passi: [11, 12, 13, 14, 15, 16, 17, 18],
       r: 'Entra in Cibo sul primo avvio, la fotocamera su chi entra, la foto su chi apre la fotocamera, il 1° pasto su chi entra in Cibo (non sulla foto: quasi tutti salvano scrivendo), poi ogni pasto sul precedente.' },
     { t: 'Attivazione', d: 'Su 100 persone che aprono l\'app per la prima volta, quante la riaprono in ognuno dei sette giorni dopo. I giorni sono di calendario: chi installa lunedì ha il 1 giorno martedì e il 7 giorno il lunedì dopo.', passi: [19, 20, 21, 22, 23, 24, 25],
@@ -45,7 +47,7 @@ ACT.sprints = () => {
   return (ACT.rows || []).map(r => {
     const days = Math.floor((Date.parse(today) - Date.parse(r.fine)) / 864e5);
     return { k: 'S' + r.numero, dal: ACT.dm(r.inizio), al: ACT.dm(r.fine), v: ACT.PASSI.map((_, j) => r.v[j] == null || (ACT.FROM[j] && r.inizio < ACT.FROM[j]) ? null : r.v[j]),
-      from: j => ACT.FROM[j] ? ACT.dm(ACT.FROM[j]) : '', coorte: r.v[0],
+      from: j => ACT.FROM[j] ? ACT.dm(ACT.FROM[j]) : '', coorte: r.v[0], inizio: r.inizio,
       inCorso: r.fine >= today, prov: days < ACT.RECENT_DAYS };
   });
 };
@@ -166,7 +168,8 @@ function pageActivationSprint() {
       const max = ACT.mode === 'rel' ? Math.min(100, top) : top;
       return `<section class="sa-card asp-g"><h2 class="sa-title">${g.t}</h2><p class="asp-gd">${ACT.mode === 'rel' ? g.r : g.d} Le strisce di questo riquadro hanno la stessa scala, da 0 a ${max}%.</p>`
         + g.passi.map(p => `<div class="asp-row"><div class="asp-lab"><b>${esc(ACT.PASSI[p])}</b><span>${esc(ACT.EVENTI[p])}</span></div><div class="asp-plot" data-p="${p}" data-max="${max}"></div></div>`).join('')
-        + '<div class="asp-row asp-xrow"><div class="asp-lab"></div><div class="asp-plot asp-xticks"></div></div></section>';
+        + '<div class="asp-row asp-xrow"><div class="asp-lab"></div><div class="asp-plot asp-xticks"></div></div>'
+        + (g.nota ? `<p class="asp-gd" style="margin:4px 0 12px;font-size:12px;color:#6b7280">${esc(g.nota)}</p>` : '') + '</section>';
     }).join('');
     body = `<div class="asp-sticky"><div class="asp-row asp-trow"><div class="asp-lab"><span>Sprint · persone al primo avvio</span></div><div class="asp-plot asp-ticks"></div></div></div>
       ${groups}
@@ -198,10 +201,13 @@ function actDraw() {
       const i = +r.dataset.i, sp = S[i], p = +r.closest('.asp-plot').dataset.p;
       off();
       document.querySelectorAll(`.asp-col[data-i="${i}"]`).forEach(c => c.classList.add('on'));
-      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: ${sp.v[p] == null ? `non misurato: l\'evento esiste dal ${sp.from(p)}` : `<b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' && p in ACT.PREV ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`}`;
+      // la nota del riquadro (es. il 2° workout da S23) si ripete nel riquadro al tocco, solo sugli sprint dal suo giorno
+      const g = ACT.GRUPPI.find(x => x.nota && x.passi.includes(p) && sp.inizio >= x.notaDal);
+      tip.innerHTML = `<b>${sp.k}</b> <span class="m">${sp.dal} → ${sp.al}${sp.inCorso ? ', in corso' : ''}</span><br>${esc(ACT.PASSI[p])}: ${sp.v[p] == null ? `non misurato: l\'evento esiste dal ${sp.from(p)}` : `<b>${sp.v[p]}</b> su ${ACT.base(sp, p)}${ACT.mode === 'rel' && p in ACT.PREV ? ' (' + esc(ACT.PASSI[ACT.PREV[p]]) + ')' : ''} · <b>${ACT.fp(sp.v[p], ACT.base(sp, p))}</b>`}`
+        + (g ? `<br><span class="m">${esc(g.nota)}</span>` : '');
       tip.style.display = 'block';
     });
-    r.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - 240) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
+    r.addEventListener('mousemove', e => { tip.style.left = Math.min(e.clientX + 14, innerWidth - 290) + 'px'; tip.style.top = (e.clientY + 14) + 'px'; });
     r.addEventListener('mouseleave', off);
   });
 }
