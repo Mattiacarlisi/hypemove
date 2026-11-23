@@ -8739,170 +8739,16 @@ function paywallArmsOverlap(a, b) {
   return Number(a.ci_lo) <= Number(b.ci_hi) && Number(b.ci_lo) <= Number(a.ci_hi);
 }
 
-// ── La parte alta: la risposta prima dei numeri ──────────────────────────────
-// Chi legge questo riquadro vuole sapere due cose: chi paga di più, e quando lo sapremo. Quindi
-// in cima una frase di verdetto, i paganti su 1.000 per gruppo con l'intervallo disegnato e due
-// linee di riferimento, l'avanzamento verso le persone che servono, la regola di sicurezza.
-// La tabella completa resta sotto, chiusa in «Vedi tutti i numeri».
-
-// Le due linee del grafico, su 1.000 persone. 8 = sola X a fine onboarding, sprint 14-19
-// (13 paganti su 1.715 prime aperture, misurato il 22/11/2026). 16 = pareggio con la pubblicità,
-// stima del 30/10/2026: va ricalcolato quando cambia il costo per installazione.
-const PAYWALL_ARMS_REF = { soloX: 8, pareggio: 16 };
-// Persone per gruppo: 500 bastano per vedere 15 contro 45 su 1.000, 1.500 servono per 15 contro
-// 30 (due proporzioni, 95% e potenza 80%). Con la pubblicità accesa entrano ~25 persone per gruppo
-// al giorno (60-80 prime aperture, 7 su 10 finiscono l'onboarding); spenta, 2 o 3.
-const PAYWALL_ARMS_TARGET = { grande: 500, piccola: 1500, alGiorno: 25 };
-
-// Il database manda percentuali 0–100; qui si parla su 1.000 persone.
-const pwaPer1000 = v => (v == null || isNaN(Number(v))) ? null : Number(v) * 10;
-const pwaFmt = v => v == null ? '—' : Math.round(v).toLocaleString('it-IT');
-const pwaMetric = (row, k) => (row && row.metrics && row.metrics[k]) || null;
-
-// La frase in cima. Si giudica sui paganti finora; se qualcuno è ancora in prova, lo si dice.
-function paywallArmsVerdict(ma, mb, inTrial) {
-  if (!ma || !mb || !Number(ma.n) || !Number(mb.n)) {
-    return { cls: 'wait', chip: 'In attesa', title: 'Manca ancora uno dei due gruppi',
-      text: 'Per confrontare servono persone in tutti e due i gruppi nel periodo scelto.' };
-  }
-  const a = pwaPer1000(ma.pct), b = pwaPer1000(mb.pct);
-  const prov = inTrial > 0
-    ? ` ${inTrial} ${inTrial === 1 ? 'persona è ancora in prova e può' : 'persone sono ancora in prova e possono'} ancora pagare: il numero è provvisorio.`
-    : '';
-  if (paywallArmsOverlap(ma, mb)) {
-    return { cls: 'open', chip: 'Ancora nessun vincitore',
-      title: `A ${pwaFmt(a)}, B ${pwaFmt(b)} su 1.000: troppo presto per dirlo`,
-      text: `Con ${pwaFmt(Number(ma.n))} e ${pwaFmt(Number(mb.n))} persone le due barre si toccano: la differenza può essere solo il caso.${prov}` };
-  }
-  const w = a > b ? 'A' : 'B';
-  return { cls: 'win', chip: `Avanti ${w}`,
-    title: `${w} paga di più: ${pwaFmt(Math.max(a, b))} contro ${pwaFmt(Math.min(a, b))} su 1.000`,
-    text: `Le due barre non si toccano: la differenza non è il caso. Prima di decidere guarda la regola di sicurezza qui sotto.${prov}` };
-}
-
-// Il grafico: un punto (il valore) e una barra (l'intervallo al 95%) per gruppo, su 1.000.
-function paywallArmsChart(ma, mb) {
-  const W = 480, H = 128, L = 24, R = 56;
-  const his = [ma, mb].filter(m => m && Number(m.n)).map(m => pwaPer1000(m.ci_hi) || 0);
-  const max = Math.max(40, Math.ceil(Math.max(0, ...his) / 10) * 10);
-  const step = max > 80 ? 20 : 10;
-  const x = v => L + (Math.min(v, max) / max) * (W - L - R);
-  let g = '';
-  for (let t = 0; t <= max; t += step) {
-    g += `<line x1="${x(t)}" x2="${x(t)}" y1="20" y2="${H - 26}" stroke="#1d1d2c" stroke-width="1"/>`;
-    g += `<text x="${x(t)}" y="${H - 10}" text-anchor="middle" font-size="13" fill="#5a5a7a">${t}</text>`;
-  }
-  const ref = (v, lab, anchor) => `
-    <line x1="${x(v)}" x2="${x(v)}" y1="16" y2="${H - 26}" stroke="#7070a0" stroke-width="1.2" stroke-dasharray="4 4"/>
-    <text x="${x(v) + (anchor === 'end' ? -5 : 5)}" y="12" text-anchor="${anchor}" font-size="13" fill="#8b8ba7">${lab}</text>`;
-  g += ref(PAYWALL_ARMS_REF.soloX, `solo X: ${PAYWALL_ARMS_REF.soloX}`, 'end');
-  g += ref(PAYWALL_ARMS_REF.pareggio, `pareggio: ${PAYWALL_ARMS_REF.pareggio}`, 'start');
-  const row = (m, y, col, lab) => {
-    const head = `<text x="2" y="${y + 4}" font-size="15" font-weight="700" fill="${col}">${lab}</text>`;
-    if (!m || !Number(m.n)) return head + `<text x="${x(0) + 6}" y="${y + 4}" font-size="13" fill="#5a5a7a">nessuno ancora</text>`;
-    const v = pwaPer1000(m.pct), lo = pwaPer1000(m.ci_lo), hi = pwaPer1000(m.ci_hi);
-    return head + `
-      <line x1="${x(lo)}" x2="${x(hi)}" y1="${y}" y2="${y}" stroke="${col}" stroke-width="10" stroke-linecap="round" opacity=".3"/>
-      <circle cx="${x(v)}" cy="${y}" r="6.5" fill="${col}"/>
-      <text x="${x(hi) + 10}" y="${y + 4}" font-size="13" fill="#8b8ba7">${pwaFmt(lo)}–${pwaFmt(hi)}</text>`;
-  };
-  g += row(ma, 44, '#f472b6', 'A') + row(mb, 80, '#60a5fa', 'B');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Paganti su 1.000 per gruppo, con intervallo al 95%">${g}</svg>`;
-}
-
-// Verdetto, numeri grandi, grafico, avanzamento, regola di sicurezza.
-function paywallArmsTop(A, B) {
-  const pa = pwaMetric(A, 'payers'), pb = pwaMetric(B, 'payers');
-  const inTrial = Number((pwaMetric(A, 'in_trial_now') || {}).x || 0) + Number((pwaMetric(B, 'in_trial_now') || {}).x || 0);
-  const v = paywallArmsVerdict(pa, pb, inTrial);
-
-  const big = (m, lettera, col) => {
-    const n = Number((m || {}).n || 0);
-    return `<div class="pwa-big">
-      <div class="pwa-big-v" style="color:${col}">${n ? pwaFmt(pwaPer1000(m.pct)) : '—'}</div>
-      <div class="pwa-big-l">pagano su 1.000 nel gruppo ${lettera}${n ? ` · ${Number(m.x)} su ${pwaFmt(n)}` : ''}</div>
-    </div>`;
-  };
-
-  // Il dato definitivo: paganti fra chi è nel gruppo da almeno 35 giorni (prova e rinnovo passati).
-  const a35 = pwaMetric(A, 'payers_35d'), b35 = pwaMetric(B, 'payers_35d');
-  const def = (m, l) => m && Number(m.n)
-    ? `${l} <strong>${pwaFmt(pwaPer1000(m.pct))}</strong> su 1.000 (${Number(m.x)} su ${pwaFmt(Number(m.n))})`
-    : `${l} nessuno ancora`;
-  const maturo = (a35 && Number(a35.n)) || (b35 && Number(b35.n))
-    ? `Definitivo, fra chi è nel gruppo da almeno 35 giorni: ${def(a35, 'A')} · ${def(b35, 'B')}.`
-    : 'Il dato definitivo, cioè chi è nel gruppo da almeno 35 giorni e ha finito la prova, arriva 35 giorni dopo i primi ingressi.';
-
-  // Avanzamento verso 500 e 1.500 persone per gruppo.
-  const nA = Number((pwaMetric(A, 'assigned') || {}).n || 0), nB = Number((pwaMetric(B, 'assigned') || {}).n || 0);
-  const T = PAYWALL_ARMS_TARGET;
-  const bar = (n, lettera, col) => `
-    <div class="pwa-prow">
-      <span class="pwa-letter" style="background:${col}">${lettera}</span>
-      <div class="pwa-track"><i style="width:${Math.min(100, n / T.piccola * 100)}%;background:${col}"></i><span class="pwa-mk" style="left:${T.grande / T.piccola * 100}%"></span></div>
-      <span class="pwa-pn">${pwaFmt(n)}</span>
-    </div>`;
-  const nMin = Math.min(nA, nB);
-  const giorni = target => Math.ceil((target - nMin) / T.alGiorno);
-  const quando = nMin < T.grande
-    ? `Per una differenza grande (15 contro 45 su 1.000) servono ${pwaFmt(T.grande)} persone per gruppo: con la pubblicità accesa mancano circa <strong>${giorni(T.grande)} giorni</strong>.`
-    : nMin < T.piccola
-      ? `Le persone bastano per una differenza grande. Per una piccola (15 contro 30 su 1.000) ne servono ${pwaFmt(T.piccola)}: mancano circa <strong>${giorni(T.piccola)} giorni</strong> di pubblicità.`
-      : 'Le persone bastano anche per una differenza piccola.';
-
-  // Regola di sicurezza: vale solo per B (A non ha una parte gratis). Per A: quanti escono.
-  const actB = pwaMetric(B, 'activated_24h'), exA = pwaMetric(A, 'exit_tapped');
-  const sogliaB = (PAYWALL_ARMS_METRICS.find(d => d.k === 'activated_24h') || {}).guard || 30;
-  const bOk = actB && Number(actB.n) ? Number(actB.pct) >= sogliaB : null;
-  const guardB = `<div class="pwa-gbox">
-      <div class="pwa-glab"><span class="pwa-letter" style="background:#60a5fa">B</span>Esercizio entro 24 ore</div>
-      <div class="pwa-gv">${actB && Number(actB.n) ? `${pwaFmt(pwaPer1000(actB.pct))} <small>su 1.000</small>` : '—'}</div>
-      <span class="pwa-state ${bOk === null ? 'na' : bOk ? 'ok' : 'bad'}">${bOk === null ? 'nessuno ancora'
-        : bOk ? `sopra ${sogliaB * 10}: va bene` : `sotto ${sogliaB * 10}: la X all'inizio sta frenando`}</span>
-    </div>`;
-  const guardA = `<div class="pwa-gbox">
-      <div class="pwa-glab"><span class="pwa-letter" style="background:#f472b6">A</span>Toccano «No, esco»</div>
-      <div class="pwa-gv">${exA && Number(exA.n) ? `${pwaFmt(pwaPer1000(exA.pct))} <small>su 1.000</small>` : '—'}</div>
-      <span class="pwa-gnote">Quanti manda via il blocco subito. Qui non c'è soglia: in A senza abbonamento non ci si allena.</span>
-    </div>`;
-
-  return `
-    <div class="pwa-groups">
-      <div class="pwa-group" style="--c:#f472b6"><strong><span class="pwa-letter" style="background:#f472b6">A</span>Blocco subito</strong>Paywall senza X a fine onboarding. Senza abbonamento l'app si ferma.</div>
-      <div class="pwa-group" style="--c:#60a5fa"><strong><span class="pwa-letter" style="background:#60a5fa">B</span>X, poi blocco</strong>Paywall con la X. Gratis 2 allenamenti e 2 pasti, al terzo il paywall senza X.</div>
-    </div>
-
-    <div class="pwa-sec">
-      <div class="pwa-eyebrow">Chi sta vincendo</div>
-      <span class="pwa-chip ${v.cls}">${esc(v.chip)}</span>
-      <div class="pwa-title">${esc(v.title)}</div>
-      <div class="pwa-text">${esc(v.text)}</div>
-      <div class="pwa-bigrow">${big(pa, 'A', '#f472b6')}${big(pb, 'B', '#60a5fa')}</div>
-      <div class="pwa-chart">${paywallArmsChart(pa, pb)}</div>
-      <div class="pwa-note">Il punto è il valore di oggi, la barra quanto potrebbe valere davvero con queste persone: se le due barre si toccano, la differenza può essere il caso. ${maturo}</div>
-    </div>
-
-    <div class="pwa-sec">
-      <div class="pwa-eyebrow">Quando potremo dirlo · persone per gruppo</div>
-      <div class="pwa-scale"><span></span><div><b style="left:0;transform:none">0</b><b style="left:${T.grande / T.piccola * 100}%">${pwaFmt(T.grande)}</b><b style="left:100%;transform:translateX(-100%)">${pwaFmt(T.piccola)}</b></div><span></span></div>
-      ${bar(nA, 'A', '#f472b6')}${bar(nB, 'B', '#60a5fa')}
-      <div class="pwa-note">${quando} Poi si aspettano 35 giorni, perché chi è in prova possa pagare.</div>
-    </div>
-
-    <div class="pwa-sec">
-      <div class="pwa-eyebrow">Regola di sicurezza</div>
-      <div class="pwa-text">Il blocco non deve uccidere l'uso: nel gruppo B almeno ${sogliaB * 10} su 1.000 devono fare un esercizio entro 24 ore (nello sprint 22 erano 430). Sotto, la X all'inizio si toglie.</div>
-      <div class="pwa-guard">${guardB}${guardA}</div>
-    </div>`;
-}
-
 function premiumPaywallArmsCard() {
   const busy = state.paywallArmsLoading && state.paywallArms;
   const head = `
-    <div style="margin-bottom:14px">
-      <div class="card-title" style="margin-bottom:3px">A/B del paywall · sprint 23${busy ? ' <span class="pulse" style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">aggiorno…</span>' : ''}</div>
-      <div style="font-size:12px;color:var(--muted);line-height:1.55">
-        Chi è entrato in un gruppo nel periodo scelto qui sopra. Si guarda una cosa sola: quanti pagano davvero, su 1.000 persone del gruppo.
+    <div style="margin-bottom:12px">
+      <div class="card-title" style="margin-bottom:3px">A/B paywall sprint 23 — blocco subito contro X poi muro${busy ? ' <span class="pulse" style="font-size:10px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">aggiorno…</span>' : ''}</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.55">
+        Chi ha ricevuto il gruppo <strong style="color:var(--fg)">nel periodo selezionato qui sopra</strong>, contando da quel momento.
+        Il gruppo si dà una volta sola, a fine onboarding. Nel confronto solo Android, 50/50 a sorte ·
+        le percentuali sono su chi non era già premium · tra parentesi l'intervallo di Wilson al 95%:
+        se i due si toccano, la differenza può essere solo il caso.
       </div>
     </div>`;
 
@@ -8926,11 +8772,7 @@ function premiumPaywallArmsCard() {
 
   if (!totale) {
     return `<div class="card" style="margin-bottom:16px">${head}
-      <div class="pwa-sec" style="border-top:none;padding-top:0">
-        <span class="pwa-chip wait">Non ancora partito</span>
-        <div class="pwa-title">Nessuno è ancora in un gruppo</div>
-        <div class="pwa-text">Il gruppo si dà a fine onboarding, con la nuova versione dell'app. Da quel giorno questo riquadro si riempie da solo.</div>
-      </div></div>`;
+      <div style="color:var(--muted);font-size:12px;padding:12px 0">Nessuno è ancora in un gruppo: il test parte con la build nuova (23/11/2026).</div></div>`;
   }
 
   const armHead = (lettera, nome, desc, col) => `
@@ -9008,10 +8850,6 @@ function premiumPaywallArmsCard() {
   return `
     <div class="card" style="margin-bottom:16px">
       ${head}
-      ${paywallArmsTop(A, B)}
-      <details class="pwa-more"${state.paywallArmsMore ? ' open' : ''} ontoggle="state.paywallArmsMore = this.open">
-      <summary>Vedi tutti i numeri</summary>
-      <div class="pwa-more-note">Ogni riga: persone su gruppo · percentuale · tra parentesi l'intervallo al 95% (Wilson). Percentuali su chi non era già abbonato quando è entrato nel gruppo. Nel confronto solo Android, 50 e 50 a sorte.</div>
       <div class="pwa-grid">
         <div class="pwa-corner"></div>
         ${armHead('A', 'blocco subito', 'onboarding_no_x a fine onboarding, niente gratis: il muro risale a ogni apertura', '#f472b6')}
@@ -9048,7 +8886,6 @@ function premiumPaywallArmsCard() {
         </div>
         ${notaA}
       </div>
-      </details>
     </div>`;
 }
 
