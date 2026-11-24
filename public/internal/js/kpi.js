@@ -3431,7 +3431,7 @@ function saShort(row, narrow) {
   return narrow ? 'S' + row.numero + word.slice(0, 1).toLowerCase() : ('S' + row.numero + ' ' + word.toLowerCase()).trim();
 }
 // «22» nella tabella sprint si legge «Sprint 22»
-function saName(r) { return /^s*d+s*$/.test(r.nome) ? 'Sprint ' + r.numero : String(r.nome); }
+function saName(r) { return /^\s*\d+\s*$/.test(r.nome) ? 'Sprint ' + r.numero : String(r.nome); }
 function saPaywall(r) { return r.base >= 10 && r.paywall / r.base >= SA_PAYWALL_SHARE; }
 function saPhase(row) {
   if (!row || row.base < SA_MIN_BASE) return null;
