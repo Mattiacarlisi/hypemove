@@ -275,9 +275,9 @@ const ONBOARDING_FUNNEL_STEPS = [
 ];
 
 const LS_OV             = 'hm_overview_keys';
-const LS_SA_SEL         = 'hm_sa_sprints_v1';   // sprint scelti nella card «Attivazione per sprint» (null = ultimi 6)
-const LS_SA_PHASES      = 'hm_sa_phases_v1';    // fasce delle fasi sopra il grafico: 'on' | 'off'
-const LS_SA_COORTE      = 'hm_sa_coorte_v1';    // linea «dal primo avvio» (attivati su chi ha aperto l'app): 'on' | 'off'
+const LS_SA_SEL         = 'hm_sa_sprints_v2';   // sprint scelti nella card «Attivazione per sprint» (null = tutti i principali)
+const LS_SA_PHASES      = 'hm_sa_phases_v2';    // fascia dell'atterraggio sopra il grafico: 'on' | 'off'
+const LS_SA_WIN         = 'hm_sa_win_v1';       // finestra dal primo avvio: 'd1' (24 ore) | 'd14' (14 giorni)
 const LS_FUN            = 'hm_funnel_cfg_v2';
 const LS_FUNNEL_DATES   = 'hm_funnel_dates';
 const LS_META_TOKEN     = 'hm_meta_token';
@@ -575,7 +575,7 @@ let state = {
   // analizzato (null = sprint in corso), scoreRef = 'best' o id dello sprint con cui confrontarlo,
   // scoreMenu = menu aperto ('sel' | 'ref' | null).
   scoreboard: null, scoreboardError: null, scoreboardCache: null, scoreSel: null, scoreRef: 'best', scoreMenu: null,
-  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'on') !== 'off', saCoorte: loadLS(LS_SA_COORTE, 'off') === 'on', saLegend: false, saMenu: false, saW: 800,
+  sa: null, saError: null, saCache: null, saForce: false, saSel: loadLS(LS_SA_SEL, null), saPhases: loadLS(LS_SA_PHASES, 'off') === 'on', saWin: loadLS(LS_SA_WIN, 'd1') === 'd14' ? 'd14' : 'd1', saPick: null, saScroll: null, saLegend: false, saMenu: false, saW: 800,
   // Pagina «Goal» (kpi_goal_board, letta dalla cache). goals = kpi_settings.goals, uguale per tutti gli operatori;
   // goalEdit = { k, text, saving, fresh } mentre un obiettivo è in modifica.
   goalBoard: null, goalBoardError: null, goalCache: null, goalLoading: false, goalForce: false,
@@ -1968,6 +1968,7 @@ async function fetchSprintActivation(force) {
     if (error) throw error;
     if (data && Array.isArray(data.data)) {
       state.sa = data.data; state.saError = null;
+      if (!data.data.some(r => r.d1)) force = true;   // copia di prima del 24/11/2026: senza i numeri nuovi
       state.saCache = { computedAt: data.computed_at, pending: !!(force || data.stale), failed: kcFailed(data), fresh: false };
       render();
       if (!state.saCache.pending) return;
@@ -3398,42 +3399,49 @@ function attachGoal() {
 }
 
 // ── CARD «ATTIVAZIONE PER SPRINT» ───────────────────────────────────────
-// Per ogni sprint scelto, tre linee in % sulla stessa base: chi finisce l'onboarding ed entra in app (la prima
-// schermata dell'app, dopo l'eventuale paywall o registrazione). Attivati = allenamento finito O pasto salvato, una
-// persona conta una volta; premono Inizia; finiscono l'allenamento. Tutto entro 14 giorni dal primo avvio.
-// Numeri da kpi_sprint_activation (cache 'sprint_activation'/'all'), mai in diretta. Sopra il grafico due fasce
-// calcolate dai dati: se c'era il paywall a fine onboarding e su quale schermata si atterra per prima.
-// Dal 03/11/2026 il paywall a fine onboarding non c'è più (la v2 esce dopo ogni allenamento): la base non cambia —
-// /inizia emette ancora onboarding_end_landing all'arrivo — e la fascia torna «Senza paywall» da sola quando le build
-// nuove sono la maggioranza dello sprint, come negli sprint 11-12.
-const SA_MIN_BASE = 30;         // sotto: punto vuoto e niente etichette (regola dei grafici: niente curve su pochi dati)
+// Per ogni sprint scelto, quattro linee in % su UNA base: chi apre l'app per la prima volta (la coorte del Funnel).
+// Attivati = un esercizio completato O un pasto salvato, una persona conta una volta; avviano un esercizio; finiscono un
+// allenamento intero; solo cibo. Finestra uguale per tutti dal primo avvio: 24 ore (default) o 14 giorni.
+// Dal 24/11/2026 (Mattia): prima la base era chi entra in app e l'attivato era workout_complete, che dallo sprint 22
+// (allenamenti a pezzi) non scatta più. Numeri da kpi_sprint_activation (cache 'sprint_activation'/'all'), voci d1 e d14,
+// mai in diretta: le definizioni esatte stanno in testa a rpc/kpi_sprint_activation.sql.
+const SA_MIN_BASE = 30;         // sotto: lo sprint resta sull'asse ma senza punti (niente percentuali su pochi dati)
+const SA_SMALL_BASE = 100;      // sotto: punto vuoto
 const SA_PAYWALL_SHARE = 0.5;    // dalla metà della base in su che ha visto il paywall → «Paywall»
 const SA_LANDING_SHARE = 0.7;    // una schermata d'arrivo vale per lo sprint se ci atterra almeno il 70%
-const SA_DEFAULT_N = 6;          // sprint accesi di default: gli ultimi sei principali
-// coo = attivati su chi ha aperto l'app (tasto «Dal primo avvio», spento di default)
-const SA_COL = { att: '#ffffff', ini: '#9ca3af', fin: '#4361ee', coo: '#fb8b04' };
+const SA_DEFAULT_N = 6;          // scelta rapida «Ultimi 6»
+const SA_COL = { att: '#ffffff', avvia: '#a78bfa', intero: '#34d399', cibo: '#fb8b04' };
+const SA_WIN = { d1: '24 ore', d14: '14 giorni' };
+const SA_FOOD_FROM = '2026-09-26';   // la linea del cibo parte dallo sprint 14, come nell'analisi del 21/11
+const SA_NOTE = { 7: 'tutorial', 22: 'tutorial', 23: 'tutorial' };   // sprint col tutorial
 
 // Sprint 1 e 2 non hanno first_open: non si possono scegliere.
 function saSelectable(rows) { return rows.filter(r => r.coorte > 0); }
-function saDefaultSel(rows) { return rows.filter(r => r.principale && r.coorte > 0).slice(-SA_DEFAULT_N).map(r => r.id); }
-function saPct(n, base) { return base > 0 ? Math.round(n * 100 / base) : null; }
-// «S12», e per i sotto-sprint la prima parola dopo il numero: «S12 test», «S15 post», «S16 uomini».
+function saDefaultSel(rows) { return rows.filter(r => r.principale && r.coorte > 0).map(r => r.id); }
+function saPct1(n, base) { return base > 0 ? (n * 100 / base).toFixed(1).replace('.', ',') + '%' : '—'; }
+function saNum(n) { return Number(n || 0).toLocaleString('it-IT'); }
+function saM(r) { return (r && r[state.saWin]) || {}; }
+// i numeri possono ancora salire finché l'ultimo arrivato non ha vissuto tutta la finestra
+function saProv(r) { return (r.age_hours != null ? r.age_hours : r.age_days * 24) < (state.saWin === 'd14' ? 336 : 24); }
+// «S12», e per i sotto-sprint la prima parola dopo il numero: «S12 test», «S15 post», «S16 uomini» (stretto: «S12t»).
 function saShort(row, narrow) {
   if (row.numero == null) return String(row.nome).slice(0, 8);
-  if (row.principale || narrow) return 'S' + row.numero;
+  if (row.principale) return 'S' + row.numero;
   const word = String(row.nome).replace(/^\D*\d+\s*[-–·:]?\s*/, '').trim().split(/\s+/)[0] || '';
-  return ('S' + row.numero + ' ' + word.toLowerCase()).trim();
+  return narrow ? 'S' + row.numero + word.slice(0, 1).toLowerCase() : ('S' + row.numero + ' ' + word.toLowerCase()).trim();
 }
+// «22» nella tabella sprint si legge «Sprint 22»
+function saName(r) { return /^s*d+s*$/.test(r.nome) ? 'Sprint ' + r.numero : String(r.nome); }
+function saPaywall(r) { return r.base >= 10 && r.paywall / r.base >= SA_PAYWALL_SHARE; }
 function saPhase(row) {
   if (!row || row.base < SA_MIN_BASE) return null;
-  const paywall = row.paywall / row.base >= SA_PAYWALL_SHARE ? 'Paywall' : 'Senza paywall';
   const l = row.landing || {}, tot = (l.home || 0) + (l.detail || 0) + (l.cibo || 0);
   let landing = 'Misto';
   if (tot > 0) {
     const [name, n] = [['Home', l.home || 0], ['Dettaglio', l.detail || 0], ['Cibo', l.cibo || 0]].sort((a, b) => b[1] - a[1])[0];
     if (n / tot >= SA_LANDING_SHARE) landing = name;
   }
-  return { paywall, landing };
+  return { landing };
 }
 // Sprint vicini con la stessa etichetta condividono la fascia; uno sprint senza fase la spezza.
 function saBands(phases, key) {
@@ -3446,131 +3454,125 @@ function saBands(phases, key) {
   });
   return out;
 }
-// Dove va l'etichetta di ogni valore: Inizia sopra, finiti sotto, attivati sopra o di lato se è vicino a Inizia.
-function saLabelSides(v) {
-  const s = { ini: 'up', fin: 'down', att: 'up' };
-  if (v.fin > v.ini) { s.fin = 'up'; s.ini = 'down'; }
-  if (Math.abs(v.att - v.ini) < 6) s.att = 'right';
-  // dal primo avvio: sotto i finiti se c'è spazio, sopra se li supera, a sinistra quando è troppo vicina
-  if (v.coo != null) {
-    if (v.coo >= v.fin) s.coo = Math.abs(v.att - v.coo) < 12 || v.coo - v.fin < 6 ? 'left' : 'up';
-    else s.coo = v.fin - v.coo >= 6 ? 'down' : 'left';
-  }
-  return s;
-}
 function saSelected(rows) {
   const ids = Array.isArray(state.saSel) ? state.saSel : saDefaultSel(rows);
   return ids.filter(id => rows.some(r => r.id === id && r.coorte > 0));
 }
+function saShown() {
+  const rows = state.sa || [], sel = saSelected(rows);
+  return rows.filter(r => sel.includes(r.id) && r.d1);
+}
 // Testo di una fascia: intero, accorciato o niente se non ci sta (12 px, circa 7 px per lettera).
 function saBandText(label, w) {
-  const SHORT = { 'Senza paywall': 'No paywall', Dettaglio: 'Dett.', Paywall: 'Pw', Home: 'Home', Cibo: 'Cibo', Misto: 'Misto' };
+  const SHORT = { Dettaglio: 'Dett.', Home: 'Home', Cibo: 'Cibo', Misto: 'Misto' };
   if (label.length * 7 + 10 <= w) return label;
   const s = SHORT[label] || '';
   return s && s.length * 7 + 10 <= w ? s : '';
 }
 
-function saChart(rows, W, phasesOn, coorteOn) {
-  const narrow = W < 600;
+function saChart(rows, W0, phasesOn) {
+  const narrow = W0 < 600;
+  // su schermi stretti ogni sprint tiene 46 px e il grafico scorre di lato
+  const n = rows ? rows.length : SA_DEFAULT_N, W = rows ? Math.max(W0, n * 46 + 60) : W0;
   const bandH = phasesOn && rows ? 22 : 0;
-  const top = bandH ? bandH * 2 + 26 : 14, plotH = narrow ? 200 : 260, xLab = narrow ? 28 : 44;
+  const top = bandH ? bandH + 34 : 26, plotH = narrow ? 230 : 300, xLab = 44;
   const H = top + plotH + xLab;
-  const x0 = narrow ? 38 : 46, x1 = W - 12;
-  const n = rows ? rows.length : SA_DEFAULT_N, step = (x1 - x0) / n;
-  const X = i => x0 + step * (i + 0.5);
-  const Y = v => top + plotH - v / 100 * plotH;
-  let s = `<svg class="sa-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Attivazione per sprint">`;
-  [0, 20, 40, 60, 80, 100].forEach(v => {
-    s += `<line class="pt-gh" x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}"/><text class="sa-tk" x="${x0 - 8}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
+  const x0 = 46, x1 = W - 12, step = (x1 - x0) / n;
+  const pts = (rows || []).map((r, i) => {
+    const m = saM(r), pc = v => v * 100 / r.coorte;
+    return { r, i, x: x0 + step * (i + 0.5), few: r.coorte < SA_MIN_BASE, small: r.coorte < SA_SMALL_BASE,
+      v: { att: pc(m.att), avvia: pc(m.avvia), intero: pc(m.intero), cibo: String(r.inizio) >= SA_FOOD_FROM ? pc(m.cibo) : null } };
   });
-  if (!rows) return s + '</svg>';
-  for (let i = 1; i < n; i++) s += `<line class="sa-sep" x1="${x0 + step * i}" x2="${x0 + step * i}" y1="${bandH ? 8 : top}" y2="${top + plotH}"/>`;
-  if (bandH) {
-    const ph = rows.map(saPhase);
-    [['paywall', 8], ['landing', 8 + bandH + 6]].forEach(([key, y]) => saBands(ph, key).forEach(b => {
-      const bx = x0 + step * b.from + 3, bw = step * (b.to - b.from + 1) - 6;
-      const t = saBandText(b.label, bw);
-      s += `<rect class="sa-band${key === 'paywall' && b.label === 'Paywall' ? ' sa-band-pw' : ''}" x="${bx}" y="${y}" width="${bw}" height="${bandH}" rx="6"/>`
-        + (t ? `<text class="sa-band-t" x="${bx + bw / 2}" y="${y + bandH / 2 + 4}" text-anchor="middle">${esc(t)}</text>` : '');
-    }));
+  const peak = Math.max(40, ...pts.filter(p => !p.few).flatMap(p => [p.v.att, p.v.avvia]));
+  const max = rows ? Math.min(100, Math.ceil((peak + 8) / 10) * 10) : 60;
+  const Y = v => top + plotH - Math.min(v, max) / max * plotH;
+  let s = `<svg class="sa-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Attivazione per sprint">`;
+  pts.forEach(p => { if (saPaywall(p.r)) s += `<rect class="sa-pw" x="${(x0 + step * p.i).toFixed(1)}" y="${top}" width="${(step + 0.5).toFixed(1)}" height="${plotH}"/>`; });
+  for (let v = 0; v <= max; v += 20) {
+    s += `<line class="pt-gh" x1="${x0}" x2="${x1}" y1="${Y(v)}" y2="${Y(v)}"/><text class="sa-tk" x="${x0 - 8}" y="${Y(v) + 4}" text-anchor="end">${v}%</text>`;
   }
-  const pts = rows.map((r, i) => ({
-    r, i, x: X(i), ok: r.base > 0, few: r.base < SA_MIN_BASE,
-    v: { att: saPct(r.attivati, r.base), ini: saPct(r.inizia, r.base), fin: saPct(r.finisce, r.base),
-         ...(coorteOn ? { coo: saPct(r.attivati_coorte || 0, r.coorte) } : {}) },
-  }));
-  const showLbl = step >= 40;
-  // Inizia e finiti prima, attivati per ultimi: se due valori coincidono si vede il bianco
-  (coorteOn ? ['coo', 'ini', 'fin', 'att'] : ['ini', 'fin', 'att']).forEach(k => {
+  if (!rows) return s + '</svg>';
+  if (bandH) saBands(rows.map(saPhase), 'landing').forEach(b => {
+    const bx = x0 + step * b.from + 3, bw = step * (b.to - b.from + 1) - 6, t = saBandText(b.label, bw);
+    s += `<rect class="sa-band" x="${bx}" y="2" width="${bw}" height="${bandH}" rx="6"/>`
+      + (t ? `<text class="sa-band-t" x="${bx + bw / 2}" y="${2 + bandH / 2 + 4}" text-anchor="middle">${esc(t)}</text>` : '');
+  });
+  const sel = pts.find(p => p.r.id === state.saPick);
+  if (sel) s += `<rect class="sa-pick" x="${(x0 + step * sel.i + 1).toFixed(1)}" y="${top}" width="${(step - 2).toFixed(1)}" height="${plotH + xLab - 4}" rx="8"/>`;
+  // attivati per ultimi: se due valori coincidono si vede il bianco
+  ['cibo', 'intero', 'avvia', 'att'].forEach(k => {
     let seg = [];
     const flush = () => { if (seg.length > 1) s += `<polyline class="sa-ln sa-ln-${k}" points="${seg.join(' ')}"/>`; seg = []; };
-    pts.forEach(p => { if (p.ok) seg.push(`${p.x.toFixed(1)},${Y(p.v[k]).toFixed(1)}`); else flush(); });
+    const ok = p => p.v[k] != null && !p.few;
+    pts.forEach(p => { if (ok(p)) seg.push(`${p.x.toFixed(1)},${Y(p.v[k]).toFixed(1)}`); else flush(); });
     flush();
-    pts.filter(p => p.ok).forEach(p => {
-      const y = Y(p.v[k]);
-      s += `<circle class="sa-pt${p.few ? ' sa-hollow' : ''}" cx="${p.x.toFixed(1)}" cy="${y.toFixed(1)}" r="${k === 'att' ? 5.5 : 4.5}" style="--c:${SA_COL[k]}"/>`;
-      if (!showLbl || p.few) return;
-      const side = saLabelSides(p.v)[k];
-      const lx = side === 'right' ? p.x + 7 : side === 'left' ? p.x - 7 : p.x, ly = side === 'up' ? y - 11 : side === 'down' ? y + 20 : y + 4;
-      s += `<text class="sa-lbl${k === 'att' ? ' sa-lbl-att' : ''}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${side === 'right' ? 'start' : side === 'left' ? 'end' : 'middle'}" fill="${SA_COL[k]}">${p.v[k]}%</text>`;
-    });
+    pts.filter(ok).forEach(p => { s += `<circle class="sa-pt${p.small ? ' sa-hollow' : ''}" cx="${p.x.toFixed(1)}" cy="${Y(p.v[k]).toFixed(1)}" r="${k === 'att' ? 5.5 : 4}" style="--c:${SA_COL[k]}"/>`; });
   });
   pts.forEach(p => {
-    const r = p.r, prov = r.age_days < 14;
-    s += `<text class="sa-tk sa-xl${prov ? ' sa-prov' : ''}" x="${p.x.toFixed(1)}" y="${top + plotH + 18}" text-anchor="middle">${esc(saShort(r, narrow || step < 70))}</text>`;
-    if (!narrow) s += `<text class="sa-tk sa-xd" x="${p.x.toFixed(1)}" y="${top + plotH + 34}" text-anchor="middle">${ddmm(String(r.inizio))}</text>`;
-    const tip = `${r.nome} · ${r.base.toLocaleString('it-IT')} ${r.base === 1 ? 'persona' : 'persone'}`
-      + (p.ok ? ` · attivati ${r.attivati} (${p.v.att}%) · Inizia ${r.inizia} (${p.v.ini}%) · finiscono ${r.finisce} (${p.v.fin}%)` : '')
-      + (coorteOn && p.ok ? ` · dal primo avvio ${r.attivati_coorte || 0} su ${r.coorte} (${p.v.coo}%)` : '')
-      + (p.few && p.ok ? ' · pochi dati' : '') + (prov ? ' · provvisorio' : '');
-    s += `<rect class="sa-hit" x="${(x0 + step * p.i).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${H}"><title>${esc(tip)}</title></rect>`;
+    const r = p.r, y = Y(p.v.att);
+    if (!p.few) {
+      s += `<text class="sa-lbl sa-lbl-att" x="${p.x.toFixed(1)}" y="${(y - 12).toFixed(1)}" text-anchor="middle">${Math.round(p.v.att)}%</text>`;
+      if (r.principale && SA_NOTE[r.numero]) s += `<text class="sa-note" x="${p.x.toFixed(1)}" y="${Math.max(12, y - 30).toFixed(1)}" text-anchor="middle">${SA_NOTE[r.numero]}</text>`;
+    }
+    s += `<text class="sa-tk sa-xl${saProv(r) ? ' sa-prov' : ''}" x="${p.x.toFixed(1)}" y="${top + plotH + 18}" text-anchor="middle">${esc(saShort(r, step < 70))}</text>`
+      + `<text class="sa-tk sa-xd" x="${p.x.toFixed(1)}" y="${top + plotH + 34}" text-anchor="middle">${ddmm(String(r.inizio))}</text>`
+      + `<rect class="sa-hit" data-sa-hit="${esc(r.id)}" data-x="${p.x.toFixed(1)}" tabindex="0" role="button" aria-label="${esc(saName(r))}: dettaglio" x="${(x0 + step * p.i).toFixed(1)}" y="0" width="${step.toFixed(1)}" height="${H}"/>`;
   });
   return s + '</svg>';
 }
 
-// Segno di una serie nella legenda: linea col pallino (tratteggiata per «dal primo avvio») o punto vuoto.
-function saSwatch(k) {
-  if (k === 'few') return `<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>`;
-  const dash = k === 'coo' ? ' stroke-dasharray="6 4"' : ' stroke-linecap="round"';
-  return `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${SA_COL[k]}" stroke-width="${k === 'att' ? 3 : 2.5}"${dash}/><circle cx="15" cy="7" r="4" fill="${SA_COL[k]}"/></svg>`;
-}
-// Sprint d'esempio della legenda completa: l'ultimo dei mostrati coi numeri chiusi (14 giorni) e abbastanza persone.
-function saExample(rows) {
-  return [...rows].reverse().find(r => r.age_days >= 14 && r.base >= SA_MIN_BASE) || null;
+const SA_LBL = { att: 'Attivati: esercizio o pasto', avvia: 'Avviano un esercizio', intero: 'Finiscono un allenamento intero', cibo: 'Solo cibo: pasto e nessun esercizio' };
+
+function saTip(r) {
+  const m = saM(r);
+  const row = k => `<div class="sa-tr"><i style="background:${SA_COL[k]}"></i><span>${SA_LBL[k].split(':')[0]}</span><b>${saPct1(m[k], r.coorte)}</b><em>${saNum(m[k])}</em></div>`;
+  return `<div class="sa-tt">${esc(saName(r))} · dal ${ddmm(String(r.inizio))}</div><div class="sa-ts">${saNum(r.coorte)} aprono l'app${saPaywall(r) ? ' · paywall' : ''}${saProv(r) ? ' · provvisorio' : ''}</div>`
+    + ['att', 'avvia', 'intero'].map(row).join('') + (String(r.inizio) >= SA_FOOD_FROM ? row('cibo') : '') + '<div class="sa-ts sa-tf">Clicca per il dettaglio</div>';
 }
 
-// Legenda: la riga corta, con la freccia che apre sotto la legenda completa (cosa conta ogni linea e su chi).
-function saLegend(coorteOn, rows) {
+// Il dettaglio dello sprint toccato: tutti i passi, persone e % sulla stessa base.
+function saDetail(rows) {
+  const r = rows.find(x => x.id === state.saPick);
+  if (!r) return '';
+  const m = saM(r), food = String(r.inizio) >= SA_FOOD_FROM || m.pasto > 0;
+  const li = (label, n, c, sub) => `<div class="sa-dr${sub ? ' sa-dsub' : ''}"><span>${label}</span><div class="sa-db"><i style="width:${Math.min(100, n * 100 / r.coorte).toFixed(1)}%;background:${c}"></i></div><b>${saPct1(n, r.coorte)}</b><em>${saNum(n)}</em></div>`;
+  return `<div class="sa-det"><div class="sa-dh"><b>${esc(saName(r))}</b><span>entro ${SA_WIN[state.saWin]}${saProv(r) ? ' · provvisorio' : ''}</span><button class="sa-dx" data-sa-close aria-label="Chiudi il dettaglio">×</button></div>`
+    + li("Aprono l'app", r.coorte, '#6b7280') + li("Finiscono l'onboarding", m.ob, '#6b7280')
+    + li('Avviano un esercizio', m.avvia, SA_COL.avvia) + li('Completano un esercizio', m.eserc, '#c4b5fd')
+    + li('Finiscono un allenamento intero', m.intero, SA_COL.intero)
+    + (food ? li('Salvano un pasto', m.pasto, SA_COL.cibo) : '')
+    + li('Attivati', m.att, SA_COL.att)
+    + (food ? li('solo esercizio', m.att - m.pasto, '#c4b5fd', 1) + li('esercizio e pasto', m.eserc + m.pasto - m.att, '#9ca3af', 1) + li('solo cibo', m.cibo, SA_COL.cibo, 1) : '')
+    + '</div>';
+}
+
+// Segno di una serie nella legenda: linea col pallino, punto vuoto o riquadro del paywall.
+function saSwatch(k) {
+  if (k === 'few') return `<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="#1a1d24" stroke="#9ca3af" stroke-width="2"/></svg>`;
+  if (k === 'pw') return `<svg width="18" height="14" aria-hidden="true"><rect x="1" y="1" width="16" height="12" rx="3" fill="#262d45"/></svg>`;
+  return `<svg width="30" height="14" aria-hidden="true"><line x1="2" y1="7" x2="28" y2="7" stroke="${SA_COL[k]}" stroke-width="${k === 'att' ? 3 : 2.5}" stroke-linecap="round"/><circle cx="15" cy="7" r="4" fill="${SA_COL[k]}"/></svg>`;
+}
+// Sprint d'esempio della legenda completa: l'ultimo dei mostrati coi numeri chiusi e abbastanza persone.
+function saExample(rows) { return [...rows].reverse().find(r => !saProv(r) && r.coorte >= SA_SMALL_BASE) || null; }
+
+// Legenda: la riga corta, con la freccia che apre sotto la legenda completa (cosa conta ogni linea).
+function saLegend(rows) {
   const open = !!state.saLegend;
   const chev = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
-  const short = `<div class="pt-legend sa-legend" data-sa-legend><span>${saSwatch('att')}attivati: allenamento o pasto, una persona conta una volta</span>`
-    + `<span>${saSwatch('ini')}premono Inizia</span><span>${saSwatch('fin')}finiscono l'allenamento</span>`
-    + (coorteOn ? `<span>${saSwatch('coo')}attivati su chi ha aperto l'app</span>` : '')
-    + `<span>${saSwatch('few')}meno di ${SA_MIN_BASE} persone</span>`
+  const short = `<div class="pt-legend sa-legend" data-sa-legend>` + ['att', 'avvia', 'intero', 'cibo'].map(k => `<span>${saSwatch(k)}${SA_LBL[k]}</span>`).join('')
+    + `<span>${saSwatch('pw')}Paywall a fine onboarding</span><span>${saSwatch('few')}Meno di ${SA_SMALL_BASE} persone</span>`
     + `<button class="sa-lg-btn${open ? ' pt-on' : ''}" aria-expanded="${open}" aria-controls="sa-lg-full" aria-label="${open ? 'Chiudi' : 'Apri'} la legenda completa" title="Legenda completa">${chev}</button></div>`;
   if (!open) return short;
-  const ex = saExample(rows);
-  const eg = (n, d) => ex && d > 0
-    ? `<p class="sa-lg-eg">In ${esc(saShort(ex))}: ${n.toLocaleString('it-IT')} su ${d.toLocaleString('it-IT')}, cioè ${saPct(n, d)} su 100.</p>` : '';
+  const ex = saExample(rows), m = ex ? saM(ex) : null;
+  const eg = n => ex ? `<p class="sa-lg-eg">${esc(saShort(ex))}: ${saNum(n)} su ${saNum(ex.coorte)}, ${saPct1(n, ex.coorte)}</p>` : '';
   const item = (sw, title, body, extra = '') => `<div class="sa-lg-it"><div class="sa-lg-h">${sw}<b>${title}</b></div><p>${body}</p>${extra}</div>`;
-  const last = rows[rows.length - 1];
   return short + `<div class="sa-lg-full" id="sa-lg-full">`
-    + item(saSwatch('att'), 'Attivati',
-      'Su 100 persone che finiscono l\'onboarding ed entrano in app, quante entro 14 giorni dal primo avvio finiscono almeno un allenamento o salvano almeno un pasto analizzato. Chi fa tutte e due le cose conta una volta. Quello che sta sopra la linea blu sono le persone attivate solo dal cibo.',
-      ex ? eg(ex.attivati, ex.base) : '')
-    + item(saSwatch('ini'), 'Premono Inizia',
-      'Su 100 persone entrate in app, quante entro 14 giorni premono Inizia su un allenamento almeno una volta. Dice chi ci prova: la distanza dalla linea blu è chi inizia e non finisce.',
-      ex ? eg(ex.inizia, ex.base) : '')
-    + item(saSwatch('fin'), 'Finiscono l\'allenamento',
-      'Su 100 persone entrate in app, quante entro 14 giorni finiscono almeno un allenamento.',
-      ex ? eg(ex.finisce, ex.base) : '')
-    + item(saSwatch('coo'), 'Attivati su chi ha aperto l\'app',
-      'Conta la stessa cosa della bianca, allenamento finito o pasto salvato entro 14 giorni, ma su 100 persone che aprono l\'app per la prima volta, comprese quelle che lasciano durante l\'onboarding. Per questo sta quasi sempre sotto la bianca: più è lontana, più persone si fermano prima di entrare in app.',
-      coorteOn ? (ex ? eg(ex.attivati_coorte || 0, ex.coorte) : '') : '<p class="sa-lg-eg">Si accende con il tasto «Dal primo avvio».</p>')
-    + item(saSwatch('few'), `Meno di ${SA_MIN_BASE} persone`,
-      `Lo sprint ha meno di ${SA_MIN_BASE} persone entrate in app. Il punto resta, ma senza percentuale: con così poche persone, una in più sposta il valore di oltre 3 punti.`)
-    + item(`<span class="sa-lg-prov">${esc(saShort(last))}</span>`, 'Nome dello sprint in grigio',
-      'Lo sprint è finito da meno di 14 giorni: chi è arrivato negli ultimi giorni ha ancora tempo per attivarsi, quindi i numeri possono salire.')
+    + item(saSwatch('att'), 'Attivati', 'Completano almeno un esercizio o salvano almeno un pasto. Chi fa tutte e due conta una volta. Un esercizio saltato col tasto conta come completato.', m ? eg(m.att) : '')
+    + item(saSwatch('avvia'), 'Avviano un esercizio', 'Fanno partire un allenamento o il tutorial, anche senza finirlo.', m ? eg(m.avvia) : '')
+    + item(saSwatch('intero'), 'Finiscono un allenamento intero', 'Dallo sprint 22 vuol dire finire tutti i pezzi di un allenamento. Il tutorial non conta.', m ? eg(m.intero) : '')
+    + item(saSwatch('cibo'), 'Solo cibo', 'Salvano un pasto e non completano nessun esercizio. Sono già dentro gli attivati.', m ? eg(m.cibo) : '')
+    + item(saSwatch('pw'), 'Paywall a fine onboarding', 'Almeno metà di chi entra in app l\'ha visto.')
+    + item('<span class="sa-lg-prov">S</span>', 'Nome dello sprint in grigio', 'Chi è arrivato per ultimo ha ancora tempo: i numeri possono salire.')
     + '</div>';
 }
 
@@ -3583,20 +3585,22 @@ function saHead(rows) {
     const on = sel.includes(r.id), off = !(r.coorte > 0);
     return `<button class="pt-opt sa-opt${on ? ' pt-sel' : ''}${r.principale ? '' : ' sa-sub'}" role="option" aria-selected="${on}"`
       + (off ? ' disabled aria-disabled="true"' : ` data-sa-toggle="${esc(r.id)}"`)
-      + `><span class="sa-chk"></span>${esc(r.nome)}${off ? '<span class="sa-miss">dati mancanti</span>' : ''}</button>`;
+      + `><span class="sa-chk"></span>${esc(saName(r))}${off ? '<span class="sa-miss">dati mancanti</span>' : ''}</button>`;
   }).join('');
   const menu = state.saMenu
-    ? `<div class="pt-menu sa-menu" role="listbox" aria-multiselectable="true"><div class="sa-quick"><button class="sa-qb" data-sa-quick="def">Ultimi ${SA_DEFAULT_N}</button><button class="sa-qb" data-sa-quick="all">Tutti</button></div>${items}</div>`
+    ? `<div class="pt-menu sa-menu" role="listbox" aria-multiselectable="true"><div class="sa-quick"><button class="sa-qb" data-sa-quick="last">Ultimi ${SA_DEFAULT_N}</button><button class="sa-qb" data-sa-quick="def">Principali</button><button class="sa-qb" data-sa-quick="all">Tutti</button></div>${items}</div>`
     : '';
+  const seg = Object.keys(SA_WIN).map(k => `<button class="sa-phases${state.saWin === k ? ' pt-on' : ''}" data-sa-win="${k}" aria-pressed="${state.saWin === k}">${SA_WIN[k]}</button>`).join('');
   return `<div class="sa-head">${title}
     <div class="sa-pills"><div class="pt-pillwrap sa-w"><button class="pt-pill" data-sa-menu aria-haspopup="listbox" aria-expanded="${!!state.saMenu}"><span>${sel.length ? sel.length + ' sprint' : 'Nessuno sprint'}</span>${chev}</button>${menu}</div>
-    <button class="sa-phases${state.saPhases ? ' pt-on' : ''}" data-sa-phases aria-pressed="${!!state.saPhases}">Fasi</button>
-    <button class="sa-phases${state.saCoorte ? ' pt-on' : ''}" data-sa-coorte aria-pressed="${!!state.saCoorte}">Dal primo avvio</button></div>
+    ${seg}
+    <button class="sa-phases${state.saPhases ? ' pt-on' : ''}" data-sa-phases aria-pressed="${!!state.saPhases}">Atterraggio</button></div>
     ${state.saCache ? `<span class="sbr-upd">${kcMark(state.saCache)}</span>` : ''}</div>`;
 }
 
 function sprintActivationCard() {
-  const rows = state.sa;
+  // una copia in cache di prima del 24/11 non ha d1: la card resta in caricamento finché non torna il ricalcolo
+  const rows = state.sa && state.sa.some(r => r.d1) ? state.sa : null;
   const shell = body => `<section class="sa-card">${body}</section>`;
   if (state.saError && !rows) {
     return shell(saHead(null) + `<div class="pt-err">
@@ -3604,29 +3608,54 @@ function sprintActivationCard() {
       <div class="pt-err-t">Errore nel caricamento</div><button class="pt-retry" data-sa-retry>Riprova</button></div>`);
   }
   if (!rows) return shell(saHead(null) + `<div class="sa-chart sa-loading" aria-busy="true">${saChart(null, state.saW, false)}</div>`);
-  const sel = saSelected(rows), shown = rows.filter(r => sel.includes(r.id));
+  const shown = saShown();
   if (!shown.length) {
     return shell(saHead(rows) + `<div class="pt-err sbr-none">
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
       <div class="pt-err-t">Nessuno sprint scelto</div><div class="sbr-sub">Sceglili dal menu.</div></div>`);
   }
-  return shell(saHead(rows) + `<div class="sa-chart">${saChart(shown, state.saW, state.saPhases, state.saCoorte)}</div>${saLegend(state.saCoorte, shown)}`);
+  return shell(saHead(rows) + `<p class="sa-base">Su chi apre l'app, entro ${SA_WIN[state.saWin]} dal primo avvio.</p>`
+    + `<div class="sa-wrap"><div class="sa-chart">${saChart(shown, state.saW, state.saPhases)}</div><div class="sa-tip" hidden></div></div>${saDetail(shown)}${saLegend(shown)}`);
 }
 
-// Il grafico si ridisegna alla larghezza vera della card (come ptFit).
+// Il grafico si ridisegna alla larghezza vera della card (come ptFit); se scorre, parte dagli sprint più recenti.
 function saFit() {
   const wrap = document.querySelector('.sa-chart');
   if (!wrap) return;
   const w = Math.round(wrap.clientWidth);
-  if (!w || Math.abs(w - state.saW) < 6) return;
-  state.saW = w;
-  const rows = state.sa;
-  if (!rows) { wrap.innerHTML = saChart(null, w, false); return; }
-  const sel = saSelected(rows);
-  wrap.innerHTML = saChart(rows.filter(r => sel.includes(r.id)), w, state.saPhases, state.saCoorte);
+  if (!w) return;
+  if (Math.abs(w - state.saW) >= 6) {
+    state.saW = w;
+    const loading = wrap.classList.contains('sa-loading');
+    wrap.innerHTML = saChart(loading ? null : saShown(), w, !loading && state.saPhases);
+  }
+  wrap.scrollLeft = state.saScroll == null ? wrap.scrollWidth : state.saScroll;
 }
 
-// Gestori della card: menu a scelta multipla, «Ultimi 6» / «Tutti», interruttore delle fasi, «Riprova».
+// Riquadro al passaggio del mouse e dettaglio al clic o al tocco; sul contenitore, così vale anche dopo un ridisegno.
+function saHover() {
+  const wrap = document.querySelector('.sa-wrap .sa-chart'), tip = document.querySelector('.sa-tip');
+  if (!wrap || !tip) return;
+  const hide = () => { tip.hidden = true; };
+  wrap.addEventListener('scroll', () => { if (wrap.scrollWidth > wrap.clientWidth) state.saScroll = wrap.scrollLeft; hide(); }, { passive: true });
+  wrap.addEventListener('pointermove', ev => {
+    const h = ev.pointerType === 'mouse' && ev.target.closest('[data-sa-hit]');
+    const r = h && saShown().find(x => x.id === h.dataset.saHit);
+    if (!r) return hide();
+    if (tip.dataset.id !== r.id || tip.hidden) { tip.innerHTML = saTip(r); tip.dataset.id = r.id; tip.hidden = false; }
+    const x = Number(h.dataset.x) - wrap.scrollLeft;
+    tip.style.left = (x > wrap.clientWidth / 2 ? Math.max(0, x - tip.offsetWidth - 16) : x + 16) + 'px';
+  });
+  wrap.addEventListener('pointerleave', hide);
+  const pick = h => { state.saPick = state.saPick === h.dataset.saHit ? null : h.dataset.saHit; render(); };
+  wrap.addEventListener('click', ev => { const h = ev.target.closest('[data-sa-hit]'); if (h) pick(h); });
+  wrap.addEventListener('keydown', ev => {
+    const h = ev.target.closest('[data-sa-hit]');
+    if (h && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); pick(h); }
+  });
+}
+
+// Gestori della card: menu a scelta multipla, scelte rapide, finestra (24 ore / 14 giorni), atterraggio, dettaglio, «Riprova».
 let saGlobals = false;
 function attachSprintActivation() {
   const saveSel = ids => {
@@ -3644,7 +3673,8 @@ function attachSprintActivation() {
   }));
   document.querySelectorAll('[data-sa-quick]').forEach(el => el.addEventListener('click', ev => {
     ev.stopPropagation();
-    saveSel(el.dataset.saQuick === 'all' ? saSelectable(state.sa || []).map(r => r.id) : null);
+    const all = state.sa || [], q = el.dataset.saQuick;
+    saveSel(q === 'all' ? saSelectable(all).map(r => r.id) : q === 'last' ? saDefaultSel(all).slice(-SA_DEFAULT_N) : null);
     render();
   }));
   document.querySelector('[data-sa-phases]')?.addEventListener('click', () => {
@@ -3652,11 +3682,12 @@ function attachSprintActivation() {
     try { localStorage.setItem(LS_SA_PHASES, JSON.stringify(state.saPhases ? 'on' : 'off')); } catch (e) { /* idem */ }
     render();
   });
-  document.querySelector('[data-sa-coorte]')?.addEventListener('click', () => {
-    state.saCoorte = !state.saCoorte;
-    try { localStorage.setItem(LS_SA_COORTE, JSON.stringify(state.saCoorte ? 'on' : 'off')); } catch (e) { /* idem */ }
+  document.querySelectorAll('[data-sa-win]').forEach(el => el.addEventListener('click', () => {
+    state.saWin = el.dataset.saWin;
+    try { localStorage.setItem(LS_SA_WIN, JSON.stringify(state.saWin)); } catch (e) { /* idem */ }
     render();
-  });
+  }));
+  document.querySelector('[data-sa-close]')?.addEventListener('click', () => { state.saPick = null; render(); });
   // tutta la riga della legenda apre e chiude; la freccia è il bottone per tastiera e lettori di schermo
   document.querySelector('[data-sa-legend]')?.addEventListener('click', () => {
     state.saLegend = !state.saLegend; render();
@@ -3665,6 +3696,7 @@ function attachSprintActivation() {
     state.saError = null; state.sa = null; render(); fetchSprintActivation(true);
   });
   saFit();
+  saHover();
   if (!saGlobals) {
     saGlobals = true;
     document.addEventListener('click', ev => {

@@ -1254,26 +1254,54 @@
 .sa-opt[disabled]:hover { background: transparent; }
 .sa-miss { margin-left: auto; padding-left: 12px; font-size: 12px; font-weight: 600; color: #6b7280; }
 
-.sa-chart { width: 100%; min-height: 330px; }
-.sa-svg { display: block; overflow: visible; }
+.sa-base { margin: -8px 0 12px; font-size: 14px; font-weight: 600; color: #9ca3af; }
+.sa-wrap { position: relative; }
+.sa-chart { width: 100%; min-height: 370px; overflow-x: auto; overflow-y: hidden; }
+.sa-svg { display: block; }
 .sa-tk { font-size: 13px; font-weight: 700; fill: #9ca3af; }
 .sa-xl { fill: #ffffff; }
 .sa-xl.sa-prov { fill: #9ca3af; }
 .sa-xd { font-size: 12px; fill: #6b7280; }
-.sa-sep { stroke: #23272f; stroke-width: 1; }
 .sa-band { fill: #14171d; stroke: #2a2e37; stroke-width: 1.5; }
-.sa-band-pw { fill: #262d45; stroke: #4361ee; }
 .sa-band-t { font-size: 12px; font-weight: 700; fill: #ffffff; }
 .sa-ln { fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .sa-ln-att { stroke: #ffffff; stroke-width: 3; }
-.sa-ln-ini { stroke: #9ca3af; stroke-width: 2.5; }
-.sa-ln-fin { stroke: #4361ee; stroke-width: 2.5; }
-.sa-ln-coo { stroke: #fb8b04; stroke-width: 2.5; stroke-dasharray: 6 5; }
+.sa-ln-avvia { stroke: #a78bfa; stroke-width: 2.5; }
+.sa-ln-intero { stroke: #34d399; stroke-width: 2.5; }
+.sa-ln-cibo { stroke: #fb8b04; stroke-width: 2.5; }
+.sa-pw { fill: #262d45; opacity: .55; }
+.sa-pick { fill: none; stroke: #4361ee; stroke-width: 1.5; }
+.sa-note { font-size: 12px; font-weight: 600; fill: #9ca3af; }
 .sa-pt { fill: var(--c); stroke: #1a1d24; stroke-width: 2; }
 .sa-pt.sa-hollow { fill: #1a1d24; stroke: var(--c); stroke-width: 2; }
 .sa-lbl { font-size: 12px; font-weight: 800; paint-order: stroke; stroke: #1a1d24; stroke-width: 4px; stroke-linejoin: round; }
-.sa-lbl-att { font-size: 13px; stroke-width: 6px; }
-.sa-hit { fill: transparent; }
+.sa-lbl-att { font-size: 13px; stroke-width: 5px; fill: #ffffff; }
+.sa-hit { fill: transparent; cursor: pointer; outline: none; }
+.sa-hit:focus-visible { stroke: #ffffff; stroke-width: 2; }
+.sa-tip {
+  position: absolute; top: 20px; z-index: 5; width: 290px; box-sizing: border-box; padding: 12px 14px; pointer-events: none;
+  background: #14171d; border: 1.5px solid #2a2e37; border-radius: 12px; box-shadow: 0 6px 20px rgba(0, 0, 0, .45); font-size: 13px;
+}
+.sa-tip[hidden] { display: none; }
+.sa-tt { font-size: 14px; font-weight: 800; }
+.sa-ts { margin: 2px 0 6px; font-size: 12px; font-weight: 600; color: #9ca3af; }
+.sa-tf { margin: 6px 0 0; }
+.sa-tr { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.sa-tr i { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.sa-tr span { flex: 1; min-width: 0; color: #d1d5db; font-weight: 600; }
+.sa-tr b { font-weight: 800; }
+.sa-tr em, .sa-dr em { width: 42px; text-align: right; font-style: normal; font-weight: 600; color: #9ca3af; font-variant-numeric: tabular-nums; }
+.sa-det { margin: 8px 0 16px; padding: 14px 16px; background: #14171d; border: 1.5px solid #2a2e37; border-radius: 12px; }
+.sa-dh { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; }
+.sa-dh b { font-size: 16px; font-weight: 800; }
+.sa-dh span { color: #9ca3af; font-weight: 600; }
+.sa-dx { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid #2a2e37; background: #1a1d24; color: #ffffff; font-size: 18px; line-height: 1; cursor: pointer; }
+.sa-dr { display: grid; grid-template-columns: 230px 1fr 60px 48px; align-items: center; gap: 12px; padding: 5px 0; font-size: 14px; font-weight: 700; }
+.sa-dr b { text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sa-db { height: 10px; border-radius: 5px; background: #23272f; overflow: hidden; }
+.sa-db i { display: block; height: 100%; border-radius: 5px; }
+.sa-dsub { font-size: 13px; color: #9ca3af; }
+.sa-dsub span { padding-left: 16px; }
 .sa-loading .sa-svg { opacity: .5; }
 .sa-legend { gap: 8px 28px; align-items: center; cursor: pointer; }
 .sa-lg-btn {
@@ -1299,8 +1327,11 @@
 @container sa (max-width: 700px) {
   .sa-head { gap: 12px; }
   .sa-title { width: 100%; margin: 0; }
-  .sa-pills { width: 100%; }
-  .sa-w { flex: 1; }
+  .sa-pills { width: 100%; flex-wrap: wrap; }
+  .sa-phases { padding: 0 14px; }
+  .sa-dr { grid-template-columns: minmax(0, 1fr) 56px 44px; gap: 8px; }
+  .sa-db { display: none; }
+  .sa-w { flex: 1 1 100%; }
   .sa-w .pt-pill { width: 100%; }
   .sa-w .pt-menu { min-width: 0; width: 100%; }
   .sa-chart { min-height: 250px; }
