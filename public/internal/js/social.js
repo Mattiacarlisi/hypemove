@@ -20,7 +20,7 @@ const PAGINE = [
 const STATI = { da_vedere: 'Da decidere', revisione: 'Da rifare', rifatto: 'Rifatto, da decidere', approvato: 'Approvato', scartato: 'Scartato', pubblicato: 'Pubblicato', archivio: 'Archivio' };
 const TEMI = { sonoio: 'Sono io', parliamone: 'Parliamone', miserve: 'Mi serve', natale: 'Natale' };
 const TEMI_NOTA = { sonoio: 'Per le condivisioni', parliamone: 'Per i commenti', miserve: 'Per i salvataggi', natale: 'Dall’8 al 27 dicembre' };
-const FORMATI = { fr: 'Frase e risposta', qu: 'Carta a quadretti', pd: 'Prima e dopo', sc: 'Scene da film', fo: 'Foto di casa', na: 'Natale', fi: 'Figurine', tr: 'Tribunale di Moovy', tv: 'Quiz in tv', se: 'Da tenere', ar: 'Archivio' };
+const FORMATI = { fr: 'Frase e risposta', qu: 'Carta a quadretti', pd: 'Prima e dopo', sc: 'Scene da film', fo: 'Foto di casa', na: 'Natale', fi: 'Figurine', tr: 'Tribunale di Moovy', re: 'Reel', tv: 'Quiz in tv', se: 'Da tenere', ar: 'Archivio' };
 const SETTIMANA = 13;                 // post previsti a settimana (due al giorno, uno la domenica)
 const INIZIO = '2026-11-30';
 
@@ -158,12 +158,14 @@ const testa = (t, s) => el('div', { className: 'so-head' }, el('h1', { textConte
 const vuoto = (t) => el('p', { className: 'so-vuoto', textContent: t });
 
 // ── carta di un post ──
+// Se il file non c'è (caricamento interrotto) lo si dice: prima restava un riquadro vuoto o un lettore a zero secondi.
+const senzaFile = (n, video) => n.replaceWith(el('span', { className: 'so-manca', textContent: video ? 'Il video non è stato caricato' : 'Il file non c’è' }));
 function carta(p, coda) {
   const m = p.media[0], ultima = revDi(p.id).at(-1);
   const tag = m?.type === 'video' ? 'Reel' : p.media.length > 1 ? p.media.length + ' pagine' : null;
   const fermo = ['pubblicato', 'archivio'].includes(p.stato), deciso = !daDec(p);
   return el('article', { className: 'so-card' + (S.recenti.has(p.id) ? ' deciso' : '') },
-    el('button', { type: 'button', className: 'so-pic', aria: { label: 'Apri ' + p.titolo }, on: { click: () => apri(p.id, coda) } }, m ? el('img', { src: thumb(m), alt: p.titolo, loading: 'lazy' }) : null, tag ? el('span', { className: 'so-tag', textContent: tag }) : null, !pronto(p) && !fermo ? el('span', { className: 'so-tag rosso', textContent: 'Da sistemare' }) : null),
+    el('button', { type: 'button', className: 'so-pic' + (m?.type === 'video' ? ' reel' : ''), aria: { label: 'Apri ' + p.titolo }, on: { click: () => apri(p.id, coda) } }, m ? el('img', { src: thumb(m), alt: p.titolo, loading: 'lazy', on: { error: (e) => senzaFile(e.currentTarget, m.type === 'video') } }) : null, m?.type === 'video' ? el('span', { className: 'so-play', textContent: '▶' }) : null, tag ? el('span', { className: 'so-tag', textContent: tag }) : null, !pronto(p) && !fermo ? el('span', { className: 'so-tag rosso', textContent: 'Da sistemare' }) : null),
     fascia(p),
     el('div', { className: 'so-cb' },
       p.stato === 'rifatto' ? el('div', { className: 'so-riga' }, el('span', { className: 'so-st rifatto', textContent: 'Rifatto' })) : daDec(p) && p.data_consigliata ? el('div', { className: 'so-riga', textContent: 'Per il ' + leggibile(p.data_consigliata, { day: 'numeric', month: 'long' }) }) : null,
@@ -192,10 +194,10 @@ function scheda() {
   document.body.style.overflow = 'hidden';
   const barra = [];
   const B = S.bozza, chiuso = ['pubblicato', 'archivio'].includes(p.stato);
-  const giro = el('div', { className: 'so-giro', tabIndex: 0 }, p.media.map((m, n) => m.type === 'video' ? el('video', { src: MEDIA + m.path, poster: thumb(m), controls: true, playsInline: true, preload: 'none' }) : el('img', { src: MEDIA + m.path, alt: p.titolo + (p.media.length > 1 ? ', pagina ' + (n + 1) : '') })));
+  const giro = el('div', { className: 'so-giro', tabIndex: 0 }, p.media.map((m, n) => m.type === 'video' ? el('video', { src: MEDIA + m.path, poster: thumb(m), controls: true, playsInline: true, preload: 'metadata', on: { error: (e) => senzaFile(e.currentTarget, true) } }) : el('img', { src: MEDIA + m.path, alt: p.titolo + (p.media.length > 1 ? ', pagina ' + (n + 1) : '') })));
   const pag = p.media.length > 1 ? el('div', { className: 'so-pag', textContent: '1 di ' + p.media.length }) : null;
   if (pag) giro.addEventListener('scroll', () => { pag.textContent = Math.round(giro.scrollLeft / giro.clientWidth + 1) + ' di ' + p.media.length; });
-  const sx = el('div', { className: 'so-sx' }, giro, pag);
+  const sx = el('div', { className: 'so-sx' + (p.media[0]?.type === 'video' ? ' reel' : '') }, giro, pag);
   sx.dataset.media = JSON.stringify(p.media);
   const dx = el('div', { className: 'so-dx' });
   dx.append(el('div', { className: 'so-tit' }, el('div', { style: 'flex:1;min-width:0;display:grid;gap:6px' }, el('div', { className: 'so-riga' }, el('span', { className: 'so-st ' + p.stato, textContent: STATI[p.stato] }), el('span', { textContent: FORMATI[p.formato] || '' })), el('h2', { textContent: p.titolo })), el('button', { type: 'button', className: 'so-x', textContent: '✕', aria: { label: 'Chiudi' }, on: { click: chiudiSeSalvato } })));
