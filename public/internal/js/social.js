@@ -105,7 +105,7 @@ async function scrivi(fn, detto) {
     return true;
   } catch (e) {
     console.error('social', e);
-    toast(navigator.onLine === false ? 'Sei senza connessione. Non è stato salvato.' : 'Non salvato. Riprova.', false);
+    toast(navigator.onLine === false ? 'Sei senza connessione. Non è stato salvato.' : /prima va approvato/.test(e.message || '') ? 'Prima va approvato.' : /controlli non superati/.test(e.message || '') ? 'Prima vanno sistemati i controlli.' : 'Non salvato. Riprova.', false);
     return false;
   } finally { occupato = false; disegna(); }
 }
@@ -494,6 +494,18 @@ async function avvia() {
   disegna();
   try { await carica(); disegna(); } catch (e) { console.error('social', e); document.querySelector('.so-main')?.replaceChildren(vuoto('Non si carica.'), bottone('Riprova', 'pri', avvia)); }
 }
+// Se nel frattempo è uscita una versione nuova della pagina la si ricarica: altrimenti un telefono con la
+// scheda aperta da ore continua a usare quella vecchia. Mai mentre si scrive.
+let versione = null;
+async function nuovaVersione() {
+  try {
+    const r = await fetch('js/social.js', { method: 'HEAD', cache: 'no-store' }), v = r.ok ? r.headers.get('etag') : null;
+    if (!v) return false;
+    if (versione === null) { versione = v; return false; }
+    return v !== versione;
+  } catch (e) { return false; }
+}
+nuovaVersione();
 // Tornando sulla pagina si rileggono i dati, ma mai mentre si sta scrivendo o con una scheda aperta.
-document.addEventListener('visibilitychange', async () => { if (document.visibilityState !== 'visible' || !S.caricato || S.apri || occupato || /TEXTAREA|INPUT|SELECT/.test(document.activeElement?.tagName || '') || document.querySelector('.so-vel')) return; try { await carica(); disegna(); } catch (e) { console.error('social', e); } });
+document.addEventListener('visibilitychange', async () => { if (document.visibilityState !== 'visible' || !S.caricato || S.apri || occupato || /TEXTAREA|INPUT|SELECT/.test(document.activeElement?.tagName || '') || document.querySelector('.so-vel')) return; if (await nuovaVersione()) { location.reload(); return; } try { await carica(); disegna(); } catch (e) { console.error('social', e); } });
 avvia();
