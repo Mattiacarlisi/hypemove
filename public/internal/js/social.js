@@ -411,8 +411,18 @@ function vLink(main) {
   main.append(el('details', { style: 'margin-top:20px' }, el('summary', { className: 'so-sum', textContent: 'Tabella' }), el('div', { className: 'table-wrap' }, el('table', { className: 'so-tab' }, el('thead', {}, el('tr', {}, ['Giorno', 'Visite', 'Android', 'Primi avvii'].map((t) => el('th', { textContent: t })))), el('tbody', {}, L.giorni.slice().reverse().filter((r) => r.visite || r.android || r.avvii).map((r) => el('tr', {}, el('td', { textContent: leggibile(r.g, { day: 'numeric', month: 'short' }) }), [r.visite, r.android, r.avvii].map((v) => el('td', { textContent: v })))))))));
 }
 
+const META_PERMESSI = 'instagram_basic,instagram_content_publish,instagram_manage_comments,instagram_manage_insights,instagram_manage_messages,pages_show_list,pages_read_engagement,business_management';
+// Si apre nella stessa scheda: dal telefono i popup vengono bloccati.
+async function collegaConFacebook() {
+  const { data, error } = await sb.rpc('social_oauth_apri');
+  if (error || !data) { toast('Non riesco a partire. Riprova.', false); return; }
+  location.assign('https://www.facebook.com/v23.0/dialog/oauth?' + new URLSearchParams({ client_id: '1239770904774784', redirect_uri: 'https://hypemove.app/internal/instagram.html', response_type: 'token', scope: META_PERMESSI, state: data }));
+}
+const scaduto = () => S.conn?.scade_il && new Date(S.conn.scade_il) < new Date();
 function vInstagram(main) {
-  if (!collegato()) {
+  if (!collegato() || scaduto()) {
+    if (scaduto()) main.append(el('p', { className: 'so-avviso', textContent: 'Il collegamento è scaduto il ' + leggibile(giorno(S.conn.scade_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(S.conn.scade_il) + '.' }));
+    main.append(el('section', { className: 'so-box', style: 'margin-bottom:12px' }, el('strong', { style: 'font-size:16px', textContent: 'Veloce, dal telefono' }), bottone('Collega con Facebook', 'pri', collegaConFacebook), el('p', { className: 'so-riga', textContent: 'Dura poco: scarica post e numeri, poi scade.' })));
     const inp = el('input', { type: 'password', className: 'so-in', style: 'width:100%', placeholder: 'Incolla qui la chiave (EAA…)', autocomplete: 'off', aria: { label: 'Chiave di Meta' } }), out = el('p', { className: 'so-riga', role: 'status' });
     const b = bottone('Collega', 'pri', async () => {
       const token = inp.value.trim(); if (!token) { inp.focus(); return; }
@@ -423,7 +433,7 @@ function vInstagram(main) {
       if (msg) { out.textContent = msg; return; }
       toast('Collegato: @' + (data.username || 'hypemove.app')); await carica().catch(() => {}); disegna();
     });
-    main.append(el('section', { className: 'so-box' }, el('strong', { style: 'font-size:16px', textContent: 'Collega @hypemove.app' }),
+    main.append(el('section', { className: 'so-box' }, el('strong', { style: 'font-size:16px', textContent: 'Definitivo, dal computer' }),
       el('ol', { className: 'so-passi' }, el('li', {}, 'Apri ', el('a', { href: 'https://business.facebook.com/latest/settings/system_users?business_id=981913040519792&selected_user_id=61582721401522', target: '_blank', rel: 'noopener', textContent: 'Utenti di sistema su Meta' }), ' e tocca «Genera token».'), el('li', { textContent: 'App «Hypemove», scadenza «Mai».' }), el('li', {}, 'Spunta: ', el('b', { textContent: 'instagram_basic, instagram_content_publish, instagram_manage_comments, instagram_manage_insights, instagram_manage_messages, pages_show_list, pages_read_engagement' }), '.'), el('li', { textContent: 'Copia la chiave e incollala qui.' })),
       inp, b, out, el('p', { className: 'so-riga', textContent: 'Finisce nella cassaforte del server: da qui non si può rileggere.' })));
     return;
@@ -431,6 +441,7 @@ function vInstagram(main) {
   const I = S.ig, C = S.conn;
   const agg = bottone('Aggiorna ora', '', async () => { agg.disabled = true; agg.textContent = 'Aggiorno…'; const { error } = await sb.functions.invoke('social-instagram', { body: { azione: 'aggiorna' } }); if (error) toast('Non aggiornato. Riprova.', false); else toast('Aggiornato'); await carica().catch(() => {}); disegna(); });
   main.append(el('div', { className: 'so-fine', style: 'margin-bottom:12px' }, el('span', { className: 'so-riga', textContent: '@' + (C.username || 'hypemove.app') + (C.aggiornato_il ? ', aggiornato ' + leggibile(giorno(C.aggiornato_il), { day: 'numeric', month: 'short' }) + ' alle ' + ora(C.aggiornato_il) : '') }), agg));
+  if (C.scade_il) main.append(el('p', { className: 'so-avviso', textContent: 'Collegamento provvisorio: scade il ' + leggibile(giorno(C.scade_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(C.scade_il) + '.' }));
   if (C.ultimo_errore) main.append(el('p', { className: 'so-avviso', textContent: C.ultimo_errore }));
   if (C.mancanti?.length) main.append(el('p', { className: 'so-avviso', textContent: 'Permessi mancanti: ' + C.mancanti.join(', ') }));
   if (!I) { main.append(vuoto('I numeri non si caricano.')); return; }
