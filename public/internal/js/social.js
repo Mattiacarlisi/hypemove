@@ -24,7 +24,7 @@ const FORMATI = { fr: 'Frase e risposta', qu: 'Carta a quadretti', pd: 'Prima e 
 const SETTIMANA = 13;                 // post previsti a settimana (due al giorno, uno la domenica)
 const INIZIO = '2026-11-30';
 
-const S = { page: 'oggi', tema: 'tutti', stato: 'decidere', ris: 'obiettivi', giorni: 30, link: null, ig: null, conn: null, sett: null, apri: null, coda: [], posts: [], rev: [], idee: [], ob: [], kpi: null, caricato: false };
+const S = { page: 'oggi', tema: 'tutti', stato: 'decidere', ris: 'obiettivi', giorni: 30, link: null, ig: null, conn: null, prof: null, vista: 'calendario', dopo: true, sett: null, apri: null, coda: [], posts: [], rev: [], idee: [], ob: [], kpi: null, caricato: false };
 try { const p = localStorage.getItem('hm_social_page'); if (PAGINE.some(([k]) => k === p)) S.page = p; } catch (e) {}
 
 // ── piccoli attrezzi ──
@@ -77,7 +77,7 @@ const pronto = (p) => controlliOk(p) && !controllaTesto(p.didascalia).length;
 
 // ── dati ──
 async function carica() {
-  const [p, r, i, o, k, c, l, d] = await Promise.all([
+  const [p, r, i, o, k, c, l, d, pf] = await Promise.all([
     sb.from('social_posts').select('*').order('ordine'),
     sb.from('social_revisioni').select('*').order('created_at'),
     sb.from('social_idee').select('*').order('id'),
@@ -86,10 +86,11 @@ async function carica() {
     sb.from('social_instagram').select('*'),
     sb.rpc('social_link', { p_giorni: S.giorni }),
     sb.rpc('social_instagram_dati'),
+    sb.rpc('social_profilo'),
   ]);
   const err = [p, r, i, o].find((x) => x.error);
   if (err) throw err.error;
-  Object.assign(S, { posts: p.data, rev: r.data, idee: i.data, ob: o.data, kpi: k.error ? null : k.data, conn: c.error ? null : c.data?.[0] ?? null, link: l.error ? null : l.data, ig: d.error ? null : d.data, caricato: true });
+  Object.assign(S, { posts: p.data, rev: r.data, idee: i.data, ob: o.data, kpi: k.error ? null : k.data, conn: c.error ? null : c.data?.[0] ?? null, link: l.error ? null : l.data, ig: d.error ? null : d.data, prof: pf.error ? null : pf.data, caricato: true });
 }
 // Ogni scrittura: prima il server, poi la pagina si ridisegna con quello che il server ha davvero.
 let occupato = false;
@@ -309,7 +310,9 @@ const VISTE = {
     const oggi = giorno(Date.now()), lib = approvatiLiberi();
     S.sett ??= lunedi(oggi < INIZIO ? INIZIO : oggi);
     const gg = Array.from({ length: 7 }, (_, n) => piu(S.sett, n)), tutti = gg.flatMap(delGiorno);
-    main.append(testa('Programma', tutti.length + ' post su ' + SETTIMANA + ' questa settimana'));
+    main.append(testa('Programma', S.vista === 'profilo' ? null : tutti.length + ' post su ' + SETTIMANA + ' questa settimana'));
+    main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Vista' } }, chip(S.vista === 'calendario', 'Calendario', null, () => { S.vista = 'calendario'; disegna(); }), chip(S.vista === 'profilo', 'Profilo Instagram', null, () => { S.vista = 'profilo'; disegna(); })));
+    if (S.vista === 'profilo') { vProfilo(main); return; }
     if (!collegato()) main.append(el('p', { className: 'so-avviso', textContent: 'Instagram non è ancora collegato: gli orari non partono da soli.' }));
     if (lib.length) {
       const buoni = lib.filter(pronto), piano = pianoAutomatico();
@@ -346,6 +349,34 @@ const VISTE = {
   },
 
 };
+
+// ── il profilo come si vede su Instagram ──
+// I prossimi sei: prima quelli con una data, poi gli approvati senza data, poi (se non bastano) quelli ancora da decidere.
+function prossimiSei() {
+  const ora0 = new Date().toISOString(), ok = (p) => !/^(acc-|reel-tribunale)/.test(p.id);
+  const a = S.posts.filter((p) => p.stato === 'approvato' && p.publish_at && p.publish_at > ora0).sort((x, y) => x.publish_at < y.publish_at ? -1 : 1);
+  const piano = pianoAutomatico(), b = approvatiLiberi().filter(ok).sort((x, y) => { const f = (p) => piano.find((z) => z.id === p.id)?.publish_at || '9'; return f(x) < f(y) ? -1 : 1; });
+  const c = [], visti = new Set([...a, ...b].map((p) => p.formato));
+  for (const p of [...daDecidere().filter((x) => x.tema !== 'natale' && ok(x) && !visti.has(x.formato)), ...daDecidere().filter((x) => x.tema !== 'natale' && ok(x))]) if (!c.includes(p) && (c.filter((x) => x.formato === p.formato).length < 1 || c.length > 6)) c.push(p);
+  return [...a.map((p) => [p, leggibile(giorno(p.publish_at), { day: 'numeric', month: 'short' })]), ...b.map((p) => [p, 'senza data']), ...c.map((p) => [p, 'da decidere'])].slice(0, 6);
+}
+function vProfilo(main) {
+  const A = S.prof?.account, media = S.prof?.media || [], sei = prossimiSei();
+  const legati = new Set(S.posts.map((p) => p.ig_media_id).filter(Boolean)), solo = S.posts.filter((p) => p.stato === 'pubblicato' && !p.ig_media_id).sort((a, b) => a.pubblicato_il < b.pubblicato_il ? 1 : -1);
+  main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Anteprima' } }, chip(S.dopo, 'Con i prossimi ' + sei.length, null, () => { S.dopo = true; disegna(); }), chip(!S.dopo, 'Adesso', null, () => { S.dopo = false; disegna(); })));
+  if (!media.length) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.ris = 'instagram'; vai('risultati'); } } }, 'I post passati arrivano quando colleghi Instagram ›'));
+  const coda = sei.map(([p]) => p.id), passati = [...solo.map((p) => ({ t: p.pubblicato_il, p })), ...media.map((m) => ({ t: m.quando, m }))].sort((a, b) => a.t < b.t ? 1 : -1);
+  const segno = (k) => k ? el('span', { className: 'so-ig-t', aria: { hidden: 'true' }, textContent: k }) : null;
+  const tess = (src, alt, tipo, eti, fn, cls) => el(fn ? 'button' : 'a', { className: 'so-ig-q ' + (cls || ''), ...(fn ? { type: 'button', on: { click: fn } } : {}), aria: { label: alt } }, src ? el('img', { src, alt: '', loading: 'lazy' }) : el('span', { className: 'so-ig-v', textContent: alt.slice(0, 60) }), segno(tipo), eti ? el('span', { className: 'so-ig-e', textContent: eti }) : null);
+  const nuovi = S.dopo ? sei.slice().reverse().map(([p, eti]) => tess(p.media[0] ? thumb(p.media[0]) : null, p.titolo, p.media[0]?.type === 'video' ? '▶' : p.media.length > 1 ? '❐' : '', eti, () => apri(p.id, coda), 'nuovo' + (p.stato === 'approvato' ? '' : ' forse'))) : [];
+  const vecchi = passati.map((x) => { if (x.p) return tess(x.p.media[0] ? thumb(x.p.media[0]) : null, x.p.titolo, x.p.media[0]?.type === 'video' ? '▶' : x.p.media.length > 1 ? '❐' : '', null, () => apri(x.p.id)); const e = tess(x.m.img ? MEDIA + x.m.img : null, x.m.testo || 'Post', x.m.tipo === 'REELS' ? '▶' : x.m.carosello ? '❐' : '', null, null); if (x.m.link && x.m.link.startsWith('https://')) Object.assign(e, { href: x.m.link, target: '_blank', rel: 'noopener' }); return e; });
+  const n = (A?.post ?? passati.length) + (S.dopo ? sei.length : 0);
+  main.append(el('section', { className: 'so-ig' },
+    el('header', {}, el('i', {}), el('div', {}, el('b', { textContent: A?.username || 'hypemove.app' }), el('div', { className: 'so-ig-n' }, [[A ? n : null, 'post'], [A?.follower, 'follower'], [A?.seguiti, 'seguiti']].filter(([v]) => v != null).map(([v, t]) => el('span', {}, el('b', { textContent: num(v) }), ' ' + t))))),
+    A?.nome || A?.bio ? el('p', {}, A.nome ? el('b', { textContent: A.nome }) : null, A.bio ? el('span', { textContent: A.bio }) : null) : null,
+    el('div', { className: 'so-ig-g' }, nuovi, vecchi)));
+  if (S.dopo && sei.some(([p]) => p.stato !== 'approvato')) main.append(el('p', { className: 'so-riga', style: 'margin-top:10px', textContent: 'I più chiari non li hai ancora approvati: sono lì per riempire i sei posti.' }));
+}
 
 // ── risultati ──
 function vObiettivi(main) {

@@ -212,3 +212,19 @@ button.so-tile { cursor: pointer; }
   .so-frecce { margin: 0 -16px calc(-20px - env(safe-area-inset-bottom)); padding-left: 10px; padding-right: 10px; }
   .so-fil.seg { gap: 6px; } .so-fil.seg .so-chip { flex: 1 1 auto; padding: 0 9px; font-size: 12.5px; }
 }
+
+/* profilo Instagram: chiaro come lo vede chi ci trova, griglia 3:4 */
+.so-ig { background: #fff; color: #0f0f0f; border-radius: 18px; overflow: hidden; max-width: 470px; margin: 0 auto; }
+.so-ig header { display: flex; gap: 18px; align-items: center; padding: 18px 16px 10px; }
+.so-ig header > i { width: 78px; height: 78px; flex: none; border-radius: 50%; border: 1px solid #dbdbdb; background: #fff url(../img/social-avatar.png) center/cover; }
+.so-ig header > div { display: grid; gap: 8px; min-width: 0; } .so-ig header > div > b { font-size: 17px; }
+.so-ig-n { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13.5px; }
+.so-ig > p { padding: 0 16px 14px; font-size: 13.5px; display: grid; white-space: pre-line; line-height: 1.4; }
+.so-ig-g { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; border-top: 1px solid #efefef; padding-top: 2px; }
+.so-ig-q { position: relative; display: block; aspect-ratio: 3/4; border: 0; padding: 0; background: #efefef; cursor: pointer; overflow: hidden; color: #0f0f0f; text-decoration: none; }
+.so-ig-q img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.so-ig-v { display: grid; place-items: center; height: 100%; padding: 8px; font-size: 11px; text-align: center; color: #555; }
+.so-ig-t { position: absolute; right: 7px; top: 5px; color: #fff; font-size: 15px; text-shadow: 0 0 5px rgba(0,0,0,.8); }
+.so-ig-e { position: absolute; left: 5px; bottom: 5px; background: #6d28d9; color: #fff; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 8px; }
+.so-ig-q.nuovo { box-shadow: inset 0 0 0 3px #6d28d9; } .so-ig-q.nuovo img { padding: 3px; }
+.so-ig-q.forse { box-shadow: none; } .so-ig-q.forse img { opacity: .5; padding: 0; } .so-ig-q.forse .so-ig-e { background: #55556b; }
