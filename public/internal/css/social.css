@@ -228,3 +228,20 @@ button.so-tile { cursor: pointer; }
 .so-ig-e { position: absolute; left: 5px; bottom: 5px; background: #6d28d9; color: #fff; font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 8px; }
 .so-ig-q.nuovo { box-shadow: inset 0 0 0 3px #6d28d9; } .so-ig-q.nuovo img { padding: 3px; }
 .so-ig-q.forse { box-shadow: none; } .so-ig-q.forse img { opacity: .5; padding: 0; } .so-ig-q.forse .so-ig-e { background: #55556b; }
+
+/* esito di una decisione: a parole, col colore e col passo dopo */
+.so-b.ok { background: #16a34a; border-color: #16a34a; color: #fff; }
+.so-b.largo:only-child, .so-az .so-b.largo { grid-column: 1 / -1; }
+.so-esito { display: flex; gap: 10px; align-items: center; padding: 10px 12px; flex-wrap: wrap; }
+.so-esito i { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 14px; }
+.so-esito > div:nth-child(2) { display: grid; min-width: 0; flex: 1; } .so-esito b { font-size: 14px; } .so-esito span { font-size: 12.5px; opacity: .9; }
+.so-esito.si { background: #10301c; color: #b8f2cc; } .so-esito.si i { background: #22c55e; color: #04210e; }
+.so-esito.att { background: #33260a; color: #fde6a8; } .so-esito.att i { background: #fbbf24; color: #2b1f00; }
+.so-esito.no { background: #331214; color: #fecaca; } .so-esito.no i { background: #ef4444; color: #fff; }
+.so-esito.pub { background: #0f2440; color: #bfdbfe; } .so-esito.pub i { background: #60a5fa; color: #06162e; }
+.so-esito.grande { border-radius: 14px; padding: 14px; } .so-esito.grande i { width: 36px; height: 36px; font-size: 19px; } .so-esito.grande b { font-size: 17px; } .so-esito.grande span { font-size: 14px; }
+.so-esito.grande .so-due { flex: 1 0 100%; margin-top: 4px; }
+.so-esito.pop { animation: so-pop .45s cubic-bezier(.2,1.5,.4,1); } @keyframes so-pop { from { transform: scale(.86); opacity: 0; } }
+.so-card.deciso .so-pic img { opacity: .45; }
+.so-frecce .ok, .so-frecce .pri { flex: 1.5; }
+@media (prefers-reduced-motion: reduce) { .so-esito.pop { animation: none; } }
