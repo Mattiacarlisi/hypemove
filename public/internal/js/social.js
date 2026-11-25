@@ -286,7 +286,7 @@ const VISTE = {
     if (rev.length) box.append(voce(rev.length, rev.length === 1 ? 'da rifare' : 'da rifare', 'Tocca a Claude', 'Vedi', () => { S.stato = 'revisione'; S.tema = 'tutti'; vai('post'); }));
     if (!d.length && !lib.length && !rev.length) box.append(vuoto('Tutto deciso.'));
     main.append(box);
-    if (!collegato()) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.ris = 'instagram'; vai('risultati'); } } }, 'Instagram da collegare: manca un passaggio tuo ›'));
+    if (!collegato() || scaduto()) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.ris = 'instagram'; vai('risultati'); } } }, scaduto() ? 'Il collegamento con Instagram è scaduto: rinnovalo ›' : 'Instagram da collegare: manca un passaggio tuo ›'));
     else if (S.conn.ultimo_errore) main.append(el('p', { className: 'so-avviso', textContent: 'Instagram non si aggiorna: ' + S.conn.ultimo_errore }));
     main.append(el('h2', { className: 'so-h2' }, 'Prossimi sette giorni'), el('div', { className: 'so-7' }, Array.from({ length: 7 }, (_, i) => piu(oggi, i)).map((g) => { const n = delGiorno(g).length; return el('button', { type: 'button', className: n ? 'pieno' : '', aria: { label: leggibile(g) + ', ' + n + ' post' }, on: { click: () => { S.sett = lunedi(g); vai('programma'); } } }, el('span', { textContent: leggibile(g, { weekday: 'short' }) }), el('b', { textContent: leggibile(g, { day: 'numeric' }) }), el('i', { textContent: n || '–' })); })));
     if (S.link) { const o = S.link.ora; main.append(el('h2', { className: 'so-h2' }, 'Link in bio', el('small', { textContent: 'Ultimi ' + S.giorni + ' giorni' })), el('button', { type: 'button', className: 'so-tre so-tile', aria: { label: 'Apri i numeri del link' }, on: { click: () => { S.ris = 'link'; vai('risultati'); } } }, [['Visite', o.visite], ['Tocchi su Android', o.android], ['Primi avvii', o.avvii]].map(([t, n]) => el('span', {}, el('b', { className: 'so-num', textContent: num(n) }), t)))); }
@@ -313,7 +313,7 @@ const VISTE = {
     main.append(testa('Programma', S.vista === 'profilo' ? null : tutti.length + ' post su ' + SETTIMANA + ' questa settimana'));
     main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Vista' } }, chip(S.vista === 'calendario', 'Calendario', null, () => { S.vista = 'calendario'; disegna(); }), chip(S.vista === 'profilo', 'Profilo Instagram', null, () => { S.vista = 'profilo'; disegna(); })));
     if (S.vista === 'profilo') { vProfilo(main); return; }
-    if (!collegato()) main.append(el('p', { className: 'so-avviso', textContent: 'Instagram non è ancora collegato: gli orari non partono da soli.' }));
+    main.append(el('p', { className: 'so-avviso', textContent: 'La pubblicazione automatica non è ancora accesa: gli orari non partono da soli.' }));
     if (lib.length) {
       const buoni = lib.filter(pronto), piano = pianoAutomatico();
       main.append(el('section', { className: 'so-box', style: 'margin-bottom:18px' }, el('div', { className: 'so-fine' }, el('strong', { textContent: lib.length === 1 ? '1 approvato senza data' : lib.length + ' approvati senza data' }), buoni.length ? bottone('Distribuisci da solo', 'pri', () => scrivi(async () => { for (const x of piano) { const r = await sb.from('social_posts').update({ publish_at: x.publish_at }).eq('id', x.id); if (r.error) return r; } return {}; }, piano.length + (piano.length === 1 ? ' messo in programma' : ' messi in programma'))) : null),
@@ -419,8 +419,8 @@ async function collegaConFacebook() {
   location.assign('https://www.facebook.com/v23.0/dialog/oauth?' + new URLSearchParams({ client_id: '1239770904774784', redirect_uri: 'https://hypemove.app/internal/instagram.html', response_type: 'token', scope: META_PERMESSI, state: data }));
 }
 const scaduto = () => S.conn?.scade_il && new Date(S.conn.scade_il) < new Date();
-function vInstagram(main) {
-  if (!collegato() || scaduto()) {
+function modiCollega() {
+  const box = el('div', {}), main = box;
     if (scaduto()) main.append(el('p', { className: 'so-avviso', textContent: 'Il collegamento è scaduto il ' + leggibile(giorno(S.conn.scade_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(S.conn.scade_il) + '.' }));
     main.append(el('section', { className: 'so-box', style: 'margin-bottom:12px' }, el('strong', { style: 'font-size:16px', textContent: 'Veloce, dal telefono' }), bottone('Collega con Facebook', 'pri', collegaConFacebook), el('p', { className: 'so-riga', textContent: 'Dura poco: scarica post e numeri, poi scade.' })));
     const inp = el('input', { type: 'password', className: 'so-in', style: 'width:100%', placeholder: 'Incolla qui la chiave (EAA…)', autocomplete: 'off', aria: { label: 'Chiave di Meta' } }), out = el('p', { className: 'so-riga', role: 'status' });
@@ -436,24 +436,27 @@ function vInstagram(main) {
     main.append(el('section', { className: 'so-box' }, el('strong', { style: 'font-size:16px', textContent: 'Definitivo, dal computer' }),
       el('ol', { className: 'so-passi' }, el('li', {}, 'Apri ', el('a', { href: 'https://business.facebook.com/latest/settings/system_users?business_id=981913040519792&selected_user_id=61582721401522', target: '_blank', rel: 'noopener', textContent: 'Utenti di sistema su Meta' }), ' e tocca «Genera token».'), el('li', { textContent: 'App «Hypemove», scadenza «Mai».' }), el('li', {}, 'Spunta: ', el('b', { textContent: 'instagram_basic, instagram_content_publish, instagram_manage_comments, instagram_manage_insights, instagram_manage_messages, pages_show_list, pages_read_engagement' }), '.'), el('li', { textContent: 'Copia la chiave e incollala qui.' })),
       inp, b, out, el('p', { className: 'so-riga', textContent: 'Finisce nella cassaforte del server: da qui non si può rileggere.' })));
-    return;
-  }
+  return box;
+}
+function vInstagram(main) {
+  if (!collegato() || scaduto()) main.append(modiCollega());
+  if (!collegato()) return;
   const I = S.ig, C = S.conn;
   const agg = bottone('Aggiorna ora', '', async () => { agg.disabled = true; agg.textContent = 'Aggiorno…'; const { error } = await sb.functions.invoke('social-instagram', { body: { azione: 'aggiorna' } }); if (error) toast('Non aggiornato. Riprova.', false); else toast('Aggiornato'); await carica().catch(() => {}); disegna(); });
   main.append(el('div', { className: 'so-fine', style: 'margin-bottom:12px' }, el('span', { className: 'so-riga', textContent: '@' + (C.username || 'hypemove.app') + (C.aggiornato_il ? ', aggiornato ' + leggibile(giorno(C.aggiornato_il), { day: 'numeric', month: 'short' }) + ' alle ' + ora(C.aggiornato_il) : '') }), agg));
-  if (C.scade_il) main.append(el('p', { className: 'so-avviso', textContent: 'Collegamento provvisorio: scade il ' + leggibile(giorno(C.scade_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(C.scade_il) + '.' }));
+  if (C.scade_il && !scaduto()) main.append(el('details', { className: 'so-contr no', style: 'margin-bottom:14px' }, el('summary', { textContent: 'Provvisorio: scade il ' + leggibile(giorno(C.scade_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(C.scade_il) }), el('div', { style: 'padding-bottom:14px' }, modiCollega())));
   if (C.ultimo_errore) main.append(el('p', { className: 'so-avviso', textContent: C.ultimo_errore }));
   if (C.mancanti?.length) main.append(el('p', { className: 'so-avviso', textContent: 'Permessi mancanti: ' + C.mancanti.join(', ') }));
   if (!I) { main.append(vuoto('I numeri non si caricano.')); return; }
   const g = I.giorni30 || {};
-  main.append(el('div', { className: 'so-tre so-tile quattro' }, [['Follower', I.account?.follower], ['Visualizzazioni', g.views], ['Persone raggiunte', g.reach], ['Interazioni', g.total_interactions], ['Tocchi sul link', g.profile_links_taps], ['Commenti', g.comments]].map(([t, n]) => el('span', {}, el('b', { className: 'so-num', textContent: num(n ?? null) }), t))));
+  main.append(el('div', { className: 'so-tre so-tile quattro' }, [['Follower', I.account?.follower], ['Visualizzazioni', g.views], ['Persone raggiunte', g.reach], ['Interazioni', g.total_interactions]].map(([t, n]) => el('span', {}, el('b', { className: 'so-num', textContent: num(n ?? null) }), t))));
   main.append(el('p', { className: 'so-riga', style: 'margin-top:8px', textContent: 'Ultimi 30 giorni, pubblicità compresa. «Persone raggiunte» somma i giorni.' }));
   main.append(el('h2', { className: 'so-h2' }, 'Post per post'), el('div', { className: 'table-wrap' }, el('table', { className: 'so-tab' }, el('thead', {}, el('tr', {}, ['Post', 'Viste', 'Commenti', 'Condivisi', 'Salvati'].map((t) => el('th', { textContent: t })))), el('tbody', {}, I.media.map((m) => el('tr', {}, el('td', {}, el('a', { href: m.link && m.link.startsWith('https://') ? m.link : '#', target: '_blank', rel: 'noopener', textContent: (m.testo || 'Senza testo').slice(0, 46) }), el('small', { style: 'display:block;color:var(--muted)', textContent: m.quando ? leggibile(giorno(m.quando), { day: 'numeric', month: 'short', year: '2-digit' }) : '' })), ['views', 'comments', 'shares', 'saved'].map((k) => el('td', { textContent: num(m.numeri[k] ?? null) }))))))));
 }
 
 function vMessaggi(main) {
   const m = S.ig?.messaggi, p = S.ig?.pena;
-  main.append(el('p', { className: 'so-avviso', textContent: 'Le risposte automatiche sono spente: partono quando Instagram è collegato e la pagina delle pene è online.' }));
+  main.append(el('p', { className: 'so-avviso', textContent: 'Le risposte automatiche sono spente: servono il collegamento definitivo e la pagina delle pene.' }));
   if (!m || !p) { main.append(vuoto('I numeri non si caricano. Riapri la pagina.')); return; }
   main.append(el('h2', { className: 'so-h2', style: 'margin-top:4px' }, 'Tribunale: dal commento all’app'), imbuto([['Commenti ricevuti', m.commenti], ['Risposte sotto al post', m.risposte], ['Messaggi privati mandati', m.privati], ['Apre la pagina della pena', p.aperta], ['Inizia i 30 secondi', p.iniziata], ['Finisce la pena', p.finita], ['Tocca «Scarica»', p.android]]));
   main.append(el('ul', { className: 'so-righe', style: 'margin-top:16px' }, [['Denunce mandate a un’amica', p.denunce], ['Commenti saltati (salute, offese)', m.saltati], ['Messaggi non riusciti', m.errori]].map(([t, n]) => el('li', {}, el('span', { textContent: t }), el('b', { textContent: num(n) })))));
