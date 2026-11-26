@@ -252,3 +252,25 @@ button.so-tile { cursor: pointer; }
 .so-card.deciso .so-pic img { opacity: .45; }
 .so-frecce .ok, .so-frecce .pri { flex: 1.5; }
 @media (prefers-reduced-motion: reduce) { .so-esito.pop { animation: none; } }
+
+/* Reel di prova: bollino sulla card, riquadro nella scheda */
+.so-pic .so-tag.prova { top: 36px; background: #5b21b6; }
+.so-pic .so-tag.prova.in_corso { background: #92400e; }
+.so-pic .so-tag.prova.errore { background: #7f1d1d; }
+.so-prova { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.so-prova > div { display: grid; gap: 2px; min-width: 0; }
+.so-prova b { font-size: 14px; }
+.so-prova span { font-size: 12.5px; color: #a5a5c0; }
+.so-prova.si { border-color: #7c3aed; background: rgba(124, 58, 237, .12); }
+.so-prova.att { border-color: var(--amber); }
+.so-prova.no { border-color: var(--red); }
+.so-prova.no span { color: var(--red); }
+.so-prova a.so-b { text-decoration: none; display: inline-flex; align-items: center; }
+/* «L'ho pubblicato a mano»: chiuso, si apre solo quando serve */
+.so-mano { display: grid; gap: 8px; }
+.so-mano summary { cursor: pointer; color: #8a8aa8; font-size: 13px; min-height: 36px; display: flex; align-items: center; list-style: none; text-decoration: underline; text-underline-offset: 3px; }
+.so-mano summary::-webkit-details-marker { display: none; }
+.so-mano[open] { border: 1px solid var(--border); border-radius: 12px; padding: 0 14px 14px; }
+/* toast con un tasto (es. «Annulla») */
+.toast.con-tasto { display: flex; gap: 14px; align-items: center; }
+.so-toast-b { background: none; border: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 4px 0; min-height: 32px; }

@@ -55,7 +55,8 @@ function istante(g, h) { const u = new Date(`${g}T${h}:00Z`).getTime(); const sp
 const num = (v) => v == null ? '–' : new Intl.NumberFormat('it-IT').format(v);
 const alza = (t) => { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 4, 420) + 'px'; };
 let toastT;
-function toast(msg, ok) { document.querySelector('.toast')?.remove(); const t = el('div', { className: 'toast ' + (ok === false ? 'error' : 'success'), textContent: msg, role: 'status' }); document.body.append(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 3200); }
+// azione = [testo, fn]: un tasto dentro il toast (es. «Annulla»), che allora resta più a lungo.
+function toast(msg, ok, azione) { document.querySelector('.toast')?.remove(); const t = el('div', { className: 'toast ' + (ok === false ? 'error' : 'success') + (azione ? ' con-tasto' : ''), role: 'status' }, el('span', { textContent: msg }), azione ? el('button', { type: 'button', className: 'so-toast-b', textContent: azione[0], on: { click: () => { t.remove(); azione[1](); } } }) : null); document.body.append(t); clearTimeout(toastT); toastT = setTimeout(() => t.remove(), azione ? 7000 : 3200); }
 const post = (id) => S.posts.find((p) => p.id === id);
 const revDi = (id) => S.rev.filter((r) => r.post_id === id).sort((a, b) => a.created_at < b.created_at ? -1 : 1);
 const daDecidere = () => S.posts.filter((p) => p.stato === 'da_vedere' || p.stato === 'rifatto');
@@ -74,6 +75,9 @@ function controllaTesto(t) {
   return out;
 }
 const pronto = (p) => controlliOk(p) && !controllaTesto(p.didascalia).length;
+// Reel di prova (lo vedono solo i non follower): 'si' uscito, 'in_corso' chiesto o preso dal cron, 'errore', null mai.
+const prova = (p) => p.reel_prova_media_id ? 'si' : p.reel_prova_errore ? 'errore' : p.reel_prova_dal || p.reel_prova_chiesto ? 'in_corso' : null;
+const unReel = (p) => p.formato === 're' && p.media.length === 1 && p.media[0].type === 'video';
 
 // ── dati ──
 async function carica() {
@@ -105,7 +109,7 @@ async function scrivi(fn, detto) {
     return true;
   } catch (e) {
     console.error('social', e);
-    toast(navigator.onLine === false ? 'Sei senza connessione. Non è stato salvato.' : /prima va approvato/.test(e.message || '') ? 'Prima va approvato.' : /controlli non superati/.test(e.message || '') ? 'Prima vanno sistemati i controlli.' : 'Non salvato. Riprova.', false);
+    toast(navigator.onLine === false ? 'Sei senza connessione. Non è stato salvato.' : /prima va approvato/.test(e.message || '') ? 'Prima va approvato.' : /controlli non superati/.test(e.message || '') ? 'Prima vanno sistemati i controlli.' : /di prova|preso in carico|etichetta IA|non è un Reel/.test(e.message || '') ? 'Non fatto: ' + e.message + '.' : 'Non salvato. Riprova.', false);
     return false;
   } finally { occupato = false; disegna(); }
 }
@@ -137,6 +141,28 @@ function fascia(p, grande) {
 // Primo posto libero per un approvato, lo stesso che userebbe «Distribuisci da solo».
 const primoPosto = (id) => pianoAutomatico().find((x) => x.id === id)?.publish_at || null;
 const aggiorna = (id, campi, detto) => scrivi(() => sb.from('social_posts').update(campi).eq('id', id), detto);
+// Messo in programma: la scheda si chiude, la card si accende con «Esce …» e il toast dice quando, con «Annulla».
+async function programma(p, t) {
+  const prima = p.publish_at || null;
+  if (!(await aggiorna(p.id, { publish_at: t }))) return;
+  chiudi(); S.appena = p.id; disegna();
+  document.querySelector(`.so-card[data-id="${CSS.escape(p.id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  setTimeout(() => { if (S.appena === p.id) S.appena = null; }, 900);
+  toast('Esce ' + leggibile(giorno(t), { weekday: 'long', day: 'numeric', month: 'long' }) + ' alle ' + ora(t), true,
+    ['Annulla', () => aggiorna(p.id, { publish_at: prima }, prima ? 'Rimesso com’era' : 'Tolto dal programma')]);
+}
+const chiediProva = (p, si) => scrivi(() => sb.rpc('social_chiedi_prova', { p_post: p.id, p_si: si }), si ? 'Esce di prova entro 5 minuti' : 'Prova annullata');
+// Riquadro della prova nella scheda: com'è andata, oppure il tasto per farla.
+function riquadroProva(p) {
+  if (!unReel(p)) return null;
+  const s = prova(p), quando = p.reel_prova_dal || p.reel_prova_chiesto;
+  if (s === 'si') return el('div', { className: 'so-prova si' }, el('div', {}, el('b', { textContent: 'In prova dal ' + dataBreve(quando) }), el('span', { textContent: 'Lo vedono solo i non follower' })), p.reel_prova_permalink ? el('a', { href: p.reel_prova_permalink, target: '_blank', rel: 'noopener', className: 'so-b', textContent: 'Apri su Instagram' }) : null);
+  if (s === 'in_corso') return el('div', { className: 'so-prova att' }, el('div', {}, el('b', { textContent: 'Sta uscendo di prova' }), el('span', { textContent: 'Entro 5 minuti' })), p.reel_prova_dal ? null : bottone('Annulla', '', () => chiediProva(p, false)));
+  if (s === 'errore') return el('div', { className: 'so-prova no' }, el('div', {}, el('b', { textContent: 'La prova non è uscita' }), el('span', { textContent: p.reel_prova_errore })), bottone('Riprova', 'pri', () => chiediProva(p, true)));
+  if (['scartato', 'archivio'].includes(p.stato) || p.etichetta_ia) return null;
+  const ok = pronto(p);
+  return el('div', { className: 'so-prova' }, el('div', {}, el('b', { textContent: 'Provalo prima sui non follower' }), el('span', { textContent: ok ? 'Non esce sul profilo' : 'Prima vanno sistemati i controlli' })), bottone('Metti in prova adesso', 'pri', () => chiediProva(p, true), { disabled: !ok }));
+}
 
 // ── cornice ──
 function conta(k) { return k === 'post' ? daDecidere().length : k === 'programma' ? approvatiLiberi().length : 0; }
@@ -163,9 +189,9 @@ const senzaFile = (n, video) => n.replaceWith(el('span', { className: 'so-manca'
 function carta(p, coda) {
   const m = p.media[0], ultima = revDi(p.id).at(-1);
   const tag = m?.type === 'video' ? 'Reel' : p.media.length > 1 ? p.media.length + ' pagine' : null;
-  const fermo = ['pubblicato', 'archivio'].includes(p.stato), deciso = !daDec(p);
-  return el('article', { className: 'so-card' + (S.recenti.has(p.id) ? ' deciso' : '') },
-    el('button', { type: 'button', className: 'so-pic' + (m?.type === 'video' ? ' reel' : ''), aria: { label: 'Apri ' + p.titolo }, on: { click: () => apri(p.id, coda) } }, m ? el('img', { src: thumb(m), alt: p.titolo, loading: 'lazy', on: { error: (e) => senzaFile(e.currentTarget, m.type === 'video') } }) : null, m?.type === 'video' ? el('span', { className: 'so-play', textContent: '▶' }) : null, tag ? el('span', { className: 'so-tag', textContent: tag }) : null, !pronto(p) && !fermo ? el('span', { className: 'so-tag rosso', textContent: 'Da sistemare' }) : null),
+  const fermo = ['pubblicato', 'archivio'].includes(p.stato), deciso = !daDec(p), pr = prova(p);
+  const card = el('article', { className: 'so-card' + (S.recenti.has(p.id) ? ' deciso' : '') },
+    el('button', { type: 'button', className: 'so-pic' + (m?.type === 'video' ? ' reel' : ''), aria: { label: 'Apri ' + p.titolo }, on: { click: () => apri(p.id, coda) } }, m ? el('img', { src: thumb(m), alt: p.titolo, loading: 'lazy', on: { error: (e) => senzaFile(e.currentTarget, m.type === 'video') } }) : null, m?.type === 'video' ? el('span', { className: 'so-play', textContent: '▶' }) : null, tag ? el('span', { className: 'so-tag', textContent: tag }) : null, pr ? el('span', { className: 'so-tag prova ' + pr, textContent: { si: 'In prova', in_corso: 'Prova in arrivo', errore: 'Prova non uscita' }[pr] }) : null, !pronto(p) && !fermo ? el('span', { className: 'so-tag rosso', textContent: 'Da sistemare' }) : null),
     fascia(p),
     el('div', { className: 'so-cb' },
       p.stato === 'rifatto' ? el('div', { className: 'so-riga' }, el('span', { className: 'so-st rifatto', textContent: 'Rifatto' })) : daDec(p) && p.data_consigliata ? el('div', { className: 'so-riga', textContent: 'Per il ' + leggibile(p.data_consigliata, { day: 'numeric', month: 'long' }) }) : null,
@@ -178,6 +204,8 @@ function carta(p, coda) {
       : el('div', { className: 'so-az' },
         p.stato === 'approvato' && !p.etichetta_ia ? bottone(p.publish_at ? 'Cambia orario' : 'Scegli quando esce', p.publish_at ? '' : 'pri', () => apri(p.id, coda, false, true)) : null,
         bottone(S.recenti.has(p.id) ? 'Annulla' : p.stato === 'scartato' ? 'Recupera' : 'Cambia idea', 'largo', () => decidi(p.id, 'da_vedere')))));
+  card.dataset.id = p.id;
+  return card;
 }
 function apri(id, coda, rivedi, data) { S.apri = id; S.coda = coda || [id]; S.rivedi = !!rivedi; S.bozza = {}; scheda(); if (data) document.getElementById('so-g')?.scrollIntoView({ block: 'center' }); }
 function chiudi() { S.apri = null; S.bozza = {}; document.querySelector('.so-vel')?.remove(); document.body.style.overflow = ''; }
@@ -204,9 +232,10 @@ function scheda() {
 
   const fa = fascia(p, true);
   if (fa) {
-    if (p.stato === 'approvato' && !p.publish_at && !p.etichetta_ia && pronto(p)) { const posto = primoPosto(p.id); fa.append(el('div', { className: 'so-due' }, posto ? bottone(dataBreve(posto), 'pri', () => aggiorna(p.id, { publish_at: posto })) : null, bottone('Scelgo io', '', () => document.getElementById('so-g')?.scrollIntoView({ block: 'center' })))); }
+    if (p.stato === 'approvato' && !p.publish_at && !p.etichetta_ia && pronto(p)) { const posto = primoPosto(p.id); fa.append(el('div', { className: 'so-due' }, posto ? bottone(dataBreve(posto), 'pri', () => programma(p, posto)) : null, bottone('Scelgo io', '', () => document.getElementById('so-g')?.scrollIntoView({ block: 'center' })))); }
     dx.prepend(fa);
   }
+  dx.append(riquadroProva(p) || '');
   // didascalia
   const ta = el('textarea', { className: 'so-ta', id: 'so-did', value: B.did ?? p.didascalia, maxLength: 2200, readOnly: chiuso });
   const salva = bottone('Salva didascalia', 'pri', async () => { const v = ta.value.trim(); B.did = null; if (!(await aggiorna(p.id, { didascalia: v }, 'Didascalia salvata'))) { B.did = v; scheda(); } });
@@ -253,7 +282,7 @@ function scheda() {
     const ok = pronto(p);
     const g = el('input', { type: 'date', className: 'so-in', id: 'so-g', value: p.publish_at ? giorno(p.publish_at) : p.data_consigliata || '', aria: { label: 'Giorno' } });
     const o = el('input', { type: 'time', className: 'so-in', value: p.publish_at ? ora(p.publish_at) : '12:30', aria: { label: 'Ora' } });
-    const sal = bottone('Sposta', 'pri', () => { if (!g.value || !o.value) { g.focus(); return; } aggiorna(p.id, { publish_at: istante(g.value, o.value) }, 'Messo in programma'); });
+    const sal = bottone('Sposta', 'pri', () => { if (!g.value || !o.value) { g.focus(); return; } programma(p, istante(g.value, o.value)); });
     const tog = p.publish_at ? bottone('Togli dal programma', '', () => aggiorna(p.id, { publish_at: null }, 'Tolto dal programma')) : null;
     const agg = () => { sal.hidden = !!p.publish_at && g.value === giorno(p.publish_at) && o.value === ora(p.publish_at); sal.textContent = p.publish_at ? 'Sposta' : 'Metti in programma'; sal.disabled = !ok; };
     g.addEventListener('input', agg); o.addEventListener('input', agg); agg();
@@ -263,7 +292,7 @@ function scheda() {
   if (p.stato === 'approvato') {
     const l = el('input', { type: 'url', className: 'so-in', id: 'so-link', placeholder: 'https://www.instagram.com/p/…', style: 'width:100%', value: B.link || '' });
     l.addEventListener('input', () => { B.link = l.value; });
-    dx.append(el('div', { className: 'so-box' }, el('label', { className: 'so-lab', for: 'so-link', style: 'margin:0', textContent: 'Pubblicato a mano?' }), l, bottone('Segna come pubblicato', '', () => { const v = l.value.trim(); if (v && !/^https:\/\/(www\.)?instagram\.com\//.test(v)) { toast('Il link deve essere di Instagram.', false); return; } aggiorna(p.id, { stato: 'pubblicato', pubblicato_il: new Date().toISOString(), permalink: v || null }, 'Segnato come pubblicato'); })));
+    dx.append(el('details', { className: 'so-mano', open: !!B.link }, el('summary', { textContent: 'L’ho pubblicato a mano' }), el('label', { className: 'so-lab', for: 'so-link', style: 'margin:0', textContent: 'Link del post (se ce l’hai)' }), l, bottone('Segna come pubblicato', '', () => { const v = l.value.trim(); if (v && !/^https:\/\/(www\.)?instagram\.com\//.test(v)) { toast('Il link deve essere di Instagram.', false); return; } aggiorna(p.id, { stato: 'pubblicato', pubblicato_il: new Date().toISOString(), permalink: v || null }, 'Segnato come pubblicato'); })));
   }
   if (p.stato === 'pubblicato') dx.append(el('p', { className: 'so-riga', textContent: 'Pubblicato ' + (p.pubblicato_il ? leggibile(giorno(p.pubblicato_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(p.pubblicato_il) : '') }), p.permalink ? el('a', { href: p.permalink, target: '_blank', rel: 'noopener', textContent: 'Apri su Instagram', style: 'color:var(--purple);font-weight:600' }) : null);
   const i = S.coda.indexOf(p.id);
@@ -336,14 +365,15 @@ const VISTE = {
   },
 
   post(main) {
-    const F = { decidere: ['Da decidere', (p) => p.stato === 'da_vedere' || p.stato === 'rifatto'], revisione: ['Da rifare', (p) => p.stato === 'revisione'], approvato: ['Approvati', (p) => p.stato === 'approvato'], pubblicato: ['Pubblicati', (p) => p.stato === 'pubblicato'], scartato: ['Scartati', (p) => p.stato === 'scartato'], archivio: ['Archivio', (p) => p.stato === 'archivio'] };
-    const f = F[S.stato][1], senzaTema = ['archivio', 'pubblicato'].includes(S.stato);
+    const F = { decidere: ['Da decidere', (p) => p.stato === 'da_vedere' || p.stato === 'rifatto'], revisione: ['Da rifare', (p) => p.stato === 'revisione'], approvato: ['Approvati', (p) => p.stato === 'approvato'], prova: ['In prova', (p) => !!prova(p)], pubblicato: ['Pubblicati', (p) => p.stato === 'pubblicato'], scartato: ['Scartati', (p) => p.stato === 'scartato'], archivio: ['Archivio', (p) => p.stato === 'archivio'] };
+    const f = F[S.stato][1], senzaTema = ['archivio', 'pubblicato', 'prova'].includes(S.stato);
     main.append(testa('Post'));
     main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Stato' } }, Object.entries(F).map(([k, [t, g]]) => chip(S.stato === k, t, S.posts.filter(g).length, () => { S.stato = k; S.recenti.clear(); disegna(); }))));
     if (!senzaTema) main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Tema' } }, chip(S.tema === 'tutti', 'Tutti i temi', null, () => { S.tema = 'tutti'; disegna(); }), Object.entries(TEMI).map(([k, t]) => chip(S.tema === k, t, S.posts.filter((p) => p.tema === k && f(p)).length, () => { S.tema = k; disegna(); }))));
     const vis = S.posts.filter((p) => (f(p) || S.stato === 'decidere' && S.recenti.has(p.id)) && (senzaTema || S.tema === 'tutti' || p.tema === S.tema)).sort((a, b) => (a.stato === 'rifatto' ? 0 : 1) - (b.stato === 'rifatto' ? 0 : 1) || a.ordine - b.ordine);
     if (S.stato === 'pubblicato') vis.sort((a, b) => a.pubblicato_il < b.pubblicato_il ? 1 : -1);
-    if (!vis.length) { main.append(vuoto({ decidere: 'Hai deciso tutto.', revisione: 'Niente da rifare. Da un post, tocca «Fai rifare».', approvato: 'Nessun post approvato.', pubblicato: 'Ancora niente.' }[S.stato] || 'Niente qui.')); return; }
+    if (S.stato === 'prova') vis.sort((a, b) => (a.reel_prova_dal || a.reel_prova_chiesto) < (b.reel_prova_dal || b.reel_prova_chiesto) ? 1 : -1);
+    if (!vis.length) { main.append(vuoto({ decidere: 'Hai deciso tutto.', revisione: 'Niente da rifare. Da un post, tocca «Fai rifare».', approvato: 'Nessun post approvato.', pubblicato: 'Ancora niente.', prova: 'Nessun Reel in prova. Da un Reel, tocca «Metti in prova adesso».' }[S.stato] || 'Niente qui.')); return; }
     const gruppi = []; for (const p of vis) { const k = p.stato === 'rifatto' || S.recenti.get(p.id) === 'rifatto' ? 'rifatto' : senzaTema ? S.stato : p.tema + '/' + p.formato; let g = gruppi.find((x) => x.k === k); if (!g) gruppi.push(g = { k, p, l: [] }); g.l.push(p); }
     const coda = gruppi.flatMap((g) => g.l.map((p) => p.id));
     for (const g of gruppi) main.append(g.k === 'rifatto' ? el('h2', { className: 'so-h2' }, 'Rifatti', el('small', { textContent: 'Come chiedevi tu' })) : senzaTema ? '' : el('h2', { className: 'so-h2' }, FORMATI[g.p.formato] || '', el('small', { textContent: g.p.formato === 'na' ? TEMI_NOTA.natale : TEMI[g.p.tema] + '. ' + TEMI_NOTA[g.p.tema] })), el('div', { className: 'so-grid' }, g.l.map((p) => carta(p, coda))));
@@ -547,6 +577,8 @@ async function nuovaVersione() {
   } catch (e) { return false; }
 }
 nuovaVersione();
+// Una prova chiesta esce al giro del cron (ogni 5 minuti): finché c'è, la pagina si rilegge ogni minuto da sola.
+setInterval(async () => { if (document.visibilityState !== 'visible' || !S.caricato || occupato || !S.posts.some((p) => prova(p) === 'in_corso') || /TEXTAREA|INPUT|SELECT/.test(document.activeElement?.tagName || '') || sporco()) return; try { await carica(); disegna(); } catch (e) { console.error('social', e); } }, 60000);
 // Tornando sulla pagina si rileggono i dati, ma mai mentre si sta scrivendo o con una scheda aperta.
 document.addEventListener('visibilitychange', async () => { if (document.visibilityState !== 'visible' || !S.caricato || S.apri || occupato || /TEXTAREA|INPUT|SELECT/.test(document.activeElement?.tagName || '') || document.querySelector('.so-vel')) return; if (await nuovaVersione()) { location.reload(); return; } try { await carica(); disegna(); } catch (e) { console.error('social', e); } });
 avvia();
