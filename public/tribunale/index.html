@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tribunale di Moovy</title>
 <meta name="robots" content="noindex">
-<meta name="theme-color" content="#0f2b2a">
+<meta name="theme-color" content="#071716">
 <meta property="og:title" content="C’è un caso a tuo carico">
-<meta property="og:description" content="Il Tribunale di Moovy ha emesso la sentenza.">
+<meta property="og:description" content="Il Tribunale di Moovy ti aspetta in aula.">
 <meta property="og:image" content="https://hypemove.app/tribunale/og.jpg">
 <meta property="og:type" content="website">
 <link rel="icon" href="/favicon.svg">
@@ -15,104 +15,171 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Nunito:wght@500;700;800;900&display=swap">
 <!--
   Tribunale di Moovy: la pagina dove arriva chi commenta un post del Tribunale su Instagram (link nel messaggio privato)
-  e chi riceve una «denuncia» da un'amica. Sentenza → 30 secondi di movimento coi video dell'app → scarica l'app o denuncia qualcuno.
+  e chi riceve una «denuncia» da un'amica. È il seguito del Reel, in quattro scene:
+    porta → il giudice legge l'accusa e chiede «Come si dichiara?» → risponde a «colpevole» o «innocente» e condanna
+    → 30 secondi di movimento coi video dell'app (35 per chi si dichiara innocente) → scarcerazione, scarica l'app o denuncia qualcuno.
+  I filmati del giudice (acc-<caso>, colpevole, innocente, libera) sono fatti con lo stesso motore del Reel:
+  marketing/creative/animati/tribunale-sito nel repo HypeMove.
   ?c=<caso>  quale reato (lunedi, scarpe, sveglia, palestra); senza, lunedi.
-  ?d=1       arriva da una denuncia: prima legge l'accusa, poi sente la sentenza.
-  Pagina statica: scrive le visite e i tocchi in public.link_page_events (source «tribunale» o «tribunale-den»), anonima come /link.
+  ?d=1       arriva da una denuncia.
+  Pagina statica: scrive visite e tocchi in public.link_page_events (source «tribunale» o «tribunale-den»), anonima come /link.
 -->
 <style>
-:root{--arancio:#f27b0c;--arancio2:#c85f00;--verde:#0f2b2a;--oro:#ffd76a;--carta:#f7ebcf;--legno:#3a2412;--mut:#6d675b}
+:root{--arancio:#f27b0c;--arancio2:#c85f00;--verde:#0f2b2a;--scuro:#071716;--oro:#ffd76a;--carta:#f7ebcf;--legno:#3a2412;--mut:#6d675b}
 *{box-sizing:border-box}[hidden]{display:none!important}
-html,body{margin:0;height:100%;background:#071716}
-body{color:#1d1a15;font-family:Nunito,system-ui,sans-serif;font-size:16px;line-height:1.35;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--scuro)}
+body{color:#1d1a15;font-family:Nunito,system-ui,sans-serif;font-size:16px;line-height:1.35;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2px}
-.tel{position:relative;width:100%;max-width:480px;height:100dvh;min-height:560px;margin:0 auto;overflow:hidden;background:#fff;isolation:isolate}
+.tel{position:relative;width:100%;max-width:480px;height:100dvh;min-height:560px;margin:0 auto;overflow:hidden;background:var(--verde);isolation:isolate}
 .sc{position:absolute;inset:0;display:none;flex-direction:column}
 .sc.on{display:flex}
-.aula{background:var(--verde) no-repeat center bottom/cover;color:#fff}
-.aula::before{content:"";position:absolute;inset:0 0 auto;height:46%;background:linear-gradient(rgba(7,23,22,.86),rgba(7,23,22,0));pointer-events:none}
-.aula::after{content:"";position:absolute;inset:auto 0 0;height:34%;background:linear-gradient(rgba(7,23,22,0),rgba(7,23,22,.8));pointer-events:none}
-.alto{position:relative;z-index:1;padding:max(26px,env(safe-area-inset-top)) 22px 0;text-align:center}
-.trib{font:400 17px/1 'DM Serif Display',Georgia,serif;color:#e8c66a;letter-spacing:.02em}
-.grande{font:400 46px/1 'DM Serif Display',Georgia,serif;color:var(--oro);margin:8px 0 10px;text-wrap:balance}
-.reato{font-weight:800;font-size:22px;line-height:1.18;text-wrap:balance}
-.basso{position:relative;z-index:1;margin-top:auto;padding:0 20px max(22px,env(safe-area-inset-bottom));display:grid;gap:10px}
+.serif{font-family:'DM Serif Display',Georgia,serif;font-weight:400}
 .btn{display:block;width:100%;text-align:center;text-decoration:none;background:var(--arancio);color:#fff;font-weight:900;font-size:19px;padding:15px 16px;border-radius:18px;border-bottom:5px solid var(--arancio2)}
 .btn:active{transform:translateY(2px);border-bottom-width:3px}
 .btn.carta{background:var(--carta);color:var(--legno);border-bottom-color:#d3bd88}
+.btn.scuro{background:#16403d;color:#fff;border-bottom-color:#0a2423}
 .link{font-weight:800;text-decoration:underline;text-underline-offset:3px;padding:8px;text-align:center}
-.martello{animation:pulsa 1.3s ease-in-out infinite}
-@keyframes pulsa{50%{transform:scale(1.025)}}
+.basso{position:relative;z-index:3;margin-top:auto;padding:0 20px max(22px,env(safe-area-inset-bottom));display:grid;gap:10px}
+.sfuma::after{content:"";position:absolute;inset:auto 0 0;height:38%;background:linear-gradient(rgba(7,23,22,0),rgba(7,23,22,.88));pointer-events:none;z-index:2}
+
+/* 1. la porta */
+#s-porta{background:radial-gradient(120% 70% at 50% 0,#17423f,var(--scuro) 70%);color:#fff;align-items:center}
+.cornice{position:absolute;inset:14% 9% 25%;border:10px solid #2a160a;border-bottom:0;border-radius:14px 14px 0 0;background:#0b0705;overflow:hidden;perspective:900px;box-shadow:0 0 0 3px #4a2a14,0 30px 60px rgba(0,0,0,.6)}
+.luce{position:absolute;inset:0;background:radial-gradient(60% 50% at 50% 45%,#fff7dc,#ffd76a 40%,#7a4a10 100%);opacity:0;transition:opacity .5s}
+.anta{position:absolute;top:0;bottom:0;width:50%;background:linear-gradient(90deg,#4a2a14,#6a3d1e 45%,#55301a);transition:transform .75s cubic-bezier(.6,0,.3,1)}
+.anta::before,.anta::after{content:"";position:absolute;left:14%;right:14%;border:3px solid #3a1f0e;border-radius:6px;box-shadow:inset 0 0 0 2px #7a4a26}
+.anta::before{top:6%;height:40%}.anta::after{top:52%;height:40%}
+.anta.sx{left:0;transform-origin:left center;border-right:2px solid #2a160a}
+.anta.dx{right:0;transform-origin:right center;border-left:2px solid #2a160a}
+.anta i{position:absolute;top:50%;width:13px;height:44px;border-radius:7px;background:linear-gradient(#ffe9a6,#b98a2b);box-shadow:0 2px 4px rgba(0,0,0,.5)}
+.anta.sx i{right:9%}.anta.dx i{left:9%}
+.aperta .anta.sx{transform:rotateY(-78deg)}.aperta .anta.dx{transform:rotateY(78deg)}.aperta .luce{opacity:1}
+.targa{position:absolute;top:4.5%;left:50%;transform:translateX(-50%);z-index:2;background:linear-gradient(#ffe9a6,#c99a35);color:#3a2412;border-radius:8px;padding:8px 18px;text-align:center;box-shadow:0 4px 10px rgba(0,0,0,.5);white-space:nowrap}
+.targa b{display:block;font-size:21px;line-height:1.1}.targa span{font-size:12.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.avviso{position:relative;z-index:3;margin-top:auto;text-align:center;padding:0 22px 12px}
+#s-porta .basso{margin-top:0;width:100%}
+.avviso p{margin:0;font-weight:800;font-size:19px;text-wrap:balance}
+.avviso small{display:block;color:#bfd6d2;font-weight:700;margin-top:4px}
+.pulsa{animation:pulsa 1.3s ease-in-out infinite}
+@keyframes pulsa{50%{transform:scale(1.03)}}
+
+/* 2 e 3. il giudice */
+#film{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--verde)}
+#s-aula{color:#fff}
+.scelte{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.entra{animation:entra .45s cubic-bezier(.2,1.3,.4,1) both}
+@keyframes entra{from{transform:translateY(70px);opacity:0}}
+.foglio{background:var(--carta);color:var(--legno);border-radius:20px;padding:16px 16px 18px;text-align:center;box-shadow:0 12px 30px rgba(0,0,0,.45);transform-origin:50% 0}
+.foglio small{font-family:'DM Serif Display',Georgia,serif;font-size:18px;color:#9a5b1d;display:block}
+.foglio b{display:block;font:400 34px/1.05 'DM Serif Display',Georgia,serif;margin:4px 0 6px;text-wrap:balance}
+.foglio span{font-weight:800}
+.cala{animation:cala .5s cubic-bezier(.2,1.4,.4,1) both}
+@keyframes cala{from{transform:translateY(-120px) rotate(-6deg);opacity:0}}
 .scossa{animation:scossa .42s}
 @keyframes scossa{10%{transform:translate(-9px,5px) rotate(-1deg)}30%{transform:translate(8px,-6px) rotate(1deg)}55%{transform:translate(-5px,3px)}80%{transform:translate(3px,-2px)}}
-/* allenamento */
-#s-gioco{background:#fff}
-.gtop{display:flex;justify-content:space-between;align-items:center;padding:max(18px,env(safe-area-inset-top)) 20px 0;font-weight:800}
+
+/* 4. la condanna: un gioco. Ogni ripetizione è un tocco che cancella un pezzo del reato */
+#s-gioco{background:#fbf6ea;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.gtop{display:flex;justify-content:space-between;align-items:center;padding:max(14px,env(safe-area-inset-top)) 18px 0;font-weight:900}
+.gtop span{color:var(--arancio2);letter-spacing:.04em;text-transform:uppercase;font-size:13px}
 .gtop button{color:var(--mut);padding:8px 4px;font-weight:800}
-.gnome{text-align:center;font-weight:900;font-size:25px;margin:8px 20px 0}
-.anello{position:relative;width:min(300px,70%);aspect-ratio:1;margin:14px auto 0}
-.anello svg{position:absolute;inset:0;transform:rotate(-90deg)}
-.anello video{position:absolute;inset:7%;width:86%;height:86%;border-radius:50%;object-fit:cover;background:#fff}
-.conto{position:absolute;inset:0;display:grid;place-items:center;font-weight:900;font-size:110px;color:var(--arancio);background:rgba(255,255,255,.82);border-radius:50%}
-.sec{text-align:center;font-weight:900;font-size:66px;line-height:1;font-variant-numeric:tabular-nums;margin-top:10px}
-.moovy{margin-top:auto;display:flex;align-items:flex-end;gap:8px;padding:0 16px max(8px,env(safe-area-inset-bottom))}
-.moovy img{width:112px;display:block}
-.fum{background:#fff1de;border-radius:18px 18px 18px 4px;padding:12px 15px;font-weight:800;font-size:17px;margin-bottom:38px;min-width:0}
+.missione{text-align:center;padding:2px 18px 0}
+.missione b{display:block;font:400 30px/1.05 'DM Serif Display',Georgia,serif;color:var(--legno);text-wrap:balance}
+.missione span{font-weight:800;color:var(--mut);font-size:15px}
+.tessere{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;padding:10px 16px 0;min-height:84px;align-content:flex-start}
+.tessere i{font-style:normal;font-weight:900;font-size:11px;line-height:1;color:#fff;background:#b3261e;border-radius:6px;padding:6px 0;width:34px;text-align:center;box-shadow:0 2px 0 #7d1711;transition:transform .45s cubic-bezier(.3,0,.8,.4),opacity .45s}
+.tessere.grandi i{width:44px;font-size:13px;padding:8px 0}
+.tessere i.via{transform:translateY(-70px) rotate(40deg) scale(.4);opacity:0}
+.campo{position:relative;width:min(250px,58%);aspect-ratio:1;margin:8px auto 0}
+.campo svg{position:absolute;inset:0;transform:rotate(-90deg)}
+.campo button{position:absolute;inset:6%;border-radius:50%;overflow:hidden;padding:0;background:#fff;box-shadow:0 8px 0 #d9cfb8,0 14px 24px rgba(58,36,18,.25);transition:transform .08s,box-shadow .08s}
+.campo button.giu{transform:translateY(6px) scale(.97);box-shadow:0 2px 0 #d9cfb8,0 4px 10px rgba(58,36,18,.25)}
+.campo video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.conto{position:absolute;inset:0;display:grid;place-items:center;font-weight:900;font-size:104px;color:var(--arancio);background:rgba(251,246,234,.86);border-radius:50%;pointer-events:none}
+.piu{position:absolute;left:50%;top:8%;font-weight:900;font-size:30px;color:#1f9d55;pointer-events:none;animation:piu .7s ease-out forwards}
+@keyframes piu{from{transform:translate(-50%,0) scale(.6);opacity:0}25%{opacity:1;transform:translate(-50%,-14px) scale(1.15)}to{transform:translate(-50%,-70px) scale(1);opacity:0}}
+.tocca{text-align:center;font-weight:900;font-size:17px;margin-top:12px;color:var(--legno)}
+.tempo{margin:8px 26px 0;height:12px;border-radius:99px;background:#eadfc6;overflow:hidden}
+.tempo div{height:100%;width:100%;background:#22c77f;border-radius:99px;transform-origin:left center}
+.tempo.fine div{background:var(--arancio)}
+.giud{margin-top:auto;display:flex;align-items:flex-end;gap:6px;padding:0 12px;height:118px;overflow:hidden}
+.giud img{width:140px;display:block;margin-bottom:-24px}
+.giud img.salta{animation:salta .35s}
+@keyframes salta{40%{transform:translateY(-14px)}}
+.fum{background:#fff;border-radius:18px 18px 18px 4px;padding:11px 14px;font-weight:800;font-size:16.5px;margin-bottom:40px;min-width:0;box-shadow:0 2px 0 #eadfc6}
+.fum.pop{animation:pop .35s cubic-bezier(.2,1.6,.4,1)}
+@keyframes pop{from{transform:scale(.6);opacity:0}}
 .eva{position:absolute;inset:0;background:rgba(20,16,10,.55);display:flex;align-items:flex-end;z-index:4}
 .eva>div{background:#fff;width:100%;border-radius:28px 28px 0 0;padding:26px 20px max(24px,env(safe-area-inset-bottom));display:grid;gap:10px;text-align:center}
 .eva h3{font:400 34px/1 'DM Serif Display',Georgia,serif;margin:0}.eva p{margin:0 0 6px;font-size:17px}
-/* fine e denuncia */
-.cont{font-weight:800;font-size:19px;margin:0;text-wrap:balance}
-.lista{position:relative;z-index:1;display:grid;gap:9px;padding:18px 20px max(22px,env(safe-area-inset-bottom));overflow:auto;align-content:start;flex:1}
+
+/* 5. la libertà e la denuncia */
+#s-fine,#s-denuncia{color:#fff;background:var(--verde) no-repeat center bottom/cover}
+.alto{position:relative;z-index:3;padding:max(26px,env(safe-area-inset-top)) 22px 0;text-align:center}
+.alto::before{content:"";position:absolute;inset:0 0 -60px;background:linear-gradient(rgba(7,23,22,.9),rgba(7,23,22,0));z-index:-1}
+.trib{font:400 17px/1 'DM Serif Display',Georgia,serif;color:#e8c66a}
+.grande{font:400 42px/1 'DM Serif Display',Georgia,serif;color:var(--oro);margin:8px 0 8px;text-wrap:balance}
+.timbro.due{right:auto;left:-8px;top:-16px;transform:rotate(-10deg);color:#1f7a4a;border-color:#1f7a4a;animation-delay:.95s;animation-name:timbra2}
+@keyframes timbra2{from{transform:rotate(-10deg) scale(2.6);opacity:0}}
+.timbro{position:absolute;right:-8px;top:-18px;font:900 15px/1 Nunito,sans-serif;letter-spacing:.08em;color:#c0392b;border:3px solid #c0392b;border-radius:8px;padding:6px 9px;transform:rotate(12deg);background:rgba(247,235,207,.6);animation:timbra .35s .55s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes timbra{from{transform:rotate(12deg) scale(2.6);opacity:0}}
+.lista{position:relative;z-index:3;display:grid;gap:9px;padding:18px 20px max(22px,env(safe-area-inset-bottom));overflow:auto;align-content:start;flex:1}
 .lista button{background:#fff;color:#1d1a15;border-radius:16px;padding:13px 15px;text-align:left;font-weight:800;line-height:1.2}
-.coria{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:2}
+.coria{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:4}
 .coria i{position:absolute;top:-20px;width:9px;height:15px;animation:cade 2.6s linear forwards}
 @keyframes cade{to{transform:translateY(110vh) rotate(700deg)}}
-.nota{font-size:14px;font-weight:700;text-align:center;color:#e8e2d2;margin:0}
-@media(prefers-reduced-motion:reduce){*{animation-duration:.01s!important}}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01s!important;transition-duration:.01s!important}}
 </style>
 </head>
 <body>
 <main class="tel" id="tel">
- <section class="sc aula" id="s-aula">
-  <div class="alto"><div class="trib">Tribunale di Moovy</div><h1 class="grande" id="tit">Silenzio!</h1><div class="reato" id="reato"></div></div>
+ <section class="sc" id="s-porta">
+  <div class="targa serif"><b>Tribunale di Moovy</b><span>Udienza in corso</span></div>
+  <div class="cornice" id="cornice"><div class="luce"></div><div class="anta sx"><i></i></div><div class="anta dx"><i></i></div></div>
+  <div class="avviso"><p id="avviso">C’è un caso a tuo carico.</p><small>Alza il volume: il giudice parla.</small></div>
+  <div class="basso"><button class="btn pulsa" id="entra">Entra in aula</button></div>
+ </section>
+ <section class="sc sfuma" id="s-aula">
+  <video id="film" playsinline preload="auto"></video>
   <div class="basso" id="aulabasso"></div>
  </section>
  <section class="sc" id="s-gioco">
-  <div class="gtop"><span id="gpena"></span><button id="salta">Salta</button></div>
-  <div class="gnome" id="gnome"></div>
-  <div class="anello"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="46.5" fill="none" stroke="#efece5" stroke-width="5"/><circle id="arco" cx="50" cy="50" r="46.5" fill="none" stroke="#22c77f" stroke-width="5" stroke-linecap="round" pathLength="100" stroke-dasharray="100 100"/></svg><video id="vid" muted loop playsinline preload="auto"></video><div class="conto" id="conto">3</div></div>
-  <div class="sec" id="sec" aria-live="off">30</div>
-  <div class="moovy"><img src="moovy.webp" alt="Moovy"><div class="fum" id="fum"></div></div>
-  <div class="eva" id="eva" hidden><div><h3>Tentata evasione?</h3><p>Ti mancano <b id="mancano"></b> secondi alla libertà.</p><button class="btn" id="resto">Torno in cella</button><button class="link" id="evado">Evado</button></div></div>
+  <div class="gtop"><span>Condanna in corso</span><button id="salta">Evado</button></div>
+  <div class="missione"><b id="missione"></b><span id="restano"></span></div>
+  <div class="tessere" id="tessere"></div>
+  <div class="campo"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="47" fill="none" stroke="#eadfc6" stroke-width="4"/><circle id="arco" cx="50" cy="50" r="47" fill="none" stroke="#22c77f" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/></svg><button id="colpo" aria-label="Tocca a ogni ripetizione"><video id="vid" muted loop playsinline preload="auto"></video></button><div class="conto" id="conto">3</div></div>
+  <div class="tocca" id="tocca"></div>
+  <div class="tempo" id="tempo"><div id="barra"></div></div>
+  <div class="giud"><img src="giudice.webp" alt="Il giudice Moovy ti osserva" id="faccia"><div class="fum" id="fum"></div></div>
+  <div class="eva" id="eva" hidden><div><h3>Tentata evasione?</h3><p>Ti mancano <b id="mancano"></b> secondi alla libertà.</p><button class="btn" id="resto">Torno in cella</button><button class="link" id="evado">Evado lo stesso</button></div></div>
  </section>
- <section class="sc aula" id="s-fine">
-  <div class="alto"><div class="trib">Tribunale di Moovy</div><h2 class="grande" id="fint">Condanna scontata</h2><p class="cont" id="fins"></p></div>
-  <div class="basso"><a class="btn" id="store" href="https://play.google.com/store/apps/details?id=pt.app&hl=it" rel="noopener">Scarica HypeMove</a><button class="btn carta" id="vaidenuncia">Denuncia qualcuno</button></div>
+ <section class="sc sfuma" id="s-fine">
+  <div class="alto"><div class="trib">Tribunale di Moovy</div><h2 class="grande" id="fint">Scarcerazione</h2></div>
+  <div class="basso"><div class="foglio" id="atto" style="position:relative"></div><a class="btn" id="store" href="https://play.google.com/store/apps/details?id=pt.app&hl=it" rel="noopener">Scarica HypeMove</a><button class="btn carta" id="vaidenuncia">Denuncia un complice</button></div>
   <div class="coria" id="coria"></div>
  </section>
- <section class="sc aula" id="s-denuncia" style="background-image:url(accusa.jpg)">
-  <div class="alto"><div class="trib">Nuova denuncia</div><h2 class="grande" style="font-size:38px">Che cosa ha fatto?</h2></div>
+ <section class="sc" id="s-denuncia" style="background-image:url(accusa.jpg)">
+  <div class="alto"><div class="trib">Nuova denuncia</div><h2 class="grande" style="font-size:36px">Che cosa ha fatto?</h2></div>
   <div class="lista" id="reati"></div>
  </section>
 </main>
 <script>
 (function () {
   var $ = function (s) { return document.querySelector(s); };
-  // I reati: tu = accusa in seconda persona, lei = come si sceglie nella denuncia, p = condanna, d = cosa si fa, v = video dell'app
+  // I reati. lei = come si sceglie nella denuncia, d = che cosa si fa, v = video dell'app, f = che cosa dice il giudice mentre guardi
   var CASI = {
-    lunedi: { lei: 'Dice «da lunedì comincio» da quarantadue lunedì.', tu: 'Hai detto «da lunedì comincio» per quarantadue lunedì di fila.', p: 'Lavori leggeri', d: '30 secondi di squat, oggi', n: 'Squat', v: 'squat', f: ['Oggi. Non lunedì.', 'Ognuno al suo ritmo.', 'Quasi in libertà.'] },
-    scarpe: { lei: 'Ha comprato le scarpe da corsa. Le usa per fare la spesa.', tu: 'Hai comprato le scarpe da corsa. Le usi per fare la spesa.', p: 'Ai domiciliari', d: '30 secondi di marcia, dalla sedia', n: 'Marcia dalla sedia', v: 'marcia', f: ['Dalla sedia. Nessuno ti vede.', 'La corte osserva le braccia.', 'Quasi in libertà.'] },
-    sveglia: { lei: 'Ha messo la sveglia alle 6. L’ha spenta sette volte.', tu: 'Hai messo la sveglia alle 6. L’hai spenta sette volte.', p: 'Sveglia forzata', d: '30 secondi di jumping jack', n: 'Jumping jack', v: 'salti', f: ['Buongiorno.', 'I vicini sono stati avvisati.', 'Quasi in libertà.'] },
-    palestra: { lei: 'Paga la palestra da gennaio. Non sa dov’è l’entrata.', tu: 'Paghi la palestra da gennaio. Non sai dov’è l’entrata.', p: 'Legittima difesa', d: '30 secondi di boxe a vuoto', n: 'Boxe a vuoto', v: 'boxe', f: ['Colpisci l’abbonamento.', 'Non vale mirare al giudice.', 'Quasi in libertà.'] }
+    lunedi: { lei: 'Dice «da lunedì comincio» da quarantadue lunedì.', d: 'di squat', v: 'squat', m: 42, n: 14, tessera: 'LUN', missione: 'Cancella i 42 lunedì', unita: ['lunedì', 'lunedì'], tocca: 'Un tocco a ogni squat', f: ['Oggi. Non lunedì.', 'La corte prende nota.', 'Ognuno al suo ritmo.', 'Ne restano pochi.'] },
+    scarpe: { lei: 'Ha comprato le scarpe da corsa. Le usa per fare la spesa.', d: 'di marcia, anche da seduti', v: 'marcia', m: 30, n: 30, tessera: '👣', missione: 'Fai i 30 passi mai fatti', unita: ['passo', 'passi'], tocca: 'Un tocco a ogni passo', f: ['Anche dalla sedia. Vale.', 'La corte osserva le braccia.', 'Le scarpe ringraziano.', 'Ne restano pochi.'] },
+    sveglia: { lei: 'Ha messo la sveglia alle 6. L’ha spenta sette volte.', d: 'di jumping jack', v: 'salti', m: 7, n: 21, tessera: '⏰', grandi: true, missione: 'Spegni le 7 sveglie', unita: ['sveglia', 'sveglie'], tocca: 'Un tocco a ogni salto', f: ['Buongiorno.', 'I vicini sono stati avvisati.', 'Questa non si rimanda.', 'Ne restano poche.'] },
+    palestra: { lei: 'Paga la palestra da gennaio. Non sa dov’è l’entrata.', d: 'di boxe a vuoto', v: 'boxe', m: 11, n: 22, tessera: ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV'], grandi: true, missione: 'Colpisci 11 mesi di abbonamento', unita: ['mese', 'mesi'], tocca: 'Un tocco a ogni pugno', f: ['Colpisci l’abbonamento.', 'Non vale mirare al giudice.', 'Almeno questi sono pagati.', 'Ne restano pochi.'] }
   };
   var q = new URLSearchParams(location.search);
   var caso = CASI[q.get('c')] ? q.get('c') : 'lunedi', denuncia = q.get('d') === '1';
   var source = denuncia ? 'tribunale-den' : 'tribunale';
   var URL_DB = 'https://fiwskdxntgcredypplub.supabase.co', KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpd3NrZHhudGdjcmVkeXBwbHViIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDkwMzIxNzAsImV4cCI6MjA2NDYwODE3MH0.W5b8A2zfm0Oeo746SXcANdeRhd2HsAMk5ND9Uc-q7Uo';
   var refHost = null; try { if (document.referrer) refHost = new URL(document.referrer).hostname.slice(0, 100); } catch (e) {}
-  // una riga per evento, anonima: view, oppure click con cosa è stato toccato
+  // una riga per evento, anonima: view, oppure click con che cosa è stato toccato
   function conta(event, link) {
     try {
       return fetch(URL_DB + '/rest/v1/link_page_events', { method: 'POST', keepalive: true,
@@ -121,63 +188,110 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       }).then(function () {}, function () {});
     } catch (e) { return Promise.resolve(); }
   }
-  var tick = null, raf = 0, left = 30, paused = false, libera = true;
+  var film = $('#film'), vid = $('#vid'), tick = null, raf = 0, totale = 30, left = 30, paused = false, libera = true, condotta = false, sconto = 0;
   function mostra(k) {
-    clearInterval(tick); clearTimeout(tick); cancelAnimationFrame(raf); $('#vid').pause();
+    clearInterval(tick); clearTimeout(tick); cancelAnimationFrame(raf); vid.pause();
     document.querySelectorAll('.sc').forEach(function (s) { s.classList.toggle('on', s.id === 's-' + k); });
-    $('#tel').classList.remove('scossa');
-    ({ aula: aula, gioco: gioco, fine: fine })[k] && ({ aula: aula, gioco: gioco, fine: fine })[k]();
   }
-  function colpo() {
-    try { var A = window.AudioContext || window.webkitAudioContext, a = colpo.a || (colpo.a = new A()), t = a.currentTime;
-      [0, .16].forEach(function (o) { var s = a.createOscillator(), g = a.createGain(); s.type = 'triangle'; s.frequency.setValueAtTime(190, t + o); s.frequency.exponentialRampToValueAtTime(60, t + o + .1); g.gain.setValueAtTime(.7, t + o); g.gain.exponentialRampToValueAtTime(.001, t + o + .16); s.connect(g).connect(a.destination); s.start(t + o); s.stop(t + o + .18); });
-    } catch (e) {}
-    try { navigator.vibrate && navigator.vibrate([60, 60, 90]); } catch (e) {}
+  function vibra(p) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
+  // un filmato del giudice: parte con l'audio (siamo dentro un tocco), e alla fine chiama «poi»
+  function proietta(nome, poi) {
+    $('#aulabasso').replaceChildren(); film.loop = false; film.poster = nome + '.jpg';
+    if (film.getAttribute('data-nome') !== nome) { film.setAttribute('data-nome', nome); film.src = nome + '.mp4'; }
+    film.muted = false; film.currentTime = 0;
+    var fatto = false, fine = function () { if (fatto) return; fatto = true; film.onended = film.onerror = null; poi(); };
+    film.onended = fine; film.onerror = fine;
+    var p = film.play(); if (p && p.catch) p.catch(function () { film.muted = true; var p2 = film.play(); if (p2 && p2.catch) p2.catch(fine); });
   }
-  function aula() {
-    var a = $('#s-aula'), c = CASI[caso];
-    $('#aulabasso').replaceChildren();
-    function sentenza() {
-      colpo(); a.style.backgroundImage = 'url(sentenza.jpg)'; $('#tit').textContent = c.p; $('#reato').textContent = c.d;
-      var t = $('#tel'); t.classList.remove('scossa'); void t.offsetWidth; t.classList.add('scossa');
-      var g = document.createElement('button'); g.className = 'btn'; g.textContent = 'Inizia';
-      g.onclick = function () { conta('click', 'inizia'); mostra('gioco'); };
-      $('#aulabasso').replaceChildren(g);
-    }
-    if (denuncia) {
-      a.style.backgroundImage = 'url(accusa.jpg)'; $('#tit').textContent = 'L’accusa'; $('#reato').textContent = c.tu;
-      var b = document.createElement('button'); b.className = 'btn martello'; b.textContent = 'Senti la sentenza';
-      b.onclick = function () { conta('click', 'sentenza'); sentenza(); }; $('#aulabasso').append(b);
-    } else {
-      a.style.backgroundImage = 'url(silenzio.jpg)'; $('#tit').textContent = 'Colpevole'; $('#reato').textContent = c.tu;
-      tick = setTimeout(sentenza, 2600);
-    }
+  function bottone(testo, classe, fai) { var b = document.createElement('button'); b.className = 'btn ' + (classe || ''); b.textContent = testo; b.onclick = fai; return b; }
+
+  // 1. la porta
+  $('#avviso').textContent = denuncia ? 'Qualcuno ha sporto denuncia contro di te.' : 'C’è un caso a tuo carico.';
+  $('#entra').onclick = function () {
+    conta('click', 'entra'); vibra(40); $('#cornice').classList.add('aperta'); $('#entra').classList.remove('pulsa'); $('#entra').disabled = true;
+    // il filmato si avvia dentro il tocco, così l'audio è permesso. I filmati dell'accusa cominciano con 0,7 secondi
+    // fermi e muti: è il tempo in cui le ante si aprono, poi si passa all'aula
+    accusa();
+    setTimeout(function () { mostra('aula'); }, 700);
+  };
+  // 2. l'accusa: il giudice la legge e chiede «Come si dichiara?»
+  function accusa() {
+    proietta('acc-' + caso, function () {
+      var d = document.createElement('div'); d.className = 'scelte entra';
+      d.append(bottone('Colpevole', '', function () { risponde('colpevole'); }), bottone('Innocente', 'scuro', function () { risponde('innocente'); }));
+      $('#aulabasso').replaceChildren(d);
+    });
   }
-  function disegna() { $('#sec').textContent = Math.ceil(left); $('#arco').setAttribute('stroke-dasharray', (left / 30 * 100) + ' 100'); }
+  // 3. la risposta del giudice e la condanna: chi si dichiara innocente prende cinque secondi in più
+  function risponde(scelta) {
+    conta('click', scelta); totale = scelta === 'innocente' ? 35 : 30;
+    proietta(scelta, function () {
+      vibra([60, 60, 90]); var t = $('#tel'); t.classList.remove('scossa'); void t.offsetWidth; t.classList.add('scossa');
+      var c = CASI[caso], f = document.createElement('div'); f.className = 'foglio cala';
+      f.innerHTML = '<small>La condanna</small><b></b><span>Da scontare subito, qui.</span>'; f.querySelector('b').textContent = totale + ' secondi ' + c.d;
+      var b = bottone('Sconto la condanna', 'entra', function () { conta('click', 'inizia'); mostra('gioco'); gioco(); });
+      $('#aulabasso').replaceChildren(f, b);
+    });
+  }
+  // 4. la condanna è un gioco: ogni ripetizione si segna con un tocco sul video e cancella un pezzo del reato.
+  // Chi cancella tutto prima che scada il tempo esce in anticipo per buona condotta; se il tempo scade, la condanna è scontata lo stesso.
+  var suona = function (hz, dur) { try { var A = window.AudioContext || window.webkitAudioContext, a = suona.a || (suona.a = new A()), t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(hz, t); o.frequency.exponentialRampToValueAtTime(hz * .6, t + dur); g.gain.setValueAtTime(.35, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} };
   function gioco() {
-    var c = CASI[caso], v = $('#vid'); v.src = c.v + '.mp4'; v.play().catch(function () {});
-    $('#gpena').textContent = c.p; $('#gnome').textContent = c.n; $('#fum').textContent = c.f[0]; $('#eva').hidden = true; left = 30; paused = false; disegna();
-    var k = $('#conto'), n = 3; k.hidden = false; k.textContent = n;
+    var c = CASI[caso], fum = $('#fum'), box = $('#tessere'), n = c.n + (totale > 30 ? 3 : 0), fatti = 0, tolte = 0, ultimoTocco = 0, detto = -1, partito = false, faccia = $('#faccia');
+    var dici = function (t) { fum.textContent = t; fum.classList.remove('pop'); void fum.offsetWidth; fum.classList.add('pop'); };
+    var restano = function () { var r = c.m - tolte; $('#restano').textContent = r > 0 ? 'Ne restano ' + r : 'Fatto!'; };
+    vid.src = c.v + '.mp4'; vid.play().catch(function () {});
+    $('#missione').textContent = c.missione; $('#tocca').textContent = c.tocca; $('#eva').hidden = true; $('#tempo').classList.remove('fine'); faccia.src = 'giudice.webp';
+    box.className = 'tessere' + (c.grandi ? ' grandi' : ''); box.replaceChildren();
+    for (var i = 0; i < c.m; i++) { var x = document.createElement('i'); x.textContent = Array.isArray(c.tessera) ? c.tessera[i] : c.tessera; box.append(x); }
+    left = totale; paused = false; condotta = false; sconto = 0; restano(); fum.textContent = 'In posizione.';
+    $('#barra').style.transform = 'scaleX(1)'; $('#arco').setAttribute('stroke-dasharray', '0 100');
+    $('#colpo').onpointerdown = function (e) {
+      e.preventDefault(); if (!partito || paused) return;
+      var ora = performance.now(), b = $('#colpo'); b.classList.add('giu'); setTimeout(function () { b.classList.remove('giu'); }, 90);
+      if (ora - ultimoTocco < 330) { dici('Piano. Conto solo quelli veri.'); return; } // niente raffiche col dito
+      ultimoTocco = ora; fatti++; vibra(22); suona(300 + 520 * fatti / n, .12);
+      var devono = Math.min(c.m, Math.round(fatti * c.m / n)), vive = box.querySelectorAll('i:not(.via)');
+      for (var k = 0; k < devono - tolte && k < vive.length; k++) vive[vive.length - 1 - k].classList.add('via');
+      var tolteOra = devono - tolte; tolte = devono; restano(); $('#arco').setAttribute('stroke-dasharray', (fatti / n * 100) + ' 100');
+      var p = document.createElement('div'); p.className = 'piu'; p.textContent = tolteOra > 0 ? '−' + tolteOra : '+1'; $('.campo').append(p); setTimeout(function () { p.remove(); }, 720);
+      faccia.classList.remove('salta'); void faccia.offsetWidth; faccia.classList.add('salta');
+      if (fatti === Math.ceil(n / 2)) { faccia.src = 'giudice-ok.webp'; dici('Metà. La corte è colpita.'); }
+      if (fatti >= n) { condotta = true; sconto = Math.floor(left); libera = true; suona(880, .3); vibra([40, 40, 120]); conta('click', 'condotta'); setTimeout(fine, 450); partito = false; }
+    };
+    var k = $('#conto'), giu = 3; k.hidden = false; k.textContent = giu;
     tick = setInterval(function () {
-      n--; if (n > 0) { k.textContent = n; return; }
-      k.hidden = true; clearInterval(tick); var last = performance.now();
+      giu--; if (giu > 0) { k.textContent = giu; vibra(20); return; }
+      k.hidden = true; clearInterval(tick); partito = true; dici(c.f[0]); var last = performance.now();
       var f = function (t) {
+        if (!partito) return;
         var dt = Math.max(0, Math.min(.25, (t - last) / 1000)); last = t; if (!paused) left -= dt;
-        if (left <= 0) { left = 0; disegna(); try { navigator.vibrate && navigator.vibrate(80); } catch (e) {} libera = true; conta('click', 'finita'); mostra('fine'); return; }
-        $('#fum').textContent = left > 19 ? c.f[0] : left > 7 ? c.f[1] : c.f[2]; disegna(); raf = requestAnimationFrame(f);
+        if (left <= 0) { partito = false; vibra(80); libera = true; conta('click', 'finita'); fine(); return; }
+        var fatta = 1 - left / totale, i = fatta < .3 ? 0 : fatta < .55 ? 1 : fatta < .8 ? 2 : 3;
+        if (i !== detto) { if (detto >= 0) dici(c.f[i]); detto = i; }
+        $('#barra').style.transform = 'scaleX(' + (left / totale) + ')'; if (left <= 6) $('#tempo').classList.add('fine');
+        raf = requestAnimationFrame(f);
       };
       raf = requestAnimationFrame(f);
     }, 800);
   }
-  $('#salta').onclick = function () { paused = true; $('#vid').pause(); $('#mancano').textContent = Math.ceil(left); $('#eva').hidden = false; };
-  $('#resto').onclick = function () { paused = false; $('#vid').play().catch(function () {}); $('#eva').hidden = true; };
-  $('#evado').onclick = function () { libera = false; conta('click', 'evasa'); mostra('fine'); };
+  $('#salta').onclick = function () { paused = true; vid.pause(); $('#mancano').textContent = Math.ceil(left); $('#eva').hidden = false; };
+  $('#resto').onclick = function () { paused = false; vid.play().catch(function () {}); $('#eva').hidden = true; };
+  $('#evado').onclick = function () { libera = false; conta('click', 'evasa'); fine(); };
+  // 5. la libertà
   function fine() {
-    var ok = libera; $('#s-fine').style.backgroundImage = ok ? 'url(libera.jpg)' : 'url(latitante.jpg)';
-    $('#fint').textContent = ok ? 'Condanna scontata' : 'Latitante';
-    $('#fins').textContent = ok ? 'Fedina pulita fino a domani. Poi ci vediamo nell’app.' : 'Ti cerco nell’app. Ho pazienza.';
+    var ok = libera, s = $('#s-fine'), atto = $('#atto'), oggi = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
+    mostra('fine'); s.style.backgroundImage = ok ? 'url(libera.jpg)' : 'url(latitante.jpg)';
+    $('#fint').textContent = ok ? 'Scarcerazione' : 'Latitante'; cancelAnimationFrame(raf);
+    atto.className = 'foglio cala';
+    atto.innerHTML = ok ? '<i class="timbro">SCONTATA</i>' + (condotta ? '<i class="timbro due">BUONA CONDOTTA</i>' : '') + '<small>Atto di scarcerazione</small><b>' + (condotta ? 'Fuori in anticipo' : 'Fedina pulita') + '</b><span></span>' : '<small>Mandato di cattura</small><b>Ti cerco nell’app</b><span>Ho pazienza.</span>';
+    if (ok) atto.querySelector('span').textContent = (condotta && sconto > 0 ? sconto + ' secondi di sconto. ' : oggi + '. ') + 'Vale fino a domani: poi ci vediamo nell’app.';
     var k = $('#coria'); k.replaceChildren();
-    if (ok) for (var i = 0; i < 46; i++) { var x = document.createElement('i'); x.style.cssText = 'left:' + Math.random() * 100 + '%;background:' + ['#ffd76a', '#f27b0c', '#fff', '#22c77f'][i % 4] + ';animation-delay:' + Math.random() * 1.2 + 's'; k.append(x); }
+    if (ok) {
+      for (var i = 0; i < 46; i++) { var x = document.createElement('i'); x.style.cssText = 'left:' + Math.random() * 100 + '%;background:' + ['#ffd76a', '#f27b0c', '#fff', '#22c77f'][i % 4] + ';animation-delay:' + Math.random() * 1.2 + 's'; k.append(x); }
+      // la festa del giudice: stesso lettore, già sbloccato dal primo tocco (resta nascosto, si sente soltanto)
+      try { film.onended = film.onerror = null; film.setAttribute('data-nome', 'libera'); film.src = 'libera.mp4'; film.muted = false; var p = film.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+    }
   }
   // negozio: Android al Play Store con la sorgente, iPhone alla pagina dedicata
   var ios = /iPhone|iPad|iPod/.test(navigator.userAgent), store = $('#store');
@@ -194,8 +308,9 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
     };
     $('#reati').append(b);
   });
-  conta('view');
-  mostra('aula');
+  // i filmati successivi si scaricano mentre si guarda la porta
+  ['acc-' + caso, 'colpevole', 'innocente'].forEach(function (n) { var l = document.createElement('link'); l.rel = 'prefetch'; l.href = n + '.mp4'; document.head.append(l); });
+  conta('view'); mostra('porta');
 })();
 </script>
 </body>
