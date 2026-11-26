@@ -122,6 +122,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 .risposte button.si{background:#22c77f;color:#fff;border-bottom-color:#16965e}
 .risposte button.no{background:#e2574c;color:#fff;border-bottom-color:#b03a30}
 .risposte button.via{display:none}
+.risposte.quattro{grid-template-columns:1fr 1fr}
 .fatto{margin:0;font-weight:800;font-size:16.5px;line-height:1.3;animation:entra .4s both}
 /* schermi bassi (telefoni piccoli, browser dentro le app con due barre): il banco si stringe perché il tasto resti sempre visibile */
 @media(max-height:660px){.banco{gap:7px;padding-top:11px;max-height:calc(100% - 92px)}.banco h3{font-size:21px}.risposte{gap:7px}.risposte button{padding:9px 12px;font-size:16px}.fatto{font-size:15px;line-height:1.25}.banco .btn{padding:11px 16px;font-size:18px}.palco{min-height:86px}.grande{font-size:34px}.foglio b{font-size:28px}}
@@ -232,7 +233,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       $('#aulabasso').replaceChildren(d);
     });
   }
-  // 3. la risposta del giudice e la condanna: cinque domande. Il filmato di chi si dichiara innocente si ferma dopo «Lo dicono tutti.»
+  // 3. la risposta del giudice e la condanna: cinque domande. Il filmato di chi si dichiara innocente è tagliato dopo «Lo dicono tutti.»
   function risponde(scelta) {
     conta('click', scelta);
     proietta(scelta, function () {
@@ -241,7 +242,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       f.innerHTML = '<small>La condanna</small><b>Cinque domande</b><span>Vediamo quante ne sai su come tenerti in forma.</span>';
       var b = bottone('Rispondo', 'entra', function () { conta('click', 'inizia'); suona(1, .01, .001); try { film.pause(); } catch (e) {} mostra('quiz'); quiz(); });
       $('#aulabasso').replaceChildren(f, b);
-    }, scelta === 'innocente' ? .9 : 2.4); // colpevole: l'ultimo fotogramma mostra già la scritta del filmato dopo
+    }, scelta === 'innocente' ? 0 : 2.4); // colpevole: l'ultimo fotogramma mostra già la scritta del filmato dopo
   }
   var suona = function (hz, dur, vol) { try { var A = window.AudioContext || window.webkitAudioContext, a = suona.a || (suona.a = new A()), t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(hz, t); o.frequency.exponentialRampToValueAtTime(hz * .5, t + dur); g.gain.setValueAtTime(vol || .4, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} };
   // 4. il quiz. Ogni domanda ha una risposta verificabile; la fonte è nel commento.
@@ -251,7 +252,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
     // I diecimila: Manpo-kei («contapassi dei diecimila passi»), Giappone 1965
     { q: 'Quanti passi al giorno bastano per mantenersi in salute?', r: ['Circa 2.000', 'Almeno 10.000', 'Circa 7.000'], ok: 2, f: 'I 10.000 li ha inventati la pubblicità di un contapassi. Gli studi dicono che a 7.000 hai già quasi tutti i benefici.' },
     // OMS, linee guida 2020 sull'attività fisica: adulti, 150-300 minuti a settimana di attività moderata, senza durata minima per volta
-    { q: 'Per stare bene, quanto movimento serve in una settimana?', r: ['Un’ora', 'Sette ore, una al giorno', 'Due ore e mezza'], ok: 2, f: 'Sono circa 20 minuti al giorno. Puoi anche dividerli: 10 la mattina e 10 la sera.' },
+    { q: 'Quanti minuti di attività fisica a settimana raccomanda l’OMS?', r: ['60 minuti', '100 minuti', '150 minuti', '400 minuti'], ok: 2, f: 'L’Organizzazione Mondiale della Sanità dice almeno 150: circa 20 al giorno, anche divisi in due.' },
     // Ekelund et al., The Lancet 2026;407:339-349: cinque minuti in più al giorno di attività moderata o intensa, stima del 10% di morti in meno
     { q: 'Oggi hai solo cinque minuti per muoverti. Servono a qualcosa?', r: ['No, sono troppo pochi', 'Sì, contano già', 'Solo se sudi'], ok: 1, f: 'Uno studio del 2026 lo conferma: chi si muove anche solo 5 minuti in più al giorno vive più a lungo.' },
     // il dimagrimento localizzato non esiste: allenare un muscolo non scioglie il grasso che gli sta sopra
@@ -275,8 +276,8 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       var d = DOMANDE[i]; risposto = false;
       p.children[i].className = 'ora'; $('#qn').textContent = 'Domanda ' + (i + 1) + ' di ' + DOMANDE.length; $('#qt').textContent = d.q;
       $('#fatto').hidden = true; $('#avanti').hidden = true; $('#nuvola').hidden = true; $('#esito').hidden = true; $('#raggi').classList.remove('on');
-      box.replaceChildren();
-      d.r.forEach(function (t, k) { var b = document.createElement('button'), l = document.createElement('b'); b.type = 'button'; l.textContent = 'ABC'[k]; b.append(l, document.createTextNode(t)); b.onclick = function () { scelta(k, b); }; box.append(b); });
+      box.replaceChildren(); box.classList.toggle('quattro', d.r.length > 3);
+      d.r.forEach(function (t, k) { var b = document.createElement('button'), l = document.createElement('b'); b.type = 'button'; l.textContent = 'ABCD'[k]; b.append(l, document.createTextNode(t)); b.onclick = function () { scelta(k, b); }; box.append(b); });
       posa(corpo, 'legge'); mossa(corpo, 'sale'); suona(440, .08, .2);
       dopo(6500, function () { if (!risposto) { posa(corpo, 'dubbio'); mossa(corpo, 'pensa'); } });
     }
