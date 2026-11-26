@@ -245,16 +245,17 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
   // 4. il quiz. Ogni domanda ha una risposta verificabile; la fonte è nel commento.
   //   q domanda, r risposte, ok quale è giusta, f il fatto che Moovy mette agli atti dopo la risposta
   var DOMANDE = [
-    // OMS, linee guida 2020 sull'attività fisica: adulti, 150-300 minuti a settimana di attività moderata
-    { q: 'Quanto movimento a settimana consiglia l’Organizzazione Mondiale della Sanità?', r: ['Un’ora', 'Sette ore', 'Due ore e mezza'], ok: 2, f: 'Sono circa venti minuti al giorno. E vale anche camminare di buon passo.' },
-    // Manpo-kei («contapassi dei diecimila passi»), Yamasa, Giappone 1965; Lee et al., JAMA Intern Med 2019: benefici già da circa 4.400 passi
-    { q: 'I famosi diecimila passi al giorno: da dove arrivano?', r: ['Dalla pubblicità di un contapassi', 'Da uno studio di medici', 'Dall’esercito'], ok: 0, f: 'Giappone, 1965: il contapassi si chiamava «diecimila passi». Si sta meglio già con meno.' },
-    // OMS 2020: tolta la durata minima di 10 minuti per volta, «ogni movimento conta»
-    { q: 'Dieci minuti qua e là, durante il giorno, contano?', r: ['No, serve mezz’ora di fila', 'Sì, ogni minuto conta', 'Solo se sudi'], ok: 1, f: 'Dal 2020 non c’è più una durata minima: i pezzetti si sommano.' },
+    // Banach et al., Eur J Prev Cardiol 2023 (17 studi, 226.889 persone): il rischio cala già da circa 4.000 passi al giorno.
+    // I diecimila: Manpo-kei («contapassi dei diecimila passi»), Giappone 1965
+    { q: 'Da quanti passi al giorno la salute comincia a guadagnarci?', r: ['Da circa 4.000', 'Da 10.000', 'Da 15.000'], ok: 0, f: 'I diecimila vengono dalla pubblicità di un contapassi. Più cammini meglio è, ma si parte da qui.' },
+    // OMS, linee guida 2020 sull'attività fisica: adulti, 150-300 minuti a settimana di attività moderata, senza durata minima per volta
+    { q: 'Quanti minuti di movimento a settimana consiglia l’Organizzazione Mondiale della Sanità?', r: ['Almeno 60', 'Almeno 400', 'Almeno 150'], ok: 2, f: 'Sono una ventina di minuti al giorno, anche a pezzetti. E vale camminare di buon passo.' },
+    // Ekelund et al., The Lancet 2026;407:339-349: cinque minuti in più al giorno di attività moderata o intensa, stima del 10% di morti in meno
+    { q: 'Oggi hai solo cinque minuti per muoverti. Servono a qualcosa?', r: ['No, sono troppo pochi', 'Sì, contano già', 'Solo se arrivi a trenta'], ok: 1, f: 'The Lancet, 2026: cinque minuti in più al giorno, a buon ritmo, sono già legati a una vita più lunga.' },
     // il dimagrimento localizzato non esiste: allenare un muscolo non scioglie il grasso che gli sta sopra
-    { q: 'Fare gli addominali fa sparire la pancia?', r: ['Sì, se ne fai tanti', 'Solo se li fai la sera', 'No, il grasso non va via a zone'], ok: 2, f: 'Rinforzano i muscoli sotto. Dove dimagrire lo decide il corpo.' },
-    // OMS 2020: esercizi di rinforzo muscolare almeno 2 giorni a settimana
-    { q: 'Quante volte a settimana conviene allenare i muscoli?', r: ['Almeno due', 'Mai, basta camminare', 'Tutti i giorni'], ok: 0, f: 'Bastano esercizi a corpo libero, anche a casa.' }
+    { q: 'Fare solo addominali basta per togliere la pancia?', r: ['Sì, se ne fai tanti', 'Sì, ma ci vuole un anno', 'No, il grasso non va via a zone'], ok: 2, f: 'Rinforzano i muscoli sotto. Dove dimagrire lo decide il corpo.' },
+    // OMS 2020: attività aerobica più rinforzo muscolare almeno 2 giorni a settimana, a ogni età adulta
+    { q: 'Dopo i 50 anni, qual è l’allenamento più indicato?', r: ['Camminare e rinforzare i muscoli', 'Solo camminare', 'Poco, per non farsi male'], ok: 0, f: 'I muscoli rispondono all’allenamento a ogni età. Bastano esercizi a corpo libero, due volte a settimana.' }
   ];
   var POSE = ['legge', 'dubbio', 'martello', 'colpo', 'felice', 'stupito', 'ops', 'coppa', 'punta'], BRAVO = ['Esatto!', 'Agli atti!', 'Giusto!', 'Risposta esatta!', 'Esatto!'], VOTI = ['zero', 'uno', 'due', 'tre', 'quattro', 'cinque'];
   var attese = [], punti = 0, fila = 0, libera = true;
