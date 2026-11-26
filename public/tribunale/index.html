@@ -47,7 +47,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 #s-porta{background:radial-gradient(120% 70% at 50% 0,#17423f,var(--scuro) 70%);color:#fff;align-items:center}
 .cornice{position:absolute;inset:14% 9% 25%;border:10px solid #2a160a;border-bottom:0;border-radius:14px 14px 0 0;background:#0b0705;overflow:hidden;perspective:900px;box-shadow:0 0 0 3px #4a2a14,0 30px 60px rgba(0,0,0,.6)}
 .luce{position:absolute;inset:0;background:radial-gradient(60% 50% at 50% 45%,#fff7dc,#ffd76a 40%,#7a4a10 100%);opacity:0;transition:opacity .5s}
-.anta{position:absolute;top:0;bottom:0;width:50%;background:linear-gradient(90deg,#4a2a14,#6a3d1e 45%,#55301a);transition:transform .75s cubic-bezier(.6,0,.3,1)}
+.anta{position:absolute;top:0;bottom:0;width:50%;background:linear-gradient(90deg,#4a2a14,#6a3d1e 45%,#55301a);transition:transform .5s cubic-bezier(.6,0,.3,1)}
 .anta::before,.anta::after{content:"";position:absolute;left:14%;right:14%;border:3px solid #3a1f0e;border-radius:6px;box-shadow:inset 0 0 0 2px #7a4a26}
 .anta::before{top:6%;height:40%}.anta::after{top:52%;height:40%}
 .anta.sx{left:0;transform-origin:left center;border-right:2px solid #2a160a}
@@ -206,10 +206,10 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
   }
   function vibra(p) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
   // un filmato del giudice: parte con l'audio (siamo dentro un tocco), e alla fine chiama «poi»
-  function proietta(nome, poi, fino) {
+  function proietta(nome, poi, fino, da) {
     $('#aulabasso').replaceChildren(); film.loop = false; film.poster = nome + '.jpg';
     if (film.getAttribute('data-nome') !== nome) { film.setAttribute('data-nome', nome); film.src = nome + '.mp4'; }
-    film.muted = false; film.currentTime = 0;
+    film.muted = false; film.currentTime = da || 0;
     var fatto = false, fine = function () { if (fatto) return; fatto = true; film.onended = film.onerror = film.ontimeupdate = null; if (fino) { try { film.pause(); } catch (e) {} } poi(); };
     film.onended = fine; film.onerror = fine; film.ontimeupdate = fino ? function () { if (film.currentTime >= fino) fine(); } : null;
     var p = film.play(); if (p && p.catch) p.catch(function () { film.muted = true; var p2 = film.play(); if (p2 && p2.catch) p2.catch(fine); });
@@ -222,16 +222,19 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
     conta('click', 'entra'); vibra(40); $('#cornice').classList.add('aperta'); $('#entra').classList.remove('pulsa'); $('#entra').disabled = true;
     // il filmato si avvia dentro il tocco, così l'audio è permesso. I filmati dell'accusa cominciano con 0,7 secondi
     // fermi e muti: è il tempo in cui le ante si aprono, poi si passa all'aula
-    accusa();
-    setTimeout(function () { mostra('aula'); }, 700);
+    // si salta quasi tutto il silenzio iniziale del filmato: la voce parte mezzo secondo dopo il tocco, mentre le ante finiscono di aprirsi.
+    // Si entra in aula quando il filmato arriva davvero alla voce (se il telefono è lento a caricarlo, la porta resta aperta ad aspettare)
+    var voce = caso === 'lunedi' ? .83 : .71, t0 = performance.now(), dentro = false;
+    accusa(voce - .5);
+    (function guarda() { if (dentro) return; if (film.currentTime >= voce - .08 || performance.now() - t0 > 2500) { dentro = true; mostra('aula'); } else requestAnimationFrame(guarda); })();
   };
   // 2. l'accusa: il giudice la legge e chiede «Come si dichiara?»
-  function accusa() {
+  function accusa(da) {
     proietta('acc-' + caso, function () {
       var d = document.createElement('div'); d.className = 'scelte entra';
       d.append(bottone('Colpevole', '', function () { risponde('colpevole'); }), bottone('Innocente', 'scuro', function () { risponde('innocente'); }));
       $('#aulabasso').replaceChildren(d);
-    });
+    }, 0, da);
   }
   // 3. la risposta del giudice e la condanna: cinque domande. A chi si dichiara innocente il giudice risponde «Lo dicono tutti. Allora lo dimostri: risponda a cinque domande.»
   function risponde(scelta) {
@@ -337,6 +340,8 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
     $('#reati').append(b);
   });
   // i filmati successivi si scaricano mentre si guarda la porta
+  // il filmato dell'accusa si carica già nel lettore: al tocco parte subito, senza silenzio
+  film.setAttribute('data-nome', 'acc-' + caso); film.src = 'acc-' + caso + '.mp4'; film.poster = 'acc-' + caso + '.jpg'; try { film.load(); } catch (e) {}
   ['acc-' + caso, 'colpevole', 'innocente'].forEach(function (n) { var l = document.createElement('link'); l.rel = 'prefetch'; l.href = n + '.mp4'; document.head.append(l); });
   // l'altezza segue lo schermo davvero visibile: nei browser dentro le app (Instagram) e sui telefoni con la barra in basso 100vh è più alto di quello che si vede
   var misura = function () { var h = window.visualViewport ? visualViewport.height : window.innerHeight; if (h > 300) $('#tel').style.height = Math.round(h) + 'px'; };
