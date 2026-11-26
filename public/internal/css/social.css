@@ -274,3 +274,37 @@ button.so-tile { cursor: pointer; }
 /* toast con un tasto (es. «Annulla») */
 .toast.con-tasto { display: flex; gap: 14px; align-items: center; }
 .so-toast-b { background: none; border: 0; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; padding: 4px 0; min-height: 32px; }
+
+/* piattaforme: Instagram, Facebook, TikTok. Lo stato è sempre anche a parole (title / aria-label). */
+.so-pf { display: flex; gap: 6px; align-items: center; }
+.so-pf-i { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--surface2); color: var(--muted); border: 1px solid var(--border2); text-decoration: none; position: relative; }
+.so-pf-i.uscito { background: var(--mattia-bg); color: var(--mattia); border-color: #1f6b3d; }
+.so-pf-i.auto { background: var(--mattia-bg); color: var(--mattia); border-color: #1f6b3d; border-style: dashed; }
+.so-pf-i.corso { background: var(--amber-bg); color: var(--amber); border-color: #6b5108; }
+.so-pf-i.errore { background: var(--red-bg); color: var(--red); border-color: #6b2626; }
+.so-pf-i.escluso { opacity: .45; }
+.so-pf-i.escluso::after { content: ''; position: absolute; left: 4px; right: 4px; top: 50%; height: 1.5px; background: currentColor; transform: rotate(-45deg); }
+a.so-pf-i:hover { border-color: var(--purple); }
+.so-sl .so-pf { gap: 4px; }
+.so-sl .so-pf-i { width: 22px; height: 22px; }
+.so-sl .so-pf-i svg { width: 12px; height: 12px; }
+.so-pfr { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.so-pfr-r { display: flex; gap: 10px; align-items: center; min-height: 40px; }
+.so-pfr-r > div { flex: 1; display: grid; gap: 1px; min-width: 0; }
+.so-pfr-r b { font-size: 14px; }
+.so-pfr-r > div span { font-size: 12.5px; color: #a5a5c0; }
+.so-pfr-r.errore > div span { color: var(--red); }
+.so-pfr-r a.so-b { text-decoration: none; display: inline-flex; align-items: center; padding: 0 14px; }
+.so-pfr-r .so-mod { padding: 8px 4px; }
+
+/* Risultati: scelta della piattaforma in cima */
+.so-sel { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.so-sel-b { display: grid; gap: 10px; align-content: space-between; min-height: 104px; text-align: left; padding: 14px 16px; border-radius: 14px; border: 1px solid var(--border2); background: var(--surface); color: var(--text); cursor: pointer; }
+.so-sel-b[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-lo); }
+.so-sel-n { display: flex; gap: 9px; align-items: center; font-size: 16px; }
+.so-sel-b[aria-pressed="true"] .so-sel-n { color: var(--purple); }
+.so-sel-v { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.so-sel-v .so-num { font-size: 28px; }
+.so-sel-v small { color: var(--muted); font-size: 12.5px; }
+.so-ob article.spento { opacity: .55; }
+@media (max-width: 900px) { .so-sel-b { min-height: 92px; padding: 12px; } .so-sel-v .so-num { font-size: 22px; } }

@@ -1,5 +1,7 @@
 // ============================================================
-// HYPEMOVE · SOCIAL — Instagram in cinque pagine: Oggi (cosa serve da te), Post, Programma, Risultati, Idee.
+// HYPEMOVE · SOCIAL — Instagram, Facebook e TikTok in cinque pagine: Oggi (cosa serve da te), Post, Programma, Risultati, Idee.
+// Ogni post approvato esce su tutte le piattaforme: Facebook con la condivisione automatica di Instagram,
+// TikTok quando il post è uscito sul profilo Instagram (mai con la copia di prova). Eccezione: «Non su TikTok».
 // Dati: tabelle social_* (RLS: solo operatori, migration 20261125160000 e seguenti).
 // Login: lo stesso email+password delle altre pagine interne (stessa sessione di kpi.html).
 // Tutto il testo entra con textContent: qui non si costruisce mai HTML da stringhe.
@@ -24,7 +26,7 @@ const FORMATI = { fr: 'Frase e risposta', qu: 'Carta a quadretti', pd: 'Prima e 
 const SETTIMANA = 13;                 // post previsti a settimana (due al giorno, uno la domenica)
 const INIZIO = '2026-11-30';
 
-const S = { page: 'oggi', tema: 'tutti', stato: 'decidere', ris: 'obiettivi', giorni: 30, link: null, ig: null, conn: null, prof: null, recenti: new Map(), appena: null, vista: 'calendario', dopo: true, sett: null, apri: null, coda: [], posts: [], rev: [], idee: [], ob: [], kpi: null, caricato: false };
+const S = { page: 'oggi', tema: 'tutti', stato: 'decidere', ris: 'obiettivi', piat: 'instagram', giorni: 30, link: { instagram: null, tiktok: null }, tt: null, ig: null, conn: null, prof: null, recenti: new Map(), appena: null, vista: 'calendario', dopo: true, sett: null, apri: null, coda: [], posts: [], rev: [], idee: [], ob: [], kpi: null, caricato: false };
 try { const p = localStorage.getItem('hm_social_page'); if (PAGINE.some(([k]) => k === p)) S.page = p; } catch (e) {}
 
 // ── piccoli attrezzi ──
@@ -79,9 +81,46 @@ const pronto = (p) => controlliOk(p) && !controllaTesto(p.didascalia).length;
 const prova = (p) => p.reel_prova_media_id ? 'si' : p.reel_prova_errore ? 'errore' : p.reel_prova_dal || p.reel_prova_chiesto ? 'in_corso' : null;
 const unReel = (p) => p.formato === 're' && p.media.length === 1 && p.media[0].type === 'video';
 
+// ── piattaforme ──
+const NOMI = { ig: 'Instagram', fb: 'Facebook', tt: 'TikTok' };
+const LOGHI = {
+  ig: 'M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4zM12 8.500a3.500 3.500 0 1 0 0 7 3.500 3.500 0 0 0 0-7zM17.500 6.500h.010',
+  fb: 'M15 3h-2.500A4.500 4.500 0 0 0 8 7.500V10H5.500v4H8v7h4v-7h3l.700-4H12V7.800c0-.600.400-.800 1-.800h2z',
+  tt: 'M14 3v11.500a3.500 3.500 0 1 1-3.500-3.500M14 3c.400 2.600 2.400 4.600 5 5',
+};
+const ttCollegato = () => !!S.tt?.collegato_il;
+// Come sta il post su ogni piattaforma: [{ k, stato: uscito|auto|corso|attesa|errore|escluso, nota, link }].
+// Unica fonte per card, calendario e scheda. Solo per i post approvati o pubblicati.
+function piattaforme(p) {
+  if (!['approvato', 'pubblicato'].includes(p.stato)) return null;
+  const fuori = p.stato === 'pubblicato';
+  const ig = fuori ? { stato: 'uscito', nota: p.pubblicato_il ? 'Uscito ' + dataBreve(p.pubblicato_il) : 'Uscito', link: p.permalink }
+    : p.pubblicazione === 'errore' ? { stato: 'errore', nota: p.pubblicazione_errore || 'Non è uscito' }
+    : p.pubblicazione === 'in_corso' ? { stato: 'corso', nota: 'Sta uscendo' }
+    : p.etichetta_ia ? { stato: 'attesa', nota: 'Da pubblicare a mano' }
+    : { stato: 'attesa', nota: p.publish_at ? 'Esce ' + dataBreve(p.publish_at) : 'Senza data' };
+  const fb = fuori ? { stato: 'auto', nota: 'Condiviso in automatico da Instagram' } : { stato: 'attesa', nota: 'Esce insieme a Instagram' };
+  const tt = p.tt_escluso ? { stato: 'escluso', nota: 'Non su TikTok' }
+    : p.tt_stato === 'uscito' ? { stato: 'uscito', nota: p.tt_il ? 'Uscito ' + dataBreve(p.tt_il) : 'Uscito', link: p.tt_permalink }
+    : p.tt_stato === 'errore' ? { stato: 'errore', nota: p.tt_errore || 'Non è uscito' }
+    : p.tt_stato === 'in_corso' ? { stato: 'corso', nota: 'Sta uscendo' }
+    : !ttCollegato() ? { stato: 'attesa', nota: 'In attesa del collegamento TikTok' }
+    : { stato: 'attesa', nota: fuori ? 'Esce entro pochi minuti' : 'Esce quando è sul profilo Instagram' };
+  return [{ k: 'ig', ...ig }, { k: 'fb', ...fb }, { k: 'tt', ...tt }];
+}
+function logo(k, lato) { const s = icona(LOGHI[k]); s.setAttribute('width', lato || 15); s.setAttribute('height', lato || 15); return s; }
+// Tre tondi con lo stato a parole nel title: mai solo colore. «vivo» = link cliccabili (fuori dai bottoni).
+function iconePiattaforme(p, vivo) {
+  const l = piattaforme(p); if (!l) return null;
+  return el('div', { className: 'so-pf' }, l.map((x) => {
+    const testo = NOMI[x.k] + ': ' + x.nota, link = vivo && x.link && x.link.startsWith('https://');
+    return el(link ? 'a' : 'span', { className: 'so-pf-i ' + x.stato, title: testo, aria: { label: testo }, ...(link ? { href: x.link, target: '_blank', rel: 'noopener', on: { click: (e) => e.stopPropagation() } } : { role: 'img' }) }, logo(x.k));
+  }));
+}
+
 // ── dati ──
 async function carica() {
-  const [p, r, i, o, k, c, l, d, pf] = await Promise.all([
+  const [p, r, i, o, k, c, l, d, pf, lt, t] = await Promise.all([
     sb.from('social_posts').select('*').order('ordine'),
     sb.from('social_revisioni').select('*').order('created_at'),
     sb.from('social_idee').select('*').order('id'),
@@ -91,10 +130,12 @@ async function carica() {
     sb.rpc('social_link', { p_giorni: S.giorni }),
     sb.rpc('social_instagram_dati'),
     sb.rpc('social_profilo'),
+    sb.rpc('social_link', { p_giorni: S.giorni, p_piattaforma: 'tiktok' }),
+    sb.from('social_tiktok').select('*'),
   ]);
   const err = [p, r, i, o].find((x) => x.error);
   if (err) throw err.error;
-  Object.assign(S, { posts: p.data, rev: r.data, idee: i.data, ob: o.data, kpi: k.error ? null : k.data, conn: c.error ? null : c.data?.[0] ?? null, link: l.error ? null : l.data, ig: d.error ? null : d.data, prof: pf.error ? null : pf.data, caricato: true });
+  Object.assign(S, { posts: p.data, rev: r.data, idee: i.data, ob: o.data, kpi: k.error ? null : k.data, conn: c.error ? null : c.data?.[0] ?? null, link: { instagram: l.error ? null : l.data, tiktok: lt.error ? null : lt.data }, tt: t.error ? null : t.data?.[0] ?? null, ig: d.error ? null : d.data, prof: pf.error ? null : pf.data, caricato: true });
 }
 // Ogni scrittura: prima il server, poi la pagina si ridisegna con quello che il server ha davvero.
 let occupato = false;
@@ -109,7 +150,7 @@ async function scrivi(fn, detto) {
     return true;
   } catch (e) {
     console.error('social', e);
-    toast(navigator.onLine === false ? 'Sei senza connessione. Non è stato salvato.' : /prima va approvato/.test(e.message || '') ? 'Prima va approvato.' : /controlli non superati/.test(e.message || '') ? 'Prima vanno sistemati i controlli.' : /di prova|preso in carico|etichetta IA|non è un Reel/.test(e.message || '') ? 'Non fatto: ' + e.message + '.' : 'Non salvato. Riprova.', false);
+    toast(navigator.onLine === false ? 'Sei senza connessione. Non è stato salvato.' : /prima va approvato/.test(e.message || '') ? 'Prima va approvato.' : /controlli non superati/.test(e.message || '') ? 'Prima vanno sistemati i controlli.' : /di prova|preso in carico|etichetta IA|non è un Reel/.test(e.message || '') ? 'Non fatto: ' + e.message + '.' : /tt_escluso_fermo/.test(e.message || '') ? 'È già partito su TikTok.' : 'Non salvato. Riprova.', false);
     return false;
   } finally { occupato = false; disegna(); }
 }
@@ -163,6 +204,16 @@ function riquadroProva(p) {
   const ok = pronto(p);
   return el('div', { className: 'so-prova' }, el('div', {}, el('b', { textContent: 'Provalo prima sui non follower' }), el('span', { textContent: ok ? 'Non esce sul profilo' : 'Prima vanno sistemati i controlli' })), bottone('Metti in prova adesso', 'pri', () => chiediProva(p, true), { disabled: !ok }));
 }
+// Riquadro nella scheda: una riga per piattaforma con lo stato, il link e l'eccezione «Non su TikTok».
+function riquadroPiattaforme(p) {
+  const l = piattaforme(p); if (!l) return null;
+  const azione = (x) => {
+    if (x.link && x.link.startsWith('https://')) return el('a', { href: x.link, target: '_blank', rel: 'noopener', className: 'so-b', textContent: 'Apri' });
+    if (x.k === 'tt' && !p.tt_stato) return el('button', { type: 'button', className: 'so-mod', textContent: p.tt_escluso ? 'Rimetti su TikTok' : 'Non su TikTok', on: { click: () => aggiorna(p.id, { tt_escluso: !p.tt_escluso }, p.tt_escluso ? 'Esce anche su TikTok' : 'Non esce su TikTok') } });
+    return null;
+  };
+  return el('div', { className: 'so-pfr' }, el('span', { className: 'so-lab', style: 'margin:0', textContent: 'Dove esce' }), l.map((x) => el('div', { className: 'so-pfr-r ' + x.stato }, el('span', { className: 'so-pf-i ' + x.stato, aria: { hidden: 'true' } }, logo(x.k)), el('div', {}, el('b', { textContent: NOMI[x.k] }), el('span', { textContent: x.nota })), azione(x))));
+}
 
 // ── cornice ──
 function conta(k) { return k === 'post' ? daDecidere().length : k === 'programma' ? approvatiLiberi().length : 0; }
@@ -194,6 +245,7 @@ function carta(p, coda) {
     el('button', { type: 'button', className: 'so-pic' + (m?.type === 'video' ? ' reel' : ''), aria: { label: 'Apri ' + p.titolo }, on: { click: () => apri(p.id, coda) } }, m ? el('img', { src: thumb(m), alt: p.titolo, loading: 'lazy', on: { error: (e) => senzaFile(e.currentTarget, m.type === 'video') } }) : null, m?.type === 'video' ? el('span', { className: 'so-play', textContent: '▶' }) : null, tag ? el('span', { className: 'so-tag', textContent: tag }) : null, pr ? el('span', { className: 'so-tag prova ' + pr, textContent: { si: 'In prova', in_corso: 'Prova in arrivo', errore: 'Prova non uscita' }[pr] }) : null, !pronto(p) && !fermo ? el('span', { className: 'so-tag rosso', textContent: 'Da sistemare' }) : null),
     fascia(p),
     el('div', { className: 'so-cb' },
+      iconePiattaforme(p, true),
       p.stato === 'rifatto' ? el('div', { className: 'so-riga' }, el('span', { className: 'so-st rifatto', textContent: 'Rifatto' })) : daDec(p) && p.data_consigliata ? el('div', { className: 'so-riga', textContent: 'Per il ' + leggibile(p.data_consigliata, { day: 'numeric', month: 'long' }) }) : null,
       el('strong', { textContent: p.titolo }),
       p.stato === 'rifatto' && ultima?.risposta ? el('p', { textContent: ultima.risposta, style: 'color:#b7f0cb' }) : p.stato === 'revisione' && ultima ? el('p', { textContent: '«' + ultima.nota + '»' }) : p.didascalia ? el('p', { textContent: p.didascalia }) : null,
@@ -235,7 +287,7 @@ function scheda() {
     if (p.stato === 'approvato' && !p.publish_at && !p.etichetta_ia && pronto(p)) { const posto = primoPosto(p.id); fa.append(el('div', { className: 'so-due' }, posto ? bottone(dataBreve(posto), 'pri', () => programma(p, posto)) : null, bottone('Scelgo io', '', () => document.getElementById('so-g')?.scrollIntoView({ block: 'center' })))); }
     dx.prepend(fa);
   }
-  dx.append(riquadroProva(p) || '');
+  dx.append(riquadroProva(p) || '', riquadroPiattaforme(p) || '');
   // didascalia
   const ta = el('textarea', { className: 'so-ta', id: 'so-did', value: B.did ?? p.didascalia, maxLength: 2200, readOnly: chiuso });
   const salva = bottone('Salva didascalia', 'pri', async () => { const v = ta.value.trim(); B.did = null; if (!(await aggiorna(p.id, { didascalia: v }, 'Didascalia salvata'))) { B.did = v; scheda(); } });
@@ -294,7 +346,6 @@ function scheda() {
     l.addEventListener('input', () => { B.link = l.value; });
     dx.append(el('details', { className: 'so-mano', open: !!B.link }, el('summary', { textContent: 'L’ho pubblicato a mano' }), el('label', { className: 'so-lab', for: 'so-link', style: 'margin:0', textContent: 'Link del post (se ce l’hai)' }), l, bottone('Segna come pubblicato', '', () => { const v = l.value.trim(); if (v && !/^https:\/\/(www\.)?instagram\.com\//.test(v)) { toast('Il link deve essere di Instagram.', false); return; } aggiorna(p.id, { stato: 'pubblicato', pubblicato_il: new Date().toISOString(), permalink: v || null }, 'Segnato come pubblicato'); })));
   }
-  if (p.stato === 'pubblicato') dx.append(el('p', { className: 'so-riga', textContent: 'Pubblicato ' + (p.pubblicato_il ? leggibile(giorno(p.pubblicato_il), { day: 'numeric', month: 'long' }) + ' alle ' + ora(p.pubblicato_il) : '') }), p.permalink ? el('a', { href: p.permalink, target: '_blank', rel: 'noopener', textContent: 'Apri su Instagram', style: 'color:var(--purple);font-weight:600' }) : null);
   const i = S.coda.indexOf(p.id);
   if (S.coda.length > 1 || barra.length) dx.append(el('div', { className: 'so-frecce' }, bottone('‹', 'fr', () => passa(-1), { disabled: i <= 0, aria: { label: 'Post prima' } }), barra.filter(Boolean), bottone('›', 'fr', () => passa(1), { disabled: i >= S.coda.length - 1, aria: { label: 'Post dopo' } })));
 
@@ -358,10 +409,10 @@ const VISTE = {
     if (rev.length) box.append(voce(rev.length, rev.length === 1 ? 'da rifare' : 'da rifare', 'Tocca a Claude', 'Vedi', () => { S.stato = 'revisione'; S.tema = 'tutti'; vai('post'); }));
     if (!d.length && !lib.length && !rev.length) box.append(vuoto('Tutto deciso.'));
     main.append(box);
-    if (!collegato() || scaduto()) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.ris = 'instagram'; vai('risultati'); } } }, scaduto() ? 'Il collegamento con Instagram è scaduto: rinnovalo ›' : 'Instagram da collegare: manca un passaggio tuo ›'));
+    if (!collegato() || scaduto()) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.piat = 'instagram'; S.ris = 'instagram'; vai('risultati'); } } }, scaduto() ? 'Il collegamento con Instagram è scaduto: rinnovalo ›' : 'Instagram da collegare: manca un passaggio tuo ›'));
     else if (S.conn.ultimo_errore) main.append(el('p', { className: 'so-avviso', textContent: 'Instagram non si aggiorna: ' + S.conn.ultimo_errore }));
     main.append(el('h2', { className: 'so-h2' }, 'Prossimi sette giorni'), el('div', { className: 'so-7' }, Array.from({ length: 7 }, (_, i) => piu(oggi, i)).map((g) => { const n = delGiorno(g).length; return el('button', { type: 'button', className: n ? 'pieno' : '', aria: { label: leggibile(g) + ', ' + n + ' post' }, on: { click: () => { S.sett = lunedi(g); vai('programma'); } } }, el('span', { textContent: leggibile(g, { weekday: 'short' }) }), el('b', { textContent: leggibile(g, { day: 'numeric' }) }), el('i', { textContent: n || '–' })); })));
-    if (S.link) { const o = S.link.ora; main.append(el('h2', { className: 'so-h2' }, 'Link in bio', el('small', { textContent: 'Ultimi ' + S.giorni + ' giorni' })), el('button', { type: 'button', className: 'so-tre so-tile', aria: { label: 'Apri i numeri del link' }, on: { click: () => { S.ris = 'link'; vai('risultati'); } } }, [['Visite', o.visite], ['Tocchi su Android', o.android], ['Primi avvii', o.avvii]].map(([t, n]) => el('span', {}, el('b', { className: 'so-num', textContent: num(n) }), t)))); }
+    if (S.link.instagram) { const o = S.link.instagram.ora; main.append(el('h2', { className: 'so-h2' }, 'Link in bio', el('small', { textContent: 'Ultimi ' + S.giorni + ' giorni' })), el('button', { type: 'button', className: 'so-tre so-tile', aria: { label: 'Apri i numeri del link' }, on: { click: () => { S.piat = 'instagram'; S.ris = 'link'; vai('risultati'); } } }, [['Visite', o.visite], ['Tocchi su Android', o.android], ['Primi avvii', o.avvii]].map(([t, n]) => el('span', {}, el('b', { className: 'so-num', textContent: num(n) }), t)))); }
   },
 
   post(main) {
@@ -387,7 +438,7 @@ const VISTE = {
     main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Vista' } }, chip(S.vista === 'calendario', 'Calendario', null, () => { S.vista = 'calendario'; disegna(); }), chip(S.vista === 'profilo', 'Profilo Instagram', null, () => { S.vista = 'profilo'; disegna(); })));
     if (S.vista === 'profilo') { vProfilo(main); return; }
     const vivo = collegato() && !scaduto(), acceso = vivo && S.conn.auto;
-    main.append(el('section', { className: 'so-voce', style: 'margin-bottom:14px' }, el('div', {}, el('div', {}, el('strong', { textContent: acceso ? 'Pubblicazione accesa' : 'Pubblicazione spenta' }), el('span', { textContent: !collegato() ? 'Instagram non è collegato' : scaduto() ? 'Il collegamento è scaduto' : acceso ? (S.conn.scade_il ? 'Il collegamento scade il ' + leggibile(giorno(S.conn.scade_il), { day: 'numeric', month: 'short' }) + ' alle ' + ora(S.conn.scade_il) : 'Escono da soli i post approvati') : 'Non esce niente' }))), vivo ? bottone(acceso ? 'Ferma tutto' : 'Accendi', acceso ? 'no' : 'pri', () => scrivi(() => sb.rpc('social_auto', { p_acceso: !acceso }), acceso ? 'Fermata' : 'Accesa')) : bottone('Collega', 'pri', () => { S.ris = 'instagram'; vai('risultati'); })));
+    main.append(el('section', { className: 'so-voce', style: 'margin-bottom:14px' }, el('div', {}, el('div', {}, el('strong', { textContent: acceso ? 'Pubblicazione accesa' : 'Pubblicazione spenta' }), el('span', { textContent: !collegato() ? 'Instagram non è collegato' : scaduto() ? 'Il collegamento è scaduto' : acceso ? (S.conn.scade_il ? 'Il collegamento scade il ' + leggibile(giorno(S.conn.scade_il), { day: 'numeric', month: 'short' }) + ' alle ' + ora(S.conn.scade_il) : 'Escono da soli i post approvati') : 'Non esce niente' }))), vivo ? bottone(acceso ? 'Ferma tutto' : 'Accendi', acceso ? 'no' : 'pri', () => scrivi(() => sb.rpc('social_auto', { p_acceso: !acceso }), acceso ? 'Fermata' : 'Accesa')) : bottone('Collega', 'pri', () => { S.piat = 'instagram'; S.ris = 'instagram'; vai('risultati'); })));
     // Risposte ai commenti del Tribunale (edge social-risposte): spente di default, si accendono da qui.
     const risp = vivo && S.conn.risposte;
     main.append(el('section', { className: 'so-voce', style: 'margin-bottom:14px' }, el('div', {}, el('div', {}, el('strong', { textContent: risp ? 'Risposte del Tribunale accese' : 'Risposte del Tribunale spente' }), el('span', { textContent: !vivo ? 'Serve Instagram collegato' : risp ? 'Chi commenta riceve la condanna entro un minuto' : 'Nessuno riceve la condanna' }))), vivo ? bottone(risp ? 'Spegni' : 'Accendi', risp ? 'no' : 'pri', () => scrivi(() => sb.rpc('social_risposte', { p_acceso: !risp }), risp ? 'Spente' : 'Accese')) : null));
@@ -399,16 +450,23 @@ const VISTE = {
     main.append(el('div', { className: 'so-sett' }, bottone('‹', '', () => { S.sett = piu(S.sett, -7); disegna(); }, { aria: { label: 'Settimana prima' }, style: 'width:46px' }), el('b', { textContent: leggibile(gg[0], { day: 'numeric', month: 'short' }) + ' – ' + leggibile(gg[6], { day: 'numeric', month: 'short' }) }), bottone('›', '', () => { S.sett = piu(S.sett, 7); disegna(); }, { aria: { label: 'Settimana dopo' }, style: 'width:46px' })));
     const coda = tutti.map((p) => p.id);
     main.append(el('div', { className: 'so-gg' }, gg.map((g) => el('section', { className: 'so-g' + (g === oggi ? ' oggi' : '') }, el('b', { textContent: leggibile(g, { weekday: 'short', day: 'numeric', month: 'short' }) }),
-      delGiorno(g).map((p) => el('button', { type: 'button', className: 'so-sl ' + p.stato, on: { click: () => apri(p.id, coda) } }, p.media[0] ? el('img', { src: thumb(p.media[0]), alt: '', loading: 'lazy' }) : null, el('span', {}, el('time', { textContent: ora(quando(p)) }), el('span', { textContent: p.titolo }), p.stato === 'pubblicato' ? el('span', { className: 'so-st pubblicato', textContent: 'Pubblicato' }) : p.pubblicazione === 'errore' ? el('span', { className: 'so-st scartato', textContent: 'Non è uscito' }) : p.pubblicazione === 'in_corso' ? el('span', { className: 'so-st rifatto', textContent: 'Sta uscendo' }) : p.etichetta_ia ? el('span', { className: 'so-st revisione', textContent: 'A mano: etichetta IA' }) : null))),
+      delGiorno(g).map((p) => el('button', { type: 'button', className: 'so-sl ' + p.stato, on: { click: () => apri(p.id, coda) } }, p.media[0] ? el('img', { src: thumb(p.media[0]), alt: '', loading: 'lazy' }) : null, el('span', {}, el('time', { textContent: ora(quando(p)) }), el('span', { textContent: p.titolo }), p.stato === 'pubblicato' ? el('span', { className: 'so-st pubblicato', textContent: 'Pubblicato' }) : p.pubblicazione === 'errore' ? el('span', { className: 'so-st scartato', textContent: 'Non è uscito' }) : p.pubblicazione === 'in_corso' ? el('span', { className: 'so-st rifatto', textContent: 'Sta uscendo' }) : p.etichetta_ia ? el('span', { className: 'so-st revisione', textContent: 'A mano: etichetta IA' }) : null, iconePiattaforme(p, false)))),
       g >= oggi ? el('button', { type: 'button', className: 'so-piu', textContent: '+ Aggiungi', disabled: !lib.length, on: { click: () => scegli(g) } }) : null))));
     if (!lib.length && !tutti.length) main.append(vuoto('Qui entrano solo i post che approvi.'));
   },
 
   risultati(main) {
     main.append(testa('Risultati'));
-    const T = { obiettivi: 'Obiettivi', link: 'Link in bio', instagram: 'Instagram', messaggi: 'Messaggi' };
-    main.append(el('div', { className: 'so-fil seg', role: 'group', aria: { label: 'Risultati' } }, Object.entries(T).map(([k, t]) => chip(S.ris === k, t, null, () => { S.ris = k; disegna(); }))));
-    ({ obiettivi: vObiettivi, link: vLink, instagram: vInstagram, messaggi: vMessaggi })[S.ris](main);
+    // In cima la piattaforma: si sceglie qui e tutta la pagina mostra solo i suoi numeri.
+    // Il numero sotto si vede anche su quella non scelta, così il confronto c'è già.
+    const ult = S.kpi?.at(-1);
+    main.append(el('div', { className: 'so-sel', role: 'group', aria: { label: 'Piattaforma' } }, [['instagram', 'ig', ult?.avvii], ['tiktok', 'tt', ult?.tiktok?.avvii]].map(([k, l, n]) =>
+      el('button', { type: 'button', className: 'so-sel-b', aria: { pressed: String(S.piat === k) }, on: { click: () => { S.piat = k; if (!TABS[k][S.ris]) S.ris = 'obiettivi'; disegna(); } } },
+        el('span', { className: 'so-sel-n' }, logo(l, 22), el('b', { textContent: NOMI[l] })), el('span', { className: 'so-sel-v' }, el('b', { className: 'so-num', textContent: num(n ?? null) }), el('small', { textContent: 'primi avvii questo mese' }))))));
+    const T = TABS[S.piat];
+    if (!T[S.ris]) S.ris = 'obiettivi';
+    main.append(el('div', { className: 'so-fil seg', role: 'group', aria: { label: 'Risultati ' + NOMI[S.piat === 'tiktok' ? 'tt' : 'ig'] } }, Object.entries(T).map(([k, t]) => chip(S.ris === k, t, null, () => { S.ris = k; disegna(); }))));
+    ({ obiettivi: S.piat === 'tiktok' ? vObiettiviTikTok : vObiettivi, link: vLink, instagram: vInstagram, tiktok: vTikTok, messaggi: vMessaggi })[S.ris](main);
   },
 
   idee(main) {
@@ -441,7 +499,7 @@ function vProfilo(main) {
   const A = S.prof?.account, media = S.prof?.media || [], sei = prossimiSei();
   const legati = new Set(S.posts.map((p) => p.ig_media_id).filter(Boolean)), solo = S.posts.filter((p) => p.stato === 'pubblicato' && !p.ig_media_id).sort((a, b) => a.pubblicato_il < b.pubblicato_il ? 1 : -1);
   main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Anteprima' } }, chip(S.dopo, 'Con i prossimi ' + sei.length, null, () => { S.dopo = true; disegna(); }), chip(!S.dopo, 'Adesso', null, () => { S.dopo = false; disegna(); })));
-  if (!media.length) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.ris = 'instagram'; vai('risultati'); } } }, 'I post passati arrivano quando colleghi Instagram ›'));
+  if (!media.length) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.piat = 'instagram'; S.ris = 'instagram'; vai('risultati'); } } }, 'I post passati arrivano quando colleghi Instagram ›'));
   const coda = sei.map(([p]) => p.id), passati = [...solo.map((p) => ({ t: p.pubblicato_il, p })), ...media.map((m) => ({ t: m.quando, m }))].sort((a, b) => a.t < b.t ? 1 : -1);
   const segno = (k) => k ? el('span', { className: 'so-ig-t', aria: { hidden: 'true' }, textContent: k }) : null;
   const tess = (src, alt, tipo, eti, fn, cls) => el(fn ? 'button' : 'a', { className: 'so-ig-q ' + (cls || ''), ...(fn ? { type: 'button', on: { click: fn } } : {}), aria: { label: alt } }, src ? el('img', { src, alt: '', loading: 'lazy' }) : el('span', { className: 'so-ig-v', textContent: alt.slice(0, 60) }), segno(tipo), eti ? el('span', { className: 'so-ig-e', textContent: eti }) : null);
@@ -456,6 +514,29 @@ function vProfilo(main) {
 }
 
 // ── risultati ──
+const TABS = {
+  instagram: { obiettivi: 'Obiettivi', link: 'Link in bio', instagram: 'Instagram', messaggi: 'Messaggi' },
+  tiktok: { obiettivi: 'Obiettivi', link: 'Link in bio', tiktok: 'TikTok' },
+};
+// TikTok: per ora i traguardi non esistono. Si misura quello che c'è già (primi avvii dal link in bio),
+// il resto aspetta il collegamento dell'app TikTok.
+function vObiettiviTikTok(main) {
+  const ult = S.kpi?.at(-1)?.tiktok, prec = S.kpi?.at(-2)?.tiktok, box = el('div', { className: 'so-ob' });
+  box.append(el('article', { className: 'grande' }, el('h3', { textContent: 'Primi avvii da TikTok al mese' }), el('div', { className: 'so-num' }, num(ult?.avvii ?? null)), el('p', { textContent: 'Dal link in bio, questo mese' + (prec ? ', il mese scorso ' + prec.avvii : '') })));
+  const pubbl = S.posts.filter((p) => p.tt_stato === 'uscito').length;
+  box.append(el('article', {}, el('h3', { textContent: 'Post usciti su TikTok' }), el('div', { className: 'so-num' }, num(pubbl)), el('p', { textContent: ttCollegato() ? 'Escono dopo Instagram' : 'In attesa del collegamento TikTok' })));
+  for (const t of ['Visite al profilo al mese', 'Visualizzazioni a post (mediana)', 'Condivisioni a post «Sono io»', 'Follower']) box.append(el('article', { className: 'spento' }, el('h3', { textContent: t }), el('div', { className: 'so-num' }, '–'), el('p', { textContent: 'In attesa del collegamento TikTok' })));
+  main.append(box);
+}
+function vTikTok(main) {
+  if (!ttCollegato()) main.append(el('p', { className: 'so-avviso', textContent: 'In attesa del collegamento TikTok: l’app «HypeMove Social» è in revisione da TikTok. Poi si collega una volta sola.' }));
+  else main.append(el('p', { className: 'so-riga', style: 'margin-bottom:12px', textContent: '@' + (S.tt.username || 'hypemove.app') + ', collegato dal ' + leggibile(giorno(S.tt.collegato_il), { day: 'numeric', month: 'long' }) }));
+  main.append(el('div', { className: 'so-tre so-tile quattro' }, ['Follower', 'Visualizzazioni', 'Persone raggiunte', 'Interazioni'].map((t) => el('span', {}, el('b', { className: 'so-num', textContent: '–' }), t))));
+  const usciti = S.posts.filter((p) => p.tt_stato === 'uscito').sort((a, b) => a.tt_il < b.tt_il ? 1 : -1);
+  main.append(el('h2', { className: 'so-h2' }, 'Post su TikTok'));
+  if (!usciti.length) { main.append(vuoto('Ancora niente su TikTok.')); return; }
+  main.append(el('ul', { className: 'so-righe' }, usciti.map((p) => el('li', {}, el('span', { textContent: p.titolo }), p.tt_permalink?.startsWith('https://') ? el('a', { href: p.tt_permalink, target: '_blank', rel: 'noopener', textContent: p.tt_il ? leggibile(giorno(p.tt_il), { day: 'numeric', month: 'short' }) : 'Apri' }) : el('b', { textContent: p.tt_il ? leggibile(giorno(p.tt_il), { day: 'numeric', month: 'short' }) : '' })))));
+}
 // Obiettivi letti dall'import di Instagram (social_instagram_dati → obiettivi): tema contato e come.
 const OB_IG = { cond: ['sonoio', 'Media'], salv: ['miserve', 'Media'], comm: ['parliamone', 'Media'], views: [null, 'Mediana'] };
 function vObiettivi(main) {
@@ -477,13 +558,19 @@ function vObiettivi(main) {
 }
 
 function vLink(main) {
-  const L = S.link;
-  main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Periodo' } }, [7, 30, 90].map((g) => chip(S.giorni === g, g + ' giorni', null, async () => { S.giorni = g; const { data, error } = await sb.rpc('social_link', { p_giorni: g }); if (error) toast('Non si carica. Riprova.', false); else S.link = data; disegna(); }))));
+  const L = S.link[S.piat], tt = S.piat === 'tiktok';
+  main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Periodo' } }, [7, 30, 90].map((g) => chip(S.giorni === g, g + ' giorni', null, async () => {
+    S.giorni = g;
+    const r = await Promise.all(['instagram', 'tiktok'].map((x) => sb.rpc('social_link', { p_giorni: g, p_piattaforma: x })));
+    if (r.some((x) => x.error)) toast('Non si carica. Riprova.', false); else S.link = { instagram: r[0].data, tiktok: r[1].data };
+    disegna();
+  }))));
   if (!L) { main.append(vuoto('I numeri non si caricano. Riapri la pagina.')); return; }
+  if (tt && !L.ora.visite && !L.prima.visite) main.append(el('p', { className: 'so-avviso', textContent: 'Ancora nessuna visita da TikTok: nella bio di TikTok va il sito hypemove.app/link?s=tiktok (dall’app del telefono, Modifica profilo → Sito web).' }));
   const conf = (a, b) => L.prima_intero ? 'prima ' + num(b) : null;
   main.append(el('div', { className: 'so-tre so-tile' }, [['Visite alla pagina', 'visite'], ['Tocchi su Android', 'android'], ['Primi avvii', 'avvii']].map(([t, k]) => el('span', {}, el('b', { className: 'so-num', textContent: num(L.ora[k]) }), t, conf(L.ora[k], L.prima[k]) ? el('small', { textContent: conf(L.ora[k], L.prima[k]) }) : null))));
   if (!L.prima_intero) main.append(el('p', { className: 'so-riga', style: 'margin:8px 0 0', textContent: 'Contiamo dal 10 ottobre, quindi manca il confronto col periodo prima.' }));
-  main.append(el('h2', { className: 'so-h2' }, 'Dalla bio all’app'), imbuto([['Apre hypemove.app/link', L.ora.visite], ['Tocca «Scarica per Android»', L.ora.android], ['Apre l’app la prima volta', L.ora.avvii]]));
+  main.append(el('h2', { className: 'so-h2' }, 'Dalla bio all’app'), imbuto([[tt ? 'Apre hypemove.app/link?s=tiktok' : 'Apre hypemove.app/link', L.ora.visite], ['Tocca «Scarica per Android»', L.ora.android], ['Apre l’app la prima volta', L.ora.avvii]]));
   main.append(el('p', { className: 'so-riga', style: 'margin-top:8px', textContent: 'Solo Android: su iPhone l’arrivo non si vede. Tolti i robot.' }));
   main.append(el('h2', { className: 'so-h2' }, 'Giorno per giorno'), barre(L.giorni, 'visite', 'Visite'), barre(L.giorni, 'android', 'Tocchi su Android'));
   const N = { android: 'Scarica per Android', iphone: 'iPhone', sito: 'Sito', guide: 'Guide', coach: 'Coach' };
@@ -531,6 +618,7 @@ function vInstagram(main) {
   const g = I.giorni30 || {};
   main.append(el('div', { className: 'so-tre so-tile quattro' }, [['Follower', I.account?.follower], ['Visualizzazioni', g.views], ['Persone raggiunte', g.reach], ['Interazioni', g.total_interactions]].map(([t, n]) => el('span', {}, el('b', { className: 'so-num', textContent: num(n ?? null) }), t))));
   main.append(el('p', { className: 'so-riga', style: 'margin-top:8px', textContent: 'Ultimi 30 giorni, pubblicità compresa. «Persone raggiunte» somma i giorni.' }));
+  main.append(el('p', { className: 'so-riga', style: 'margin-top:4px', textContent: 'Facebook: i post escono sulla pagina Hypemove con la condivisione automatica di Instagram.' }));
   main.append(el('h2', { className: 'so-h2' }, 'Post per post'), el('div', { className: 'table-wrap' }, el('table', { className: 'so-tab' }, el('thead', {}, el('tr', {}, ['Post', 'Viste', 'Commenti', 'Condivisi', 'Salvati'].map((t) => el('th', { textContent: t })))), el('tbody', {}, I.media.map((m) => el('tr', {}, el('td', {}, el('a', { href: m.link && m.link.startsWith('https://') ? m.link : '#', target: '_blank', rel: 'noopener', textContent: (m.testo || 'Senza testo').slice(0, 46) }), el('small', { style: 'display:block;color:var(--muted)', textContent: m.quando ? leggibile(giorno(m.quando), { day: 'numeric', month: 'short', year: '2-digit' }) : '' })), ['views', 'comments', 'shares', 'saved'].map((k) => el('td', { textContent: num(m.numeri[k] ?? null) }))))))));
 }
 
