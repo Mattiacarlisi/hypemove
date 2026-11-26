@@ -17,7 +17,7 @@
   Tribunale di Moovy: la pagina dove arriva chi commenta un post del Tribunale su Instagram (link nel messaggio privato)
   e chi riceve una «denuncia» da un'amica. È il seguito del Reel, in quattro scene:
     porta → il giudice legge l'accusa e chiede «Come si dichiara?» → risponde a «colpevole» o «innocente» e condanna
-    → 30 secondi di movimento coi video dell'app (35 per chi si dichiara innocente) → scarcerazione, scarica l'app o denuncia qualcuno.
+    → cinque domande su come tenersi in forma, con Moovy che reagisce a ogni risposta → verdetto, scarica l'app o denuncia qualcuno.
   I filmati del giudice (acc-<caso>, colpevole, innocente, libera) sono fatti con lo stesso motore del Reel:
   marketing/creative/animati/tribunale-sito nel repo HypeMove.
   ?c=<caso>  quale reato (lunedi, scarpe, sveglia, palestra); senza, lunedi.
@@ -79,47 +79,52 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 .scossa{animation:scossa .42s}
 @keyframes scossa{10%{transform:translate(-9px,5px) rotate(-1deg)}30%{transform:translate(8px,-6px) rotate(1deg)}55%{transform:translate(-5px,3px)}80%{transform:translate(3px,-2px)}}
 
-/* 4. la condanna: un gioco a tempo di martello. Una ripetizione a ogni colpo; ogni colpo cancella un pezzo del reato */
-#s-gioco{background:#fbf6ea;user-select:none;-webkit-user-select:none}
-.gtop{display:flex;justify-content:space-between;align-items:center;padding:max(14px,env(safe-area-inset-top)) 18px 0;font-weight:900}
-.gtop span{color:var(--arancio2);letter-spacing:.04em;text-transform:uppercase;font-size:13px}
-.gtop button{color:var(--mut);padding:8px 4px;font-weight:800}
-.missione{text-align:center;padding:2px 18px 0}
-.missione b{display:block;font:400 30px/1.05 'DM Serif Display',Georgia,serif;color:var(--legno);text-wrap:balance}
-.missione span{font-weight:800;color:var(--mut);font-size:15px}
-.tessere{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;padding:10px 16px 0;min-height:84px;align-content:flex-start}
-.tessere i{font-style:normal;font-weight:900;font-size:11px;line-height:1;color:#fff;background:#b3261e;border-radius:6px;padding:6px 0;width:34px;text-align:center;box-shadow:0 2px 0 #7d1711;transition:transform .5s cubic-bezier(.3,0,.8,.4),opacity .5s}
-.tessere.grandi i{width:44px;font-size:13px;padding:8px 0}
-.tessere i.via{transform:translateY(-80px) rotate(50deg) scale(.3);opacity:0}
-.campo{position:relative;width:min(250px,58%);aspect-ratio:1;margin:8px auto 0}
-.campo svg{position:absolute;inset:0;transform:rotate(-90deg)}
-.tondo{position:absolute;inset:6%;border-radius:50%;overflow:hidden;background:#fff;box-shadow:0 8px 0 #d9cfb8,0 14px 24px rgba(58,36,18,.25)}
-.tondo.colpo{animation:colpo .28s}
-@keyframes colpo{30%{transform:scale(.94) translateY(5px)}}
-.campo video{width:100%;height:100%;object-fit:cover;display:block}
-.conto{position:absolute;inset:0;display:grid;place-items:center;font-weight:900;font-size:104px;color:var(--arancio);background:rgba(251,246,234,.86);border-radius:50%}
-.parola{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);background:var(--legno);color:#fff;font-weight:900;font-size:26px;letter-spacing:.04em;padding:6px 18px;border-radius:99px;white-space:nowrap;box-shadow:0 4px 0 #1f1208}
-.parola.batte{animation:parola .3s cubic-bezier(.2,1.7,.4,1)}
-@keyframes parola{from{transform:translateX(-50%) scale(1.5)}}
-.parola.su{background:var(--arancio);box-shadow:0 4px 0 var(--arancio2)}
-.meno{position:absolute;left:50%;top:4%;font-weight:900;font-size:32px;color:#b3261e;pointer-events:none;animation:meno .8s ease-out forwards}
-@keyframes meno{from{transform:translate(-50%,0) scale(.6);opacity:0}25%{opacity:1;transform:translate(-50%,-14px) scale(1.2)}to{transform:translate(-50%,-78px) scale(1);opacity:0}}
-.tocca{text-align:center;font-weight:900;font-size:16.5px;margin-top:20px;color:var(--legno);padding:0 18px;text-wrap:balance}
-.vede{display:flex;align-items:center;gap:8px;margin:8px 26px 0;font-weight:800;font-size:13px;color:var(--mut)}
-.vede div{flex:1;height:10px;border-radius:99px;background:#eadfc6;overflow:hidden}
-.vede div i{display:block;height:100%;width:100%;background:#22c77f;border-radius:99px;transform-origin:left center;transform:scaleX(0);transition:transform .15s linear}
-.giud{margin-top:auto;display:flex;align-items:flex-end;gap:6px;padding:0 12px;height:118px;overflow:hidden}
-.giud img{width:140px;display:block;margin-bottom:-24px}
-.giud img.salta{animation:salta .3s}
-@keyframes salta{40%{transform:translateY(-14px)}}
-.fum{position:relative;background:#fff;border-radius:18px 18px 18px 4px;padding:11px 14px;font-weight:800;font-size:16.5px;margin-bottom:40px;min-width:0;box-shadow:0 2px 0 #eadfc6}
-.fum.pop{animation:pop .35s cubic-bezier(.2,1.6,.4,1)}
-@keyframes pop{from{transform:scale(.6);opacity:0}}
-.fum em{position:absolute;right:-10px;top:-14px;font:900 12px/1 Nunito,sans-serif;font-style:normal;letter-spacing:.08em;color:#c0392b;border:2.5px solid #c0392b;border-radius:6px;padding:4px 6px;transform:rotate(10deg);background:#fff;animation:timbra .3s .35s cubic-bezier(.2,1.6,.4,1) both}
-/* il foglio dell'evasione sta al centro: in fondo allo schermo finirebbe sotto la barra del browser */
-.eva{position:absolute;inset:0;background:rgba(20,16,10,.6);display:flex;align-items:center;justify-content:center;z-index:6;padding:20px}
-.eva>div{background:#fff;width:100%;border-radius:26px;padding:26px 20px 20px;display:grid;gap:12px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.4)}
-.eva h3{font:400 34px/1 'DM Serif Display',Georgia,serif;margin:0}.eva p{margin:0 0 4px;font-size:17px}
+/* 4. la condanna: cinque domande. Moovy sta dietro il banco e reagisce a ogni risposta */
+#s-quiz,#s-fine{background:radial-gradient(120% 60% at 50% 8%,#1b4d49,var(--scuro) 78%);color:#fff}
+.qtop{display:flex;justify-content:space-between;align-items:center;padding:max(12px,env(safe-area-inset-top)) 16px 0;position:relative;z-index:3}
+.punti{display:flex;gap:7px}
+.punti i{width:30px;height:9px;border-radius:99px;background:rgba(255,255,255,.18);transition:background .3s,transform .3s}
+.punti i.ora{background:#fff;transform:scaleY(1.3)}.punti i.si{background:#22c77f}.punti i.no{background:#e2574c}
+.qtop button{color:#bfd6d2;font-weight:800;padding:8px 4px}
+.palco{position:relative;flex:1;min-height:110px;z-index:1}
+.raggi{position:absolute;inset:-20% -30% -10%;opacity:0;transition:opacity .4s;overflow:hidden;pointer-events:none}
+.raggi::before{content:"";position:absolute;left:50%;top:55%;width:150vmax;height:150vmax;margin:-75vmax;background:repeating-conic-gradient(rgba(255,215,106,.2) 0 10deg,transparent 10deg 30deg);animation:gira 16s linear infinite}
+.raggi.on{opacity:1}
+@keyframes gira{to{transform:rotate(360deg)}}
+.moo{position:absolute;inset:0 0 -30px;display:flex;justify-content:center;align-items:flex-end;pointer-events:none}
+.corpo{position:relative;height:104%;max-height:430px;aspect-ratio:2/3;transform-origin:50% 100%;animation:respiro 3.2s ease-in-out infinite}
+.corpo img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:50% 100%;opacity:0}
+.corpo img.on{opacity:1}
+@keyframes respiro{50%{transform:scale(1.012,.985)}}
+.corpo.sale{animation:sale .55s cubic-bezier(.2,1.5,.4,1)}
+@keyframes sale{from{transform:translateY(70%)}}
+.corpo.salto{animation:salto .5s cubic-bezier(.3,0,.3,1)}
+@keyframes salto{35%{transform:translateY(-9%) scale(1.04,1.02)}70%{transform:translateY(1%) scale(1.03,.96)}}
+.corpo.no{animation:testa .6s}
+@keyframes testa{20%{transform:rotate(-4deg)}45%{transform:rotate(4deg)}70%{transform:rotate(-2deg)}}
+.corpo.botta{animation:botta .3s}
+@keyframes botta{40%{transform:translateY(3%) scale(1.03,.95)}}
+.corpo.pensa{animation:pensa 1.1s ease-in-out}
+@keyframes pensa{30%{transform:rotate(3deg) translateX(2%)}70%{transform:rotate(-2deg)}}
+.nuvola{position:absolute;right:5%;top:6%;max-width:46%;background:#fff;color:#1d1a15;font-weight:900;font-size:17px;line-height:1.15;padding:10px 13px;border-radius:16px 16px 4px 16px;box-shadow:0 4px 0 rgba(0,0,0,.25);animation:pop .35s cubic-bezier(.2,1.6,.4,1) both;z-index:3}
+@keyframes pop{from{transform:scale(.5);opacity:0}}
+.esito{position:absolute;left:6%;bottom:44px;font:900 21px/1 Nunito,sans-serif;letter-spacing:.08em;padding:7px 10px;border:4px solid;border-radius:9px;background:rgba(247,235,207,.94);transform:rotate(-11deg);z-index:3;animation:timbra3 .32s cubic-bezier(.2,1.6,.4,1) both}
+.esito.si{color:#1f7a4a}.esito.no{color:#c0392b}
+@keyframes timbra3{from{transform:rotate(-11deg) scale(2.8);opacity:0}}
+.banco{position:relative;z-index:2;background:var(--carta);color:var(--legno);border-radius:26px 26px 0 0;padding:15px 18px max(18px,env(safe-area-inset-bottom));display:grid;gap:10px;box-shadow:0 -7px 0 #3a2412,0 -16px 30px rgba(0,0,0,.4)}
+.banco small{font-weight:900;font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;color:#9a5b1d}
+.banco h3{margin:0;font:400 25px/1.12 'DM Serif Display',Georgia,serif;text-wrap:balance}
+.risposte{display:grid;gap:9px}
+.risposte button{display:flex;gap:11px;align-items:center;background:#fff;border-radius:16px;padding:13px 14px;text-align:left;font-weight:800;font-size:17px;line-height:1.2;border-bottom:4px solid #d9c9a0;animation:entra .4s cubic-bezier(.2,1.3,.4,1) both}
+.risposte button:nth-child(2){animation-delay:.07s}.risposte button:nth-child(3){animation-delay:.14s}
+.risposte button:active{transform:translateY(2px);border-bottom-width:2px}
+.risposte button b{flex:none;width:28px;height:28px;border-radius:50%;background:#f1e3bf;display:grid;place-items:center;font-size:14px;font-weight:900;color:var(--legno)}
+.risposte button.si{background:#22c77f;color:#fff;border-bottom-color:#16965e}
+.risposte button.no{background:#e2574c;color:#fff;border-bottom-color:#b03a30}
+.risposte button.via{display:none}
+.fatto{margin:0;font-weight:800;font-size:16.5px;line-height:1.3;animation:entra .4s both}
+#s-fine .palco{margin-top:-10px}
+#s-fine .basso{margin-top:0;z-index:5}
 
 /* 5. la libertà e la denuncia */
 #s-fine,#s-denuncia{color:#fff;background:var(--verde) no-repeat center bottom/cover}
@@ -151,18 +156,14 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
   <video id="film" playsinline preload="auto"></video>
   <div class="basso" id="aulabasso"></div>
  </section>
- <section class="sc" id="s-gioco">
-  <div class="gtop"><span>Condanna in corso</span><button id="salta" type="button">Evado</button></div>
-  <div class="missione"><b id="missione"></b><span id="restano"></span></div>
-  <div class="tessere" id="tessere"></div>
-  <div class="campo"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="47" fill="none" stroke="#eadfc6" stroke-width="4"/><circle id="arco" cx="50" cy="50" r="47" fill="none" stroke="#22c77f" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100 100"/></svg><div class="tondo" id="tondo"><video id="vid" muted loop playsinline preload="auto"></video></div><div class="parola" id="parola" hidden></div><div class="conto" id="conto">3</div></div>
-  <div class="tocca" id="tocca"></div>
-  <div class="vede" id="vede" hidden><span>La corte ti vede</span><div><i id="occhio"></i></div></div>
-  <div class="giud"><img src="giudice.webp" alt="Il giudice Moovy ti osserva" id="faccia"><div class="fum" id="fum"></div></div>
-  <div class="eva" id="eva" hidden><div><h3>Tentata evasione?</h3><p>Ti mancano <b id="mancano"></b> secondi alla libertà.</p><button class="btn" id="resto" type="button">Torno in cella</button><button class="link" id="evado" type="button">Evado lo stesso</button></div></div>
+ <section class="sc" id="s-quiz">
+  <div class="qtop"><div class="punti" id="punti" aria-hidden="true"></div><button id="salta" type="button">Salta</button></div>
+  <div class="palco"><div class="raggi" id="raggi"></div><div class="moo"><div class="corpo" id="corpo"></div></div><div class="nuvola" id="nuvola" hidden></div><i class="esito" id="esito" hidden></i><div class="coria" id="qcoria"></div></div>
+  <div class="banco"><small id="qn"></small><h3 id="qt"></h3><div class="risposte" id="risposte"></div><p class="fatto" id="fatto" hidden></p><button class="btn" id="avanti" type="button" hidden>Avanti</button></div>
  </section>
- <section class="sc sfuma" id="s-fine">
-  <div class="alto"><div class="trib">Tribunale di Moovy</div><h2 class="grande" id="fint">Scarcerazione</h2></div>
+ <section class="sc" id="s-fine">
+  <div class="alto"><div class="trib">Tribunale di Moovy</div><h2 class="grande" id="fint">Il verdetto</h2></div>
+  <div class="palco"><div class="raggi" id="fraggi"></div><div class="moo"><div class="corpo" id="fcorpo"></div></div></div>
   <div class="basso"><div class="foglio" id="atto" style="position:relative"></div><a class="btn" id="store" href="https://play.google.com/store/apps/details?id=pt.app&hl=it" rel="noopener">Scarica HypeMove</a><button class="btn carta" id="vaidenuncia">Denuncia un complice</button></div>
   <div class="coria" id="coria"></div>
  </section>
@@ -174,13 +175,12 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 <script>
 (function () {
   var $ = function (s) { return document.querySelector(s); };
-  // I reati. lei = come si sceglie nella denuncia, d = che cosa si fa, v = video dell'app, f = che cosa dice il giudice mentre guardi
-  // I reati. m tessere da cancellare in n colpi di martello; parole = che cosa si legge a ogni colpo; scuse = quelle che il giudice respinge
+  // I reati: la frase con cui si scelgono nella denuncia. Il filmato dell'accusa è acc-<caso>.mp4
   var CASI = {
-    lunedi: { lei: 'Dice «da lunedì comincio» da quarantadue lunedì.', d: 'di squat', v: 'squat', m: 42, n: 14, tessera: 'LUN', missione: 'Cancella i 42 lunedì', tocca: 'Uno squat a ogni colpo di martello', parole: ['GIÙ', 'SU'], meta: true, scuse: ['«Pioveva.»', '«Era un anno umido.»', '«La tuta è nuova.»', '«Era martedì.»'] },
-    scarpe: { lei: 'Ha comprato le scarpe da corsa. Le usa per fare la spesa.', d: 'di marcia, anche da seduti', v: 'marcia', m: 30, n: 30, tessera: '👣', missione: 'Fai i 30 passi mai fatti', tocca: 'Un passo a ogni colpo, anche dalla sedia', parole: ['UNO', 'DUE'], scuse: ['«Sono comode.»', '«Le tengo per l’estate.»', '«Al supermercato si cammina.»', '«Erano in offerta.»'] },
-    sveglia: { lei: 'Ha messo la sveglia alle 6. L’ha spenta sette volte.', d: 'di jumping jack', v: 'salti', m: 7, n: 21, tessera: '⏰', grandi: true, missione: 'Spegni le 7 sveglie', tocca: 'Un salto a ogni colpo di martello', parole: ['APRI', 'CHIUDI'], scuse: ['«Ancora cinque minuti.»', '«Era buio.»', '«Ho sognato di allenarmi.»', '«Domani mi alzo.»'] },
-    palestra: { lei: 'Paga la palestra da gennaio. Non sa dov’è l’entrata.', d: 'di boxe a vuoto', v: 'boxe', m: 11, n: 22, tessera: ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV'], grandi: true, missione: 'Colpisci 11 mesi di abbonamento', tocca: 'Un pugno a ogni colpo di martello', parole: ['DESTRO', 'SINISTRO'], scuse: ['«Non trovo parcheggio.»', '«C’è troppa gente.»', '«Vado da settembre.»', '«Almeno la pago.»'] }
+    lunedi: { lei: 'Dice «da lunedì comincio» da quarantadue lunedì.' },
+    scarpe: { lei: 'Ha comprato le scarpe da corsa. Le usa per fare la spesa.' },
+    sveglia: { lei: 'Ha messo la sveglia alle 6. L’ha spenta sette volte.' },
+    palestra: { lei: 'Paga la palestra da gennaio. Non sa dov’è l’entrata.' }
   };
   var q = new URLSearchParams(location.search);
   var caso = CASI[q.get('c')] ? q.get('c') : 'lunedi', denuncia = q.get('d') === '1';
@@ -196,19 +196,19 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       }).then(function () {}, function () {});
     } catch (e) { return Promise.resolve(); }
   }
-  var film = $('#film'), vid = $('#vid'), tick = null, raf = 0, totale = 30, left = 30, paused = false, libera = true, condotta = false, restanti = 0;
+  var film = $('#film');
   function mostra(k) {
-    clearInterval(tick); clearTimeout(tick); cancelAnimationFrame(raf); vid.pause();
+    attese.forEach(clearTimeout); attese = [];
     document.querySelectorAll('.sc').forEach(function (s) { s.classList.toggle('on', s.id === 's-' + k); });
   }
   function vibra(p) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
   // un filmato del giudice: parte con l'audio (siamo dentro un tocco), e alla fine chiama «poi»
-  function proietta(nome, poi) {
+  function proietta(nome, poi, fino) {
     $('#aulabasso').replaceChildren(); film.loop = false; film.poster = nome + '.jpg';
     if (film.getAttribute('data-nome') !== nome) { film.setAttribute('data-nome', nome); film.src = nome + '.mp4'; }
     film.muted = false; film.currentTime = 0;
-    var fatto = false, fine = function () { if (fatto) return; fatto = true; film.onended = film.onerror = null; poi(); };
-    film.onended = fine; film.onerror = fine;
+    var fatto = false, fine = function () { if (fatto) return; fatto = true; film.onended = film.onerror = film.ontimeupdate = null; if (fino) { try { film.pause(); } catch (e) {} } poi(); };
+    film.onended = fine; film.onerror = fine; film.ontimeupdate = fino ? function () { if (film.currentTime >= fino) fine(); } : null;
     var p = film.play(); if (p && p.catch) p.catch(function () { film.muted = true; var p2 = film.play(); if (p2 && p2.catch) p2.catch(fine); });
   }
   function bottone(testo, classe, fai) { var b = document.createElement('button'); b.className = 'btn ' + (classe || ''); b.textContent = testo; b.onclick = fai; return b; }
@@ -230,93 +230,91 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       $('#aulabasso').replaceChildren(d);
     });
   }
-  // 3. la risposta del giudice e la condanna: chi si dichiara innocente prende cinque secondi in più
+  // 3. la risposta del giudice e la condanna: cinque domande. Il filmato di chi si dichiara innocente si ferma dopo «Lo dicono tutti.»
   function risponde(scelta) {
-    conta('click', scelta); totale = scelta === 'innocente' ? 35 : 30;
+    conta('click', scelta);
     proietta(scelta, function () {
       vibra([60, 60, 90]); var t = $('#tel'); t.classList.remove('scossa'); void t.offsetWidth; t.classList.add('scossa');
-      var c = CASI[caso], f = document.createElement('div'); f.className = 'foglio cala';
-      f.innerHTML = '<small>La condanna</small><b></b><span>Da scontare subito. Tieni il telefono in mano: la corte sente se ti muovi.</span>'; f.querySelector('b').textContent = totale + ' secondi ' + c.d;
-      var b = bottone('Sconto la condanna', 'entra', function () {
-        conta('click', 'inizia'); var via = function () { mostra('gioco'); gioco(); };
-        try { suona(1, .01, .001); if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') { DeviceMotionEvent.requestPermission().then(via, via); return; } } catch (e) {}
-        via();
-      });
+      var f = document.createElement('div'); f.className = 'foglio cala';
+      f.innerHTML = '<small>La condanna</small><b>Cinque domande</b><span>Vediamo quante ne sai su come tenerti in forma.</span>';
+      var b = bottone('Rispondo', 'entra', function () { conta('click', 'inizia'); suona(1, .01, .001); try { film.pause(); } catch (e) {} mostra('quiz'); quiz(); });
       $('#aulabasso').replaceChildren(f, b);
-    });
+    }, scelta === 'innocente' ? .9 : 2.4); // colpevole: l'ultimo fotogramma mostra già la scritta del filmato dopo
   }
-  // 4. la condanna è un gioco a tempo: il martello batte, a ogni colpo si fa una ripetizione e un pezzo del reato sparisce.
-  // Dove il telefono ha il sensore di movimento, il colpo vale solo se ci si è mossi: chi sta fermo non cancella niente.
-  // Senza sensore (o senza permesso) vale la parola: ogni colpo cancella. Nessuno perde: a tempo scaduto la condanna è scontata.
   var suona = function (hz, dur, vol) { try { var A = window.AudioContext || window.webkitAudioContext, a = suona.a || (suona.a = new A()), t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(hz, t); o.frequency.exponentialRampToValueAtTime(hz * .5, t + dur); g.gain.setValueAtTime(vol || .4, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} };
-  // sensore: quanto si sta muovendo il telefono (0 fermo, verso 1 in movimento)
-  var moto = { c: false, media: 9.8, forza: 0, picco: 0 };
-  window.addEventListener('devicemotion', function (e) {
-    var a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
-    var m = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z); if (!isFinite(m)) return;
-    moto.c = true; moto.media += (m - moto.media) * .05; var d = Math.abs(m - moto.media);
-    moto.forza += (d - moto.forza) * .2; if (moto.forza > moto.picco) moto.picco = moto.forza;
-  });
-  function gioco() {
-    var c = CASI[caso], fum = $('#fum'), box = $('#tessere'), n = c.n + (totale > 30 ? 3 : 0), passo = totale / n, colpi = 0, validi = 0, tolte = 0, partito = false, faccia = $('#faccia'), parola = $('#parola'), metaFatta = false, scusa = -1, fermi = 0;
-    var dici = function (t, timbro) { fum.textContent = t; if (timbro) { var e = document.createElement('em'); e.textContent = 'RESPINTA'; fum.append(e); } fum.classList.remove('pop'); void fum.offsetWidth; fum.classList.add('pop'); };
-    var restano = function () { var r = c.m - tolte; $('#restano').textContent = r > 0 ? 'Ne restano ' + r : 'Cancellati tutti'; };
-    var scrivi = function (t, su) { parola.textContent = t; parola.classList.toggle('su', !!su); parola.classList.remove('batte'); void parola.offsetWidth; parola.classList.add('batte'); };
-    vid.src = c.v + '.mp4'; vid.play().catch(function () {});
-    $('#missione').textContent = c.missione; $('#tocca').textContent = c.tocca; $('#eva').hidden = true; faccia.src = 'giudice.webp'; parola.hidden = true; $('#vede').hidden = true;
-    box.className = 'tessere' + (c.grandi ? ' grandi' : ''); box.replaceChildren();
-    for (var i = 0; i < c.m; i++) { var x = document.createElement('i'); x.textContent = Array.isArray(c.tessera) ? c.tessera[i] : c.tessera; box.append(x); }
-    left = totale; paused = false; condotta = false; restanti = c.m; restano(); fum.textContent = 'In posizione.'; $('#arco').setAttribute('stroke-dasharray', '100 100'); moto.picco = 0;
-    function colpo() { // un colpo di martello
-      colpi++; var mosso = !moto.c || moto.picco > .55; moto.picco = 0;
-      suona(150, .16, .5); vibra(mosso ? 28 : 10); var t = $('#tondo'); t.classList.remove('colpo'); void t.offsetWidth; t.classList.add('colpo');
-      scrivi(c.meta ? c.parole[0] : c.parole[(colpi - 1) % 2], false);
-      if (!mosso) { fermi++; if (fermi === 2 || fermi % 5 === 0) dici('Non ti vedo muovere.'); return; }
-      fermi = 0; validi++;
-      var devono = Math.min(c.m, Math.round(validi * c.m / n)), vive = box.querySelectorAll('i:not(.via)'), ora = devono - tolte;
-      for (var k = 0; k < ora && k < vive.length; k++) vive[vive.length - 1 - k].classList.add('via');
-      tolte = devono; restanti = c.m - tolte; restano();
-      if (ora > 0) { var p = document.createElement('div'); p.className = 'meno'; p.textContent = '−' + ora; $('.campo').append(p); setTimeout(function () { p.remove(); }, 820); }
-      faccia.classList.remove('salta'); void faccia.offsetWidth; faccia.classList.add('salta');
-      var q4 = Math.floor(validi / n * 5) - 1; // quattro scuse respinte lungo la strada
-      if (q4 > scusa && q4 < c.scuse.length) { scusa = q4; dici(c.scuse[q4], true); suona(520, .1, .25); }
-      if (!metaFatta && validi >= n / 2) { metaFatta = true; faccia.src = 'giudice-ok.webp'; }
+  // 4. il quiz. Ogni domanda ha una risposta verificabile; la fonte è nel commento.
+  //   q domanda, r risposte, ok quale è giusta, f il fatto che Moovy mette agli atti dopo la risposta
+  var DOMANDE = [
+    // OMS, linee guida 2020 sull'attività fisica: adulti, 150-300 minuti a settimana di attività moderata
+    { q: 'Quanto movimento a settimana consiglia l’Organizzazione Mondiale della Sanità?', r: ['Un’ora', 'Sette ore', 'Due ore e mezza'], ok: 2, f: 'Sono circa venti minuti al giorno. E vale anche camminare di buon passo.' },
+    // Manpo-kei («contapassi dei diecimila passi»), Yamasa, Giappone 1965; Lee et al., JAMA Intern Med 2019: benefici già da circa 4.400 passi
+    { q: 'I famosi diecimila passi al giorno: da dove arrivano?', r: ['Dalla pubblicità di un contapassi', 'Da uno studio di medici', 'Dall’esercito'], ok: 0, f: 'Giappone, 1965: il contapassi si chiamava «diecimila passi». Si sta meglio già con meno.' },
+    // OMS 2020: tolta la durata minima di 10 minuti per volta, «ogni movimento conta»
+    { q: 'Dieci minuti qua e là, durante il giorno, contano?', r: ['No, serve mezz’ora di fila', 'Sì, ogni minuto conta', 'Solo se sudi'], ok: 1, f: 'Dal 2020 non c’è più una durata minima: i pezzetti si sommano.' },
+    // il dimagrimento localizzato non esiste: allenare un muscolo non scioglie il grasso che gli sta sopra
+    { q: 'Fare gli addominali fa sparire la pancia?', r: ['Sì, se ne fai tanti', 'Solo se li fai la sera', 'No, il grasso non va via a zone'], ok: 2, f: 'Rinforzano i muscoli sotto. Dove dimagrire lo decide il corpo.' },
+    // OMS 2020: esercizi di rinforzo muscolare almeno 2 giorni a settimana
+    { q: 'Quante volte a settimana conviene allenare i muscoli?', r: ['Almeno due', 'Mai, basta camminare', 'Tutti i giorni'], ok: 0, f: 'Bastano esercizi a corpo libero, anche a casa.' }
+  ];
+  var POSE = ['legge', 'dubbio', 'martello', 'colpo', 'felice', 'stupito', 'ops', 'coppa', 'punta'], BRAVO = ['Esatto!', 'Agli atti!', 'Giusto!', 'Risposta esatta!', 'Esatto!'], VOTI = ['zero', 'uno', 'due', 'tre', 'quattro', 'cinque'];
+  var attese = [], punti = 0, fila = 0, libera = true;
+  function dopo(ms, fai) { attese.push(setTimeout(fai, ms)); }
+  // Moovy: tutte le pose stanno una sopra l'altra, se ne vede una per volta
+  function monta(box) { POSE.forEach(function (p) { var im = document.createElement('img'); im.src = 'g-' + p + '.webp'; im.alt = ''; im.setAttribute('data-p', p); box.append(im); }); }
+  function posa(box, p) { box.querySelectorAll('img').forEach(function (im) { im.classList.toggle('on', im.getAttribute('data-p') === p); }); }
+  function mossa(box, m) { box.className = 'corpo'; void box.offsetWidth; box.classList.add(m); }
+  function coriandoli(k, quanti) { for (var i = 0; i < quanti; i++) { var x = document.createElement('i'); x.style.cssText = 'left:' + Math.random() * 100 + '%;background:' + ['#ffd76a', '#f27b0c', '#fff', '#22c77f'][i % 4] + ';animation-delay:' + Math.random() * .8 + 's'; k.append(x); (function (x) { setTimeout(function () { x.remove(); }, 3600); })(x); } }
+  var corpo = $('#corpo'); monta(corpo); monta($('#fcorpo'));
+  function quiz() {
+    var i = 0, risposto = false, box = $('#risposte'), p = $('#punti'); punti = 0; fila = 0; libera = true;
+    p.replaceChildren(); DOMANDE.forEach(function () { p.append(document.createElement('i')); });
+    function domanda() {
+      var d = DOMANDE[i]; risposto = false;
+      p.children[i].className = 'ora'; $('#qn').textContent = 'Domanda ' + (i + 1) + ' di ' + DOMANDE.length; $('#qt').textContent = d.q;
+      $('#fatto').hidden = true; $('#avanti').hidden = true; $('#nuvola').hidden = true; $('#esito').hidden = true; $('#raggi').classList.remove('on');
+      box.replaceChildren();
+      d.r.forEach(function (t, k) { var b = document.createElement('button'), l = document.createElement('b'); b.type = 'button'; l.textContent = 'ABC'[k]; b.append(l, document.createTextNode(t)); b.onclick = function () { scelta(k, b); }; box.append(b); });
+      posa(corpo, 'legge'); mossa(corpo, 'sale'); suona(440, .08, .2);
+      dopo(6500, function () { if (!risposto) { posa(corpo, 'dubbio'); mossa(corpo, 'pensa'); } });
     }
-    var k = $('#conto'), giu = 3; k.hidden = false; k.textContent = giu;
-    tick = setInterval(function () {
-      giu--; if (giu > 0) { k.textContent = giu; vibra(20); suona(330, .08, .25); return; }
-      k.hidden = true; clearInterval(tick); partito = true; parola.hidden = false; dici(moto.c ? 'Ti vedo. Segui il martello.' : 'Segui il martello.'); if (moto.c) $('#vede').hidden = false;
-      var last = performance.now(), fatto = 0, mezzo = false;
-      var f = function (t) {
-        if (!partito) return;
-        var dt = Math.max(0, Math.min(.25, (t - last) / 1000)); last = t; if (!paused) left -= dt;
-        if (left <= 0) { partito = false; vibra([40, 40, 120]); suona(880, .3, .4); libera = true; condotta = moto.c && validi >= n * .8; conta('click', condotta ? 'condotta' : 'finita'); fine(); return; }
-        var passato = totale - left, idx = Math.floor(passato / passo); // quale colpo tocca: si regge sul tempo rimasto, così la pausa non lo sfasa
-        if (idx >= fatto && fatto < n) { fatto = idx + 1; mezzo = false; colpo(); }
-        if (c.meta && !mezzo && passato - (fatto - 1) * passo > passo * .5) { mezzo = true; scrivi(c.parole[1], true); suona(300, .08, .2); }
-        if (moto.c) { if ($('#vede').hidden) $('#vede').hidden = false; $('#occhio').style.transform = 'scaleX(' + Math.min(1, moto.forza / 2) + ')'; }
-        $('#arco').setAttribute('stroke-dasharray', (left / totale * 100) + ' 100');
-        raf = requestAnimationFrame(f);
-      };
-      raf = requestAnimationFrame(f);
-    }, 800);
+    function dici(t) { var n = $('#nuvola'); n.textContent = t; n.hidden = true; void n.offsetWidth; n.hidden = false; }
+    function timbro(t, ok) { var e = $('#esito'); e.textContent = t; e.className = 'esito ' + (ok ? 'si' : 'no'); e.hidden = true; void e.offsetWidth; e.hidden = false; }
+    function scelta(k, b) {
+      if (risposto) return; risposto = true; attese.forEach(clearTimeout); attese = [];
+      var d = DOMANDE[i], ok = k === d.ok;
+      [].forEach.call(box.children, function (x, j) { x.disabled = true; x.style.animation = 'none'; if (j === d.ok) x.classList.add('si'); else if (x === b) x.classList.add('no'); else x.classList.add('via'); });
+      p.children[i].className = ok ? 'si' : 'no'; conta('click', ok ? 'giusta' : 'sbagliata');
+      if (ok) {
+        punti++; fila++; posa(corpo, 'martello'); mossa(corpo, 'salto');
+        dopo(240, function () { posa(corpo, 'colpo'); mossa(corpo, 'botta'); suona(150, .16, .5); vibra(35); var t = $('#tel'); t.classList.remove('scossa'); void t.offsetWidth; t.classList.add('scossa'); timbro('ESATTO', true); });
+        dopo(760, function () { posa(corpo, fila >= 3 ? 'stupito' : 'felice'); mossa(corpo, 'salto'); $('#raggi').classList.add('on'); coriandoli($('#qcoria'), 16); suona(660, .12, .3); dopo(110, function () { suona(880, .16, .3); }); dici(fila >= 3 ? fila + ' di fila!' : BRAVO[i]); });
+      } else {
+        fila = 0; posa(corpo, 'ops'); mossa(corpo, 'no'); suona(200, .25, .3); vibra([30, 40, 30]); timbro('QUASI', false);
+        dopo(350, function () { dici('Ci cascano in tanti.'); });
+      }
+      dopo(ok ? 900 : 600, function () { var f = $('#fatto'); f.textContent = d.f; f.hidden = false; var a = $('#avanti'); a.textContent = i < DOMANDE.length - 1 ? 'Avanti' : 'La sentenza'; a.hidden = false; });
+    }
+    $('#avanti').onclick = function () { i++; if (i < DOMANDE.length) domanda(); else { conta('click', 'voto_' + VOTI[punti]); fine(); } };
+    domanda();
   }
-  $('#salta').onclick = function () { paused = true; try { vid.pause(); } catch (e) {} $('#mancano').textContent = Math.max(1, Math.ceil(left)); $('#eva').hidden = false; };
-  $('#resto').onclick = function () { $('#eva').hidden = true; paused = false; try { var p = vid.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {} };
-  $('#evado').onclick = function () { libera = false; conta('click', 'evasa'); fine(); };
-  // 5. la libertà
+  $('#salta').onclick = function () { libera = false; conta('click', 'evasa'); fine(); };
+  // 5. il verdetto: quante ne ha sapute, e la proposta dell'app
   function fine() {
-    var ok = libera, s = $('#s-fine'), atto = $('#atto'), oggi = new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' });
-    mostra('fine'); s.style.backgroundImage = ok ? 'url(libera.jpg)' : 'url(latitante.jpg)';
-    $('#fint').textContent = ok ? 'Scarcerazione' : 'Latitante'; cancelAnimationFrame(raf);
+    var ok = libera, atto = $('#atto'), fc = $('#fcorpo'), bene = ok && punti >= 3, k = $('#coria');
+    mostra('fine'); k.replaceChildren(); $('#fraggi').classList.toggle('on', bene);
+    $('#fint').textContent = !ok ? 'Latitante' : punti === 5 ? 'Assoluzione piena' : bene ? 'Pena ridotta' : 'Condanna confermata';
+    posa(fc, !ok ? 'punta' : punti === 5 ? 'coppa' : bene ? 'felice' : 'punta'); mossa(fc, 'sale');
     atto.className = 'foglio cala';
-    atto.innerHTML = ok ? '<i class="timbro">SCONTATA</i>' + (condotta ? '<i class="timbro due">BUONA CONDOTTA</i>' : '') + '<small>Atto di scarcerazione</small><b>' + (restanti > 0 ? 'Fuori lo stesso' : 'Fedina pulita') + '</b><span></span>' : '<small>Mandato di cattura</small><b>Ti cerco nell’app</b><span>Ho pazienza.</span>';
-    if (ok) atto.querySelector('span').textContent = restanti > 0 ? 'Te ne restano ' + restanti + ': il resto si sconta nell’app.' : oggi + '. Vale fino a domani: poi ci vediamo nell’app.';
-    var k = $('#coria'); k.replaceChildren();
+    atto.innerHTML = ok ? '<i class="timbro"></i><small>Il verdetto</small><b></b><span></span>' : '<small>Mandato di cattura</small><b>Ti cerco nell’app</b><span>Ho pazienza.</span>';
     if (ok) {
-      for (var i = 0; i < 46; i++) { var x = document.createElement('i'); x.style.cssText = 'left:' + Math.random() * 100 + '%;background:' + ['#ffd76a', '#f27b0c', '#fff', '#22c77f'][i % 4] + ';animation-delay:' + Math.random() * 1.2 + 's'; k.append(x); }
+      atto.querySelector('i').textContent = punti === 5 ? 'CON LODE' : bene ? 'BUONA CONDOTTA' : 'DA RIVEDERE';
+      atto.querySelector('b').textContent = punti + ' su ' + DOMANDE.length;
+      atto.querySelector('span').textContent = punti === 5 ? 'Le sai tutte. Adesso tocca metterle in pratica.' : bene ? 'Niente male. Adesso tocca metterle in pratica.' : 'Adesso le sai. Metterle in pratica è più facile di quanto pensi.';
+    }
+    if (bene) {
+      coriandoli(k, 46); dopo(700, function () { mossa(fc, 'salto'); });
       // la festa del giudice: stesso lettore, già sbloccato dal primo tocco (resta nascosto, si sente soltanto)
-      try { film.onended = film.onerror = null; film.setAttribute('data-nome', 'libera'); film.src = 'libera.mp4'; film.muted = false; var p = film.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+      try { film.onended = film.onerror = film.ontimeupdate = null; film.setAttribute('data-nome', 'libera'); film.src = 'libera.mp4'; film.muted = false; var pl = film.play(); if (pl && pl.catch) pl.catch(function () {}); } catch (e) {}
     }
   }
   // negozio: Android al Play Store con la sorgente, iPhone alla pagina dedicata
