@@ -456,6 +456,8 @@ function vProfilo(main) {
 }
 
 // ── risultati ──
+// Obiettivi letti dall'import di Instagram (social_instagram_dati → obiettivi): tema contato e come.
+const OB_IG = { cond: ['sonoio', 'Media'], salv: ['miserve', 'Media'], comm: ['parliamone', 'Media'], views: [null, 'Mediana'] };
 function vObiettivi(main) {
   main.append(el('p', { className: 'so-riga', style: 'margin-bottom:12px', textContent: 'Dal 30 novembre al 28 febbraio. Bilancio il 3 gennaio.' }));
   const ult = S.kpi?.at(-1), prec = S.kpi?.at(-2), box = el('div', { className: 'so-ob' });
@@ -464,10 +466,11 @@ function vObiettivi(main) {
     if (o.id === 'avvii') { v = ult?.avvii ?? null; sotto = ult ? 'Questo mese' + (prec ? ', il mese scorso ' + prec.avvii : '') : null; }
     else if (o.id === 'post') { v = S.posts.filter((p) => p.stato === 'pubblicato').length; sotto = daDecidere().length + ' da decidere, ' + S.posts.filter((p) => p.stato === 'approvato').length + ' approvati'; }
     else if (o.id === 'foll' && S.ig?.account?.follower != null) { v = S.ig.account.follower; sotto = 'Da Instagram'; }
-    else if (v == null) sotto = 'Da misurare: serve Instagram collegato';
+    else if (OB_IG[o.id]) { const x = S.ig?.obiettivi?.[o.id], [tema, come] = OB_IG[o.id]; v = x?.n ? x.v : null; sotto = !S.ig ? 'Instagram non risponde' : x?.n ? come + ' di ' + (x.n === 1 ? '1 post' : x.n + ' post') + (tema ? ' «' + TEMI[tema] + '»' : '') : 'Nessun post' + (tema ? ' «' + TEMI[tema] + '»' : '') + ' uscito ancora'; }
+    else if (v == null) sotto = 'Ancora da misurare';
     else sotto = 'Letto il ' + leggibile(o.valore_il, { day: 'numeric', month: 'long' });
     const art = el('article', { className: n === 0 ? 'grande' : '' }, el('h3', { textContent: o.nome + (o.unita ? ' ' + o.unita : '') }), el('div', { className: 'so-num' }, num(v), el('small', { textContent: ' su ' + num(o.obiettivo) })), el('div', { className: 'so-bar' }, el('i', { style: 'width:' + Math.max(0, Math.min(100, (v || 0) / o.obiettivo * 100)) + '%' })), sotto ? el('p', { textContent: sotto }) : null);
-    if (!o.automatico && sotto !== 'Da Instagram') art.append(el('button', { type: 'button', className: 'so-mod', textContent: 'Aggiorna a mano', on: { click: (e) => { const inp = el('input', { type: 'number', inputMode: 'decimal', className: 'so-in', style: 'width:100%', value: o.valore ?? '', aria: { label: o.nome } }); e.target.replaceWith(el('div', { className: 'so-due' }, inp, bottone('Salva', 'pri', () => { if (inp.value === '' || !Number.isFinite(+inp.value)) { inp.focus(); return; } scrivi(() => sb.from('social_obiettivi').update({ valore: +inp.value, valore_il: giorno(Date.now()) }).eq('id', o.id), 'Aggiornato'); }))); inp.focus(); } } }));
+    if (!o.automatico && !OB_IG[o.id] && sotto !== 'Da Instagram') art.append(el('button', { type: 'button', className: 'so-mod', textContent: 'Aggiorna a mano', on: { click: (e) => { const inp = el('input', { type: 'number', inputMode: 'decimal', className: 'so-in', style: 'width:100%', value: o.valore ?? '', aria: { label: o.nome } }); e.target.replaceWith(el('div', { className: 'so-due' }, inp, bottone('Salva', 'pri', () => { if (inp.value === '' || !Number.isFinite(+inp.value)) { inp.focus(); return; } scrivi(() => sb.from('social_obiettivi').update({ valore: +inp.value, valore_il: giorno(Date.now()) }).eq('id', o.id), 'Aggiornato'); }))); inp.focus(); } } }));
     box.append(art);
   });
   main.append(box);
