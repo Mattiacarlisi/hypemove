@@ -233,7 +233,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       $('#aulabasso').replaceChildren(d);
     });
   }
-  // 3. la risposta del giudice e la condanna: cinque domande. Il filmato di chi si dichiara innocente è tagliato dopo «Lo dicono tutti.»
+  // 3. la risposta del giudice e la condanna: cinque domande. A chi si dichiara innocente il giudice risponde «Lo dicono tutti. Allora lo dimostri: risponda a cinque domande.»
   function risponde(scelta) {
     conta('click', scelta);
     proietta(scelta, function () {
@@ -242,7 +242,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       f.innerHTML = '<small>La condanna</small><b>Cinque domande</b><span>Vediamo quante ne sai su come tenerti in forma.</span>';
       var b = bottone('Rispondo', 'entra', function () { conta('click', 'inizia'); suona(1, .01, .001); try { film.pause(); } catch (e) {} mostra('quiz'); quiz(); });
       $('#aulabasso').replaceChildren(f, b);
-    }, scelta === 'innocente' ? 0 : 2.4); // colpevole: l'ultimo fotogramma mostra già la scritta del filmato dopo
+    }, scelta === 'innocente' ? 5.2 : 2.4); // colpevole: l'ultimo fotogramma mostra già la scritta del filmato dopo
   }
   var suona = function (hz, dur, vol) { try { var A = window.AudioContext || window.webkitAudioContext, a = suona.a || (suona.a = new A()), t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(hz, t); o.frequency.exponentialRampToValueAtTime(hz * .5, t + dur); g.gain.setValueAtTime(vol || .4, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} };
   // 4. il quiz. Ogni domanda ha una risposta verificabile; la fonte è nel commento.
