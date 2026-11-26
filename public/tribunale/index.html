@@ -79,8 +79,8 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 .scossa{animation:scossa .42s}
 @keyframes scossa{10%{transform:translate(-9px,5px) rotate(-1deg)}30%{transform:translate(8px,-6px) rotate(1deg)}55%{transform:translate(-5px,3px)}80%{transform:translate(3px,-2px)}}
 
-/* 4. la condanna: un gioco. Ogni ripetizione è un tocco che cancella un pezzo del reato */
-#s-gioco{background:#fbf6ea;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+/* 4. la condanna: un gioco a tempo di martello. Una ripetizione a ogni colpo; ogni colpo cancella un pezzo del reato */
+#s-gioco{background:#fbf6ea;user-select:none;-webkit-user-select:none}
 .gtop{display:flex;justify-content:space-between;align-items:center;padding:max(14px,env(safe-area-inset-top)) 18px 0;font-weight:900}
 .gtop span{color:var(--arancio2);letter-spacing:.04em;text-transform:uppercase;font-size:13px}
 .gtop button{color:var(--mut);padding:8px 4px;font-weight:800}
@@ -88,31 +88,38 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 .missione b{display:block;font:400 30px/1.05 'DM Serif Display',Georgia,serif;color:var(--legno);text-wrap:balance}
 .missione span{font-weight:800;color:var(--mut);font-size:15px}
 .tessere{display:flex;flex-wrap:wrap;justify-content:center;gap:5px;padding:10px 16px 0;min-height:84px;align-content:flex-start}
-.tessere i{font-style:normal;font-weight:900;font-size:11px;line-height:1;color:#fff;background:#b3261e;border-radius:6px;padding:6px 0;width:34px;text-align:center;box-shadow:0 2px 0 #7d1711;transition:transform .45s cubic-bezier(.3,0,.8,.4),opacity .45s}
+.tessere i{font-style:normal;font-weight:900;font-size:11px;line-height:1;color:#fff;background:#b3261e;border-radius:6px;padding:6px 0;width:34px;text-align:center;box-shadow:0 2px 0 #7d1711;transition:transform .5s cubic-bezier(.3,0,.8,.4),opacity .5s}
 .tessere.grandi i{width:44px;font-size:13px;padding:8px 0}
-.tessere i.via{transform:translateY(-70px) rotate(40deg) scale(.4);opacity:0}
+.tessere i.via{transform:translateY(-80px) rotate(50deg) scale(.3);opacity:0}
 .campo{position:relative;width:min(250px,58%);aspect-ratio:1;margin:8px auto 0}
 .campo svg{position:absolute;inset:0;transform:rotate(-90deg)}
-.campo button{position:absolute;inset:6%;border-radius:50%;overflow:hidden;padding:0;background:#fff;box-shadow:0 8px 0 #d9cfb8,0 14px 24px rgba(58,36,18,.25);transition:transform .08s,box-shadow .08s}
-.campo button.giu{transform:translateY(6px) scale(.97);box-shadow:0 2px 0 #d9cfb8,0 4px 10px rgba(58,36,18,.25)}
-.campo video{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
-.conto{position:absolute;inset:0;display:grid;place-items:center;font-weight:900;font-size:104px;color:var(--arancio);background:rgba(251,246,234,.86);border-radius:50%;pointer-events:none}
-.piu{position:absolute;left:50%;top:8%;font-weight:900;font-size:30px;color:#1f9d55;pointer-events:none;animation:piu .7s ease-out forwards}
-@keyframes piu{from{transform:translate(-50%,0) scale(.6);opacity:0}25%{opacity:1;transform:translate(-50%,-14px) scale(1.15)}to{transform:translate(-50%,-70px) scale(1);opacity:0}}
-.tocca{text-align:center;font-weight:900;font-size:17px;margin-top:12px;color:var(--legno)}
-.tempo{margin:8px 26px 0;height:12px;border-radius:99px;background:#eadfc6;overflow:hidden}
-.tempo div{height:100%;width:100%;background:#22c77f;border-radius:99px;transform-origin:left center}
-.tempo.fine div{background:var(--arancio)}
+.tondo{position:absolute;inset:6%;border-radius:50%;overflow:hidden;background:#fff;box-shadow:0 8px 0 #d9cfb8,0 14px 24px rgba(58,36,18,.25)}
+.tondo.colpo{animation:colpo .28s}
+@keyframes colpo{30%{transform:scale(.94) translateY(5px)}}
+.campo video{width:100%;height:100%;object-fit:cover;display:block}
+.conto{position:absolute;inset:0;display:grid;place-items:center;font-weight:900;font-size:104px;color:var(--arancio);background:rgba(251,246,234,.86);border-radius:50%}
+.parola{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);background:var(--legno);color:#fff;font-weight:900;font-size:26px;letter-spacing:.04em;padding:6px 18px;border-radius:99px;white-space:nowrap;box-shadow:0 4px 0 #1f1208}
+.parola.batte{animation:parola .3s cubic-bezier(.2,1.7,.4,1)}
+@keyframes parola{from{transform:translateX(-50%) scale(1.5)}}
+.parola.su{background:var(--arancio);box-shadow:0 4px 0 var(--arancio2)}
+.meno{position:absolute;left:50%;top:4%;font-weight:900;font-size:32px;color:#b3261e;pointer-events:none;animation:meno .8s ease-out forwards}
+@keyframes meno{from{transform:translate(-50%,0) scale(.6);opacity:0}25%{opacity:1;transform:translate(-50%,-14px) scale(1.2)}to{transform:translate(-50%,-78px) scale(1);opacity:0}}
+.tocca{text-align:center;font-weight:900;font-size:16.5px;margin-top:20px;color:var(--legno);padding:0 18px;text-wrap:balance}
+.vede{display:flex;align-items:center;gap:8px;margin:8px 26px 0;font-weight:800;font-size:13px;color:var(--mut)}
+.vede div{flex:1;height:10px;border-radius:99px;background:#eadfc6;overflow:hidden}
+.vede div i{display:block;height:100%;width:100%;background:#22c77f;border-radius:99px;transform-origin:left center;transform:scaleX(0);transition:transform .15s linear}
 .giud{margin-top:auto;display:flex;align-items:flex-end;gap:6px;padding:0 12px;height:118px;overflow:hidden}
 .giud img{width:140px;display:block;margin-bottom:-24px}
-.giud img.salta{animation:salta .35s}
+.giud img.salta{animation:salta .3s}
 @keyframes salta{40%{transform:translateY(-14px)}}
-.fum{background:#fff;border-radius:18px 18px 18px 4px;padding:11px 14px;font-weight:800;font-size:16.5px;margin-bottom:40px;min-width:0;box-shadow:0 2px 0 #eadfc6}
+.fum{position:relative;background:#fff;border-radius:18px 18px 18px 4px;padding:11px 14px;font-weight:800;font-size:16.5px;margin-bottom:40px;min-width:0;box-shadow:0 2px 0 #eadfc6}
 .fum.pop{animation:pop .35s cubic-bezier(.2,1.6,.4,1)}
 @keyframes pop{from{transform:scale(.6);opacity:0}}
-.eva{position:absolute;inset:0;background:rgba(20,16,10,.55);display:flex;align-items:flex-end;z-index:4}
-.eva>div{background:#fff;width:100%;border-radius:28px 28px 0 0;padding:26px 20px max(24px,env(safe-area-inset-bottom));display:grid;gap:10px;text-align:center}
-.eva h3{font:400 34px/1 'DM Serif Display',Georgia,serif;margin:0}.eva p{margin:0 0 6px;font-size:17px}
+.fum em{position:absolute;right:-10px;top:-14px;font:900 12px/1 Nunito,sans-serif;font-style:normal;letter-spacing:.08em;color:#c0392b;border:2.5px solid #c0392b;border-radius:6px;padding:4px 6px;transform:rotate(10deg);background:#fff;animation:timbra .3s .35s cubic-bezier(.2,1.6,.4,1) both}
+/* il foglio dell'evasione sta al centro: in fondo allo schermo finirebbe sotto la barra del browser */
+.eva{position:absolute;inset:0;background:rgba(20,16,10,.6);display:flex;align-items:center;justify-content:center;z-index:6;padding:20px}
+.eva>div{background:#fff;width:100%;border-radius:26px;padding:26px 20px 20px;display:grid;gap:12px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.4)}
+.eva h3{font:400 34px/1 'DM Serif Display',Georgia,serif;margin:0}.eva p{margin:0 0 4px;font-size:17px}
 
 /* 5. la libertà e la denuncia */
 #s-fine,#s-denuncia{color:#fff;background:var(--verde) no-repeat center bottom/cover}
@@ -145,14 +152,14 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
   <div class="basso" id="aulabasso"></div>
  </section>
  <section class="sc" id="s-gioco">
-  <div class="gtop"><span>Condanna in corso</span><button id="salta">Evado</button></div>
+  <div class="gtop"><span>Condanna in corso</span><button id="salta" type="button">Evado</button></div>
   <div class="missione"><b id="missione"></b><span id="restano"></span></div>
   <div class="tessere" id="tessere"></div>
-  <div class="campo"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="47" fill="none" stroke="#eadfc6" stroke-width="4"/><circle id="arco" cx="50" cy="50" r="47" fill="none" stroke="#22c77f" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/></svg><button id="colpo" aria-label="Tocca a ogni ripetizione"><video id="vid" muted loop playsinline preload="auto"></video></button><div class="conto" id="conto">3</div></div>
+  <div class="campo"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="47" fill="none" stroke="#eadfc6" stroke-width="4"/><circle id="arco" cx="50" cy="50" r="47" fill="none" stroke="#22c77f" stroke-width="4" stroke-linecap="round" pathLength="100" stroke-dasharray="100 100"/></svg><div class="tondo" id="tondo"><video id="vid" muted loop playsinline preload="auto"></video></div><div class="parola" id="parola" hidden></div><div class="conto" id="conto">3</div></div>
   <div class="tocca" id="tocca"></div>
-  <div class="tempo" id="tempo"><div id="barra"></div></div>
+  <div class="vede" id="vede" hidden><span>La corte ti vede</span><div><i id="occhio"></i></div></div>
   <div class="giud"><img src="giudice.webp" alt="Il giudice Moovy ti osserva" id="faccia"><div class="fum" id="fum"></div></div>
-  <div class="eva" id="eva" hidden><div><h3>Tentata evasione?</h3><p>Ti mancano <b id="mancano"></b> secondi alla libertà.</p><button class="btn" id="resto">Torno in cella</button><button class="link" id="evado">Evado lo stesso</button></div></div>
+  <div class="eva" id="eva" hidden><div><h3>Tentata evasione?</h3><p>Ti mancano <b id="mancano"></b> secondi alla libertà.</p><button class="btn" id="resto" type="button">Torno in cella</button><button class="link" id="evado" type="button">Evado lo stesso</button></div></div>
  </section>
  <section class="sc sfuma" id="s-fine">
   <div class="alto"><div class="trib">Tribunale di Moovy</div><h2 class="grande" id="fint">Scarcerazione</h2></div>
@@ -168,11 +175,12 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
 (function () {
   var $ = function (s) { return document.querySelector(s); };
   // I reati. lei = come si sceglie nella denuncia, d = che cosa si fa, v = video dell'app, f = che cosa dice il giudice mentre guardi
+  // I reati. m tessere da cancellare in n colpi di martello; parole = che cosa si legge a ogni colpo; scuse = quelle che il giudice respinge
   var CASI = {
-    lunedi: { lei: 'Dice «da lunedì comincio» da quarantadue lunedì.', d: 'di squat', v: 'squat', m: 42, n: 14, tessera: 'LUN', missione: 'Cancella i 42 lunedì', unita: ['lunedì', 'lunedì'], tocca: 'Un tocco a ogni squat', f: ['Oggi. Non lunedì.', 'La corte prende nota.', 'Ognuno al suo ritmo.', 'Ne restano pochi.'] },
-    scarpe: { lei: 'Ha comprato le scarpe da corsa. Le usa per fare la spesa.', d: 'di marcia, anche da seduti', v: 'marcia', m: 30, n: 30, tessera: '👣', missione: 'Fai i 30 passi mai fatti', unita: ['passo', 'passi'], tocca: 'Un tocco a ogni passo', f: ['Anche dalla sedia. Vale.', 'La corte osserva le braccia.', 'Le scarpe ringraziano.', 'Ne restano pochi.'] },
-    sveglia: { lei: 'Ha messo la sveglia alle 6. L’ha spenta sette volte.', d: 'di jumping jack', v: 'salti', m: 7, n: 21, tessera: '⏰', grandi: true, missione: 'Spegni le 7 sveglie', unita: ['sveglia', 'sveglie'], tocca: 'Un tocco a ogni salto', f: ['Buongiorno.', 'I vicini sono stati avvisati.', 'Questa non si rimanda.', 'Ne restano poche.'] },
-    palestra: { lei: 'Paga la palestra da gennaio. Non sa dov’è l’entrata.', d: 'di boxe a vuoto', v: 'boxe', m: 11, n: 22, tessera: ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV'], grandi: true, missione: 'Colpisci 11 mesi di abbonamento', unita: ['mese', 'mesi'], tocca: 'Un tocco a ogni pugno', f: ['Colpisci l’abbonamento.', 'Non vale mirare al giudice.', 'Almeno questi sono pagati.', 'Ne restano pochi.'] }
+    lunedi: { lei: 'Dice «da lunedì comincio» da quarantadue lunedì.', d: 'di squat', v: 'squat', m: 42, n: 14, tessera: 'LUN', missione: 'Cancella i 42 lunedì', tocca: 'Uno squat a ogni colpo di martello', parole: ['GIÙ', 'SU'], meta: true, scuse: ['«Pioveva.»', '«Era un anno umido.»', '«La tuta è nuova.»', '«Era martedì.»'] },
+    scarpe: { lei: 'Ha comprato le scarpe da corsa. Le usa per fare la spesa.', d: 'di marcia, anche da seduti', v: 'marcia', m: 30, n: 30, tessera: '👣', missione: 'Fai i 30 passi mai fatti', tocca: 'Un passo a ogni colpo, anche dalla sedia', parole: ['UNO', 'DUE'], scuse: ['«Sono comode.»', '«Le tengo per l’estate.»', '«Al supermercato si cammina.»', '«Erano in offerta.»'] },
+    sveglia: { lei: 'Ha messo la sveglia alle 6. L’ha spenta sette volte.', d: 'di jumping jack', v: 'salti', m: 7, n: 21, tessera: '⏰', grandi: true, missione: 'Spegni le 7 sveglie', tocca: 'Un salto a ogni colpo di martello', parole: ['APRI', 'CHIUDI'], scuse: ['«Ancora cinque minuti.»', '«Era buio.»', '«Ho sognato di allenarmi.»', '«Domani mi alzo.»'] },
+    palestra: { lei: 'Paga la palestra da gennaio. Non sa dov’è l’entrata.', d: 'di boxe a vuoto', v: 'boxe', m: 11, n: 22, tessera: ['GEN', 'FEB', 'MAR', 'APR', 'MAG', 'GIU', 'LUG', 'AGO', 'SET', 'OTT', 'NOV'], grandi: true, missione: 'Colpisci 11 mesi di abbonamento', tocca: 'Un pugno a ogni colpo di martello', parole: ['DESTRO', 'SINISTRO'], scuse: ['«Non trovo parcheggio.»', '«C’è troppa gente.»', '«Vado da settembre.»', '«Almeno la pago.»'] }
   };
   var q = new URLSearchParams(location.search);
   var caso = CASI[q.get('c')] ? q.get('c') : 'lunedi', denuncia = q.get('d') === '1';
@@ -188,7 +196,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
       }).then(function () {}, function () {});
     } catch (e) { return Promise.resolve(); }
   }
-  var film = $('#film'), vid = $('#vid'), tick = null, raf = 0, totale = 30, left = 30, paused = false, libera = true, condotta = false, sconto = 0;
+  var film = $('#film'), vid = $('#vid'), tick = null, raf = 0, totale = 30, left = 30, paused = false, libera = true, condotta = false, restanti = 0;
   function mostra(k) {
     clearInterval(tick); clearTimeout(tick); cancelAnimationFrame(raf); vid.pause();
     document.querySelectorAll('.sc').forEach(function (s) { s.classList.toggle('on', s.id === 's-' + k); });
@@ -228,55 +236,73 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
     proietta(scelta, function () {
       vibra([60, 60, 90]); var t = $('#tel'); t.classList.remove('scossa'); void t.offsetWidth; t.classList.add('scossa');
       var c = CASI[caso], f = document.createElement('div'); f.className = 'foglio cala';
-      f.innerHTML = '<small>La condanna</small><b></b><span>Da scontare subito, qui.</span>'; f.querySelector('b').textContent = totale + ' secondi ' + c.d;
-      var b = bottone('Sconto la condanna', 'entra', function () { conta('click', 'inizia'); mostra('gioco'); gioco(); });
+      f.innerHTML = '<small>La condanna</small><b></b><span>Da scontare subito. Tieni il telefono in mano: la corte sente se ti muovi.</span>'; f.querySelector('b').textContent = totale + ' secondi ' + c.d;
+      var b = bottone('Sconto la condanna', 'entra', function () {
+        conta('click', 'inizia'); var via = function () { mostra('gioco'); gioco(); };
+        try { suona(1, .01, .001); if (window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission === 'function') { DeviceMotionEvent.requestPermission().then(via, via); return; } } catch (e) {}
+        via();
+      });
       $('#aulabasso').replaceChildren(f, b);
     });
   }
-  // 4. la condanna è un gioco: ogni ripetizione si segna con un tocco sul video e cancella un pezzo del reato.
-  // Chi cancella tutto prima che scada il tempo esce in anticipo per buona condotta; se il tempo scade, la condanna è scontata lo stesso.
-  var suona = function (hz, dur) { try { var A = window.AudioContext || window.webkitAudioContext, a = suona.a || (suona.a = new A()), t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(hz, t); o.frequency.exponentialRampToValueAtTime(hz * .6, t + dur); g.gain.setValueAtTime(.35, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} };
+  // 4. la condanna è un gioco a tempo: il martello batte, a ogni colpo si fa una ripetizione e un pezzo del reato sparisce.
+  // Dove il telefono ha il sensore di movimento, il colpo vale solo se ci si è mossi: chi sta fermo non cancella niente.
+  // Senza sensore (o senza permesso) vale la parola: ogni colpo cancella. Nessuno perde: a tempo scaduto la condanna è scontata.
+  var suona = function (hz, dur, vol) { try { var A = window.AudioContext || window.webkitAudioContext, a = suona.a || (suona.a = new A()), t = a.currentTime, o = a.createOscillator(), g = a.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(hz, t); o.frequency.exponentialRampToValueAtTime(hz * .5, t + dur); g.gain.setValueAtTime(vol || .4, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {} };
+  // sensore: quanto si sta muovendo il telefono (0 fermo, verso 1 in movimento)
+  var moto = { c: false, media: 9.8, forza: 0, picco: 0 };
+  window.addEventListener('devicemotion', function (e) {
+    var a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
+    var m = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z); if (!isFinite(m)) return;
+    moto.c = true; moto.media += (m - moto.media) * .05; var d = Math.abs(m - moto.media);
+    moto.forza += (d - moto.forza) * .2; if (moto.forza > moto.picco) moto.picco = moto.forza;
+  });
   function gioco() {
-    var c = CASI[caso], fum = $('#fum'), box = $('#tessere'), n = c.n + (totale > 30 ? 3 : 0), fatti = 0, tolte = 0, ultimoTocco = 0, detto = -1, partito = false, faccia = $('#faccia');
-    var dici = function (t) { fum.textContent = t; fum.classList.remove('pop'); void fum.offsetWidth; fum.classList.add('pop'); };
-    var restano = function () { var r = c.m - tolte; $('#restano').textContent = r > 0 ? 'Ne restano ' + r : 'Fatto!'; };
+    var c = CASI[caso], fum = $('#fum'), box = $('#tessere'), n = c.n + (totale > 30 ? 3 : 0), passo = totale / n, colpi = 0, validi = 0, tolte = 0, partito = false, faccia = $('#faccia'), parola = $('#parola'), metaFatta = false, scusa = -1, fermi = 0;
+    var dici = function (t, timbro) { fum.textContent = t; if (timbro) { var e = document.createElement('em'); e.textContent = 'RESPINTA'; fum.append(e); } fum.classList.remove('pop'); void fum.offsetWidth; fum.classList.add('pop'); };
+    var restano = function () { var r = c.m - tolte; $('#restano').textContent = r > 0 ? 'Ne restano ' + r : 'Cancellati tutti'; };
+    var scrivi = function (t, su) { parola.textContent = t; parola.classList.toggle('su', !!su); parola.classList.remove('batte'); void parola.offsetWidth; parola.classList.add('batte'); };
     vid.src = c.v + '.mp4'; vid.play().catch(function () {});
-    $('#missione').textContent = c.missione; $('#tocca').textContent = c.tocca; $('#eva').hidden = true; $('#tempo').classList.remove('fine'); faccia.src = 'giudice.webp';
+    $('#missione').textContent = c.missione; $('#tocca').textContent = c.tocca; $('#eva').hidden = true; faccia.src = 'giudice.webp'; parola.hidden = true; $('#vede').hidden = true;
     box.className = 'tessere' + (c.grandi ? ' grandi' : ''); box.replaceChildren();
     for (var i = 0; i < c.m; i++) { var x = document.createElement('i'); x.textContent = Array.isArray(c.tessera) ? c.tessera[i] : c.tessera; box.append(x); }
-    left = totale; paused = false; condotta = false; sconto = 0; restano(); fum.textContent = 'In posizione.';
-    $('#barra').style.transform = 'scaleX(1)'; $('#arco').setAttribute('stroke-dasharray', '0 100');
-    $('#colpo').onpointerdown = function (e) {
-      e.preventDefault(); if (!partito || paused) return;
-      var ora = performance.now(), b = $('#colpo'); b.classList.add('giu'); setTimeout(function () { b.classList.remove('giu'); }, 90);
-      if (ora - ultimoTocco < 330) { dici('Piano. Conto solo quelli veri.'); return; } // niente raffiche col dito
-      ultimoTocco = ora; fatti++; vibra(22); suona(300 + 520 * fatti / n, .12);
-      var devono = Math.min(c.m, Math.round(fatti * c.m / n)), vive = box.querySelectorAll('i:not(.via)');
-      for (var k = 0; k < devono - tolte && k < vive.length; k++) vive[vive.length - 1 - k].classList.add('via');
-      var tolteOra = devono - tolte; tolte = devono; restano(); $('#arco').setAttribute('stroke-dasharray', (fatti / n * 100) + ' 100');
-      var p = document.createElement('div'); p.className = 'piu'; p.textContent = tolteOra > 0 ? '−' + tolteOra : '+1'; $('.campo').append(p); setTimeout(function () { p.remove(); }, 720);
+    left = totale; paused = false; condotta = false; restanti = c.m; restano(); fum.textContent = 'In posizione.'; $('#arco').setAttribute('stroke-dasharray', '100 100'); moto.picco = 0;
+    function colpo() { // un colpo di martello
+      colpi++; var mosso = !moto.c || moto.picco > .55; moto.picco = 0;
+      suona(150, .16, .5); vibra(mosso ? 28 : 10); var t = $('#tondo'); t.classList.remove('colpo'); void t.offsetWidth; t.classList.add('colpo');
+      scrivi(c.meta ? c.parole[0] : c.parole[(colpi - 1) % 2], false);
+      if (!mosso) { fermi++; if (fermi === 2 || fermi % 5 === 0) dici('Non ti vedo muovere.'); return; }
+      fermi = 0; validi++;
+      var devono = Math.min(c.m, Math.round(validi * c.m / n)), vive = box.querySelectorAll('i:not(.via)'), ora = devono - tolte;
+      for (var k = 0; k < ora && k < vive.length; k++) vive[vive.length - 1 - k].classList.add('via');
+      tolte = devono; restanti = c.m - tolte; restano();
+      if (ora > 0) { var p = document.createElement('div'); p.className = 'meno'; p.textContent = '−' + ora; $('.campo').append(p); setTimeout(function () { p.remove(); }, 820); }
       faccia.classList.remove('salta'); void faccia.offsetWidth; faccia.classList.add('salta');
-      if (fatti === Math.ceil(n / 2)) { faccia.src = 'giudice-ok.webp'; dici('Metà. La corte è colpita.'); }
-      if (fatti >= n) { condotta = true; sconto = Math.floor(left); libera = true; suona(880, .3); vibra([40, 40, 120]); conta('click', 'condotta'); setTimeout(fine, 450); partito = false; }
-    };
+      var q4 = Math.floor(validi / n * 5) - 1; // quattro scuse respinte lungo la strada
+      if (q4 > scusa && q4 < c.scuse.length) { scusa = q4; dici(c.scuse[q4], true); suona(520, .1, .25); }
+      if (!metaFatta && validi >= n / 2) { metaFatta = true; faccia.src = 'giudice-ok.webp'; }
+    }
     var k = $('#conto'), giu = 3; k.hidden = false; k.textContent = giu;
     tick = setInterval(function () {
-      giu--; if (giu > 0) { k.textContent = giu; vibra(20); return; }
-      k.hidden = true; clearInterval(tick); partito = true; dici(c.f[0]); var last = performance.now();
+      giu--; if (giu > 0) { k.textContent = giu; vibra(20); suona(330, .08, .25); return; }
+      k.hidden = true; clearInterval(tick); partito = true; parola.hidden = false; dici(moto.c ? 'Ti vedo. Segui il martello.' : 'Segui il martello.'); if (moto.c) $('#vede').hidden = false;
+      var last = performance.now(), fatto = 0, mezzo = false;
       var f = function (t) {
         if (!partito) return;
         var dt = Math.max(0, Math.min(.25, (t - last) / 1000)); last = t; if (!paused) left -= dt;
-        if (left <= 0) { partito = false; vibra(80); libera = true; conta('click', 'finita'); fine(); return; }
-        var fatta = 1 - left / totale, i = fatta < .3 ? 0 : fatta < .55 ? 1 : fatta < .8 ? 2 : 3;
-        if (i !== detto) { if (detto >= 0) dici(c.f[i]); detto = i; }
-        $('#barra').style.transform = 'scaleX(' + (left / totale) + ')'; if (left <= 6) $('#tempo').classList.add('fine');
+        if (left <= 0) { partito = false; vibra([40, 40, 120]); suona(880, .3, .4); libera = true; condotta = moto.c && validi >= n * .8; conta('click', condotta ? 'condotta' : 'finita'); fine(); return; }
+        var passato = totale - left, idx = Math.floor(passato / passo); // quale colpo tocca: si regge sul tempo rimasto, così la pausa non lo sfasa
+        if (idx >= fatto && fatto < n) { fatto = idx + 1; mezzo = false; colpo(); }
+        if (c.meta && !mezzo && passato - (fatto - 1) * passo > passo * .5) { mezzo = true; scrivi(c.parole[1], true); suona(300, .08, .2); }
+        if (moto.c) { if ($('#vede').hidden) $('#vede').hidden = false; $('#occhio').style.transform = 'scaleX(' + Math.min(1, moto.forza / 2) + ')'; }
+        $('#arco').setAttribute('stroke-dasharray', (left / totale * 100) + ' 100');
         raf = requestAnimationFrame(f);
       };
       raf = requestAnimationFrame(f);
     }, 800);
   }
-  $('#salta').onclick = function () { paused = true; vid.pause(); $('#mancano').textContent = Math.ceil(left); $('#eva').hidden = false; };
-  $('#resto').onclick = function () { paused = false; vid.play().catch(function () {}); $('#eva').hidden = true; };
+  $('#salta').onclick = function () { paused = true; try { vid.pause(); } catch (e) {} $('#mancano').textContent = Math.max(1, Math.ceil(left)); $('#eva').hidden = false; };
+  $('#resto').onclick = function () { $('#eva').hidden = true; paused = false; try { var p = vid.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {} };
   $('#evado').onclick = function () { libera = false; conta('click', 'evasa'); fine(); };
   // 5. la libertà
   function fine() {
@@ -284,8 +310,8 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
     mostra('fine'); s.style.backgroundImage = ok ? 'url(libera.jpg)' : 'url(latitante.jpg)';
     $('#fint').textContent = ok ? 'Scarcerazione' : 'Latitante'; cancelAnimationFrame(raf);
     atto.className = 'foglio cala';
-    atto.innerHTML = ok ? '<i class="timbro">SCONTATA</i>' + (condotta ? '<i class="timbro due">BUONA CONDOTTA</i>' : '') + '<small>Atto di scarcerazione</small><b>' + (condotta ? 'Fuori in anticipo' : 'Fedina pulita') + '</b><span></span>' : '<small>Mandato di cattura</small><b>Ti cerco nell’app</b><span>Ho pazienza.</span>';
-    if (ok) atto.querySelector('span').textContent = (condotta && sconto > 0 ? sconto + ' secondi di sconto. ' : oggi + '. ') + 'Vale fino a domani: poi ci vediamo nell’app.';
+    atto.innerHTML = ok ? '<i class="timbro">SCONTATA</i>' + (condotta ? '<i class="timbro due">BUONA CONDOTTA</i>' : '') + '<small>Atto di scarcerazione</small><b>' + (restanti > 0 ? 'Fuori lo stesso' : 'Fedina pulita') + '</b><span></span>' : '<small>Mandato di cattura</small><b>Ti cerco nell’app</b><span>Ho pazienza.</span>';
+    if (ok) atto.querySelector('span').textContent = restanti > 0 ? 'Te ne restano ' + restanti + ': il resto si sconta nell’app.' : oggi + '. Vale fino a domani: poi ci vediamo nell’app.';
     var k = $('#coria'); k.replaceChildren();
     if (ok) {
       for (var i = 0; i < 46; i++) { var x = document.createElement('i'); x.style.cssText = 'left:' + Math.random() * 100 + '%;background:' + ['#ffd76a', '#f27b0c', '#fff', '#22c77f'][i % 4] + ';animation-delay:' + Math.random() * 1.2 + 's'; k.append(x); }
