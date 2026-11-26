@@ -247,9 +247,9 @@ button:focus-visible,a:focus-visible{outline:3px solid #3a7bff;outline-offset:2p
   // 4. il quiz. Ogni domanda ha una risposta verificabile; la fonte è nel commento.
   //   q domanda, r risposte, ok quale è giusta, f il fatto che Moovy mette agli atti dopo la risposta
   var DOMANDE = [
-    // Banach et al., Eur J Prev Cardiol 2023 (17 studi, 226.889 persone): il rischio cala già da circa 4.000 passi al giorno.
+    // Ding et al., Lancet Public Health 2025 (57 studi): a 7.000 passi al giorno il rischio di morte è il 47% più basso che a 2.000, e oltre il guadagno rallenta.
     // I diecimila: Manpo-kei («contapassi dei diecimila passi»), Giappone 1965
-    { q: 'A fine giornata il telefono segna 4.000 passi, non 10.000. Sono serviti?', r: ['Sì, fanno già bene', 'No, servono tutti e 10.000', 'Solo se li fai di corsa'], ok: 0, f: 'I 10.000 passi li ha inventati la pubblicità di un contapassi. Ne bastano 4.000 per stare già meglio.' },
+    { q: 'Quanti passi al giorno bastano per mantenersi in salute?', r: ['Circa 2.000', 'Almeno 10.000', 'Circa 7.000'], ok: 2, f: 'I 10.000 li ha inventati la pubblicità di un contapassi. Gli studi dicono che a 7.000 hai già quasi tutti i benefici.' },
     // OMS, linee guida 2020 sull'attività fisica: adulti, 150-300 minuti a settimana di attività moderata, senza durata minima per volta
     { q: 'Per stare bene, quanto movimento serve in una settimana?', r: ['Un’ora', 'Sette ore, una al giorno', 'Due ore e mezza'], ok: 2, f: 'Sono circa 20 minuti al giorno. Puoi anche dividerli: 10 la mattina e 10 la sera.' },
     // Ekelund et al., The Lancet 2026;407:339-349: cinque minuti in più al giorno di attività moderata o intensa, stima del 10% di morti in meno
