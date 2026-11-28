@@ -63,7 +63,18 @@ const FX = {
     social_kpi: [{ mese: '2026-10', visite: 180, android: 40, avvii: 7, pubblicati: 0, tiktok: { visite: 0, android: 0, avvii: 0, pubblicati: 0 } }, { mese: '2026-11', visite: 210, android: 48, avvii: 6, pubblicati: 3, tiktok: { visite: 34, android: 9, avvii: 2, pubblicati: 1 } }],
     social_link: { instagram: link(2), tiktok: link(0.6) },
     social_instagram_dati: { account: { follower: 445 }, giorni30: { views: 9120, reach: 6400, total_interactions: 310 }, media: [], obiettivi: { views: { v: 329, n: 3 } }, messaggi: { commenti: 0, risposte: 0, privati: 0, saltati: 0, errori: 0 }, pena: { aperta: 0, iniziata: 0, finita: 0, android: 0, denunce: 0 } },
-    social_profilo: { account: { username: 'hypemove.app', post: 55, follower: 445, seguiti: 120, nome: 'Hypemove' }, media: [] },
+    // Uscite lette dall'import nella settimana che il calendario apre: una prova, una prova condivisa con tutti dall'app,
+    // un Reel caricato a mano, e il post del pannello già abbinato (non deve comparire due volte).
+    social_profilo: { account: { username: 'hypemove.app', post: 55, follower: 445, seguiti: 120, nome: 'Hypemove' }, aggiornato: ISO(Date.now() - 10 * 60e3), media: (() => {
+      const oggi = new Date().toISOString().slice(0, 10), base = oggi < '2026-11-30' ? '2026-11-30' : oggi, d0 = new Date(base + 'T12:00:00Z');
+      const lun = new Date(d0.getTime() - ((d0.getUTCDay() + 6) % 7) * 864e5), g = (n, h) => ISO(new Date(lun.getTime() + n * 864e5).toISOString().slice(0, 10) + 'T' + h + ':00Z');
+      return [
+        { id: 'm-prova', post: 'banco-pigri', prova_di: 'banco-pigri', tipo: 'REELS', quando: g(1, '16:00'), sul_profilo: false, sul_profilo_dal: null, testo: 'PROVA-NASCOSTA', link: 'https://www.instagram.com/reel/BANCOP/' },
+        { id: 'm-tutti', post: null, prova_di: null, tipo: 'REELS', quando: g(0, '10:00'), sul_profilo: true, sul_profilo_dal: g(2, '11:00'), testo: 'Prova condivisa a tutti', link: 'https://www.instagram.com/reel/BANCOT/' },
+        { id: 'm-mano', post: null, prova_di: null, tipo: 'REELS', quando: g(2, '19:00'), sul_profilo: true, sul_profilo_dal: g(2, '19:00'), testo: 'Reel caricato a mano', link: 'https://www.instagram.com/reel/BANCOM/' },
+        { id: '1800000000000000', post: 'banco-edizione', prova_di: null, tipo: 'REELS', quando: g(1, '18:00'), sul_profilo: true, sul_profilo_dal: g(1, '18:00'), testo: 'Ultim’ora dal divano.', link: 'https://www.instagram.com/reel/BANCO0000/' },
+      ];
+    })() },
   },
 };
 
@@ -150,6 +161,16 @@ verifica('card nel calendario', await slot.count() === 1);
 verifica('tre icone sulla card', (await slot.locator('.so-pf-i').count()) === 3);
 await slot.hover();
 await pausa(2500);
+// Il calendario mostra anche quello che è uscito fuori dal pannello (letto dall'import), senza doppioni.
+const uscite = page.locator('.so-sl.uscita'), testiUscite = (await uscite.allInnerTexts()).join(' | ');
+verifica('quattro uscite fuori programma', (await uscite.count()) === 4);
+verifica('etichette In prova, Condiviso a tutti, A mano', ['In prova', 'Condiviso a tutti', 'A mano'].every((t) => testiUscite.includes(t)));
+verifica('il post del pannello già abbinato non è doppio', !testiUscite.includes('Ultim’ora'));
+verifica('tasto per riprendere i dati', await page.getByRole('button', { name: 'Riprendi adesso' }).isVisible());
+if (process.argv.includes('--foto')) { await page.locator('.so-gg').scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(OUT, 'calendario.png'), fullPage: true }); console.log('Foto: ' + path.join(OUT, 'calendario.png')); }
+await page.locator('.so-chip', { hasText: 'Profilo Instagram' }).click();
+verifica('le prove non compaiono sul profilo', (await page.locator('[aria-label="PROVA-NASCOSTA"]').count()) === 0 && (await page.locator('[aria-label="Prova condivisa a tutti"]').count()) === 1);
+await page.locator('.so-chip', { hasText: 'Calendario' }).click();
 
 // 4. uscito (simulato: è il giro del cron)
 await sotto('5 · At the scheduled time the scheduler publishes via /business/video/publish/ and checks /business/publish/status/.');

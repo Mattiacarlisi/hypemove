@@ -364,6 +364,21 @@ document.addEventListener('keydown', (e) => { if (!S.apri || /TEXTAREA|INPUT/.te
 const chip = (on, t, n, fn) => el('button', { type: 'button', className: 'so-chip' + (on ? ' on' : ''), aria: { pressed: String(on) }, on: { click: fn } }, t, n != null ? el('b', { textContent: n }) : null);
 const quando = (p) => p.stato === 'pubblicato' ? p.pubblicato_il : p.publish_at;
 const delGiorno = (g) => S.posts.filter((p) => quando(p) && ['approvato', 'pubblicato'].includes(p.stato) && giorno(quando(p)) === g).sort((a, b) => quando(a) < quando(b) ? -1 : 1);
+// Cosa è uscito davvero su Instagram quel giorno, letto dall'import (ogni 30 minuti): Reel di prova, prove condivise
+// con tutti dall'app, post fatti a mano. I post del pannello già pubblicati e abbinati li mostra delGiorno.
+// Una prova si riconosce perché non è sul profilo, o perché ci è arrivata dopo (sul_profilo_dal oltre un'ora dopo l'uscita).
+const eraProva = (m) => !!m.prova_di || !m.sul_profilo || (m.sul_profilo_dal && m.quando && Date.parse(m.sul_profilo_dal) - Date.parse(m.quando) > 3600e3);
+function uscite(g) {
+  const out = [];
+  for (const m of S.prof?.media || []) {
+    if (!m.quando) continue;
+    if (eraProva(m)) {
+      if (giorno(m.quando) === g) out.push({ m, t: m.quando, tipo: 'prova', eti: 'In prova' });
+      if (m.sul_profilo && m.sul_profilo_dal && giorno(m.sul_profilo_dal) === g) out.push({ m, t: m.sul_profilo_dal, tipo: 'tutti', eti: 'Condiviso a tutti' });
+    } else if (giorno(m.quando) === g && !S.posts.some((p) => p.ig_media_id === m.id)) out.push({ m, t: m.quando, tipo: 'mano', eti: m.post ? 'Pubblicato' : 'A mano' });
+  }
+  return out.sort((a, b) => a.t < b.t ? -1 : 1);
+}
 const collegato = () => !!S.conn?.collegato_il;
 const perc = (a, b) => b ? Math.round(a / b * 100) + '%' : '–';
 
@@ -433,8 +448,8 @@ const VISTE = {
   programma(main) {
     const oggi = giorno(Date.now()), lib = approvatiLiberi();
     S.sett ??= lunedi(oggi < INIZIO ? INIZIO : oggi);
-    const gg = Array.from({ length: 7 }, (_, n) => piu(S.sett, n)), tutti = gg.flatMap(delGiorno);
-    main.append(testa('Programma', S.vista === 'profilo' ? null : tutti.length + ' post su ' + SETTIMANA + ' questa settimana'));
+    const gg = Array.from({ length: 7 }, (_, n) => piu(S.sett, n)), tutti = gg.flatMap(delGiorno), fuori = gg.flatMap(uscite);
+    main.append(testa('Programma', S.vista === 'profilo' ? null : tutti.length + ' post su ' + SETTIMANA + ' questa settimana' + (fuori.length ? ', più ' + fuori.length + (fuori.length === 1 ? ' uscita' : ' uscite') + ' fuori programma' : '')));
     main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Vista' } }, chip(S.vista === 'calendario', 'Calendario', null, () => { S.vista = 'calendario'; disegna(); }), chip(S.vista === 'profilo', 'Profilo Instagram', null, () => { S.vista = 'profilo'; disegna(); })));
     if (S.vista === 'profilo') { vProfilo(main); return; }
     const vivo = collegato() && !scaduto(), acceso = vivo && S.conn.auto;
@@ -442,6 +457,10 @@ const VISTE = {
     // Risposte ai commenti del Tribunale (edge social-risposte): spente di default, si accendono da qui.
     const risp = vivo && S.conn.risposte;
     main.append(el('section', { className: 'so-voce', style: 'margin-bottom:14px' }, el('div', {}, el('div', {}, el('strong', { textContent: risp ? 'Risposte del Tribunale accese' : 'Risposte del Tribunale spente' }), el('span', { textContent: !vivo ? 'Serve Instagram collegato' : risp ? 'Chi commenta riceve la condanna entro un minuto' : 'Nessuno riceve la condanna' }))), vivo ? bottone(risp ? 'Spegni' : 'Accendi', risp ? 'no' : 'pri', () => scrivi(() => sb.rpc('social_risposte', { p_acceso: !risp }), risp ? 'Spente' : 'Accese')) : null));
+    // Da quando sono i dati di Instagram nel calendario, e il tasto per riprenderli subito (giro leggero, ~20 secondi).
+    const agg = S.prof?.aggiornato;
+    main.append(el('section', { className: 'so-voce', style: 'margin-bottom:14px' }, el('div', {}, el('div', {}, el('strong', { textContent: 'Dati di Instagram' }), el('span', { textContent: agg ? 'Aggiornati ' + dataBreve(agg) + '. Si riprendono da soli ogni 30 minuti' : 'Non ancora presi' }))),
+      vivo ? bottone('Riprendi adesso', '', () => scrivi(() => sb.rpc('social_aggiorna_instagram'), 'Sto riprendendo i dati…').then((ok) => { if (ok) setTimeout(async () => { try { await carica(); toast('Dati di Instagram aggiornati'); } catch (e) { console.error('social', e); } disegna(); }, 20000); })) : null));
     if (lib.length) {
       const buoni = lib.filter(pronto), piano = pianoAutomatico();
       main.append(el('section', { className: 'so-box', style: 'margin-bottom:18px' }, el('div', { className: 'so-fine' }, el('strong', { textContent: lib.length === 1 ? '1 approvato senza data' : lib.length + ' approvati senza data' }), buoni.length ? bottone('Distribuisci da solo', 'pri', () => scrivi(async () => { for (const x of piano) { const r = await sb.from('social_posts').update({ publish_at: x.publish_at }).eq('id', x.id); if (r.error) return r; } return {}; }, piano.length + (piano.length === 1 ? ' messo in programma' : ' messi in programma'))) : null),
@@ -451,6 +470,10 @@ const VISTE = {
     const coda = tutti.map((p) => p.id);
     main.append(el('div', { className: 'so-gg' }, gg.map((g) => el('section', { className: 'so-g' + (g === oggi ? ' oggi' : '') }, el('b', { textContent: leggibile(g, { weekday: 'short', day: 'numeric', month: 'short' }) }),
       delGiorno(g).map((p) => el('button', { type: 'button', className: 'so-sl ' + p.stato, on: { click: () => apri(p.id, coda) } }, p.media[0] ? el('img', { src: thumb(p.media[0]), alt: '', loading: 'lazy' }) : null, el('span', {}, el('time', { textContent: ora(quando(p)) }), el('span', { textContent: p.titolo }), p.stato === 'pubblicato' ? el('span', { className: 'so-st pubblicato', textContent: 'Pubblicato' }) : p.pubblicazione === 'errore' ? el('span', { className: 'so-st scartato', textContent: 'Non è uscito' }) : p.pubblicazione === 'in_corso' ? el('span', { className: 'so-st rifatto', textContent: 'Sta uscendo' }) : p.etichetta_ia ? el('span', { className: 'so-st revisione', textContent: 'A mano: etichetta IA' }) : null, iconePiattaforme(p, false)))),
+      uscite(g).map((u) => { const p = u.m.post ? post(u.m.post) : null, src = p?.media[0] ? thumb(p.media[0]) : u.m.img ? MEDIA + u.m.img : null;
+        const dentro = [src ? el('img', { src, alt: '', loading: 'lazy' }) : null, el('span', {}, el('time', { textContent: ora(u.t) }), el('span', { textContent: p?.titolo || u.m.testo || 'Post' }), el('span', { className: 'so-st ' + u.tipo, textContent: u.eti }))];
+        return p ? el('button', { type: 'button', className: 'so-sl uscita', on: { click: () => apri(p.id) } }, ...dentro)
+          : el('a', { className: 'so-sl uscita', ...(u.m.link && u.m.link.startsWith('https://') ? { href: u.m.link, target: '_blank', rel: 'noopener' } : {}) }, ...dentro); }),
       g >= oggi ? el('button', { type: 'button', className: 'so-piu', textContent: '+ Aggiungi', disabled: !lib.length, on: { click: () => scegli(g) } }) : null))));
     if (!lib.length && !tutti.length) main.append(vuoto('Qui entrano solo i post che approvi.'));
   },
@@ -496,7 +519,8 @@ function prossimiSei() {
   return [...a.map((p) => [p, leggibile(giorno(p.publish_at), { day: 'numeric', month: 'short' })]), ...b.map((p) => [p, 'senza data']), ...c.map((p) => [p, 'da decidere'])].slice(0, 6);
 }
 function vProfilo(main) {
-  const A = S.prof?.account, media = S.prof?.media || [], sei = prossimiSei();
+  // Sul profilo solo quello che c'è davvero: i Reel di prova non si vedono finché non sono condivisi con tutti.
+  const A = S.prof?.account, media = (S.prof?.media || []).filter((m) => m.sul_profilo !== false), sei = prossimiSei();
   const legati = new Set(S.posts.map((p) => p.ig_media_id).filter(Boolean)), solo = S.posts.filter((p) => p.stato === 'pubblicato' && !p.ig_media_id).sort((a, b) => a.pubblicato_il < b.pubblicato_il ? 1 : -1);
   main.append(el('div', { className: 'so-fil', role: 'group', aria: { label: 'Anteprima' } }, chip(S.dopo, 'Con i prossimi ' + sei.length, null, () => { S.dopo = true; disegna(); }), chip(!S.dopo, 'Adesso', null, () => { S.dopo = false; disegna(); })));
   if (!media.length) main.append(el('button', { type: 'button', className: 'so-avviso so-avb', on: { click: () => { S.piat = 'instagram'; S.ris = 'instagram'; vai('risultati'); } } }, 'I post passati arrivano quando colleghi Instagram ›'));

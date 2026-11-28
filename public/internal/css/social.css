@@ -22,6 +22,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .so-st.scartato { background: var(--red-bg); color: var(--red); }
 .so-st.pubblicato { background: var(--danilo-bg); color: var(--danilo); }
 .so-st.archivio { background: var(--surface2); color: var(--muted); }
+/* uscite lette da Instagram, fuori dal programma del pannello */
+.so-st.prova { background: var(--so-ora-bg); color: var(--so-ora); }
+.so-st.tutti { background: var(--danilo-bg); color: var(--danilo); }
+.so-st.mano { background: var(--surface2); color: #d6d6ea; }
+.so-sl.uscita img { opacity: .9; border: 2px dashed var(--border, #3a3a52); }
+a.so-sl { color: inherit; text-decoration: none; }
 
 /* filtri */
 .so-fil { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
